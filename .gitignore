@@ -1,0 +1,40 @@
+# === Секреты и конфигурация ===
+.env
+config.py
+*.session
+*.session-journal
+*.session-wal
+
+# === Данные (runtime) ===
+data/checkpoints.json
+data/leads.json
+data/chats.json
+data/lead_examples.json
+
+# === Python ===
+__pycache__/
+*.pyc
+*.pyo
+*.py.broken
+tg-venv/
+venv/
+.venv/
+
+# === IDE ===
+.idea/
+.vscode/
+*.swp
+
+# === OS ===
+.DS_Store
+Thumbs.db
+
+# === Временные/тестовые файлы ===
+_test_*.py
+test_*.py
+_register_commands.py
+setup_bot.py
+artifacts/
+
+# === TeamD runtime ===
+containers/
