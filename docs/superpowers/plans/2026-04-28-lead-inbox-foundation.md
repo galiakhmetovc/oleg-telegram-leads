@@ -94,6 +94,8 @@ filters, timeline, events, matches, and feedback payloads. Covered by `tests/tes
 
 ## Task 6: Runtime Classification Handler
 
+- [x] Implement runtime classifier handler registry.
+
 **Files:**
 - Modify: `src/pur_leads/workers/runtime.py`
 - Test: `tests/test_lead_runtime_handlers.py`
@@ -102,6 +104,10 @@ filters, timeline, events, matches, and feedback payloads. Covered by `tests/tes
 - [ ] Handler reads unclassified/queued `source_messages`, calls injected classifier adapter, records events/matches/clusters, and marks messages classified.
 - [ ] Missing classifier adapter fails visibly through existing scheduler event path.
 - [ ] Tests use fake classifier only.
+
+Completed: implemented classifier DTOs/protocol, `build_lead_handler_registry`, batch message
+loading, adapter invocation, lead event/match/cluster recording, source message status updates,
+and visible failure when the classifier adapter is missing. Covered by `tests/test_lead_runtime_handlers.py`.
 
 ## Acceptance
 
