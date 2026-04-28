@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import datetime, timedelta
 from typing import Any
 
 from sqlalchemy import select
@@ -10,8 +11,9 @@ from sqlalchemy.orm import Session
 
 from pur_leads.core.time import utc_now
 from pur_leads.models.catalog import classifier_snapshot_entries_table
+from pur_leads.models.leads import lead_matches_table
 from pur_leads.models.telegram_sources import source_messages_table
-from pur_leads.repositories.leads import LeadEventRecord, LeadRepository
+from pur_leads.repositories.leads import LeadClusterRecord, LeadEventRecord, LeadRepository
 
 
 @dataclass(frozen=True)
@@ -133,6 +135,154 @@ class LeadService:
         self.session.commit()
         return event
 
+    def assign_event_to_cluster(
+        self,
+        event_id: str,
+        *,
+        window_minutes: int,
+    ) -> LeadClusterRecord:
+        event = self.repository.get_event(event_id)
+        if event is None:
+            raise KeyError(event_id)
+        if event.lead_cluster_id is not None:
+            cluster = self.repository.get_cluster(event.lead_cluster_id)
+            if cluster is None:
+                raise KeyError(event.lead_cluster_id)
+            return cluster
+
+        message = self._message(event.source_message_id)
+        message_at = message["message_date"]
+        category_id = self._event_category_id(event.id)
+        existing_cluster = self.repository.find_compatible_cluster(
+            monitored_source_id=event.monitored_source_id,
+            sender_id=event.sender_id,
+            category_id=category_id,
+            window_start=message_at - timedelta(minutes=window_minutes),
+            message_at=message_at,
+        )
+        if existing_cluster is not None:
+            return self._merge_event_into_cluster(
+                cluster=existing_cluster,
+                event=event,
+                message_at=message_at,
+                window_minutes=window_minutes,
+            )
+        return self._create_cluster_for_event(
+            event=event,
+            message_at=message_at,
+            category_id=category_id,
+        )
+
+    def _create_cluster_for_event(
+        self,
+        *,
+        event: LeadEventRecord,
+        message_at: datetime,
+        category_id: str | None,
+    ) -> LeadClusterRecord:
+        now = utc_now()
+        cluster = self.repository.create_cluster(
+            monitored_source_id=event.monitored_source_id,
+            chat_id=event.chat_id,
+            primary_sender_id=event.sender_id,
+            primary_sender_name=event.sender_name,
+            primary_lead_event_id=event.id,
+            primary_source_message_id=event.source_message_id,
+            category_id=category_id,
+            summary=event.reason or event.message_text,
+            cluster_status=_cluster_status_for_decision(event.decision),
+            review_status="unreviewed",
+            work_outcome="none",
+            first_message_at=message_at,
+            last_message_at=message_at,
+            message_count=1,
+            lead_event_count=1,
+            confidence_max=event.confidence,
+            commercial_value_score_max=event.commercial_value_score,
+            negative_score_min=event.negative_score,
+            dedupe_key=_dedupe_key(event.monitored_source_id, event.sender_id, category_id),
+            merge_strategy="none",
+            merge_reason=None,
+            last_notified_at=None,
+            notify_update_count=0,
+            snoozed_until=None,
+            duplicate_of_cluster_id=None,
+            primary_task_id=None,
+            converted_entity_type=None,
+            converted_entity_id=None,
+            crm_candidate_count=0,
+            crm_conversion_action_id=None,
+            created_at=now,
+            updated_at=now,
+        )
+        self.repository.update_event(event.id, lead_cluster_id=cluster.id)
+        self.repository.create_cluster_member(
+            lead_cluster_id=cluster.id,
+            source_message_id=event.source_message_id,
+            lead_event_id=event.id,
+            member_role="primary",
+            added_by="system",
+            merge_score=1.0,
+            merge_reason="cluster_primary_event",
+            created_at=now,
+        )
+        self.session.commit()
+        return cluster
+
+    def _merge_event_into_cluster(
+        self,
+        *,
+        cluster: LeadClusterRecord,
+        event: LeadEventRecord,
+        message_at: datetime,
+        window_minutes: int,
+    ) -> LeadClusterRecord:
+        now = utc_now()
+        reason = "same_source_sender_category_window"
+        self.repository.update_event(event.id, lead_cluster_id=cluster.id)
+        self.repository.create_cluster_member(
+            lead_cluster_id=cluster.id,
+            source_message_id=event.source_message_id,
+            lead_event_id=event.id,
+            member_role="trigger",
+            added_by="system",
+            merge_score=1.0,
+            merge_reason=reason,
+            created_at=now,
+        )
+        updated_cluster = self.repository.update_cluster(
+            cluster.id,
+            first_message_at=_min_datetime(cluster.first_message_at, message_at),
+            last_message_at=_max_datetime(cluster.last_message_at, message_at),
+            message_count=cluster.message_count + 1,
+            lead_event_count=cluster.lead_event_count + 1,
+            confidence_max=_max_optional(cluster.confidence_max, event.confidence),
+            commercial_value_score_max=_max_optional(
+                cluster.commercial_value_score_max, event.commercial_value_score
+            ),
+            negative_score_min=_min_optional(cluster.negative_score_min, event.negative_score),
+            merge_strategy="auto",
+            merge_reason=reason,
+            updated_at=now,
+        )
+        self.repository.create_cluster_action(
+            action_type="auto_merge",
+            from_cluster_id=None,
+            to_cluster_id=cluster.id,
+            source_message_id=event.source_message_id,
+            lead_event_id=event.id,
+            actor="system",
+            reason=reason,
+            details_json={
+                "window_minutes": window_minutes,
+                "merge_score": 1.0,
+                "strategy": "same monitored source, sender, category, and time window",
+            },
+            created_at=now,
+        )
+        self.session.commit()
+        return updated_cluster
+
     def _message(self, source_message_id: str) -> dict[str, Any]:
         row = (
             self.session.execute(
@@ -159,7 +309,60 @@ class LeadService:
         )
         return dict(row) if row is not None else None
 
+    def _event_category_id(self, event_id: str) -> str | None:
+        row = (
+            self.session.execute(
+                select(lead_matches_table.c.category_id)
+                .where(
+                    lead_matches_table.c.lead_event_id == event_id,
+                    lead_matches_table.c.category_id.is_not(None),
+                )
+                .order_by(lead_matches_table.c.score.desc())
+            )
+            .mappings()
+            .first()
+        )
+        return row["category_id"] if row is not None else None
+
 
 def _message_text(message: dict[str, Any]) -> str | None:
     parts = [part for part in (message.get("text"), message.get("caption")) if part]
     return "\n".join(parts) if parts else None
+
+
+def _cluster_status_for_decision(decision: str) -> str:
+    if decision == "maybe":
+        return "maybe"
+    if decision == "not_lead":
+        return "not_lead"
+    return "new"
+
+
+def _dedupe_key(monitored_source_id: str, sender_id: str | None, category_id: str | None) -> str:
+    return ":".join(
+        [
+            monitored_source_id,
+            sender_id or "unknown_sender",
+            category_id or "unknown_category",
+        ]
+    )
+
+
+def _max_optional(left: float | None, right: float | None) -> float | None:
+    values = [value for value in (left, right) if value is not None]
+    return max(values) if values else None
+
+
+def _min_optional(left: float | None, right: float | None) -> float | None:
+    values = [value for value in (left, right) if value is not None]
+    return min(values) if values else None
+
+
+def _max_datetime(left: datetime | None, right: datetime | None) -> datetime | None:
+    values = [value for value in (left, right) if value is not None]
+    return max(values) if values else None
+
+
+def _min_datetime(left: datetime | None, right: datetime | None) -> datetime | None:
+    values = [value for value in (left, right) if value is not None]
+    return min(values) if values else None

@@ -44,6 +44,8 @@ This plan implements backend storage and deterministic services for lead inbox f
 
 ## Task 3: Cluster Creation And Auto-Merge
 
+- [x] Implement cluster creation/auto-merge and verify cluster service tests.
+
 **Files:**
 - Modify: `src/pur_leads/services/leads.py`
 - Test: `tests/test_lead_cluster_service.py`
@@ -53,6 +55,10 @@ This plan implements backend storage and deterministic services for lead inbox f
 - [ ] Add cluster members with roles `primary`, `trigger`, `context`, or `clarification`.
 - [ ] Update cluster counters, confidence/value/negative score aggregates, first/last message times.
 - [ ] Store auto-merge action rows with reason and score.
+
+Completed: implemented `LeadService.assign_event_to_cluster` with primary cluster creation,
+same-source/sender/category window auto-merge, member rows, aggregate updates, and
+`auto_merge` audit actions. Covered by `tests/test_lead_cluster_service.py`.
 
 ## Task 4: Feedback And Inbox Actions
 
