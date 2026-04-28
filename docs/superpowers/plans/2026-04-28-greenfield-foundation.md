@@ -420,7 +420,7 @@ git commit -m "feat: add typed settings service"
 - Test: `tests/test_audit_log.py`
 - Test: `tests/test_secret_refs.py`
 
-- [ ] **Step 1: Write audit tests**
+- [x] **Step 1: Write audit tests**
 
 Verify:
 
@@ -428,7 +428,7 @@ Verify:
 - operational events store severity, correlation id, and details JSON;
 - secret values never appear in audit or operational event payloads.
 
-- [ ] **Step 2: Write secret reference tests**
+- [x] **Step 2: Write secret reference tests**
 
 Verify:
 
@@ -436,7 +436,7 @@ Verify:
 - UI-safe DTO exposes display name/status/storage backend but not value;
 - missing secret checks create masked operational events.
 
-- [ ] **Step 3: Implement services**
+- [x] **Step 3: Implement services**
 
 Keep services narrow:
 
@@ -446,7 +446,7 @@ Keep services narrow:
 - `SecretRefService.mark_missing(...)`
 - `SecretRefService.public_view(...)`
 
-- [ ] **Step 4: Run tests**
+- [x] **Step 4: Run tests**
 
 ```bash
 python -m pytest tests/test_audit_log.py tests/test_secret_refs.py -q
@@ -454,7 +454,7 @@ python -m pytest tests/test_audit_log.py tests/test_secret_refs.py -q
 
 Expected: pass.
 
-- [ ] **Step 5: Commit audit and secrets**
+- [x] **Step 5: Commit audit and secrets**
 
 ```bash
 git add src/pur_leads/models src/pur_leads/repositories src/pur_leads/services tests/test_audit_log.py tests/test_secret_refs.py
