@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 from dataclasses import dataclass
+from typing import Any
 from urllib.parse import urlparse
 
 from sqlalchemy.orm import Session
@@ -180,7 +181,12 @@ class TelegramSourceService:
             raise ActivationRequiresPreview("source must be preview_ready before activation")
         activated = self.activate(source.id, actor=actor)
         now = utc_now()
-        activated = self.repository.update(source.id, next_poll_at=now, updated_at=now)
+        checkpoint_message_id = self._activation_checkpoint(source)
+        update_values: dict[str, Any] = {"next_poll_at": now, "updated_at": now}
+        if checkpoint_message_id is not None and activated.checkpoint_message_id is None:
+            update_values["checkpoint_message_id"] = checkpoint_message_id
+            update_values["checkpoint_date"] = now
+        activated = self.repository.update(source.id, **update_values)
         job = self.scheduler.enqueue(
             job_type="poll_monitored_source",
             scope_type="telegram_source",
@@ -251,6 +257,25 @@ class TelegramSourceService:
         if source is None:
             raise KeyError(source_id)
         return source
+
+    def _activation_checkpoint(self, source: MonitoredSourceRecord) -> int | None:
+        if source.checkpoint_message_id is not None:
+            return source.checkpoint_message_id
+        if source.start_mode == "from_message":
+            return source.start_message_id
+        if source.start_mode != "from_now":
+            return None
+
+        preview_ids = [
+            row.telegram_message_id for row in self.repository.list_preview_messages(source.id)
+        ]
+        access_ids = [
+            row.last_message_id
+            for row in self.repository.list_access_checks(source.id, limit=1)
+            if row.last_message_id is not None
+        ]
+        message_ids = [*preview_ids, *access_ids]
+        return max(message_ids) if message_ids else None
 
 
 def parse_source_input(input_ref: str, purpose: str) -> ParsedSourceInput:

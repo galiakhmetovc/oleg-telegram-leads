@@ -164,6 +164,19 @@ def test_activate_from_web_requires_preview_and_enqueues_poll(source_service):
     assert [job["job_type"] for job in jobs] == ["poll_monitored_source"]
 
 
+def test_activate_from_web_from_now_uses_latest_preview_as_checkpoint(source_service):
+    service, session = source_service
+    source = service.create_draft("@example_chat", added_by="admin")
+    service.set_status(source.id, "preview_ready", actor="system")
+    _insert_preview_message(session, source.id)
+
+    activated, poll_job = service.activate_from_web(source.id, actor="admin")
+
+    assert activated.checkpoint_message_id == 10
+    assert activated.checkpoint_date is not None
+    assert poll_job.checkpoint_before_json == {"message_id": 10}
+
+
 def _insert_preview_message(session, source_id: str) -> None:
     session.execute(
         insert(source_preview_messages_table).values(
