@@ -25,6 +25,10 @@ The system must continuously read the PUR Telegram channel, parse messages and d
 - CRM starts empty. Clients, interests, assets, and notes can be created manually or from confirmed leads.
 - Oleg is the only active CRM user at first, but tables include ownership/assignee fields for future expansion.
 - A central CRM job is generating reasons to contact existing or previously interested clients when catalog changes create a useful follow-up opportunity.
+- Runtime work is processed by a continuous job loop, not a single monolithic polling cycle.
+- Start with one Telegram userbot session and one Telegram worker. Additional userbot sessions are a future configurable expansion through the web UI.
+- Telegram-read jobs are serialized per userbot session. AI and parse jobs can run in parallel with configurable limits.
+- Logging and audit are first-class requirements for source sync, access issues, AI calls, parser runs, catalog changes, CRM changes, and notifications.
 
 ## Source Layers
 
@@ -90,6 +94,82 @@ Default classifier inclusion:
 - exclude `rejected`, `muted`, `deprecated`, `expired`;
 - `needs_review` is configurable.
 
+## Current External Limits To Track
+
+This section documents public limits and operational constraints as of 2026-04-28. These values must not be treated as permanent constants. Store them in SQLite settings/model-limit tables and update them when provider documentation or observed runtime behavior changes.
+
+### Telegram / Telethon Userbot Limits
+
+Telegram does not publish exact MTProto request limits for every method/account/source combination. Telethon documentation explicitly notes that exact limits are not known and depend on many factors. Therefore the system must be adaptive:
+
+- Start with one userbot session and one serialized Telegram-read worker.
+- Use small bounded jobs and persist checkpoints after every job.
+- Handle `FLOOD_WAIT`/`FloodWaitError` as a normal runtime state, not an exceptional crash.
+- Store flood wait seconds in `rate_limit_states.paused_until`.
+- Continue processing other sources/jobs while one account/source is paused.
+- Use operator notifications only when a human action is required or repeated failures cross thresholds.
+
+Known public Telethon guidance:
+
+- `FloodWaitError` indicates the same request was repeated too many times and exposes wait seconds.
+- Telethon can auto-sleep on flood waits under `flood_sleep_threshold`.
+- For `GetHistoryRequest`, Telethon documentation says Telegram's flood wait limit "seems to be around 30 seconds per 10 requests"; the default history wait behavior is designed to reduce flood waits.
+- Retrieving more than roughly 3000 messages takes longer and may require wait time between requests.
+
+Sources:
+
+- Telethon RPC Errors: `https://docs.telethon.dev/en/stable/concepts/errors.html`
+- Telethon TelegramClient / iter_messages: `https://docs.telethon.dev/en/stable/modules/client.html`
+
+Design implication:
+
+- The web UI should show observed limits/flood waits per userbot and source.
+- Adding more userbot accounts is a future scaling path, configured in the web UI.
+- The system should never try to bypass anti-bot protections. It should surface `needs_join`, `needs_captcha`, `private_or_no_access`, `banned`, and `flood_wait` clearly.
+
+### z.ai Coding Plan / API Limits
+
+z.ai limits depend on plan, model, time window, and whether the usage is through supported tools.
+
+Current public Coding Plan notes:
+
+- Supported Coding Plan models: `GLM-5.1`, `GLM-5-Turbo`, `GLM-4.7`, `GLM-4.5-Air`.
+- Coding Plan quota is based on 5-hour and weekly windows.
+- Approximate plan limits:
+  - Lite: up to about 80 prompts per 5 hours, about 400 weekly.
+  - Pro: up to about 400 prompts per 5 hours, about 2000 weekly.
+  - Max: up to about 1600 prompts per 5 hours, about 8000 weekly.
+- Concurrency limits are plan-dependent and dynamically adjusted; public guidance is Max > Pro > Lite.
+- GLM-5.1 and GLM-5-Turbo consume more quota during peak/off-peak periods according to z.ai's current rules.
+- Peak hours are documented as 14:00-18:00 UTC+8.
+- z.ai states the Coding Plan is limited to officially supported tools/products and unsupported SDK/third-party integrations may be restricted.
+
+Current public model/API notes:
+
+- `GLM-5.1`: context length 200K, maximum output 128K.
+- `GLM-4.7`: context length 200K, maximum output 128K.
+- `GLM-4.5`: context length 128K, maximum output 96K.
+- Chat Completions endpoint supports `thinking.type` enabled/disabled for supported models.
+- Chat Completions response includes `usage` fields with prompt/completion/total tokens.
+
+Sources:
+
+- z.ai Coding Plan overview: `https://docs.z.ai/devpack/overview`
+- z.ai Coding Plan usage policy: `https://docs.z.ai/devpack/usage-policy`
+- z.ai Coding Plan FAQ: `https://docs.z.ai/devpack/faq`
+- z.ai Chat Completion API: `https://docs.z.ai/api-reference/llm/chat-completion`
+- GLM-5.1 model page: `https://docs.z.ai/guides/llm/glm-5.1`
+- GLM-4.7 model page: `https://docs.z.ai/guides/llm/glm-4.7`
+- GLM-4.5 model page: `https://docs.z.ai/guides/llm/glm-4.5`
+
+Design implication:
+
+- The provider config must distinguish Coding Plan from regular API platform / enterprise usage.
+- The UI should surface the policy warning when using Coding Plan credentials for this application.
+- AI scheduler must track model usage, token usage, errors, and provider throttling.
+- PromptBuilder must record prompt token estimates and actual response usage.
+- Parallel AI job limits are configurable and should be conservative by default until real usage is measured.
+
 ## Data Flow
 
 ```text
@@ -110,6 +190,20 @@ Default classifier inclusion:
   -> contact reason generation
 ```
 
+Runtime execution uses a continuous scheduler:
+
+```text
+while running:
+  pick next due job
+  run a bounded unit of work
+  save cursor/checkpoint/result
+  update rate-limit state
+  schedule follow-up jobs
+  move to the next job
+```
+
+The daemon should always keep working. If one source is blocked by access issues or flood wait, the worker records that state and moves to other available work.
+
 Manual examples use the same downstream path:
 
 ```text
@@ -123,6 +217,286 @@ Oleg link/forward/manual text
 ```
 
 ## SQLite Schema
+
+### `userbot_accounts`
+
+Stores Telegram userbot accounts that can read monitored Telegram sources.
+
+Key fields:
+
+- `id`
+- `display_name`
+- `telegram_user_id`
+- `telegram_username`
+- `session_name`
+- `session_path`
+- `status`: `active`, `paused`, `needs_login`, `banned`, `disabled`
+- `priority`
+- `max_parallel_telegram_jobs`
+- `flood_sleep_threshold_seconds`
+- `last_connected_at`
+- `last_error`
+- `created_at`
+- `updated_at`
+
+Rules:
+
+- First implementation uses one active userbot account and one Telegram worker.
+- The schema allows adding more userbot accounts later through the web UI.
+- Session files are secrets and must never be exposed in the UI or logs.
+
+### `monitored_sources`
+
+Stores chats/channels/DMs that may be monitored.
+
+Key fields:
+
+- `id`
+- `source_kind`: `telegram_group`, `telegram_supergroup`, `telegram_private_group`, `telegram_channel`, `telegram_comments`, `telegram_dm`
+- `telegram_id`
+- `username`
+- `title`
+- `invite_link_hash`
+- `assigned_userbot_account_id`
+- `priority`: `low`, `normal`, `high`
+- `status`: `active`, `paused`, `needs_join`, `needs_captcha`, `private_or_no_access`, `flood_wait`, `banned`, `read_error`, `disabled`
+- `lead_detection_enabled`
+- `catalog_ingestion_enabled`
+- `phase_enabled`
+- `start_mode`: `from_now`, `from_message`, `recent_limit`, `recent_days`
+- `start_message_id`
+- `checkpoint_message_id`
+- `checkpoint_date`
+- `last_success_at`
+- `last_error_at`
+- `last_error`
+- `created_at`
+- `updated_at`
+
+Rules:
+
+- First implementation enables public groups/supergroups.
+- Other source kinds are represented in the schema but can be hidden or marked "later" in UI.
+- Chats are added from the web interface, not through Telegram commands.
+
+### `access_issues`
+
+Stores source access problems that require operator attention or retry.
+
+Key fields:
+
+- `id`
+- `monitored_source_id`
+- `userbot_account_id`
+- `issue_type`: `needs_join`, `needs_captcha`, `private_or_no_access`, `flood_wait`, `banned`, `read_error`, `network_error`
+- `status`: `open`, `resolved`, `ignored`
+- `detected_at`
+- `resolved_at`
+- `retry_after_at`
+- `operator_message`
+- `technical_details`
+- `notification_sent_at`
+- `created_at`
+- `updated_at`
+
+Rules:
+
+- Captcha/join/private/banned issues notify Telegram immediately.
+- Temporary read/network errors notify after configured repeat thresholds.
+- The system does not bypass anti-bot protections. It records the issue and asks an operator to complete legitimate access steps.
+
+### `scheduler_jobs`
+
+Stores continuous background work.
+
+Key fields:
+
+- `id`
+- `job_type`: `poll_monitored_source`, `check_source_access`, `fetch_message_context`, `classify_message_batch`, `sync_pur_channel`, `download_artifact`, `parse_artifact`, `extract_catalog_facts`, `generate_contact_reasons`, `send_notifications`
+- `status`: `queued`, `running`, `succeeded`, `failed`, `paused`, `cancelled`
+- `priority`: `low`, `normal`, `high`
+- `run_after_at`
+- `locked_by`
+- `locked_at`
+- `attempt_count`
+- `max_attempts`
+- `payload_json`
+- `last_error`
+- `created_at`
+- `updated_at`
+
+Rules:
+
+- Telegram jobs are serialized per `userbot_account_id`.
+- AI and parse jobs can run in parallel according to provider/parser settings.
+- Jobs must be small and resumable.
+
+### `job_runs`
+
+Stores each execution attempt for observability.
+
+Key fields:
+
+- `id`
+- `scheduler_job_id`
+- `worker_name`
+- `started_at`
+- `finished_at`
+- `status`
+- `duration_ms`
+- `result_json`
+- `error`
+- `log_correlation_id`
+
+### `operational_events`
+
+Stores structured runtime logs that should be queryable in the web UI.
+
+Key fields:
+
+- `id`
+- `event_type`: `source_sync`, `access_check`, `telegram_request`, `ai_request`, `parser_run`, `catalog_extraction`, `notification`, `crm_generation`, `scheduler`
+- `severity`: `debug`, `info`, `warning`, `error`, `critical`
+- `entity_type`
+- `entity_id`
+- `correlation_id`
+- `message`
+- `details_json`
+- `created_at`
+
+Purpose:
+
+- Keep operational visibility inside the product, not only in text log files.
+- Support debugging without exposing secrets or excessive personal data.
+- Link related events across scheduler jobs, provider calls, source sync, and notifications.
+
+### `ai_usage_events`
+
+Stores AI usage and quota observations.
+
+Key fields:
+
+- `id`
+- `provider_config_id`
+- `model`
+- `scheduler_job_id`
+- `classifier_version_id`
+- `request_started_at`
+- `request_finished_at`
+- `status`
+- `prompt_tokens`
+- `completion_tokens`
+- `total_tokens`
+- `cached_tokens`
+- `estimated_tokens`
+- `thinking_enabled`
+- `temperature`
+- `max_tokens`
+- `error`
+- `raw_usage_json`
+- `created_at`
+
+Purpose:
+
+- Track z.ai/API consumption.
+- Compare estimated vs actual prompt size.
+- Support future throttling, plan selection, and model switching.
+
+### `notification_events`
+
+Stores outbound Telegram/web notifications.
+
+Key fields:
+
+- `id`
+- `notification_type`: `lead`, `task`, `contact_reason`, `access_issue`, `ai_error`, `sync_error`, `digest`
+- `target_channel`: `telegram`, `web`, `email`, `none`
+- `target_ref`
+- `entity_type`
+- `entity_id`
+- `status`: `queued`, `sent`, `failed`, `suppressed`
+- `priority`: `low`, `normal`, `high`, `urgent`
+- `payload_summary`
+- `error`
+- `sent_at`
+- `created_at`
+
+Purpose:
+
+- Audit what was sent to Telegram and why.
+- Avoid duplicate urgent notifications.
+- Support notification cooldowns and digests.
+
+### `rate_limit_states`
+
+Stores observed provider/account/source rate limits.
+
+Key fields:
+
+- `id`
+- `scope_type`: `telegram_global`, `telegram_userbot`, `telegram_source`, `ai_provider`, `ai_model`, `parser`
+- `scope_id`
+- `provider`
+- `reason`: `flood_wait`, `slow_mode`, `quota_exhausted`, `concurrency_limit`, `timeout`, `manual_pause`
+- `paused_until`
+- `last_error`
+- `observed_limit_json`
+- `created_at`
+- `updated_at`
+
+Purpose:
+
+- Do not hard-code Telegram limits.
+- Record observed `FLOOD_WAIT`/quota responses and let the scheduler route around paused scopes.
+
+### `ai_provider_configs`
+
+Stores model provider settings.
+
+Key fields:
+
+- `id`
+- `provider`: `zai`, `openai_compatible`, `other`
+- `base_url`
+- `auth_secret_ref`
+- `plan_type`: `coding_lite`, `coding_pro`, `coding_max`, `api_platform`, `enterprise`, `unknown`
+- `default_model`
+- `enabled`
+- `max_parallel_calls`
+- `request_timeout_seconds`
+- `notes`
+- `created_at`
+- `updated_at`
+
+Rules:
+
+- Secret values are referenced, not stored in plaintext.
+- For z.ai Coding Plan, the UI must show a usage-policy warning if the plan is used outside officially supported coding tools.
+
+### `ai_model_limits`
+
+Stores known and configured model limits.
+
+Key fields:
+
+- `id`
+- `provider_config_id`
+- `model`
+- `context_window_tokens`
+- `max_output_tokens`
+- `supports_structured_output`
+- `supports_thinking`
+- `supports_tools`
+- `default_temperature`
+- `quota_multiplier_json`
+- `source_url`
+- `verified_at`
+- `notes`
+
+Purpose:
+
+- Make model limits visible and editable in the web UI.
+- Allow prompt builder to estimate token budget and choose fallback strategies.
 
 ### `sources`
 
@@ -832,6 +1206,20 @@ Key settings:
 - `crm_contact_reasons_include_auto_pending_catalog = true`
 - `crm_show_assignee_fields = false`
 - `crm_default_contact_reason_ttl_days = 30`
+- `telegram_worker_count = 1`
+- `telegram_default_userbot_account_id = null`
+- `telegram_add_userbot_accounts_enabled = true`
+- `telegram_read_jobs_per_userbot = 1`
+- `telegram_flood_sleep_threshold_seconds = 60`
+- `telegram_get_history_wait_seconds = 1`
+- `telegram_access_issue_retry_threshold = 3`
+- `telegram_access_issue_retry_window_minutes = 30`
+- `telegram_access_issue_repeat_notification_cooldown_minutes = 180`
+- `ai_max_parallel_calls = 2`
+- `ai_parse_max_parallel_jobs = 2`
+- `ai_default_provider_config_id = null`
+- `ai_default_model = "glm-4.5-air"`
+- `ai_provider_policy_warning_enabled = true`
 
 Settings are editable in the web interface and versioned through `audit_log`.
 
@@ -881,7 +1269,7 @@ Rules:
 
 ### `audit_log`
 
-Stores state changes.
+Stores user/system state changes. This is separate from `operational_events`: audit answers "who changed what"; operational events answer "what happened while the system was running".
 
 Key fields:
 
@@ -1288,6 +1676,14 @@ Required controls:
 - whether catalog changes auto-create contact reasons;
 - whether `auto_pending` catalog entries can create contact reasons;
 - whether assignee fields are visible;
+- Telegram userbot accounts: add, pause, disable, check status;
+- Telegram worker count and per-session serialization;
+- Telegram flood-wait thresholds and observed cooldowns;
+- source priority and polling policy;
+- AI provider credentials/config references;
+- AI model selection and model-limit table;
+- AI/parse parallel job limits;
+- provider policy warning acknowledgement;
 - Telegram notification toggles;
 - sync interval;
 - max document size.
@@ -1314,9 +1710,14 @@ Bot sends:
 
 Bot accepts:
 
-- manual source links;
-- forwarded examples;
-- simple commands for status/resync.
+- only minimal operational acknowledgements if explicitly enabled.
+
+Bot does not accept:
+
+- adding monitored chats;
+- monitored chat links;
+- changing checkpoints;
+- changing catalog/CRM/settings.
 
 Most review and configuration happens in the web UI.
 
