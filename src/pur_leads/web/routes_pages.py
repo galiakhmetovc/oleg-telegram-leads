@@ -63,6 +63,7 @@ def inbox_page(
                 </div>
                 <nav>
                   <a href="/">Inbox</a>
+                  <a href="/sources">Sources</a>
                   <a href="/crm">CRM</a>
                   <a href="/admin">Admin</a>
                   <button id="logout-button" type="button">Logout</button>
@@ -124,6 +125,7 @@ def admin_page(
                 </div>
                 <nav>
                   <a href="/">Inbox</a>
+                  <a href="/sources">Sources</a>
                   <a href="/crm">CRM</a>
                   <a href="/admin">Admin</a>
                   <button id="logout-button" type="button">Logout</button>
@@ -187,6 +189,7 @@ def crm_page(
                 </div>
                 <nav>
                   <a href="/">Inbox</a>
+                  <a href="/sources">Sources</a>
                   <a href="/crm">CRM</a>
                   <a href="/admin">Admin</a>
                   <button id="logout-button" type="button">Logout</button>
@@ -239,6 +242,72 @@ def crm_page(
                     </label>
                     <button type="submit">Create</button>
                     <p id="crm-status" class="status-line" role="status"></p>
+                  </form>
+                </aside>
+              </section>
+            </main>
+            """,
+        )
+    )
+
+
+@router.get("/sources", response_class=HTMLResponse)
+def sources_page(
+    request: Request,
+    auth_service: WebAuthService = Depends(get_auth_service),
+) -> Response:
+    if not _has_page_session(request, auth_service):
+        return RedirectResponse("/login", status_code=303)
+    return HTMLResponse(
+        _page(
+            page="sources",
+            title="Sources",
+            main="""
+            <main class="workspace">
+              <header class="topbar">
+                <div>
+                  <span class="eyebrow">PUR Leads</span>
+                  <h1>Sources</h1>
+                </div>
+                <nav>
+                  <a href="/">Inbox</a>
+                  <a href="/sources">Sources</a>
+                  <a href="/crm">CRM</a>
+                  <a href="/admin">Admin</a>
+                  <button id="logout-button" type="button">Logout</button>
+                </nav>
+              </header>
+              <section class="sources-layout">
+                <aside class="queue-pane" aria-label="Telegram sources">
+                  <div class="section-head">
+                    <h2>Sources</h2>
+                    <button id="source-refresh" type="button">Refresh</button>
+                  </div>
+                  <div id="source-list" class="queue-list" aria-live="polite"></div>
+                </aside>
+                <section id="source-detail" class="detail-pane" aria-live="polite">
+                  <div class="empty-state">Select a source</div>
+                </section>
+                <aside class="side-pane" aria-label="New source">
+                  <form id="source-form" class="stack">
+                    <label>
+                      Telegram chat or channel
+                      <input name="input_ref" placeholder="@chat or https://t.me/..." required>
+                    </label>
+                    <label>
+                      Purpose
+                      <select name="purpose">
+                        <option value="lead_monitoring">Lead monitoring</option>
+                        <option value="catalog_ingestion">Catalog ingestion</option>
+                        <option value="both">Both</option>
+                      </select>
+                    </label>
+                    <label class="checkbox-line">
+                      <input name="check_access" type="checkbox" checked>
+                      Check access now
+                    </label>
+                    <button type="submit">Create source</button>
+                    <p id="source-status" class="status-line" role="status"></p>
                   </form>
                 </aside>
               </section>

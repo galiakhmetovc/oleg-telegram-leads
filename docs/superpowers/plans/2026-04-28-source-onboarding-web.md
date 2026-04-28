@@ -46,11 +46,11 @@
 - Modify: `src/pur_leads/web/static/app.css`
 - Test: `tests/test_web_pages.py`
 
-- [ ] Write failing page tests proving `/sources` is protected and linked from topbar.
-- [ ] Run `uv run --extra dev pytest tests/test_web_pages.py -q` and verify expected failures.
-- [ ] Add `/sources` page with source create form, queue list, detail pane, status badges, preview messages, and action buttons.
-- [ ] Run `uv run --extra dev pytest tests/test_web_pages.py -q` and verify it passes.
-- [ ] Commit as `feat: add source onboarding workspace`.
+- [x] Write failing page tests proving `/sources` is protected and linked from topbar.
+- [x] Run `uv run --extra dev pytest tests/test_web_pages.py -q` and verify expected failures.
+- [x] Add `/sources` page with source create form, queue list, detail pane, status badges, preview messages, and action buttons.
+- [x] Run `uv run --extra dev pytest tests/test_web_pages.py -q` and verify it passes.
+- [x] Commit as `feat: add source onboarding workspace`.
 
 ### Task 4: Full Verification And Deploy
 

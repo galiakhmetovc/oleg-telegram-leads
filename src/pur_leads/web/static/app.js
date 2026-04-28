@@ -42,6 +42,7 @@ document.addEventListener("DOMContentLoaded", () => {
   bindLogout();
   if (page === "login") bindLogin();
   if (page === "leads-inbox") initInbox();
+  if (page === "sources") initSources();
   if (page === "crm") initCrm();
   if (page === "admin") initAdmin();
 });
@@ -497,6 +498,239 @@ async function createCrmClient(event, state) {
   } catch (error) {
     if (status) status.textContent = error.message;
   }
+}
+
+function initSources() {
+  const state = { items: [], selectedId: null };
+  document.querySelector("#source-refresh")?.addEventListener("click", () => loadSources(state));
+  document.querySelector("#source-form")?.addEventListener("submit", (event) =>
+    createSource(event, state)
+  );
+  loadSources(state);
+}
+
+async function loadSources(state) {
+  const payload = await api("/api/sources");
+  state.items = payload.items || [];
+  const selectedStillVisible = state.items.some((item) => item.id === state.selectedId);
+  state.selectedId = selectedStillVisible ? state.selectedId : state.items[0]?.id || null;
+  renderSourceList(state);
+  if (state.selectedId) {
+    await loadSourceDetail(state.selectedId, state);
+  } else {
+    const detail = document.querySelector("#source-detail");
+    if (detail) detail.innerHTML = `<div class="empty-state">No sources</div>`;
+  }
+}
+
+function renderSourceList(state) {
+  const target = document.querySelector("#source-list");
+  if (!target) return;
+  if (!state.items.length) {
+    target.innerHTML = `<div class="empty-state">No sources</div>`;
+    return;
+  }
+  target.innerHTML = state.items
+    .map((source) => {
+      const active = source.id === state.selectedId ? "is-active" : "";
+      const label = source.title || source.username || source.input_ref;
+      const statusClass = sourceStatusClass(source.status);
+      return `<button class="queue-item ${active}" type="button" data-id="${source.id}">
+        <strong>${escapeHtml(label)}</strong>
+        <span class="muted">${escapeHtml(source.source_kind)} / ${escapeHtml(source.source_purpose)}</span>
+        <span class="queue-meta">
+          ${badge(source.status, statusClass)}
+          ${source.lead_detection_enabled ? badge("leads") : ""}
+          ${source.catalog_ingestion_enabled ? badge("catalog") : ""}
+        </span>
+      </button>`;
+    })
+    .join("");
+  target.querySelectorAll(".queue-item").forEach((button) => {
+    button.addEventListener("click", async () => {
+      state.selectedId = button.dataset.id;
+      renderSourceList(state);
+      await loadSourceDetail(state.selectedId, state);
+    });
+  });
+}
+
+async function loadSourceDetail(sourceId, state) {
+  const detail = await api(`/api/sources/${sourceId}`);
+  renderSourceDetail(detail, state);
+}
+
+function renderSourceDetail(detail, state) {
+  const target = document.querySelector("#source-detail");
+  if (!target) return;
+  const source = detail.source || {};
+  const label = source.title || source.username || source.input_ref || "Source";
+  target.innerHTML = `<div class="detail-grid">
+    <header class="detail-header">
+      <div>
+        <h2>${escapeHtml(label)}</h2>
+        <p class="muted">${escapeHtml(source.input_ref || "")}</p>
+      </div>
+      <div class="badges">
+        ${badge(source.status || "draft", sourceStatusClass(source.status))}
+        ${badge(source.source_kind || "telegram")}
+        ${badge(source.priority || "normal")}
+      </div>
+    </header>
+    <section class="detail-section">
+      <h3>Configuration</h3>
+      <div class="detail-meta">
+        ${badge(`purpose ${source.source_purpose || "n/a"}`)}
+        ${badge(`poll ${source.poll_interval_seconds || 0}s`)}
+        ${badge(`checkpoint ${source.checkpoint_message_id || "none"}`)}
+        ${badge(`preview ${source.preview_message_count || 0}`)}
+        ${source.lead_detection_enabled ? badge("lead detection") : ""}
+        ${source.catalog_ingestion_enabled ? badge("catalog ingestion") : ""}
+      </div>
+      <p class="muted">next poll ${escapeHtml(time(source.next_poll_at) || "not scheduled")}</p>
+      ${
+        source.last_error
+          ? `<p class="muted">last error ${escapeHtml(source.last_error)}</p>`
+          : ""
+      }
+    </section>
+    <section class="detail-section">
+      <h3>Actions</h3>
+      <div class="source-action-bar">
+        <button type="button" data-source-action="check-access">Check access</button>
+        <button type="button" data-source-action="preview">Fetch preview</button>
+        <button type="button" data-source-action="activate">Activate</button>
+        <button type="button" data-source-action="pause">Pause</button>
+      </div>
+      <form id="source-checkpoint-form" class="checkpoint-form">
+        <input name="message_id" type="number" min="1" placeholder="Checkpoint message ID" required>
+        <button type="submit">Reset checkpoint</button>
+      </form>
+    </section>
+    ${sourceSection("Preview messages", detail.preview_messages, renderPreviewMessage)}
+    ${sourceSection("Access checks", detail.access_checks, renderAccessCheck)}
+    ${sourceSection("Jobs", detail.jobs, renderSourceJob)}
+  </div>`;
+  target.querySelectorAll("[data-source-action]").forEach((button) => {
+    button.addEventListener("click", () =>
+      sourceAction(source.id, button.dataset.sourceAction, state)
+    );
+  });
+  target.querySelector("#source-checkpoint-form")?.addEventListener("submit", (event) =>
+    resetSourceCheckpoint(event, source.id, state)
+  );
+}
+
+function sourceSection(title, rows, renderer) {
+  return `<section class="detail-section">
+    <h3>${escapeHtml(title)}</h3>
+    <div class="table-list">
+      ${(rows || []).map(renderer).join("") || '<div class="empty-state">None</div>'}
+    </div>
+  </section>`;
+}
+
+function renderPreviewMessage(message) {
+  const body = message.text || message.caption || "";
+  return `<div class="table-row">
+    <div>
+      <strong>${escapeHtml(body || "Media message")}</strong>
+      <p class="muted">${escapeHtml(message.sender_display || "")}</p>
+    </div>
+    <span>${escapeHtml(message.telegram_message_id)}</span>
+  </div>`;
+}
+
+function renderAccessCheck(check) {
+  return `<div class="table-row">
+    <div>
+      <strong>${escapeHtml(check.status)}</strong>
+      <p class="muted">${escapeHtml(check.resolved_title || check.error || check.check_type)}</p>
+    </div>
+    <span>${escapeHtml(time(check.checked_at))}</span>
+  </div>`;
+}
+
+function renderSourceJob(job) {
+  return `<div class="table-row">
+    <div>
+      <strong>${escapeHtml(job.job_type)}</strong>
+      <p class="muted">${escapeHtml(job.idempotency_key || job.scope_id || "")}</p>
+    </div>
+    <span>${escapeHtml(job.status || time(job.created_at))}</span>
+  </div>`;
+}
+
+async function createSource(event, state) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const status = document.querySelector("#source-status");
+  const data = new FormData(form);
+  try {
+    const payload = await api("/api/sources", {
+      method: "POST",
+      body: JSON.stringify({
+        input_ref: data.get("input_ref"),
+        purpose: data.get("purpose"),
+        check_access: data.get("check_access") === "on",
+      }),
+    });
+    form.reset();
+    form.querySelector('[name="check_access"]').checked = true;
+    if (status) status.textContent = "Created";
+    state.selectedId = payload.source?.id || null;
+    await loadSources(state);
+  } catch (error) {
+    if (status) status.textContent = error.message;
+  }
+}
+
+async function sourceAction(sourceId, action, state) {
+  const status = document.querySelector("#source-status");
+  const endpoints = {
+    "check-access": { path: `/api/sources/${sourceId}/check-access`, body: {} },
+    preview: { path: `/api/sources/${sourceId}/preview`, body: { limit: 20 } },
+    activate: { path: `/api/sources/${sourceId}/activate`, body: {} },
+    pause: { path: `/api/sources/${sourceId}/pause`, body: {} },
+  };
+  const endpoint = endpoints[action];
+  if (!endpoint) return;
+  try {
+    await api(endpoint.path, {
+      method: "POST",
+      body: JSON.stringify(endpoint.body),
+    });
+    if (status) status.textContent = "Saved";
+    await loadSources(state);
+  } catch (error) {
+    if (status) status.textContent = error.message;
+  }
+}
+
+async function resetSourceCheckpoint(event, sourceId, state) {
+  event.preventDefault();
+  const status = document.querySelector("#source-status");
+  const data = new FormData(event.currentTarget);
+  try {
+    await api(`/api/sources/${sourceId}/checkpoint`, {
+      method: "POST",
+      body: JSON.stringify({
+        message_id: Number.parseInt(data.get("message_id"), 10),
+        confirm: true,
+      }),
+    });
+    event.currentTarget.reset();
+    if (status) status.textContent = "Checkpoint reset";
+    await loadSources(state);
+  } catch (error) {
+    if (status) status.textContent = error.message;
+  }
+}
+
+function sourceStatusClass(status) {
+  if (status === "checking_access" || status === "preview_ready") return "is-warn";
+  if (status === "access_denied" || status === "error") return "is-danger";
+  return "";
 }
 
 async function initAdmin() {
