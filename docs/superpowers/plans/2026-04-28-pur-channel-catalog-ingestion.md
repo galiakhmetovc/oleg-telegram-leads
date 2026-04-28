@@ -20,10 +20,10 @@ This plan implements the ingestion bridge from Telegram messages into raw catalo
 - Modify: `src/pur_leads/workers/telegram_polling.py`
 - Test: `tests/test_telegram_polling_jobs.py`
 
-- [ ] Write a failing test that a `catalog_ingestion` source poll creates a `sources` row with `source_type="telegram_message"`, stores one text chunk from message text/caption, links `source_messages.raw_source_id`, and enqueues `download_artifact` for downloadable document media.
-- [ ] Run the test and verify it fails because polling currently only stores `source_messages`.
-- [ ] Implement catalog mirroring for `catalog_ingestion_enabled` sources only.
-- [ ] Run the focused polling tests and verify they pass.
+- [x] Write a failing test that a `catalog_ingestion` source poll creates a `sources` row with `source_type="telegram_message"`, stores one text chunk from message text/caption, links `source_messages.raw_source_id`, and enqueues `download_artifact` for downloadable document media.
+- [x] Run the test and verify it fails because polling currently only stores `source_messages`.
+- [x] Implement catalog mirroring for `catalog_ingestion_enabled` sources only.
+- [x] Run the focused polling tests and verify they pass.
 
 ## Task 2: Telegram Document Metadata And Download Port
 
@@ -35,11 +35,11 @@ This plan implements the ingestion bridge from Telegram messages into raw catalo
 - Test: `tests/test_telethon_client_adapter.py`
 - Test: `tests/test_telegram_client_port.py`
 
-- [ ] Write failing tests that Telethon marks document messages as downloadable, marks video documents as skipped, and can download a document to a supplied directory.
-- [ ] Run the focused tests and verify they fail on missing metadata/download method.
-- [ ] Add `TelegramDocumentDownload` DTO and `download_message_document` to the client port.
-- [ ] Implement Telethon document metadata extraction and `download_media(message, file=directory)` based document download.
-- [ ] Run the focused Telegram adapter tests and verify they pass.
+- [x] Write failing tests that Telethon marks document messages as downloadable, marks video documents as skipped, and can download a document to a supplied directory.
+- [x] Run the focused tests and verify they fail on missing metadata/download method.
+- [x] Add `TelegramDocumentDownload` DTO and `download_message_document` to the client port.
+- [x] Implement Telethon document metadata extraction and `download_media(message, file=directory)` based document download.
+- [x] Run the focused Telegram adapter tests and verify they pass.
 
 ## Task 3: Runtime `download_artifact` Handler
 
@@ -48,22 +48,22 @@ This plan implements the ingestion bridge from Telegram messages into raw catalo
 - Modify: `src/pur_leads/core/config.py`
 - Test: `tests/test_catalog_runtime_handlers.py`
 
-- [ ] Write a failing test that a `download_artifact` job records a downloaded document artifact with local path and sha256.
-- [ ] Write a failing test that a skipped video/non-document result records a skipped artifact with a skip reason.
-- [ ] Run the focused runtime tests and verify they fail because no handler exists.
-- [ ] Implement the handler in the canonical worker registry, deriving monitored source and message id from the job payload.
-- [ ] Add configurable `artifact_storage_path` with a local default under `data/artifacts`.
-- [ ] Run the focused runtime tests and verify they pass.
+- [x] Write a failing test that a `download_artifact` job records a downloaded document artifact with local path and sha256.
+- [x] Write a failing test that a skipped video/non-document result records a skipped artifact with a skip reason.
+- [x] Run the focused runtime tests and verify they fail because no handler exists.
+- [x] Implement the handler in the canonical worker registry, deriving monitored source and message id from the job payload.
+- [x] Add configurable `artifact_storage_path` with a local default under `data/artifacts`.
+- [x] Run the focused runtime tests and verify they pass.
 
 ## Task 4: Verification And Deploy
 
 **Files:**
 - No new files expected beyond the code/test changes above.
 
-- [ ] Run `uv run --extra dev ruff check`.
-- [ ] Run `uv run --extra dev ruff format --check`.
-- [ ] Run `uv run --extra dev mypy src`.
-- [ ] Run `uv run --extra dev pytest -q`.
-- [ ] Run `docker compose config >/tmp/oleg-telegram-leads-compose.out` and report only line count.
-- [ ] Commit and push to `main`.
-- [ ] Deploy on `teamd-ams1`, restart web/worker, and verify `/health` plus `docker compose ps web worker`.
+- [x] Run `uv run --extra dev ruff check`.
+- [x] Run `uv run --extra dev ruff format --check`.
+- [x] Run `uv run --extra dev mypy src`.
+- [x] Run `uv run --extra dev pytest -q`.
+- [x] Run `docker compose config >/tmp/oleg-telegram-leads-compose.out` and report only line count.
+- [x] Commit and push to `main`.
+- [x] Deploy on `teamd-ams1`, restart web/worker, and verify `/health` plus `docker compose ps web worker`.
