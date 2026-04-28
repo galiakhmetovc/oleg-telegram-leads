@@ -8,10 +8,13 @@ from pur_leads.db.migrations import upgrade_database
 from pur_leads.db.session import create_session_factory
 from pur_leads.integrations.telegram.types import ResolvedTelegramSource, SourceAccessResult
 from pur_leads.models.audit import operational_events_table
+from pur_leads.models.catalog import parsed_chunks_table
 from pur_leads.models.telegram_sources import source_access_checks_table
+from pur_leads.services.catalog_sources import CatalogSourceService
 from pur_leads.services.scheduler import SchedulerService
 from pur_leads.services.telegram_sources import TelegramSourceService
 from pur_leads.services.userbots import UserbotAccountService
+from pur_leads.workers.runtime import ParsedArtifact
 
 
 def test_cli_db_upgrade_creates_database(tmp_path):
@@ -91,6 +94,52 @@ def test_cli_worker_once_routes_telegram_jobs_through_canonical_registry(tmp_pat
     assert "failed job" in output
     assert stored.last_error == "telegram client is not configured"
     assert event["details_json"]["reason"] == "handler_exception"
+
+
+def test_cli_worker_once_uses_builtin_pdf_parser(tmp_path, capsys, monkeypatch):
+    db_path = tmp_path / "cli.db"
+    pdf_path = tmp_path / "catalog.pdf"
+    pdf_path.write_bytes(b"%PDF fake")
+    engine = create_sqlite_engine(db_path)
+    upgrade_database(engine)
+    session_factory = create_session_factory(engine)
+    with session_factory() as session:
+        raw_source = CatalogSourceService(session).upsert_source(
+            source_type="telegram_message",
+            origin="telegram:purmaster",
+            external_id="42",
+            raw_text="catalog",
+        )
+        artifact = CatalogSourceService(session).record_artifact(
+            raw_source.id,
+            artifact_type="document",
+            file_name="catalog.pdf",
+            mime_type="application/pdf",
+            local_path=str(pdf_path),
+            download_status="downloaded",
+        )
+        job = SchedulerService(session).enqueue(
+            job_type="parse_artifact",
+            scope_type="parser",
+            payload_json={
+                "source_id": raw_source.id,
+                "artifact_id": artifact.id,
+                "local_path": str(pdf_path),
+            },
+        )
+
+    monkeypatch.setattr("pur_leads.cli.PdfArtifactParser", FakePdfArtifactParser)
+
+    main(["--database-path", str(db_path), "worker", "once"])
+
+    with session_factory() as session:
+        stored = SchedulerService(session).repository.get(job.id)
+        chunks = session.execute(select(parsed_chunks_table)).mappings().all()
+    output = capsys.readouterr().out
+    assert stored is not None
+    assert "succeeded job" in output
+    assert stored.result_summary_json == {"chunk_count": 1, "parser_name": "fake-pdf"}
+    assert [chunk["text"] for chunk in chunks] == ["parsed pdf"]
 
 
 def test_cli_worker_once_uses_configured_telethon_client(tmp_path, capsys, monkeypatch):
@@ -220,3 +269,17 @@ class FakeConfiguredTelegramClient:
 
     async def fetch_context(self, source, *, message_id, before, after, reply_depth):  # noqa: ANN001, ANN201
         raise NotImplementedError
+
+    async def download_message_document(self, source, *, message_id, destination_dir):  # noqa: ANN001, ANN201
+        raise NotImplementedError
+
+
+class FakePdfArtifactParser:
+    async def parse_artifact(self, *, source_id: str, artifact_id: str | None, payload: dict):
+        return ParsedArtifact(
+            source_id=source_id,
+            artifact_id=artifact_id,
+            chunks=["parsed pdf"],
+            parser_name="fake-pdf",
+            parser_version="1",
+        )

@@ -228,6 +228,7 @@ def build_telegram_handler_registry(
     context_worker = MessageContextWorker(session, client)
     telegram_sources = TelegramSourceRepository(session)
     catalog_sources = CatalogSourceService(session)
+    scheduler = SchedulerService(session)
     artifact_root = Path(artifact_storage_path or "./data/artifacts")
 
     async def check_source_access(job: SchedulerJobRecord) -> JobHandlerResult:
@@ -314,6 +315,24 @@ def build_telegram_handler_registry(
             download_status=downloaded.status,
             skip_reason=downloaded.skip_reason,
         )
+        if _should_parse_artifact(
+            download_status=artifact.download_status,
+            file_name=artifact.file_name,
+            mime_type=artifact.mime_type,
+        ):
+            scheduler.enqueue(
+                job_type="parse_artifact",
+                scope_type="parser",
+                scope_id=artifact.id,
+                idempotency_key=f"parse-artifact:{artifact.id}",
+                payload_json={
+                    "source_id": artifact.source_id,
+                    "artifact_id": artifact.id,
+                    "local_path": artifact.local_path,
+                    "file_name": artifact.file_name,
+                    "mime_type": artifact.mime_type,
+                },
+            )
         return JobHandlerResult(
             result_summary={
                 "download_status": artifact.download_status,
@@ -631,6 +650,19 @@ def _sha256_file(path: Path) -> str:
         for chunk in iter(lambda: file_obj.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def _should_parse_artifact(
+    *,
+    download_status: str,
+    file_name: str | None,
+    mime_type: str | None,
+) -> bool:
+    if download_status != "downloaded":
+        return False
+    if mime_type == "application/pdf":
+        return True
+    return file_name is not None and file_name.casefold().endswith(".pdf")
 
 
 def _source_message_text(row: dict[str, Any]) -> str | None:

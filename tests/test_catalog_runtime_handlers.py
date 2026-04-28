@@ -24,6 +24,7 @@ from pur_leads.models.catalog import (
     catalog_candidates_table,
     parsed_chunks_table,
 )
+from pur_leads.models.scheduler import scheduler_jobs_table
 from pur_leads.models.telegram_sources import source_messages_table
 from pur_leads.services.catalog_sources import CatalogSourceService
 from pur_leads.services.scheduler import SchedulerService
@@ -193,6 +194,15 @@ async def test_download_artifact_handler_records_downloaded_document(runtime_ses
 
     stored = SchedulerService(runtime_session).repository.get(job.id)
     artifact = runtime_session.execute(select(artifacts_table)).mappings().one()
+    parse_job = (
+        runtime_session.execute(
+            select(scheduler_jobs_table)
+            .where(scheduler_jobs_table.c.job_type == "parse_artifact")
+            .where(scheduler_jobs_table.c.status == "queued")
+        )
+        .mappings()
+        .one()
+    )
     assert stored is not None
     assert result.status == "succeeded"
     assert stored.result_summary_json == {
@@ -207,6 +217,9 @@ async def test_download_artifact_handler_records_downloaded_document(runtime_ses
     assert artifact["file_size"] == 7
     assert artifact["sha256"] == hashlib.sha256(b"catalog").hexdigest()
     assert Path(artifact["local_path"]).read_bytes() == b"catalog"
+    assert parse_job["payload_json"]["source_id"] == raw_source.id
+    assert parse_job["payload_json"]["artifact_id"] == artifact["id"]
+    assert parse_job["payload_json"]["local_path"] == artifact["local_path"]
 
 
 @pytest.mark.asyncio
@@ -236,6 +249,9 @@ async def test_download_artifact_handler_records_skipped_document(runtime_sessio
 
     stored = SchedulerService(runtime_session).repository.get(job.id)
     artifact = runtime_session.execute(select(artifacts_table)).mappings().one()
+    parse_job_count = runtime_session.execute(
+        select(scheduler_jobs_table.c.id).where(scheduler_jobs_table.c.job_type == "parse_artifact")
+    ).all()
     assert stored is not None
     assert result.status == "succeeded"
     assert stored.result_summary_json == {
@@ -246,6 +262,7 @@ async def test_download_artifact_handler_records_skipped_document(runtime_sessio
     assert artifact["download_status"] == "skipped"
     assert artifact["skip_reason"] == "video"
     assert artifact["local_path"] is None
+    assert parse_job_count == []
 
 
 class FakeDownloadTelegramClient:
