@@ -95,10 +95,15 @@ def test_workspace_and_admin_pages_are_protected_and_render_shells(tmp_path):
     assert 'id="catalog-candidate-list"' in catalog_response.text
     assert 'id="catalog-candidate-detail"' in catalog_response.text
     assert 'id="catalog-filters"' in catalog_response.text
+    assert 'id="catalog-edit-form"' in catalog_response.text
+    assert 'id="catalog-name-input"' in catalog_response.text
+    assert 'id="catalog-value-json"' in catalog_response.text
     assert "/api/crm/clients" in js_response.text
     assert "/crm/convert" in js_response.text
     assert "/api/sources" in js_response.text
     assert "/api/catalog/candidates" in js_response.text
+    assert "loadCatalogCandidateDetail" in js_response.text
+    assert 'method: "PATCH"' in js_response.text
     assert "/api/admin/userbots" in js_response.text
 
 

@@ -28,6 +28,12 @@ class CandidateReviewResult:
     promotion: Any | None
 
 
+@dataclass(frozen=True)
+class CandidateDetailResult:
+    candidate: CatalogCandidateRecord
+    evidence: list[dict[str, Any]]
+
+
 class CatalogCandidateService:
     def __init__(self, session: Session) -> None:
         self.session = session
@@ -46,6 +52,62 @@ class CatalogCandidateService:
             candidate_type=candidate_type,
             limit=limit,
         )
+
+    def get_candidate_detail(self, candidate_id: str) -> CandidateDetailResult:
+        candidate = self.repository.get_candidate(candidate_id)
+        if candidate is None:
+            raise KeyError(candidate_id)
+        return CandidateDetailResult(
+            candidate=candidate,
+            evidence=self.repository.list_candidate_evidence_details(candidate_id),
+        )
+
+    def update_candidate(
+        self,
+        candidate_id: str,
+        *,
+        actor: str,
+        canonical_name: str | None = None,
+        normalized_value: dict[str, Any] | None = None,
+        reason: str | None = None,
+    ) -> CatalogCandidateRecord:
+        before = self.repository.get_candidate(candidate_id)
+        if before is None:
+            raise KeyError(candidate_id)
+
+        values: dict[str, Any] = {}
+        if canonical_name is not None:
+            normalized_name = canonical_name.strip()
+            if not normalized_name:
+                raise ValueError("canonical_name must not be empty")
+            values["canonical_name"] = normalized_name
+        if normalized_value is not None:
+            values["normalized_value_json"] = _normalized_value(normalized_value)
+        if not values:
+            return before
+
+        candidate = self.repository.update_candidate(
+            candidate_id,
+            **values,
+            updated_at=utc_now(),
+        )
+        self.audit.record_change(
+            actor=actor,
+            action="catalog_candidate.update",
+            entity_type="catalog_candidate",
+            entity_id=candidate_id,
+            old_value_json={
+                "canonical_name": before.canonical_name,
+                "normalized_value": before.normalized_value_json,
+            },
+            new_value_json={
+                "canonical_name": candidate.canonical_name,
+                "normalized_value": candidate.normalized_value_json,
+                "reason": reason,
+            },
+        )
+        self.session.commit()
+        return candidate
 
     def review_candidate(
         self,

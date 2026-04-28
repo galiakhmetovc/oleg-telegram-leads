@@ -390,6 +390,10 @@ def catalog_page(
                 </aside>
                 <section id="catalog-candidate-detail" class="detail-pane" aria-live="polite">
                   <div class="empty-state">Select a candidate</div>
+                  <form id="catalog-edit-form" class="catalog-edit-form" hidden>
+                    <label>Name<input id="catalog-name-input" name="canonical_name"></label>
+                    <label>Payload JSON<textarea id="catalog-value-json" name="normalized_value"></textarea></label>
+                  </form>
                 </section>
               </section>
             </main>

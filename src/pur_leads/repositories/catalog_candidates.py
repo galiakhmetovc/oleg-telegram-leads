@@ -6,16 +6,19 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import insert, select, update
+from sqlalchemy import func, insert, select, update
 from sqlalchemy.orm import Session
 
 from pur_leads.core.ids import new_id
 from pur_leads.models.catalog import (
+    artifacts_table,
     catalog_candidate_facts_table,
     catalog_candidates_table,
     catalog_evidence_table,
     extracted_facts_table,
     extraction_runs_table,
+    parsed_chunks_table,
+    sources_table,
 )
 
 
@@ -187,6 +190,67 @@ class CatalogCandidateRepository:
             .all()
         )
         return [CatalogCandidateRecord(**dict(row)) for row in rows]
+
+    def list_candidate_evidence_details(self, candidate_id: str) -> list[dict[str, Any]]:
+        artifact_id = func.coalesce(
+            catalog_evidence_table.c.artifact_id,
+            parsed_chunks_table.c.artifact_id,
+        )
+        rows = (
+            self.session.execute(
+                select(
+                    catalog_evidence_table.c.id.label("evidence_id"),
+                    catalog_evidence_table.c.source_id.label("evidence_source_id"),
+                    catalog_evidence_table.c.artifact_id.label("evidence_artifact_id"),
+                    catalog_evidence_table.c.chunk_id.label("evidence_chunk_id"),
+                    catalog_evidence_table.c.quote.label("quote"),
+                    catalog_evidence_table.c.page_number.label("page_number"),
+                    catalog_evidence_table.c.location_json.label("location_json"),
+                    catalog_evidence_table.c.extractor_version.label("extractor_version"),
+                    catalog_evidence_table.c.evidence_type.label("evidence_type"),
+                    catalog_evidence_table.c.confidence.label("evidence_confidence"),
+                    catalog_evidence_table.c.created_by.label("evidence_created_by"),
+                    catalog_evidence_table.c.created_at.label("evidence_created_at"),
+                    sources_table.c.id.label("source_id"),
+                    sources_table.c.source_type.label("source_type"),
+                    sources_table.c.origin.label("source_origin"),
+                    sources_table.c.external_id.label("source_external_id"),
+                    sources_table.c.url.label("source_url"),
+                    sources_table.c.title.label("source_title"),
+                    sources_table.c.published_at.label("source_published_at"),
+                    sources_table.c.raw_text.label("source_raw_text"),
+                    parsed_chunks_table.c.id.label("chunk_id"),
+                    parsed_chunks_table.c.chunk_index.label("chunk_index"),
+                    parsed_chunks_table.c.text.label("chunk_text"),
+                    parsed_chunks_table.c.parser_name.label("chunk_parser_name"),
+                    parsed_chunks_table.c.parser_version.label("chunk_parser_version"),
+                    artifacts_table.c.id.label("artifact_id"),
+                    artifacts_table.c.file_name.label("artifact_file_name"),
+                    artifacts_table.c.mime_type.label("artifact_mime_type"),
+                    artifacts_table.c.file_size.label("artifact_file_size"),
+                    artifacts_table.c.download_status.label("artifact_download_status"),
+                )
+                .select_from(
+                    catalog_evidence_table.outerjoin(
+                        sources_table,
+                        catalog_evidence_table.c.source_id == sources_table.c.id,
+                    )
+                    .outerjoin(
+                        parsed_chunks_table,
+                        catalog_evidence_table.c.chunk_id == parsed_chunks_table.c.id,
+                    )
+                    .outerjoin(artifacts_table, artifact_id == artifacts_table.c.id)
+                )
+                .where(
+                    catalog_evidence_table.c.entity_type == "catalog_candidate",
+                    catalog_evidence_table.c.entity_id == candidate_id,
+                )
+                .order_by(catalog_evidence_table.c.created_at)
+            )
+            .mappings()
+            .all()
+        )
+        return [dict(row) for row in rows]
 
     def ensure_candidate_fact_link(
         self,

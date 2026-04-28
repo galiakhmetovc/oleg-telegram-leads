@@ -335,6 +335,52 @@ h3 {
   line-height: 1.45;
 }
 
+.catalog-edit-form {
+  display: grid;
+  gap: 10px;
+}
+
+.catalog-edit-form textarea {
+  min-height: 220px;
+  resize: vertical;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.evidence-list {
+  display: grid;
+  gap: 10px;
+}
+
+.evidence-item {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  background: #ffffff;
+}
+
+.evidence-item blockquote {
+  margin: 0;
+  padding-left: 10px;
+  border-left: 3px solid var(--accent);
+  color: var(--text);
+}
+
+.evidence-item p {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.55;
+}
+
+.evidence-source {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
 .timeline {
   display: grid;
   gap: 8px;

@@ -735,7 +735,7 @@ function sourceStatusClass(status) {
 }
 
 function initCatalog() {
-  const state = { items: [], selectedId: null };
+  const state = { items: [], selectedId: null, detail: null };
   document.querySelector("#catalog-refresh")?.addEventListener("click", () =>
     loadCatalogCandidates(state)
   );
@@ -758,6 +758,23 @@ async function loadCatalogCandidates(state) {
   state.items = payload.items || [];
   const selectedStillVisible = state.items.some((item) => item.id === state.selectedId);
   state.selectedId = selectedStillVisible ? state.selectedId : state.items[0]?.id || null;
+  state.detail = null;
+  renderCatalogCandidateList(state);
+  if (state.selectedId) {
+    await loadCatalogCandidateDetail(state, state.selectedId);
+  } else {
+    renderCatalogCandidateDetail(state);
+  }
+}
+
+async function loadCatalogCandidateDetail(state, candidateId) {
+  const target = document.querySelector("#catalog-candidate-detail");
+  if (target) target.innerHTML = `<div class="empty-state">Loading candidate</div>`;
+  const payload = await api(`/api/catalog/candidates/${candidateId}`);
+  if (state.selectedId !== candidateId) return;
+  state.detail = payload;
+  const index = state.items.findIndex((item) => item.id === payload.candidate.id);
+  if (index >= 0) state.items[index] = payload.candidate;
   renderCatalogCandidateList(state);
   renderCatalogCandidateDetail(state);
 }
@@ -790,8 +807,9 @@ function renderCatalogCandidateList(state) {
   target.querySelectorAll(".queue-item").forEach((button) => {
     button.addEventListener("click", () => {
       state.selectedId = button.dataset.id;
+      state.detail = null;
       renderCatalogCandidateList(state);
-      renderCatalogCandidateDetail(state);
+      loadCatalogCandidateDetail(state, state.selectedId);
     });
   });
 }
@@ -799,13 +817,15 @@ function renderCatalogCandidateList(state) {
 function renderCatalogCandidateDetail(state) {
   const target = document.querySelector("#catalog-candidate-detail");
   if (!target) return;
-  const item = state.items.find((candidate) => candidate.id === state.selectedId);
+  const item =
+    state.detail?.candidate || state.items.find((candidate) => candidate.id === state.selectedId);
   if (!item) {
     target.innerHTML = `<div class="empty-state">Select a candidate</div>`;
     return;
   }
   const value = item.normalized_value || {};
   const terms = Array.isArray(value.terms) ? value.terms : [];
+  const evidence = state.detail?.evidence || [];
   target.innerHTML = `<div class="detail-grid">
     <header class="detail-header">
       <div>
@@ -839,8 +859,27 @@ function renderCatalogCandidateDetail(state) {
       </div>
     </section>
     <section class="detail-section">
-      <h3>Raw payload</h3>
-      <pre class="json-block">${escapeHtml(JSON.stringify(value, null, 2))}</pre>
+      <h3>Edit</h3>
+      <form id="catalog-edit-form" class="catalog-edit-form">
+        <label>Name
+          <input id="catalog-name-input" name="canonical_name" value="${escapeHtml(item.canonical_name)}">
+        </label>
+        <label>Payload JSON
+          <textarea id="catalog-value-json" name="normalized_value" rows="12">${escapeHtml(
+            JSON.stringify(value, null, 2)
+          )}</textarea>
+        </label>
+        <label>Reason
+          <input name="reason" placeholder="Optional note">
+        </label>
+        <div class="source-action-bar">
+          <button type="submit">Save changes</button>
+        </div>
+      </form>
+    </section>
+    <section class="detail-section">
+      <h3>Evidence</h3>
+      ${renderCatalogEvidence(evidence)}
     </section>
     <section class="detail-section">
       <h3>Review</h3>
@@ -858,6 +897,56 @@ function renderCatalogCandidateDetail(state) {
       reviewCatalogCandidate(item.id, button.dataset.catalogAction, state)
     );
   });
+  target.querySelector("#catalog-edit-form")?.addEventListener("submit", (event) =>
+    saveCatalogCandidateEdit(event, item.id, state)
+  );
+}
+
+function renderCatalogEvidence(evidence) {
+  if (!evidence.length) return `<div class="empty-state">No evidence</div>`;
+  return `<div class="evidence-list">${evidence
+    .map((item) => {
+      const sourceLabel = [item.source?.origin, item.source?.external_id].filter(Boolean).join(" / ");
+      const artifactLabel = item.artifact?.file_name || item.artifact?.mime_type || "";
+      const chunkText = item.chunk?.text || item.source?.raw_text_excerpt || "";
+      return `<article class="evidence-item">
+        <div class="evidence-source">
+          <strong>${escapeHtml(sourceLabel || "Source")}</strong>
+          ${artifactLabel ? badge(artifactLabel) : ""}
+          ${item.chunk ? badge(`chunk ${item.chunk.chunk_index}`) : ""}
+          ${item.confidence ? badge(Math.round(item.confidence * 100) + "%") : ""}
+        </div>
+        ${item.quote ? `<blockquote>${escapeHtml(item.quote)}</blockquote>` : ""}
+        ${chunkText ? `<p>${escapeHtml(shortText(chunkText, 520))}</p>` : ""}
+      </article>`;
+    })
+    .join("")}</div>`;
+}
+
+async function saveCatalogCandidateEdit(event, candidateId, state) {
+  event.preventDefault();
+  const status = document.querySelector("#catalog-status");
+  const form = event.currentTarget;
+  const data = new FormData(form);
+  try {
+    const normalizedValue = JSON.parse(data.get("normalized_value") || "{}");
+    const payload = await api(`/api/catalog/candidates/${candidateId}`, {
+      method: "PATCH",
+      body: JSON.stringify({
+        canonical_name: data.get("canonical_name"),
+        normalized_value: normalizedValue,
+        reason: data.get("reason"),
+      }),
+    });
+    state.detail = payload;
+    const index = state.items.findIndex((item) => item.id === payload.candidate.id);
+    if (index >= 0) state.items[index] = payload.candidate;
+    renderCatalogCandidateList(state);
+    renderCatalogCandidateDetail(state);
+    document.querySelector("#catalog-status").textContent = "Saved";
+  } catch (error) {
+    if (status) status.textContent = error.message;
+  }
 }
 
 async function reviewCatalogCandidate(candidateId, action, state) {
@@ -878,6 +967,12 @@ function catalogStatusClass(status) {
   if (status === "auto_pending" || status === "needs_review") return "is-warn";
   if (status === "rejected" || status === "muted") return "is-danger";
   return "";
+}
+
+function shortText(value, limit) {
+  const normalized = text(value).trim();
+  if (normalized.length <= limit) return normalized;
+  return `${normalized.slice(0, limit - 1).trim()}…`;
 }
 
 async function initAdmin() {

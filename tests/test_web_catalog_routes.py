@@ -65,6 +65,71 @@ def test_catalog_candidate_routes_reject_candidate_without_promotion(tmp_path):
         assert session.execute(select(catalog_items_table)).mappings().all() == []
 
 
+def test_catalog_candidate_detail_returns_evidence_source_and_chunk(tmp_path):
+    fixture = _setup_catalog_app(tmp_path)
+    client = fixture["client"]
+    candidate_id = _create_item_candidate(fixture["session_factory"])
+
+    denied_response = client.get(f"/api/catalog/candidates/{candidate_id}")
+    _login(client)
+    response = client.get(f"/api/catalog/candidates/{candidate_id}")
+
+    assert denied_response.status_code == 401
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["candidate"]["id"] == candidate_id
+    assert payload["candidate"]["normalized_value"]["category_slug"] == "video_surveillance"
+    assert payload["evidence"][0]["quote"] == "5.1 Видеонаблюдение"
+    assert payload["evidence"][0]["source"]["origin"] == "telegram:purmaster"
+    assert payload["evidence"][0]["source"]["external_id"] == "17"
+    assert payload["evidence"][0]["source"]["raw_text_excerpt"] == "Видеонаблюдение"
+    assert payload["evidence"][0]["chunk"]["text"] == (
+        "5.1 Видеонаблюдение Установка камер наблюдения"
+    )
+
+
+def test_catalog_candidate_routes_edit_candidate_before_approval(tmp_path):
+    fixture = _setup_catalog_app(tmp_path)
+    client = fixture["client"]
+    candidate_id = _create_item_candidate(fixture["session_factory"])
+    _login(client)
+
+    edit_response = client.patch(
+        f"/api/catalog/candidates/{candidate_id}",
+        json={
+            "canonical_name": "Камеры и видеонаблюдение",
+            "normalized_value": {
+                "item_type": "service",
+                "category_slug": "video_surveillance",
+                "terms": ["камеры", "видеонаблюдение"],
+                "description": "Установка камер и настройка просмотра",
+            },
+            "reason": "Clean up extracted title",
+        },
+    )
+    approve_response = client.post(
+        f"/api/catalog/candidates/{candidate_id}/review",
+        json={"action": "approve"},
+    )
+
+    assert edit_response.status_code == 200
+    assert edit_response.json()["candidate"]["canonical_name"] == "Камеры и видеонаблюдение"
+    assert edit_response.json()["candidate"]["normalized_value"]["terms"] == [
+        "камеры",
+        "видеонаблюдение",
+    ]
+    assert approve_response.status_code == 200
+    assert approve_response.json()["promotion"]["entity_type"] == "item"
+    with fixture["session_factory"]() as session:
+        item = session.execute(select(catalog_items_table)).mappings().one()
+        audit_actions = [
+            row["action"] for row in session.execute(select(audit_log_table)).mappings().all()
+        ]
+    assert item["canonical_name"] == "Камеры и видеонаблюдение"
+    assert "catalog_candidate.update" in audit_actions
+    assert "catalog_candidate.review" in audit_actions
+
+
 def _create_item_candidate(session_factory) -> str:
     with session_factory() as session:
         source = CatalogSourceService(session).upsert_source(
