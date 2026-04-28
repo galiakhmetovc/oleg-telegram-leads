@@ -39,6 +39,8 @@ The system must continuously read the PUR Telegram channel, parse messages and d
 - Automatic lead clustering is configurable and manually correctable through merge/split/context-only actions.
 - Feedback distinguishes classifier quality from commercial outcome. "Not a lead" teaches detection; "no answer", "too expensive", or "bought elsewhere" are CRM/work outcomes, not negative classifier examples.
 - `not_lead` feedback requires a reason and should be applied to the narrowest useful target: cluster, event, match, term, sender, or message.
+- Confirmed clusters produce CRM conversion candidates, not full CRM records, unless Oleg explicitly accepts them.
+- `Take into work` creates an action task only. Client, interest, opportunity, support case, and contact reason conversion happens after clarification.
 - Embeddings/semantic matching are designed into the schema but disabled initially.
 - Retention is based on time and hot database size. Large/old data is archived and rotated, not simply deleted.
 - Local archive storage is the first phase. S3-compatible storage is represented in the schema and planned for a later phase.
@@ -1251,6 +1253,8 @@ Key fields:
 - `primary_task_id`
 - `converted_entity_type`
 - `converted_entity_id`
+- `crm_candidate_count`
+- `crm_conversion_action_id`
 - `created_at`
 - `updated_at`
 
@@ -1592,6 +1596,66 @@ Rules:
 - Commercial outcomes use `feedback_scope = crm_outcome` and `learning_effect = no_classifier_learning` by default.
 - Classifier feedback should target the narrowest object that caused the error.
 - Feedback may create review tasks instead of mutating catalog/terms immediately.
+
+### `crm_conversion_candidates`
+
+Stores proposed CRM records extracted from a lead cluster.
+
+Key fields:
+
+- `id`
+- `lead_cluster_id`
+- `lead_event_id`
+- `candidate_type`: `client`, `contact`, `object`, `interest`, `opportunity`, `support_case`, `contact_reason`, `task`
+- `extracted_json`
+- `display_summary`
+- `confidence`
+- `status`: `proposed`, `accepted`, `rejected`, `edited`, `converted`, `superseded`
+- `created_by`: `system`, `oleg`, `admin`
+- `created_entity_type`
+- `created_entity_id`
+- `reviewed_by`
+- `reviewed_at`
+- `created_at`
+- `updated_at`
+
+Rules:
+
+- Candidates do not become CRM records until accepted or edited by Oleg/admin.
+- Candidates can be regenerated when the cluster summary, catalog match, or prompt version changes.
+- Rejected candidates remain as training/audit data.
+
+### `crm_conversion_actions`
+
+Stores the conversion of a lead cluster into CRM/work entities.
+
+Key fields:
+
+- `id`
+- `lead_cluster_id`
+- `action_type`: `create_task`, `create_client`, `link_client`, `create_contact`, `create_object`, `create_interest`, `create_opportunity`, `create_support_case`, `create_contact_reason`, `close_without_conversion`
+- `used_candidate_ids_json`
+- `created_entity_type`
+- `created_entity_id`
+- `linked_client_id`
+- `linked_contact_id`
+- `manual_changes_json`
+- `next_step`
+- `next_step_at`
+- `created_by`
+- `created_at`
+
+Purpose:
+
+- Keep an audit trail of what was created from a cluster.
+- Distinguish automatic suggestions from confirmed CRM memory.
+- Let one cluster create multiple CRM/work records when appropriate.
+
+Rules:
+
+- A cluster becomes `converted` after a primary CRM/work entity is created: `client_interest`, `opportunity`, `support_case`, `contact_reason`, or `client + task`.
+- Creating only the default contact task from `Take into work` does not mark the cluster as `converted`.
+- Duplicate checks must run before creating new clients/contacts.
 
 ### `clients`
 
@@ -1956,6 +2020,18 @@ Key settings:
 - `crm_auto_create_interest_from_manual_note = true`
 - `crm_auto_create_contact_reasons = true`
 - `crm_contact_reasons_include_auto_pending_catalog = true`
+- `crm_generate_conversion_candidates = true`
+- `crm_auto_convert_candidates = false`
+- `crm_conversion_wizard_enabled = true`
+- `crm_conversion_candidate_types_json = ["client", "contact", "object", "interest", "opportunity", "support_case", "contact_reason", "task"]`
+- `crm_conversion_require_confirmation = true`
+- `crm_conversion_mark_cluster_converted_on_task_only = false`
+- `crm_conversion_duplicate_check_enabled = true`
+- `crm_duplicate_check_telegram_user_id = true`
+- `crm_duplicate_check_username = true`
+- `crm_duplicate_check_phone = true`
+- `crm_duplicate_check_name_similarity = true`
+- `crm_duplicate_check_object_interest_similarity = true`
 - `crm_show_assignee_fields = false`
 - `crm_default_contact_reason_ttl_days = 30`
 - `telegram_worker_count = 1`
@@ -2295,6 +2371,52 @@ Rules:
 - Feedback can target a cluster, one lead event, one lead match, or one message.
 - Cross-sender clustering is manual by default unless settings explicitly allow automatic grouping.
 
+## CRM Conversion From Lead Clusters
+
+CRM conversion is a deliberate step after a cluster is confirmed or clarified.
+
+`Take into work` behavior:
+
+- confirms that the cluster needs human action;
+- creates a task to contact the person;
+- does not automatically create a client, contact, interest, opportunity, support case, or contact reason.
+
+The system can generate conversion candidates:
+
+- `client_candidate`: person/company/KP/HOA/unknown entity;
+- `contact_candidate`: Telegram user, phone, email, preferred channel;
+- `object_candidate`: house, dacha, apartment, cottage settlement, office, warehouse, production site;
+- `interest_candidate`: what the person wants, category, item/term, status;
+- `opportunity_candidate`: sales/project motion;
+- `support_case_candidate`: support, repair, setup, maintenance;
+- `contact_reason_candidate`: useful follow-up later;
+- `task_candidate`: immediate or delayed action.
+
+Conversion wizard:
+
+1. Choose what the cluster should become: new client, existing client, interest only, opportunity, support case, contact reason, or task.
+2. Review candidate fields prefilled from cluster messages, sender metadata, matches, and AI summary.
+3. Confirm next step: contact now, snooze/retry, prepare estimate, wait for answer, or close.
+
+Rules:
+
+- Candidates are suggestions until accepted.
+- Oleg can accept, edit, reject, or ignore each candidate.
+- One cluster may create several CRM records, for example client + contact + object + interest + task.
+- A cluster becomes `converted` only after a primary CRM/work entity is created: `client_interest`, `opportunity`, `support_case`, `contact_reason`, or `client + task`.
+- Creating only the default `Take into work` task does not mark the cluster as converted.
+- Duplicate checks run before creating clients/contacts.
+
+Duplicate checks:
+
+- same Telegram user id;
+- same username;
+- same phone/email;
+- similar display name;
+- similar object and interest.
+
+AI extraction should provide `crm_suggestions` in structured output, but the UI still requires confirmation before creating CRM records.
+
 ## Storage And Archive Policy
 
 SQLite is the hot operational database. It keeps active catalog, CRM, settings, users, audit log, current jobs, recent messages, and recent evidence immediately queryable.
@@ -2520,6 +2642,7 @@ Each cluster shows:
 - whether matches are `approved` or `auto_pending`;
 - classifier versions represented in the cluster;
 - why messages/events were merged;
+- CRM suggestions/candidates;
 - previous feedback if any.
 
 Primary actions:
@@ -2535,7 +2658,10 @@ Follow-up actions:
 
 - create task;
 - create or link client;
+- accept/edit CRM candidate;
 - create client interest;
+- create opportunity;
+- create support case;
 - create contact reason;
 - add comment;
 - create catalog item/term from message.
@@ -2613,6 +2739,7 @@ Lead state model:
 After `Take into work`, the card offers clarification actions:
 
 - create or link client;
+- accept/edit CRM suggestions;
 - create client interest;
 - create opportunity;
 - create support case;
@@ -2627,6 +2754,32 @@ Reasoning:
 - `Take into work` means "this requires human action".
 - Creating CRM objects requires clarification, because many Telegram leads will be incomplete or noisy.
 - This keeps lead review fast while preserving a path into CRM when the lead is real.
+
+CRM suggestions block:
+
+- proposed contact: Telegram username/display name/phone when known;
+- proposed object: house, dacha, apartment, cottage settlement, office, warehouse, production, unknown;
+- proposed interest: category, item/term, request text, urgency, budget, quantity;
+- proposed opportunity/support/contact reason when the request type is clear;
+- next-step suggestion: contact now, ask budget/location, prepare estimate, wait/retry, or close.
+
+The block shows candidates, not committed CRM records. Oleg can accept, edit, reject, or ignore each candidate.
+
+Conversion wizard:
+
+1. Choose what this cluster becomes: new client, existing client, interest only, opportunity, support case, contact reason, or task.
+2. Review extracted fields prefilled from the cluster.
+3. Confirm next step: contact now, snooze/retry, prepare estimate, wait for answer, or close.
+
+Duplicate protection:
+
+- search by Telegram user id;
+- search by username;
+- search by phone when present;
+- search by similar display name;
+- compare existing client objects/interests.
+
+If likely duplicates exist, the wizard should prefer linking to an existing client/contact over creating a new one.
 
 ### Lead Detail
 
@@ -2914,6 +3067,10 @@ Required controls:
 - Telegram authentication/session settings;
 - CRM enabled/disabled;
 - whether confirmed leads can create client/contact candidates automatically;
+- whether lead clusters generate CRM conversion candidates;
+- whether CRM candidates require confirmation;
+- conversion wizard candidate types and duplicate-check policy;
+- what marks a cluster as `converted`;
 - whether manual notes auto-create interests;
 - whether catalog changes auto-create contact reasons;
 - whether `auto_pending` catalog entries can create contact reasons;
@@ -3121,6 +3278,7 @@ Lead detection output must include:
 - evidence references;
 - classifier version.
 - clustering hint: `new_request`, `continuation`, `clarification`, `context_only`, or `separate_intent`.
+- CRM suggestions: contact, object, interest, opportunity/support/contact-reason hint, and next step.
 
 Example AI output:
 
@@ -3133,7 +3291,16 @@ Example AI output:
   "high_value_signals": ["whole_object: house", "turnkey", "installer_needed"],
   "negative_signals": [],
   "notify_reason": "AI is uncertain, but the message looks like a potential project lead",
-  "clustering_hint": "new_request"
+  "clustering_hint": "new_request",
+  "crm_suggestions": {
+    "contact": {"telegram_username": "ivan", "display_name": "Иван"},
+    "object": {"type": "dacha", "location_text": null},
+    "interest": {
+      "category": "video_surveillance",
+      "text": "Wi-Fi camera for a dacha with mobile viewing"
+    },
+    "next_step": "Ask for budget, installation location, and whether turnkey installation is needed"
+  }
 }
 ```
 
@@ -3298,6 +3465,9 @@ Unit tests:
 - commercial work outcomes do not become negative classifier feedback;
 - wrong term feedback targets `lead_matches` / `catalog_terms`;
 - expert/advice feedback can update `sender_profiles`;
+- CRM conversion candidate creation from lead cluster suggestions;
+- CRM duplicate detection by Telegram id, username, phone, name, and object/interest similarity;
+- cluster `converted` status rules;
 - manual client/contact/interest/asset creation;
 - contact reason generation from catalog changes;
 - task and touchpoint persistence.
@@ -3328,6 +3498,9 @@ Integration tests:
 - `commercial_no_answer`/`commercial_too_expensive` updates work outcome without weakening classifier examples;
 - `expert_or_advice` marks sender as expert/context candidate and suppresses future customer-lead treatment by default;
 - `context_only` removes a message from lead trigger role without deleting it from cluster context;
+- `Take into work` creates a contact task but no CRM client/opportunity automatically;
+- accepting CRM candidates creates client/contact/object/interest records and links them to the source cluster;
+- likely duplicate client is linked instead of creating a new client when Oleg confirms the match;
 - duplicate message ids across chats do not deduplicate incorrectly;
 - confirmed lead can be linked to a client and interest;
 - new catalog item creates a contact reason for an old matching interest;
