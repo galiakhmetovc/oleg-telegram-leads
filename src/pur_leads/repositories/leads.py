@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 
 from pur_leads.core.ids import new_id
 from pur_leads.models.leads import (
+    crm_conversion_actions_table,
     feedback_events_table,
     lead_cluster_actions_table,
     lead_cluster_members_table,
@@ -106,6 +107,23 @@ class FeedbackEventRecord:
     created_by: str
     created_at: datetime
     metadata_json: Any
+
+
+@dataclass(frozen=True)
+class CrmConversionActionRecord:
+    id: str
+    lead_cluster_id: str
+    action_type: str
+    used_candidate_ids_json: Any
+    created_entity_type: str | None
+    created_entity_id: str | None
+    linked_client_id: str | None
+    linked_contact_id: str | None
+    manual_changes_json: Any
+    next_step: str | None
+    next_step_at: datetime | None
+    created_by: str
+    created_at: datetime
 
 
 class LeadRepository:
@@ -215,6 +233,20 @@ class LeadRepository:
             .one()
         )
         return FeedbackEventRecord(**dict(row))
+
+    def create_crm_conversion_action(self, **values) -> CrmConversionActionRecord:  # type: ignore[no-untyped-def]
+        action_id = new_id()
+        self.session.execute(insert(crm_conversion_actions_table).values(id=action_id, **values))
+        row = (
+            self.session.execute(
+                select(crm_conversion_actions_table).where(
+                    crm_conversion_actions_table.c.id == action_id
+                )
+            )
+            .mappings()
+            .one()
+        )
+        return CrmConversionActionRecord(**dict(row))
 
     def update_cluster_member_by_event(
         self,

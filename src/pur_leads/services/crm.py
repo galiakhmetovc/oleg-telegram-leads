@@ -23,6 +23,8 @@ from pur_leads.repositories.crm import (
     SupportCaseRecord,
     TouchpointRecord,
 )
+from pur_leads.repositories.leads import CrmConversionActionRecord, LeadRepository
+from pur_leads.repositories.tasks import TaskRecord, TaskRepository
 
 
 @dataclass(frozen=True)
@@ -48,10 +50,24 @@ class DuplicateHint:
     confidence: float
 
 
+@dataclass(frozen=True)
+class LeadClusterConversionResult:
+    client: ClientRecord
+    contact: ContactRecord | None
+    client_object: ClientObjectRecord | None
+    interest: ClientInterestRecord | None
+    task: TaskRecord | None
+    action: CrmConversionActionRecord
+    primary_entity_type: str
+    primary_entity_id: str
+
+
 class CrmService:
     def __init__(self, session: Session) -> None:
         self.session = session
         self.repository = CrmRepository(session)
+        self.leads = LeadRepository(session)
+        self.tasks = TaskRepository(session)
         self.audit = AuditRepository(session)
 
     def create_client_profile(
@@ -201,6 +217,158 @@ class CrmService:
                 )
         return hints
 
+    def convert_lead_cluster(
+        self,
+        lead_cluster_id: str,
+        *,
+        actor: str,
+        client: dict[str, Any] | None = None,
+        contact: dict[str, Any] | None = None,
+        client_object: dict[str, Any] | None = None,
+        interest: dict[str, Any] | None = None,
+        task: dict[str, Any] | None = None,
+        link_existing_client_id: str | None = None,
+        used_candidate_ids: list[str] | None = None,
+        owner_user_id: str | None = None,
+        assignee_user_id: str | None = None,
+    ) -> LeadClusterConversionResult:
+        cluster = self.leads.get_cluster(lead_cluster_id)
+        if cluster is None:
+            raise KeyError(lead_cluster_id)
+
+        now = utc_now()
+        duplicate_hints = self.find_duplicate_hints(
+            telegram_user_id=(contact or {}).get("telegram_user_id"),
+            telegram_username=(contact or {}).get("telegram_username"),
+            phone=(contact or {}).get("phone"),
+            email=(contact or {}).get("email"),
+        )
+        if link_existing_client_id is None and duplicate_hints:
+            raise ValueError("duplicate contact identity requires link_existing_client_id")
+
+        linked_client: ClientRecord
+        if link_existing_client_id is not None:
+            linked_client = self.repository.get_client(link_existing_client_id)
+            if linked_client is None:
+                raise KeyError(link_existing_client_id)
+            conflicting_hints = [
+                hint for hint in duplicate_hints if hint.client_id != link_existing_client_id
+            ]
+            if conflicting_hints:
+                raise ValueError("duplicate contact identity belongs to another client")
+        else:
+            client_values = client or {}
+            linked_client = self.repository.create_client(
+                client_type=client_values.get("client_type", "unknown"),
+                display_name=client_values.get("display_name") or cluster.primary_sender_name or "Unknown",
+                status=client_values.get("status", "active"),
+                source_type="lead",
+                source_id=cluster.id,
+                owner_user_id=client_values.get("owner_user_id"),
+                assignee_user_id=client_values.get("assignee_user_id"),
+                notes=client_values.get("notes"),
+                metadata_json=client_values.get("metadata_json"),
+                created_at=now,
+                updated_at=now,
+            )
+
+        created_contact = self._maybe_create_conversion_contact(
+            linked_client.id,
+            contact,
+            duplicate_hints=duplicate_hints,
+            now=now,
+        )
+        created_object = (
+            self._create_object(linked_client.id, client_object, now=now)
+            if client_object is not None
+            else None
+        )
+        created_interest = None
+        if interest is not None:
+            interest_values = {
+                **interest,
+                "source_type": "lead",
+                "source_id": cluster.id,
+                "category_id": interest.get("category_id", cluster.category_id),
+                "client_object_id": interest.get(
+                    "client_object_id", created_object.id if created_object else None
+                ),
+            }
+            created_interest = self._create_interest(linked_client.id, interest_values, now=now)
+
+        created_task = self._maybe_create_conversion_task(
+            cluster_id=cluster.id,
+            lead_event_id=cluster.primary_lead_event_id,
+            client_id=linked_client.id,
+            values=task,
+            owner_user_id=owner_user_id,
+            assignee_user_id=assignee_user_id,
+            now=now,
+        )
+        primary_entity_type, primary_entity_id, action_type, work_outcome = _conversion_primary(
+            interest=created_interest,
+            task=created_task,
+            client=linked_client,
+        )
+        action = self.leads.create_crm_conversion_action(
+            lead_cluster_id=cluster.id,
+            action_type=action_type,
+            used_candidate_ids_json=used_candidate_ids or [],
+            created_entity_type=primary_entity_type,
+            created_entity_id=primary_entity_id,
+            linked_client_id=linked_client.id,
+            linked_contact_id=created_contact.id if created_contact else None,
+            manual_changes_json={
+                "created_contact_id": created_contact.id if created_contact else None,
+                "created_object_id": created_object.id if created_object else None,
+                "created_task_id": created_task.id if created_task else None,
+            },
+            next_step=task.get("title") if task else None,
+            next_step_at=created_task.due_at if created_task else None,
+            created_by=actor,
+            created_at=now,
+        )
+        self.leads.update_cluster(
+            cluster.id,
+            cluster_status="converted",
+            review_status="confirmed",
+            work_outcome=work_outcome,
+            primary_task_id=created_task.id if created_task else cluster.primary_task_id,
+            converted_entity_type=primary_entity_type,
+            converted_entity_id=primary_entity_id,
+            crm_conversion_action_id=action.id,
+            updated_at=now,
+        )
+        self.audit.record_change(
+            actor=actor,
+            action="crm.lead_cluster_converted",
+            entity_type="lead_cluster",
+            entity_id=cluster.id,
+            old_value_json={
+                "cluster_status": cluster.cluster_status,
+                "converted_entity_type": cluster.converted_entity_type,
+                "converted_entity_id": cluster.converted_entity_id,
+            },
+            new_value_json={
+                "cluster_status": "converted",
+                "converted_entity_type": primary_entity_type,
+                "converted_entity_id": primary_entity_id,
+                "linked_client_id": linked_client.id,
+                "crm_conversion_action_id": action.id,
+            },
+        )
+        self.session.commit()
+        return LeadClusterConversionResult(
+            client=linked_client,
+            contact=created_contact,
+            client_object=created_object,
+            interest=created_interest,
+            task=created_task,
+            action=action,
+            primary_entity_type=primary_entity_type,
+            primary_entity_id=primary_entity_id,
+        )
+
     def _create_contact(
         self,
         client_id: str,
@@ -225,6 +393,25 @@ class CrmService:
             metadata_json=values.get("metadata_json"),
             created_at=now,
             updated_at=now,
+        )
+
+    def _maybe_create_conversion_contact(
+        self,
+        client_id: str,
+        values: dict[str, Any] | None,
+        *,
+        duplicate_hints: list[DuplicateHint],
+        now: datetime,
+    ) -> ContactRecord | None:
+        if values is None:
+            return None
+        if any(hint.client_id == client_id for hint in duplicate_hints):
+            return None
+        return self._create_contact(
+            client_id,
+            {**values, "source_type": "lead"},
+            now=now,
+            fallback_primary=False,
         )
 
     def _create_object(
@@ -408,6 +595,39 @@ class CrmService:
             created_at=now,
         )
 
+    def _maybe_create_conversion_task(
+        self,
+        *,
+        cluster_id: str,
+        lead_event_id: str | None,
+        client_id: str,
+        values: dict[str, Any] | None,
+        owner_user_id: str | None,
+        assignee_user_id: str | None,
+        now: datetime,
+    ) -> TaskRecord | None:
+        if values is None:
+            return None
+        task = self.tasks.create(
+            client_id=client_id,
+            lead_cluster_id=cluster_id,
+            lead_event_id=lead_event_id,
+            opportunity_id=None,
+            support_case_id=None,
+            contact_reason_id=None,
+            title=values.get("title", "Contact client"),
+            description=values.get("description"),
+            status=values.get("status", "open"),
+            priority=values.get("priority", "normal"),
+            due_at=values.get("due_at", now),
+            owner_user_id=owner_user_id,
+            assignee_user_id=assignee_user_id or owner_user_id,
+            created_at=now,
+            updated_at=now,
+            completed_at=None,
+        )
+        return task
+
 
 def _normalize_telegram_username(value: Any) -> str | None:
     if value is None:
@@ -433,3 +653,16 @@ def _normalize_phone(value: Any) -> str | None:
     if not digits:
         return None
     return f"+{digits}" if raw.startswith("+") else digits
+
+
+def _conversion_primary(
+    *,
+    interest: ClientInterestRecord | None,
+    task: TaskRecord | None,
+    client: ClientRecord,
+) -> tuple[str, str, str, str]:
+    if interest is not None:
+        return "client_interest", interest.id, "create_interest", "client_interest_created"
+    if task is not None:
+        return "client", client.id, "create_client", "contact_task_created"
+    return "client", client.id, "create_client", "contact_task_created"

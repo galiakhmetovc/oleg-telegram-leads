@@ -47,13 +47,13 @@
 - Modify: `src/pur_leads/repositories/leads.py`
 - Test: `tests/test_crm_conversion_service.py`
 
-- [ ] Write failing tests proving explicit conversion can create `client + contact + object + interest + task`, record a `crm_conversion_actions` row, and update the lead cluster to `converted`.
-- [ ] Write failing tests proving conversion refuses unknown clusters and duplicate contacts unless `link_existing_client_id` is provided.
-- [ ] Run `uv run --extra dev pytest tests/test_crm_conversion_service.py -q` and verify expected failures.
-- [ ] Implement `CrmService.convert_lead_cluster` with duplicate guard, optional existing-client link, and transaction-safe updates.
-- [ ] Ensure `Take into work` still creates no CRM conversion action.
-- [ ] Run `uv run --extra dev pytest tests/test_crm_conversion_service.py tests/test_lead_work_actions.py -q`.
-- [ ] Commit as `feat: convert lead clusters into crm memory`.
+- [x] Write failing tests proving explicit conversion can create `client + contact + object + interest + task`, record a `crm_conversion_actions` row, and update the lead cluster to `converted`.
+- [x] Write failing tests proving conversion refuses unknown clusters and duplicate contacts unless `link_existing_client_id` is provided.
+- [x] Run `uv run --extra dev pytest tests/test_crm_conversion_service.py -q` and verify expected failures.
+- [x] Implement `CrmService.convert_lead_cluster` with duplicate guard, optional existing-client link, and transaction-safe updates.
+- [x] Ensure `Take into work` still creates no CRM conversion action.
+- [x] Run `uv run --extra dev pytest tests/test_crm_conversion_service.py tests/test_lead_work_actions.py -q`.
+- [x] Commit as `feat: convert lead clusters into crm memory`.
 
 ### Task 4: CRM API Routes
 
