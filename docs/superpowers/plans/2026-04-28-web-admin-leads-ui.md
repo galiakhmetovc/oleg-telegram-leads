@@ -139,6 +139,8 @@ and session revocation when an admin moves out of `active`.
 
 ## Task 6: First Leads Inbox Screen
 
+- [x] Implement first protected Leads Inbox screen.
+
 **Files:**
 - Create: `src/pur_leads/web/routes_pages.py`
 - Create: `src/pur_leads/web/static/app.css`
@@ -146,13 +148,19 @@ and session revocation when an admin moves out of `active`.
 - Modify: `src/pur_leads/web/app.py`
 - Test: `tests/test_web_pages.py`
 
-- [ ] Serve `/login` with local admin form, forced password-change state, and real Telegram Login payload submission hook.
-- [ ] Serve `/` as the protected Leads Inbox workspace with queue, filters, detail/timeline, match evidence, feedback, and actions.
-- [ ] Serve `/admin` as a compact protected Settings/Admin screen for Telegram admin accounts and editable settings in this slice.
-- [ ] Keep the UI dense and operational: no landing hero, no marketing copy, no nested cards.
-- [ ] Use progressive enhancement: HTML renders shell, JS fetches `/api/leads` and updates detail/action states.
-- [ ] Display source chat/link, sender, detection modes, retro date/trigger, classifier versions, merge reasons/actions, CRM candidates count, previous feedback, `auto_pending`, `retro`, `maybe`, and auto-merge/correction markers.
-- [ ] Verify protected redirect/login behavior, static asset availability, and UI JSON rendering for the required detail fields.
+- [x] Serve `/login` with local admin form, forced password-change state, and real Telegram Login payload submission hook.
+- [x] Serve `/` as the protected Leads Inbox workspace with queue, filters, detail/timeline, match evidence, feedback, and actions.
+- [x] Serve `/admin` as a compact protected Settings/Admin screen for Telegram admin accounts and editable settings in this slice.
+- [x] Keep the UI dense and operational: no landing hero, no marketing copy, no nested cards.
+- [x] Use progressive enhancement: HTML renders shell, JS fetches `/api/leads` and updates detail/action states.
+- [x] Display source chat/link, sender, detection modes, retro date/trigger, classifier versions, merge reasons/actions, CRM candidates count, previous feedback, `auto_pending`, `retro`, `maybe`, and auto-merge/correction markers.
+- [x] Verify protected redirect/login behavior, static asset availability, and UI JSON rendering for the required detail fields.
+
+Completed: added protected `/login`, `/`, and `/admin` HTML shells, mounted static CSS/JS,
+implemented queue/detail/admin/settings progressive enhancement, strengthened page auth to admin-only,
+handled expired API sessions client-side, reset stale lead selections after filters, and expanded
+Lead Inbox detail payload for sender, message URL, classifier, merge, work outcome, task, and CRM
+context fields.
 
 ## Task 7: CLI/Web Runtime Wiring
 

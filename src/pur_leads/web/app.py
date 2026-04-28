@@ -3,6 +3,7 @@
 from pathlib import Path
 
 from fastapi import FastAPI
+from fastapi.staticfiles import StaticFiles
 
 from pur_leads.core.config import load_settings
 from pur_leads.db.engine import create_sqlite_engine
@@ -12,6 +13,7 @@ from pur_leads.web.routes_admin import router as admin_router
 from pur_leads.web.routes_auth import router as auth_router
 from pur_leads.web.routes_health import router as health_router
 from pur_leads.web.routes_leads import router as leads_router
+from pur_leads.web.routes_pages import router as pages_router
 
 
 def create_app(
@@ -53,8 +55,11 @@ def create_app(
                 session_duration_hours=app.state.web_session_duration_hours,
             ).ensure_bootstrap_admin(username=username, password=password)
 
+    static_path = Path(__file__).with_name("static")
+    app.mount("/static", StaticFiles(directory=static_path), name="static")
     app.include_router(health_router)
     app.include_router(auth_router)
     app.include_router(leads_router)
     app.include_router(admin_router)
+    app.include_router(pages_router)
     return app

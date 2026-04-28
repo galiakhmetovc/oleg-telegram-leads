@@ -41,7 +41,12 @@ def test_leads_api_requires_auth_and_returns_queue_detail_with_filters(tmp_path)
     assert detail_response.status_code == 200
     detail = detail_response.json()
     assert detail["cluster"]["cluster_id"] == fixture["cluster_id"]
+    assert detail["cluster"]["primary_sender_id"] == "sender-1"
+    assert detail["cluster"]["merge_strategy"] == "none"
+    assert detail["cluster"]["crm_candidate_count"] == 0
     assert [entry["kind"] for entry in detail["timeline"]] == ["message", "event"]
+    assert detail["events"][0]["classifier_version_id"] == fixture["classifier_version_id"]
+    assert detail["events"][0]["message_url"] == "https://t.me/test/100"
     assert detail["matches"][0]["status_at_detection"] == "auto_pending"
 
 
@@ -337,6 +342,7 @@ def _setup_app(tmp_path):
             "lead_event_id": first_event.id,
             "category_id": category_id,
             "term_id": term_id,
+            "classifier_version_id": classifier_version_id,
             "match_id": match_id,
         }
 

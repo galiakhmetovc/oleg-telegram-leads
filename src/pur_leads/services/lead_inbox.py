@@ -40,9 +40,12 @@ class LeadInboxFilters:
 class LeadClusterQueueRow:
     cluster_id: str
     source_id: str | None
+    primary_sender_id: str | None
+    primary_sender_name: str | None
     primary_message: dict[str, Any]
     status: str
     review_status: str
+    work_outcome: str
     confidence: float | None
     category: dict[str, str | None] | None
     matched_terms: list[dict[str, Any]]
@@ -51,8 +54,12 @@ class LeadClusterQueueRow:
     is_maybe: bool
     has_auto_pending: bool
     has_auto_merge_pending: bool
+    merge_strategy: str
+    merge_reason: str | None
     event_count: int
     feedback_count: int
+    crm_candidate_count: int
+    primary_task_id: str | None
 
 
 @dataclass(frozen=True)
@@ -124,13 +131,20 @@ class LeadInboxService:
             select(
                 lead_clusters_table.c.id.label("cluster_id"),
                 lead_clusters_table.c.monitored_source_id.label("source_id"),
+                lead_clusters_table.c.primary_sender_id,
+                lead_clusters_table.c.primary_sender_name,
                 lead_clusters_table.c.primary_source_message_id,
                 lead_clusters_table.c.cluster_status,
                 lead_clusters_table.c.review_status,
+                lead_clusters_table.c.work_outcome,
                 lead_clusters_table.c.confidence_max,
                 lead_clusters_table.c.category_id,
                 lead_clusters_table.c.lead_event_count,
                 lead_clusters_table.c.last_message_at,
+                lead_clusters_table.c.merge_strategy,
+                lead_clusters_table.c.merge_reason,
+                lead_clusters_table.c.crm_candidate_count,
+                lead_clusters_table.c.primary_task_id,
                 catalog_categories_table.c.name.label("category_name"),
                 source_messages_table.c.telegram_message_id,
                 source_messages_table.c.sender_id,
@@ -190,6 +204,8 @@ class LeadInboxService:
         return LeadClusterQueueRow(
             cluster_id=cluster_id,
             source_id=cluster["source_id"],
+            primary_sender_id=cluster["primary_sender_id"],
+            primary_sender_name=cluster["primary_sender_name"],
             primary_message={
                 "id": cluster["primary_source_message_id"],
                 "telegram_message_id": cluster["telegram_message_id"],
@@ -199,6 +215,7 @@ class LeadInboxService:
             },
             status=cluster["cluster_status"],
             review_status=cluster["review_status"],
+            work_outcome=cluster["work_outcome"],
             confidence=cluster["confidence_max"],
             category=(
                 {"id": cluster["category_id"], "name": cluster["category_name"]}
@@ -211,8 +228,12 @@ class LeadInboxService:
             is_maybe=is_maybe,
             has_auto_pending=has_auto_pending,
             has_auto_merge_pending=self._has_auto_merge_action(cluster_id),
+            merge_strategy=cluster["merge_strategy"],
+            merge_reason=cluster["merge_reason"],
             event_count=len(event_ids),
             feedback_count=feedback_count,
+            crm_candidate_count=cluster["crm_candidate_count"],
+            primary_task_id=cluster["primary_task_id"],
         )
 
     def _event_ids(self, cluster_id: str) -> list[str]:
@@ -229,12 +250,19 @@ class LeadInboxService:
                 select(
                     lead_events_table.c.id,
                     lead_events_table.c.source_message_id,
+                    lead_events_table.c.message_url,
+                    lead_events_table.c.sender_id,
+                    lead_events_table.c.sender_name,
                     lead_events_table.c.detected_at,
+                    lead_events_table.c.classifier_version_id,
                     lead_events_table.c.decision,
                     lead_events_table.c.detection_mode,
                     lead_events_table.c.confidence,
+                    lead_events_table.c.commercial_value_score,
+                    lead_events_table.c.notify_reason,
                     lead_events_table.c.reason,
                     lead_events_table.c.is_retro,
+                    lead_events_table.c.original_detected_at,
                     lead_events_table.c.created_at,
                 )
                 .where(lead_events_table.c.lead_cluster_id == cluster_id)
