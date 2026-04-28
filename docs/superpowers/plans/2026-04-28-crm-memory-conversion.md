@@ -79,12 +79,12 @@
 - Modify: `src/pur_leads/web/static/app.css`
 - Test: `tests/test_web_pages.py`
 
-- [ ] Write failing page tests proving `/crm` is protected and exposes the CRM app shell.
-- [ ] Run `uv run --extra dev pytest tests/test_web_pages.py -q` and verify the new assertions fail.
-- [ ] Add `/crm` page with a client list, simple manual-client form, detail pane, contact reasons, and topbar link.
-- [ ] Add a lead-detail conversion form for creating/linking a CRM client from a selected lead.
-- [ ] Run `uv run --extra dev pytest tests/test_web_pages.py -q` and verify it passes.
-- [ ] Commit as `feat: add compact crm workspace`.
+- [x] Write failing page tests proving `/crm` is protected and exposes the CRM app shell.
+- [x] Run `uv run --extra dev pytest tests/test_web_pages.py -q` and verify the new assertions fail.
+- [x] Add `/crm` page with a client list, simple manual-client form, detail pane, contact reasons, and topbar link.
+- [x] Add a lead-detail conversion form for creating/linking a CRM client from a selected lead.
+- [x] Run `uv run --extra dev pytest tests/test_web_pages.py -q` and verify it passes.
+- [x] Commit as `feat: add compact crm workspace`.
 
 ### Task 6: Full Verification And Deploy
 

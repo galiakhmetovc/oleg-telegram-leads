@@ -63,6 +63,7 @@ def inbox_page(
                 </div>
                 <nav>
                   <a href="/">Inbox</a>
+                  <a href="/crm">CRM</a>
                   <a href="/admin">Admin</a>
                   <button id="logout-button" type="button">Logout</button>
                 </nav>
@@ -123,6 +124,7 @@ def admin_page(
                 </div>
                 <nav>
                   <a href="/">Inbox</a>
+                  <a href="/crm">CRM</a>
                   <a href="/admin">Admin</a>
                   <button id="logout-button" type="button">Logout</button>
                 </nav>
@@ -158,6 +160,87 @@ def admin_page(
                   </form>
                   <div id="settings-list" class="table-list"></div>
                 </section>
+              </section>
+            </main>
+            """,
+        )
+    )
+
+
+@router.get("/crm", response_class=HTMLResponse)
+def crm_page(
+    request: Request,
+    auth_service: WebAuthService = Depends(get_auth_service),
+) -> Response:
+    if not _has_page_session(request, auth_service):
+        return RedirectResponse("/login", status_code=303)
+    return HTMLResponse(
+        _page(
+            page="crm",
+            title="CRM",
+            main="""
+            <main class="workspace">
+              <header class="topbar">
+                <div>
+                  <span class="eyebrow">PUR Leads</span>
+                  <h1>CRM</h1>
+                </div>
+                <nav>
+                  <a href="/">Inbox</a>
+                  <a href="/crm">CRM</a>
+                  <a href="/admin">Admin</a>
+                  <button id="logout-button" type="button">Logout</button>
+                </nav>
+              </header>
+              <section class="crm-layout">
+                <aside class="queue-pane" aria-label="Clients">
+                  <div class="section-head">
+                    <h2>Clients</h2>
+                    <button id="crm-refresh" type="button">Refresh</button>
+                  </div>
+                  <div id="crm-client-list" class="queue-list" aria-live="polite"></div>
+                </aside>
+                <section id="crm-client-detail" class="detail-pane" aria-live="polite">
+                  <div class="empty-state">Select a client</div>
+                </section>
+                <aside class="side-pane" aria-label="New client">
+                  <form id="crm-client-form" class="stack">
+                    <label>
+                      Name
+                      <input name="display_name" required>
+                    </label>
+                    <label>
+                      Type
+                      <select name="client_type">
+                        <option value="unknown">Unknown</option>
+                        <option value="person">Person</option>
+                        <option value="family">Family</option>
+                        <option value="company">Company</option>
+                        <option value="cottage_settlement">Cottage settlement</option>
+                        <option value="hoa_tsn">HOA / TSN</option>
+                        <option value="residential_complex">Residential complex</option>
+                      </select>
+                    </label>
+                    <label>
+                      Telegram ID
+                      <input name="telegram_user_id">
+                    </label>
+                    <label>
+                      Telegram username
+                      <input name="telegram_username">
+                    </label>
+                    <label>
+                      Interest
+                      <textarea name="interest_text" rows="4"></textarea>
+                    </label>
+                    <label>
+                      Notes
+                      <textarea name="notes" rows="4"></textarea>
+                    </label>
+                    <button type="submit">Create</button>
+                    <p id="crm-status" class="status-line" role="status"></p>
+                  </form>
+                </aside>
               </section>
             </main>
             """,

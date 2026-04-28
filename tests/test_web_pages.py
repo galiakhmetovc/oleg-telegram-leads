@@ -39,16 +39,22 @@ def test_workspace_and_admin_pages_are_protected_and_render_shells(tmp_path):
 
     workspace_denied = client.get("/", follow_redirects=False)
     admin_denied = client.get("/admin", follow_redirects=False)
+    crm_denied = client.get("/crm", follow_redirects=False)
     _login(client)
     workspace_response = client.get("/")
     admin_response = client.get("/admin")
+    crm_response = client.get("/crm")
+    js_response = client.get("/static/app.js")
 
     assert workspace_denied.status_code == 303
     assert workspace_denied.headers["location"] == "/login"
     assert admin_denied.status_code == 303
     assert admin_denied.headers["location"] == "/login"
+    assert crm_denied.status_code == 303
+    assert crm_denied.headers["location"] == "/login"
     assert workspace_response.status_code == 200
     assert 'data-page="leads-inbox"' in workspace_response.text
+    assert '<a href="/crm">CRM</a>' in workspace_response.text
     assert 'id="lead-queue"' in workspace_response.text
     assert 'id="lead-detail"' in workspace_response.text
     assert 'data-field="auto_pending"' in workspace_response.text
@@ -56,8 +62,15 @@ def test_workspace_and_admin_pages_are_protected_and_render_shells(tmp_path):
     assert 'data-field="maybe"' in workspace_response.text
     assert admin_response.status_code == 200
     assert 'data-page="admin"' in admin_response.text
+    assert '<a href="/crm">CRM</a>' in admin_response.text
     assert 'id="admin-users"' in admin_response.text
     assert 'id="settings-list"' in admin_response.text
+    assert crm_response.status_code == 200
+    assert 'data-page="crm"' in crm_response.text
+    assert 'id="crm-client-list"' in crm_response.text
+    assert 'id="crm-client-form"' in crm_response.text
+    assert "/api/crm/clients" in js_response.text
+    assert "/crm/convert" in js_response.text
 
 
 def _client(tmp_path) -> TestClient:

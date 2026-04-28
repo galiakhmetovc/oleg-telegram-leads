@@ -42,6 +42,7 @@ document.addEventListener("DOMContentLoaded", () => {
   bindLogout();
   if (page === "login") bindLogin();
   if (page === "leads-inbox") initInbox();
+  if (page === "crm") initCrm();
   if (page === "admin") initAdmin();
 });
 
@@ -220,9 +221,37 @@ function renderDetail(detail) {
         <button type="button" data-action="not_lead">Not lead</button>
       </div>
     </section>
+    <section class="detail-section">
+      <h3>CRM conversion</h3>
+      <form id="lead-crm-convert-form" class="inline-form">
+        <input name="display_name" value="${escapeHtml(senderName || "New client")}" required>
+        <input name="interest_text" value="${escapeHtml(cluster.primary_message?.text || "")}" required>
+        <input name="task_title" value="Contact client" required>
+        <button type="submit">Convert</button>
+      </form>
+    </section>
   </div>`;
   target.querySelectorAll("[data-action]").forEach((button) => {
     button.addEventListener("click", () => applyLeadAction(cluster.cluster_id, button.dataset.action));
+  });
+  target.querySelector("#lead-crm-convert-form")?.addEventListener("submit", (event) => {
+    event.preventDefault();
+    const data = new FormData(event.currentTarget);
+    convertLeadToCrm(cluster.cluster_id, {
+      client: {
+        display_name: data.get("display_name"),
+        client_type: "unknown",
+      },
+      contact: {
+        telegram_user_id: firstEvent.sender_id || cluster.primary_sender_id || null,
+      },
+      interest: {
+        interest_text: data.get("interest_text"),
+      },
+      task: {
+        title: data.get("task_title"),
+      },
+    });
   });
 }
 
@@ -268,6 +297,205 @@ async function applyLeadAction(clusterId, action) {
     await loadDetail(clusterId);
   } catch (error) {
     status.textContent = error.message;
+  }
+}
+
+async function convertLeadToCrm(clusterId, payload) {
+  const status = document.querySelector("#action-status");
+  try {
+    await api(`/api/leads/${clusterId}/crm/convert`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+    if (status) status.textContent = "Converted to CRM";
+    await loadDetail(clusterId);
+  } catch (error) {
+    if (status) status.textContent = error.message;
+  }
+}
+
+function initCrm() {
+  const state = { items: [], selectedId: null };
+  document.querySelector("#crm-refresh")?.addEventListener("click", () => loadCrmClients(state));
+  document.querySelector("#crm-client-form")?.addEventListener("submit", (event) =>
+    createCrmClient(event, state)
+  );
+  loadCrmClients(state);
+}
+
+async function loadCrmClients(state) {
+  const payload = await api("/api/crm/clients");
+  state.items = payload.items || [];
+  const selectedStillVisible = state.items.some((item) => item.id === state.selectedId);
+  state.selectedId = selectedStillVisible ? state.selectedId : state.items[0]?.id || null;
+  renderCrmList(state);
+  if (state.selectedId) {
+    await loadCrmDetail(state.selectedId);
+  } else {
+    const detail = document.querySelector("#crm-client-detail");
+    if (detail) detail.innerHTML = `<div class="empty-state">No clients</div>`;
+  }
+}
+
+function renderCrmList(state) {
+  const target = document.querySelector("#crm-client-list");
+  if (!target) return;
+  if (!state.items.length) {
+    target.innerHTML = `<div class="empty-state">No clients</div>`;
+    return;
+  }
+  target.innerHTML = state.items
+    .map((client) => {
+      const active = client.id === state.selectedId ? "is-active" : "";
+      return `<button class="queue-item ${active}" type="button" data-id="${client.id}">
+        <strong>${escapeHtml(client.display_name)}</strong>
+        <span class="muted">${escapeHtml(client.client_type)} / ${escapeHtml(client.status)}</span>
+        <span class="queue-meta">${badge(client.source_type)}${badge(time(client.updated_at) || "new")}</span>
+      </button>`;
+    })
+    .join("");
+  target.querySelectorAll(".queue-item").forEach((button) => {
+    button.addEventListener("click", async () => {
+      state.selectedId = button.dataset.id;
+      renderCrmList(state);
+      await loadCrmDetail(state.selectedId);
+    });
+  });
+}
+
+async function loadCrmDetail(clientId) {
+  const profile = await api(`/api/crm/clients/${clientId}`);
+  renderCrmDetail(profile);
+}
+
+function renderCrmDetail(profile) {
+  const target = document.querySelector("#crm-client-detail");
+  if (!target) return;
+  const client = profile.client || {};
+  target.innerHTML = `<div class="detail-grid">
+    <header class="detail-header">
+      <div>
+        <h2>${escapeHtml(client.display_name || "Client")}</h2>
+        <p class="muted">${escapeHtml(client.client_type || "unknown")}</p>
+      </div>
+      <div class="badges">
+        ${badge(client.status || "active")}
+        ${badge(client.source_type || "manual")}
+      </div>
+    </header>
+    ${crmSection("Contacts", profile.contacts, renderCrmContact)}
+    ${crmSection("Objects", profile.objects, renderCrmObject)}
+    ${crmSection("Interests", profile.interests, renderCrmInterest)}
+    ${crmSection("Assets", profile.assets, renderCrmAsset)}
+    ${crmSection("Contact reasons", profile.contact_reasons, renderCrmReason)}
+    ${crmSection("Touchpoints", profile.touchpoints, renderCrmTouchpoint)}
+  </div>`;
+}
+
+function crmSection(title, rows, renderer) {
+  return `<section class="detail-section">
+    <h3>${escapeHtml(title)}</h3>
+    <div class="table-list">
+      ${(rows || []).map(renderer).join("") || '<div class="empty-state">None</div>'}
+    </div>
+  </section>`;
+}
+
+function renderCrmContact(contact) {
+  return `<div class="table-row">
+    <div>
+      <strong>${escapeHtml(contact.contact_name || contact.telegram_username || contact.telegram_user_id || "Contact")}</strong>
+      <p class="muted">${escapeHtml(contact.preferred_channel || "unknown")}</p>
+    </div>
+    <span>${contact.is_primary ? "primary" : ""}</span>
+  </div>`;
+}
+
+function renderCrmObject(item) {
+  return `<div class="table-row">
+    <div>
+      <strong>${escapeHtml(item.name)}</strong>
+      <p class="muted">${escapeHtml(item.location_text || item.object_type)}</p>
+    </div>
+    <span>${escapeHtml(item.project_stage)}</span>
+  </div>`;
+}
+
+function renderCrmInterest(item) {
+  return `<div class="table-row">
+    <div>
+      <strong>${escapeHtml(item.interest_text)}</strong>
+      <p class="muted">${escapeHtml(item.notes || "")}</p>
+    </div>
+    <span>${escapeHtml(item.interest_status)}</span>
+  </div>`;
+}
+
+function renderCrmAsset(item) {
+  return `<div class="table-row">
+    <div>
+      <strong>${escapeHtml(item.asset_name)}</strong>
+      <p class="muted">${escapeHtml(time(item.service_due_at))}</p>
+    </div>
+    <span>${escapeHtml(item.asset_status)}</span>
+  </div>`;
+}
+
+function renderCrmReason(item) {
+  return `<div class="table-row">
+    <div>
+      <strong>${escapeHtml(item.title)}</strong>
+      <p class="muted">${escapeHtml(item.reason_text)}</p>
+    </div>
+    <span>${escapeHtml(item.status)}</span>
+  </div>`;
+}
+
+function renderCrmTouchpoint(item) {
+  return `<div class="table-row">
+    <div>
+      <strong>${escapeHtml(item.summary)}</strong>
+      <p class="muted">${escapeHtml(item.channel)} / ${escapeHtml(item.direction)}</p>
+    </div>
+    <span>${escapeHtml(time(item.created_at))}</span>
+  </div>`;
+}
+
+async function createCrmClient(event, state) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const status = document.querySelector("#crm-status");
+  const data = new FormData(form);
+  const contacts = [];
+  if (data.get("telegram_user_id") || data.get("telegram_username")) {
+    contacts.push({
+      telegram_user_id: data.get("telegram_user_id") || null,
+      telegram_username: data.get("telegram_username") || null,
+      preferred_channel: "telegram",
+      is_primary: true,
+    });
+  }
+  const interests = [];
+  if (data.get("interest_text")) {
+    interests.push({ interest_text: data.get("interest_text"), interest_status: "interested" });
+  }
+  try {
+    const profile = await api("/api/crm/clients", {
+      method: "POST",
+      body: JSON.stringify({
+        display_name: data.get("display_name"),
+        client_type: data.get("client_type"),
+        notes: data.get("notes") || null,
+        contacts,
+        interests,
+      }),
+    });
+    form.reset();
+    if (status) status.textContent = "Created";
+    state.selectedId = profile.client.id;
+    await loadCrmClients(state);
+  } catch (error) {
+    if (status) status.textContent = error.message;
   }
 }
 
