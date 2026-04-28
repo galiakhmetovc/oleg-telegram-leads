@@ -29,6 +29,8 @@ The system must continuously read the PUR Telegram channel, parse messages and d
 - Start with one Telegram userbot session and one Telegram worker. Additional userbot sessions are a future configurable expansion through the web UI.
 - Telegram-read jobs are serialized per userbot session. AI and parse jobs can run in parallel with configurable limits.
 - Logging and audit are first-class requirements for source sync, access issues, AI calls, parser runs, catalog changes, CRM changes, and notifications.
+- AI batching, reclassification, and retro research behavior are configurable because they will need tuning after real traffic is observed.
+- Retro research is a separate product workflow for testing new commercial directions against historical chat demand before adding them to the operational catalog.
 
 ## Source Layers
 
@@ -74,6 +76,17 @@ The CRM layer stores what PUR knows about clients over time:
 - contact reasons generated from new catalog facts, seasonal triggers, price changes, support dates, and manual reminders.
 
 CRM starts from an empty database. Manual input is a first-class workflow. Future import is allowed by the schema but is not part of the first implementation.
+
+### Retro Research
+
+Retro research is used to test future product or service directions. It is different from live lead detection:
+
+- it may start from a hypothesis that is not part of PUR's current catalog;
+- it searches historical demand signals in saved messages and, if configured, temporary backfill from selected sources;
+- it produces a web report first;
+- it can later create catalog entries, leads, client interests, or contact reasons by explicit action or setting.
+
+This supports cases where Oleg decides to sell a new category. The system can estimate whether past chat history contains real demand before that category becomes part of the operational catalog.
 
 ## Status Model
 
@@ -312,7 +325,7 @@ Stores continuous background work.
 Key fields:
 
 - `id`
-- `job_type`: `poll_monitored_source`, `check_source_access`, `fetch_message_context`, `classify_message_batch`, `sync_pur_channel`, `download_artifact`, `parse_artifact`, `extract_catalog_facts`, `generate_contact_reasons`, `send_notifications`
+- `job_type`: `poll_monitored_source`, `check_source_access`, `fetch_message_context`, `build_ai_batch`, `classify_message_batch`, `reclassify_messages`, `retro_research_scan`, `sync_pur_channel`, `download_artifact`, `parse_artifact`, `extract_catalog_facts`, `generate_contact_reasons`, `send_notifications`
 - `status`: `queued`, `running`, `succeeded`, `failed`, `paused`, `cancelled`
 - `priority`: `low`, `normal`, `high`
 - `run_after_at`
@@ -402,6 +415,51 @@ Purpose:
 - Compare estimated vs actual prompt size.
 - Support future throttling, plan selection, and model switching.
 
+### `ai_batches`
+
+Stores AI classification batches and their prompt-size observations.
+
+Key fields:
+
+- `id`
+- `batch_type`: `lead_detection`, `reclassification`, `retro_research`, `catalog_extraction`
+- `strategy`: `source_time_window`, `thread_time_window`, `message_individual`, `keyword_clustered`, `adaptive`
+- `monitored_source_id`
+- `thread_id`
+- `classifier_version_id`
+- `message_count`
+- `target_message_count`
+- `context_message_count`
+- `prompt_chars`
+- `estimated_prompt_tokens`
+- `actual_prompt_tokens`
+- `actual_completion_tokens`
+- `model`
+- `status`: `queued`, `sent`, `parsed`, `failed`
+- `wait_time_seconds`
+- `created_at`
+- `updated_at`
+
+Rules:
+
+- AI must return decisions per target message, never only for the batch as a whole.
+- Batching strategy and size are settings.
+- Prompt stats are used to tune full-catalog vs matched-hints strategies later.
+
+### `ai_batch_messages`
+
+Links messages to AI batches.
+
+Key fields:
+
+- `id`
+- `ai_batch_id`
+- `source_id`
+- `message_id`
+- `role`: `target`, `reply_context`, `neighbor_before`, `neighbor_after`, `thread_context`
+- `sort_order`
+- `created_at`
+
 ### `notification_events`
 
 Stores outbound Telegram/web notifications.
@@ -409,7 +467,7 @@ Stores outbound Telegram/web notifications.
 Key fields:
 
 - `id`
-- `notification_type`: `lead`, `task`, `contact_reason`, `access_issue`, `ai_error`, `sync_error`, `digest`
+- `notification_type`: `lead`, `retro_lead`, `research_summary`, `task`, `contact_reason`, `access_issue`, `ai_error`, `sync_error`, `digest`
 - `target_channel`: `telegram`, `web`, `email`, `none`
 - `target_ref`
 - `entity_type`
@@ -821,15 +879,24 @@ Key fields:
 - `detected_at`
 - `classifier_version_id`
 - `decision`: `lead`, `not_lead`, `maybe`
+- `detection_mode`: `live`, `reclassification`, `retro_research`, `manual`
 - `confidence`
 - `reason`
 - `status`: `new`, `reviewed`, `closed`, `ignored`
+- `is_retro`
+- `original_detected_at`
 - `created_at`
 
 Uniqueness:
 
 - `(chat_id, message_id, classifier_version_id)` for audit.
 - Operational dedup can use `(chat_id, message_id)` for notification suppression.
+
+Rules:
+
+- Retro leads are visually marked in UI and Telegram notifications.
+- Retro lead notifications must explain that the message is historical and why it surfaced now.
+- Reclassification never mutates the old decision in place; it creates a new auditable result tied to the new classifier version.
 
 ### `lead_matches`
 
@@ -851,6 +918,190 @@ Key fields:
 - `created_at`
 
 This table is required because `auto_pending` is active immediately. Feedback needs to target exact match causes.
+
+### `reclassification_runs`
+
+Stores reclassification jobs triggered by catalog, prompt, feedback, settings, or manual changes.
+
+Key fields:
+
+- `id`
+- `trigger_type`: `catalog_change`, `prompt_change`, `feedback_change`, `settings_change`, `manual`
+- `old_classifier_version_id`
+- `new_classifier_version_id`
+- `status`: `queued`, `running`, `completed`, `failed`, `cancelled`
+- `source_scope`: `all`, `high_priority_only`, `selected_sources`
+- `window_days`
+- `max_messages`
+- `include_previous_not_leads`
+- `include_maybe`
+- `include_leads`
+- `include_unclassified`
+- `notify_new_leads`
+- `started_at`
+- `finished_at`
+- `stats_json`
+- `created_by`
+- `created_at`
+
+Purpose:
+
+- Re-run historical messages when the classifier changes.
+- Find retro leads after catalog/prompt/feedback updates without losing audit history.
+
+### `reclassification_results`
+
+Stores per-message reclassification changes.
+
+Key fields:
+
+- `id`
+- `reclassification_run_id`
+- `source_id`
+- `message_id`
+- `old_lead_event_id`
+- `new_lead_event_id`
+- `old_decision`
+- `new_decision`
+- `decision_changed`
+- `notification_policy`: `notify`, `web_only`, `suppress`
+- `created_at`
+
+Rules:
+
+- `maybe` remains web-only by default.
+- Historical messages that become `lead` can notify Telegram as `retro_lead` if enabled.
+- Retro notifications must not look like fresh live messages.
+
+### `research_hypotheses`
+
+Stores market/product-direction hypotheses Oleg wants to test against historical chat demand.
+
+Key fields:
+
+- `id`
+- `title`
+- `description`
+- `status`: `draft`, `active_research`, `promising`, `approved_direction`, `rejected`, `parked`
+- `created_by`
+- `created_at`
+- `updated_at`
+- `settings_json`
+
+Examples:
+
+- "роботы-газонокосилки"
+- "вертикальная гидропоника как отдельный продукт"
+- "новая категория камер/датчиков/оборудования"
+
+### `research_terms`
+
+Stores seed and expanded terms for a research hypothesis.
+
+Key fields:
+
+- `id`
+- `research_hypothesis_id`
+- `term`
+- `term_type`: `seed`, `expanded`, `negative`, `brand`, `problem`, `intent_phrase`
+- `source`: `manual`, `ai_expansion`, `catalog`, `feedback`
+- `weight`
+- `status`: `active`, `muted`, `rejected`
+- `created_at`
+
+### `research_runs`
+
+Stores concrete retro research scans.
+
+Key fields:
+
+- `id`
+- `research_hypothesis_id`
+- `status`: `queued`, `running`, `completed`, `failed`, `cancelled`
+- `message_scope`: `saved_messages_only`, `temporary_backfill`, `mixed`
+- `source_scope`: `all`, `selected_sources`, `high_priority_only`
+- `selected_source_ids_json`
+- `history_depth_days`
+- `history_start_message_id`
+- `history_end_message_id`
+- `max_messages`
+- `use_ai_term_expansion`
+- `use_full_catalog_context`
+- `create_leads_automatically`
+- `create_contact_reasons_automatically`
+- `min_confidence`
+- `started_at`
+- `finished_at`
+- `stats_json`
+- `created_by`
+- `created_at`
+
+Rules:
+
+- By default, research produces a web report, not live Telegram leads.
+- Temporary backfill is configurable and must respect Telegram rate limits.
+- Research backfill must not move normal monitoring checkpoints unless explicitly configured.
+
+### `research_matches`
+
+Stores messages found by a research run.
+
+Key fields:
+
+- `id`
+- `research_run_id`
+- `source_id`
+- `message_id`
+- `sender_id`
+- `matched_terms_json`
+- `decision`: `strong_intent`, `weak_intent`, `discussion`, `not_relevant`, `unknown`
+- `confidence`
+- `intent_type`
+- `reason`
+- `context_message_ids_json`
+- `created_lead_event_id`
+- `created_contact_reason_id`
+- `created_at`
+
+### `research_reports`
+
+Stores aggregate research results.
+
+Key fields:
+
+- `id`
+- `research_run_id`
+- `summary`
+- `unique_senders_count`
+- `strong_intent_count`
+- `weak_intent_count`
+- `discussion_count`
+- `top_sources_json`
+- `top_terms_json`
+- `brands_or_competitors_json`
+- `pain_points_json`
+- `sample_message_ids_json`
+- `recommendation`: `promising`, `weak_signal`, `not_promising`, `needs_more_data`
+- `created_at`
+
+Purpose:
+
+- Help Oleg decide if a new direction is worth adding to the catalog or testing commercially.
+
+### `research_conversions`
+
+Stores actions taken from research results.
+
+Key fields:
+
+- `id`
+- `research_hypothesis_id`
+- `research_run_id`
+- `conversion_type`: `catalog_category`, `catalog_item`, `catalog_term`, `lead_event`, `client_interest`, `contact_reason`, `manual_note`
+- `target_entity_type`
+- `target_entity_id`
+- `created_by`
+- `created_at`
 
 ### `feedback_events`
 
@@ -1220,6 +1471,59 @@ Key settings:
 - `ai_default_provider_config_id = null`
 - `ai_default_model = "glm-4.5-air"`
 - `ai_provider_policy_warning_enabled = true`
+- `ai_batching_strategy = "source_time_window"`
+- `ai_batch_max_messages = 20`
+- `ai_batch_max_prompt_tokens = 60000`
+- `ai_batch_max_text_chars = 50000`
+- `ai_batch_max_wait_seconds = 60`
+- `ai_batch_group_by_source = true`
+- `ai_batch_group_by_thread = true`
+- `ai_batch_include_reply_context = true`
+- `ai_batch_context_before = 3`
+- `ai_batch_context_after = 1`
+- `ai_batch_reply_depth = 2`
+- `ai_batch_allow_cross_source = false`
+- `ai_batch_priority_high_max_wait_seconds = 15`
+- `ai_batch_priority_low_max_wait_seconds = 180`
+- `reclass_enabled = true`
+- `reclass_on_catalog_change = true`
+- `reclass_on_prompt_change = true`
+- `reclass_on_feedback_change = true`
+- `reclass_window_days = 30`
+- `reclass_max_messages_per_run = 1000`
+- `reclass_include_previous_not_leads = true`
+- `reclass_include_maybe = true`
+- `reclass_include_leads = false`
+- `reclass_include_unclassified = true`
+- `reclass_sources_scope = "all"`
+- `reclass_only_if_catalog_categories_changed = true`
+- `reclass_only_messages_with_term_overlap = false`
+- `reclass_schedule_mode = "queued"`
+- `reclass_debounce_minutes = 30`
+- `reclass_nightly_time = "03:00"`
+- `reclass_priority = "low"`
+- `reclass_respect_rate_limits = true`
+- `reclass_create_new_lead_events = true`
+- `reclass_preserve_original_decision = true`
+- `reclass_notify_new_leads = true`
+- `reclass_notify_changed_to_maybe = false`
+- `reclass_notify_changed_to_not_lead = false`
+- `reclass_require_review_before_notify = false`
+- `research_enabled = true`
+- `research_default_message_scope = "saved_messages_only"`
+- `research_allow_temporary_backfill = true`
+- `research_backfill_moves_monitoring_checkpoints = false`
+- `research_default_history_depth_days = 180`
+- `research_default_source_scope = "selected_sources"`
+- `research_max_messages_per_run = 5000`
+- `research_use_ai_term_expansion = true`
+- `research_use_full_catalog_context = false`
+- `research_create_leads_automatically = false`
+- `research_create_contact_reasons_automatically = false`
+- `research_min_confidence = 0.65`
+- `research_notify_summary_to_telegram = true`
+- `research_retro_leads_are_web_first = true`
+- `research_retro_lead_telegram_label = "retro"`
 
 Settings are editable in the web interface and versioned through `audit_log`.
 
@@ -1555,6 +1859,41 @@ Actions:
 - create touchpoint;
 - create task.
 
+### Research
+
+Purpose:
+
+- test new commercial directions against historical chat demand before adding them to the catalog.
+
+Views:
+
+- hypotheses;
+- running scans;
+- completed reports;
+- strong-intent matches;
+- weak-intent/discussion samples;
+- conversions into catalog/CRM entities.
+
+Actions:
+
+- create hypothesis;
+- add seed/negative terms;
+- ask AI to expand terms;
+- choose saved-message scan or temporary backfill;
+- select sources and history depth;
+- run scan;
+- review report;
+- convert hypothesis into catalog category/item/terms;
+- create leads/contact reasons manually from selected matches.
+
+Rules:
+
+- Research is web-first. It should not flood Telegram with historical matches.
+- Telegram can receive a summary notification if enabled.
+- Research findings should show dates clearly because matches may be old.
+- Backfill depth/source scope is configurable per run and must respect rate limits.
+- Research backfill must not move normal monitoring checkpoints unless explicitly configured.
+
 ### Opportunities
 
 Purpose:
@@ -1683,6 +2022,11 @@ Required controls:
 - AI provider credentials/config references;
 - AI model selection and model-limit table;
 - AI/parse parallel job limits;
+- AI batching strategy and limits;
+- reclassification triggers, windows, scopes, and notification rules;
+- retro lead notification styling;
+- research default message scope, backfill permissions, and limits;
+- research auto-conversion settings;
 - provider policy warning acknowledgement;
 - Telegram notification toggles;
 - sync interval;
@@ -1748,6 +2092,21 @@ Lead detection output must include:
 - evidence references;
 - classifier version.
 
+For reclassification output:
+
+- preserve the original live decision;
+- store the new decision under the new classifier version;
+- create retro leads when historical messages become leads;
+- mark retro leads clearly in UI and Telegram;
+- keep `maybe` web-only by default.
+
+Retro lead notification copy must include:
+
+- that the message is historical;
+- original message date;
+- trigger reason: catalog change, prompt change, feedback change, manual research, or settings change;
+- link to the web review page.
+
 Contact-reason generation should compare:
 
 - active `client_interests`;
@@ -1757,6 +2116,14 @@ Contact-reason generation should compare:
 - manual reminders.
 
 The result is not a lead notification by default. It creates `contact_reasons` for Oleg's review.
+
+Research behavior:
+
+- starts from a hypothesis and seed/negative terms;
+- can scan only already saved messages or perform configured temporary backfill;
+- produces reports before creating catalog/CRM entities;
+- does not notify every historical match to Telegram;
+- can convert selected matches into catalog items, leads, client interests, or contact reasons.
 
 ## Feedback Loop
 
