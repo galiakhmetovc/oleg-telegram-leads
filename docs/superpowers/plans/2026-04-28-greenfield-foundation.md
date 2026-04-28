@@ -364,7 +364,7 @@ git commit -m "feat: add sqlite migration baseline"
 - Create: `src/pur_leads/services/settings.py`
 - Test: `tests/test_settings_service.py`
 
-- [ ] **Step 1: Write failing tests**
+- [x] **Step 1: Write failing tests**
 
 Cover:
 
@@ -373,7 +373,7 @@ Cover:
 - getting an unknown setting returns the defined default;
 - secret settings can only store a secret reference id, not a raw value.
 
-- [ ] **Step 2: Implement repository**
+- [x] **Step 2: Implement repository**
 
 Repository methods:
 
@@ -381,7 +381,7 @@ Repository methods:
 - `set(key, value, value_type, updated_by, scope="global", scope_id=None, reason=None)`
 - `list(scope=None)`
 
-- [ ] **Step 3: Implement service defaults**
+- [x] **Step 3: Implement service defaults**
 
 Add a typed default registry containing at least:
 
@@ -393,7 +393,7 @@ Add a typed default registry containing at least:
 - `backup_secret_values_enabled = false`
 - `backup_encryption_required_for_secrets = true`
 
-- [ ] **Step 4: Run tests**
+- [x] **Step 4: Run tests**
 
 ```bash
 python -m pytest tests/test_settings_service.py -q
@@ -401,7 +401,7 @@ python -m pytest tests/test_settings_service.py -q
 
 Expected: pass.
 
-- [ ] **Step 5: Commit settings service**
+- [x] **Step 5: Commit settings service**
 
 ```bash
 git add src/pur_leads/models/settings.py src/pur_leads/repositories/settings.py src/pur_leads/services/settings.py tests/test_settings_service.py
