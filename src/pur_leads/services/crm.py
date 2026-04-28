@@ -248,9 +248,10 @@ class CrmService:
 
         linked_client: ClientRecord
         if link_existing_client_id is not None:
-            linked_client = self.repository.get_client(link_existing_client_id)
-            if linked_client is None:
+            existing_client = self.repository.get_client(link_existing_client_id)
+            if existing_client is None:
                 raise KeyError(link_existing_client_id)
+            linked_client = existing_client
             conflicting_hints = [
                 hint for hint in duplicate_hints if hint.client_id != link_existing_client_id
             ]
@@ -260,7 +261,9 @@ class CrmService:
             client_values = client or {}
             linked_client = self.repository.create_client(
                 client_type=client_values.get("client_type", "unknown"),
-                display_name=client_values.get("display_name") or cluster.primary_sender_name or "Unknown",
+                display_name=client_values.get("display_name")
+                or cluster.primary_sender_name
+                or "Unknown",
                 status=client_values.get("status", "active"),
                 source_type="lead",
                 source_id=cluster.id,

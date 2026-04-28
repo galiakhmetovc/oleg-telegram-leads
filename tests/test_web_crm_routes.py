@@ -84,9 +84,7 @@ def test_lead_cluster_crm_conversion_route(tmp_path):
     with fixture["session_factory"]() as session:
         cluster = (
             session.execute(
-                select(lead_clusters_table).where(
-                    lead_clusters_table.c.id == fixture["cluster_id"]
-                )
+                select(lead_clusters_table).where(lead_clusters_table.c.id == fixture["cluster_id"])
             )
             .mappings()
             .one()
@@ -118,7 +116,9 @@ def _setup_app(tmp_path):
         )
         session.commit()
     return {
-        "client": TestClient(create_app(database_path=db_path, telegram_bot_token="telegram-token")),
+        "client": TestClient(
+            create_app(database_path=db_path, telegram_bot_token="telegram-token")
+        ),
         "session_factory": session_factory,
         "cluster_id": cluster.id,
     }

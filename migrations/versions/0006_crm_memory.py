@@ -181,7 +181,9 @@ def upgrade() -> None:
         ),
     )
     op.create_index("ix_client_assets_client", "client_assets", ["client_id", "asset_status"])
-    op.create_index("ix_client_assets_service_due", "client_assets", ["asset_status", "service_due_at"])
+    op.create_index(
+        "ix_client_assets_service_due", "client_assets", ["asset_status", "service_due_at"]
+    )
 
     op.create_table(
         "opportunities",

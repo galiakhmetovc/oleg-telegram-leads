@@ -254,11 +254,7 @@ class CrmRepository:
 
     def find_contacts_by_field(self, field: str, value: str) -> list[ContactRecord]:
         column = getattr(contacts_table.c, field)
-        rows = (
-            self.session.execute(select(contacts_table).where(column == value))
-            .mappings()
-            .all()
-        )
+        rows = self.session.execute(select(contacts_table).where(column == value)).mappings().all()
         return [ContactRecord(**dict(row)) for row in rows]
 
     def create_object(self, **values) -> ClientObjectRecord:  # type: ignore[no-untyped-def]
