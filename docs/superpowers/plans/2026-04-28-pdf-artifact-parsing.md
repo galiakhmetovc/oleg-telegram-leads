@@ -59,6 +59,6 @@ This plan parses text PDFs only. It does not OCR scanned PDFs, parse audio, DOCX
 - [x] Run `uv run --extra dev pytest -q`.
 - [x] Run `docker compose config >/tmp/oleg-telegram-leads-compose.out` and report only line count.
 - [x] Commit and push to `main`.
-- [ ] Deploy on `teamd-ams1`, restart web/worker, and verify `/health` plus `docker compose ps web worker`.
-- [ ] Mark existing audio artifacts as skipped/audio and remove their downloaded files.
-- [ ] Enqueue `parse_artifact` for the 3 existing downloaded PDFs and verify `parsed_chunks` increases.
+- [x] Deploy on `teamd-ams1`, restart web/worker, and verify `/health` plus `docker compose ps web worker`.
+- [x] Mark existing audio artifacts as skipped/audio and remove their downloaded files.
+- [x] Enqueue `parse_artifact` for the 3 existing downloaded PDFs and verify `parsed_chunks` increases.
