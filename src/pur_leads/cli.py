@@ -13,6 +13,7 @@ from pur_leads.core.config import load_settings
 from pur_leads.db.engine import create_sqlite_engine
 from pur_leads.db.migrations import upgrade_database
 from pur_leads.db.session import create_session_factory
+from pur_leads.integrations.catalog.heuristic_extractor import HeuristicCatalogExtractor
 from pur_leads.integrations.documents.pdf_parser import PdfArtifactParser
 from pur_leads.integrations.telegram.telethon_client import TelethonTelegramClient
 from pur_leads.integrations.telegram.types import (
@@ -163,7 +164,13 @@ def _engine_from_args(args: argparse.Namespace):
 def _build_worker_handlers(session):
     settings = load_settings()
     handlers = {}
-    handlers.update(build_catalog_handler_registry(session, parser=PdfArtifactParser()))
+    handlers.update(
+        build_catalog_handler_registry(
+            session,
+            parser=PdfArtifactParser(),
+            extractor=HeuristicCatalogExtractor(session),
+        )
+    )
     handlers.update(build_lead_handler_registry(session))
     handlers.update(
         build_telegram_handler_registry(

@@ -8,7 +8,7 @@ from pur_leads.db.migrations import upgrade_database
 from pur_leads.db.session import create_session_factory
 from pur_leads.integrations.telegram.types import ResolvedTelegramSource, SourceAccessResult
 from pur_leads.models.audit import operational_events_table
-from pur_leads.models.catalog import parsed_chunks_table
+from pur_leads.models.catalog import catalog_candidates_table, parsed_chunks_table
 from pur_leads.models.telegram_sources import source_access_checks_table
 from pur_leads.services.catalog_sources import CatalogSourceService
 from pur_leads.services.scheduler import SchedulerService
@@ -140,6 +140,49 @@ def test_cli_worker_once_uses_builtin_pdf_parser(tmp_path, capsys, monkeypatch):
     assert "succeeded job" in output
     assert stored.result_summary_json == {"chunk_count": 1, "parser_name": "fake-pdf"}
     assert [chunk["text"] for chunk in chunks] == ["parsed pdf"]
+
+
+def test_cli_worker_once_uses_builtin_heuristic_extractor(tmp_path, capsys):
+    db_path = tmp_path / "cli.db"
+    engine = create_sqlite_engine(db_path)
+    upgrade_database(engine)
+    session_factory = create_session_factory(engine)
+    with session_factory() as session:
+        raw_source = CatalogSourceService(session).upsert_source(
+            source_type="telegram_message",
+            origin="telegram:purmaster",
+            external_id="17",
+            raw_text="catalog",
+        )
+        chunk = CatalogSourceService(session).replace_parsed_chunks(
+            raw_source.id,
+            chunks=[
+                """
+                1.1 Управление освещением
+                Установка управляемых выключателей
+                Включение света голосом и по расписанию.
+                """
+            ],
+            parser_name="test",
+            parser_version="1",
+        )[0]
+        job = SchedulerService(session).enqueue(
+            job_type="extract_catalog_facts",
+            scope_type="parser",
+            payload_json={"source_id": raw_source.id, "chunk_id": chunk.id},
+        )
+
+    main(["--database-path", str(db_path), "worker", "once"])
+
+    with session_factory() as session:
+        stored = SchedulerService(session).repository.get(job.id)
+        candidate = session.execute(select(catalog_candidates_table)).mappings().one()
+    output = capsys.readouterr().out
+    assert stored is not None
+    assert "succeeded job" in output
+    assert stored.result_summary_json == {"fact_count": 1, "candidate_count": 1}
+    assert candidate["candidate_type"] == "item"
+    assert candidate["canonical_name"] == "Управление освещением"
 
 
 def test_cli_worker_once_uses_configured_telethon_client(tmp_path, capsys, monkeypatch):

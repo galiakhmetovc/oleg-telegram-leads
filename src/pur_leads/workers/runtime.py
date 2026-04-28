@@ -358,6 +358,7 @@ def build_catalog_handler_registry(
 ) -> dict[str, JobHandler]:
     source_service = CatalogSourceService(session)
     candidate_service = CatalogCandidateService(session)
+    scheduler = SchedulerService(session)
 
     async def parse_artifact(job: SchedulerJobRecord) -> JobHandlerResult:
         if parser is None:
@@ -381,6 +382,19 @@ def build_catalog_handler_registry(
             parser_name=parsed.parser_name,
             parser_version=parsed.parser_version,
         )
+        for chunk in chunks:
+            scheduler.enqueue(
+                job_type="extract_catalog_facts",
+                scope_type="parser",
+                scope_id=chunk.id,
+                idempotency_key=f"extract-catalog-facts:{chunk.id}",
+                payload_json={
+                    "source_id": chunk.source_id,
+                    "artifact_id": chunk.artifact_id,
+                    "chunk_id": chunk.id,
+                    "extractor_version": "pur-heuristic-1",
+                },
+            )
         return JobHandlerResult(
             result_summary={"chunk_count": len(chunks), "parser_name": parsed.parser_name}
         )

@@ -110,6 +110,18 @@ async def test_parse_artifact_handler_stores_chunks(runtime_session):
     assert stored.status == "succeeded"
     assert stored.result_summary_json == {"chunk_count": 2, "parser_name": "fake-parser"}
     assert [chunk["text"] for chunk in chunks] == ["Dahua Hero A1", "Wi-Fi camera for dacha"]
+    extract_jobs = (
+        runtime_session.execute(
+            select(scheduler_jobs_table)
+            .where(scheduler_jobs_table.c.job_type == "extract_catalog_facts")
+            .order_by(scheduler_jobs_table.c.created_at)
+        )
+        .mappings()
+        .all()
+    )
+    assert [job["payload_json"]["chunk_id"] for job in extract_jobs] == [
+        chunk["id"] for chunk in chunks
+    ]
 
 
 @pytest.mark.asyncio
