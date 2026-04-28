@@ -16,6 +16,8 @@ class AppSettings(BaseSettings):
     bootstrap_admin_username: str = "admin"
     bootstrap_admin_password: str | None = None
     telegram_bot_token: str | None = None
+    web_session_cookie_name: str = "pur_session"
+    web_cookie_secure: bool = False
 
     model_config = SettingsConfigDict(env_prefix="PUR_", env_file=".env", extra="ignore")
 

@@ -71,6 +71,8 @@ task-backed `LeadService.take_into_work`. Covered by `tests/test_web_auth_servic
 
 ## Task 3: Web App Dependencies And Auth Routes
 
+- [x] Implement web app DB dependencies and auth routes.
+
 **Files:**
 - Create: `src/pur_leads/web/dependencies.py`
 - Create: `src/pur_leads/web/routes_auth.py`
@@ -84,6 +86,10 @@ task-backed `LeadService.take_into_work`. Covered by `tests/test_web_auth_servic
 - [ ] Set secure cookie attributes configurable for local/dev vs production.
 - [ ] Verify unauthenticated API calls return `401`, login sets cookie, password-change clears `must_change_password`, logout revokes session, and unknown Telegram users are denied.
 - [ ] Verify Telegram auth payload hash/signature using test bot token fixtures, not a placeholder.
+
+Completed: added app DB/session state, current-admin dependency, local/Telegram login routes,
+logout, `/api/me`, password change, cookie handling, and bootstrap admin app initialization.
+Covered by `tests/test_web_auth_routes.py`.
 
 ## Task 4: Leads Inbox API
 
