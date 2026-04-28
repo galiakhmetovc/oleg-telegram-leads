@@ -31,12 +31,12 @@
 - Modify: `src/pur_leads/web/app.py`
 - Test: `tests/test_web_source_routes.py`
 
-- [ ] Write failing tests for auth-required source list/create/detail.
-- [ ] Write failing tests for check-access, preview, activate, pause, and reset-checkpoint endpoints.
-- [ ] Run `uv run --extra dev pytest tests/test_web_source_routes.py -q` and verify expected route failures.
-- [ ] Implement protected `/api/sources` routes and JSON payloads.
-- [ ] Run `uv run --extra dev pytest tests/test_web_source_routes.py -q` and verify it passes.
-- [ ] Commit as `feat: add source onboarding api`.
+- [x] Write failing tests for auth-required source list/create/detail.
+- [x] Write failing tests for check-access, preview, activate, pause, and reset-checkpoint endpoints.
+- [x] Run `uv run --extra dev pytest tests/test_web_source_routes.py -q` and verify expected route failures.
+- [x] Implement protected `/api/sources` routes and JSON payloads.
+- [x] Run `uv run --extra dev pytest tests/test_web_source_routes.py -q` and verify it passes.
+- [x] Commit as `feat: add source onboarding api`.
 
 ### Task 3: Source Web Workspace
 
