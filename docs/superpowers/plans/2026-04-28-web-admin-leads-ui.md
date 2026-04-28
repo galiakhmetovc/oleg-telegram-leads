@@ -117,18 +117,25 @@ validation, target-scoped feedback, auth guards, and commercial outcome defaults
 
 ## Task 5: Admin Settings/User API
 
+- [x] Implement admin settings/user API.
+
 **Files:**
 - Create: `src/pur_leads/web/routes_admin.py`
 - Modify: `src/pur_leads/web/app.py`
 - Test: `tests/test_web_admin_routes.py`
 
-- [ ] Add `GET /api/admin/users` for current admin users.
-- [ ] Add `POST /api/admin/users/telegram` to add Telegram admin accounts.
-- [ ] Add `PATCH /api/admin/users/{user_id}` for status/display name updates.
-- [ ] Add `GET /api/settings` and `PUT /api/settings/{key}` over existing `SettingsService`.
-- [ ] Write audit rows for settings updates, admin user creation, status changes, denied admin actions, and session revocation after user disable.
-- [ ] Write audit rows for protected-route authorization denials and future role-change/status-change events.
-- [ ] Verify settings revisions/audit rows are created, disabled users cannot authenticate, denied protected-route access is audited, and disabling a user revokes active sessions.
+- [x] Add `GET /api/admin/users` for current admin users.
+- [x] Add `POST /api/admin/users/telegram` to add Telegram admin accounts.
+- [x] Add `PATCH /api/admin/users/{user_id}` for status/display name updates.
+- [x] Add `GET /api/settings` and `PUT /api/settings/{key}` over existing `SettingsService`.
+- [x] Write audit rows for settings updates, admin user creation, status changes, denied admin actions, and session revocation after user disable.
+- [x] Write audit rows for protected-route authorization denials and future role-change/status-change events.
+- [x] Verify settings revisions/audit rows are created, disabled users cannot authenticate, denied protected-route access is audited, and disabling a user revokes active sessions.
+
+Completed: added protected admin user routes, Telegram admin creation, admin status/display-name
+updates, settings list/update routes, settings update audit rows, protected-route denial audit,
+session revocation audit, duplicate Telegram admin handling, self/last-admin deactivation guards,
+and session revocation when an admin moves out of `active`.
 
 ## Task 6: First Leads Inbox Screen
 

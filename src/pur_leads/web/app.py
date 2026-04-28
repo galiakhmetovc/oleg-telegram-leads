@@ -8,6 +8,7 @@ from pur_leads.core.config import load_settings
 from pur_leads.db.engine import create_sqlite_engine
 from pur_leads.db.session import create_session_factory
 from pur_leads.services.web_auth import WebAuthService
+from pur_leads.web.routes_admin import router as admin_router
 from pur_leads.web.routes_auth import router as auth_router
 from pur_leads.web.routes_health import router as health_router
 from pur_leads.web.routes_leads import router as leads_router
@@ -55,4 +56,5 @@ def create_app(
     app.include_router(health_router)
     app.include_router(auth_router)
     app.include_router(leads_router)
+    app.include_router(admin_router)
     return app

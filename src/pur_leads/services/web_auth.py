@@ -25,6 +25,10 @@ class AuthError(ValueError):
     """Raised when authentication or authorization fails."""
 
 
+class UserConflictError(ValueError):
+    """Raised when a user identity already exists."""
+
+
 @dataclass(frozen=True)
 class LoginResult:
     user: WebUserRecord
@@ -80,6 +84,9 @@ class WebAuthService:
             new_value_json={"local_username": username, "role": "admin"},
         )
         return user
+
+    def list_admin_users(self) -> list[WebUserRecord]:
+        return self.repository.list_users(role="admin")
 
     def login_local(
         self,
@@ -200,6 +207,8 @@ class WebAuthService:
         actor_user = self.repository.get_user(actor_user_id)
         if actor_user is None or actor_user.role != "admin" or actor_user.status != "active":
             raise AuthError("admin role required")
+        if self.repository.get_user_by_telegram_id(telegram_user_id) is not None:
+            raise UserConflictError("Telegram admin already exists")
         now = utc_now()
         user = self.repository.create_user(
             telegram_user_id=telegram_user_id,
@@ -235,7 +244,7 @@ class WebAuthService:
             raise KeyError(user_id)
         now = utc_now()
         updated = self.repository.update_user(user.id, status="disabled", updated_at=now)
-        self.repository.revoke_user_sessions(user.id, revoked_at=now)
+        revoked_count = self.repository.revoke_user_sessions(user.id, revoked_at=now)
         self.audit.record_change(
             actor=actor,
             action="web_auth.user_disabled",
@@ -244,7 +253,92 @@ class WebAuthService:
             old_value_json={"status": user.status},
             new_value_json={"status": "disabled"},
         )
+        self._record_session_revocation(
+            actor=actor,
+            user_id=user.id,
+            revoked_count=revoked_count,
+        )
         return updated
+
+    def update_admin_user(
+        self,
+        user_id: str,
+        *,
+        actor: str,
+        actor_user_id: str,
+        status: str | None = None,
+        display_name: str | None = None,
+        update_display_name: bool = False,
+    ) -> WebUserRecord:
+        user = self.repository.get_user(user_id)
+        if user is None:
+            raise KeyError(user_id)
+        if user.role != "admin":
+            raise AuthError("admin user required")
+        if status is not None and status not in {"active", "disabled", "pending"}:
+            raise ValueError("Unsupported user status")
+        if status is not None and status != "active" and user.id == actor_user_id:
+            raise ValueError("Cannot deactivate your own admin account")
+        if (
+            status is not None
+            and status != "active"
+            and user.status == "active"
+            and self.repository.count_active_admins() <= 1
+        ):
+            raise ValueError("Cannot deactivate the last active admin")
+
+        values: dict[str, Any] = {"updated_at": utc_now()}
+        if status is not None:
+            values["status"] = status
+        if update_display_name:
+            values["display_name"] = display_name
+        if len(values) == 1:
+            return user
+
+        updated = self.repository.update_user(user.id, **values)
+        if status is not None and status != user.status:
+            self.audit.record_change(
+                actor=actor,
+                action="web_auth.user_status_changed",
+                entity_type="web_user",
+                entity_id=user.id,
+                old_value_json={"status": user.status},
+                new_value_json={"status": status},
+            )
+            if status != "active":
+                revoked_count = self.repository.revoke_user_sessions(user.id, revoked_at=utc_now())
+                self._record_session_revocation(
+                    actor=actor,
+                    user_id=user.id,
+                    revoked_count=revoked_count,
+                )
+        if update_display_name and display_name != user.display_name:
+            self.audit.record_change(
+                actor=actor,
+                action="web_auth.user_display_name_changed",
+                entity_type="web_user",
+                entity_id=user.id,
+                old_value_json={"display_name": user.display_name},
+                new_value_json={"display_name": display_name},
+            )
+        self.session.commit()
+        return updated
+
+    def _record_session_revocation(
+        self,
+        *,
+        actor: str,
+        user_id: str,
+        revoked_count: int,
+    ) -> None:
+        self.audit.record_change(
+            actor=actor,
+            action="web_auth.user_sessions_revoked",
+            entity_type="web_user",
+            entity_id=user_id,
+            old_value_json=None,
+            new_value_json={"revoked_count": revoked_count},
+        )
 
     def _create_login(
         self,

@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime
 
-from sqlalchemy import insert, select, update
+from sqlalchemy import func, insert, select, update
 from sqlalchemy.orm import Session
 
 from pur_leads.core.ids import new_id
@@ -77,6 +77,26 @@ class WebAuthRepository:
         )
         return WebUserRecord(**dict(row)) if row is not None else None
 
+    def list_users(self, *, role: str | None = None) -> list[WebUserRecord]:
+        statement = select(web_users_table)
+        if role is not None:
+            statement = statement.where(web_users_table.c.role == role)
+        rows = (
+            self.session.execute(statement.order_by(web_users_table.c.created_at)).mappings().all()
+        )
+        return [WebUserRecord(**dict(row)) for row in rows]
+
+    def count_active_admins(self) -> int:
+        count = self.session.scalar(
+            select(func.count())
+            .select_from(web_users_table)
+            .where(
+                web_users_table.c.role == "admin",
+                web_users_table.c.status == "active",
+            )
+        )
+        return int(count or 0)
+
     def create_user(self, **values) -> WebUserRecord:  # type: ignore[no-untyped-def]
         user_id = new_id()
         self.session.execute(insert(web_users_table).values(id=user_id, **values))
@@ -133,7 +153,15 @@ class WebAuthRepository:
             raise KeyError(session_id)
         return session
 
-    def revoke_user_sessions(self, user_id: str, *, revoked_at: datetime) -> None:
+    def revoke_user_sessions(self, user_id: str, *, revoked_at: datetime) -> int:
+        active_session_ids = self.session.execute(
+            select(web_auth_sessions_table.c.id).where(
+                web_auth_sessions_table.c.user_id == user_id,
+                web_auth_sessions_table.c.revoked_at.is_(None),
+            )
+        ).all()
+        if not active_session_ids:
+            return 0
         self.session.execute(
             update(web_auth_sessions_table)
             .where(
@@ -142,3 +170,4 @@ class WebAuthRepository:
             )
             .values(revoked_at=revoked_at)
         )
+        return len(active_session_ids)

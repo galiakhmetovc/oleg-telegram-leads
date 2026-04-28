@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 
 from pur_leads.core.time import utc_now
 from pur_leads.repositories.settings import SettingsRepository
+from pur_leads.services.audit import AuditService
 
 ALLOWED_VALUE_TYPES = {"bool", "int", "float", "string", "json", "secret_ref"}
 
@@ -40,6 +41,7 @@ class SettingsService:
     def __init__(self, session: Session) -> None:
         self.session = session
         self.repository = SettingsRepository(session)
+        self.audit = AuditService(session)
 
     def get(
         self,
@@ -97,6 +99,14 @@ class SettingsService:
             changed_by=updated_by,
             change_reason=reason,
             created_at=now,
+        )
+        self.audit.record_change(
+            actor=updated_by,
+            action="settings.update",
+            entity_type="setting",
+            entity_id=key,
+            old_value_json={"value": old_value, "scope": scope, "scope_id": scope_id},
+            new_value_json={"value": value, "scope": scope, "scope_id": scope_id},
         )
         self.session.commit()
 
