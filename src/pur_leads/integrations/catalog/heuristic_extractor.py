@@ -29,7 +29,8 @@ TECHNICAL_START_RE = re.compile(
     re.IGNORECASE,
 )
 INLINE_TECHNICAL_RE = re.compile(
-    r"\b(Установка|Настройка|Доступ|Поддержка|Контроль|Устранение|Достаточно)\b"
+    r"(Установка|Настройка|Доступ|Поддержка|Контроль|Устранение|Достаточно|"
+    r"Модернизация|Круглосуточный)"
 )
 
 CATEGORY_BY_SECTION = {
@@ -219,7 +220,12 @@ def _category_slug(code: str, title: str) -> str:
         return "video_surveillance"
     if "замок" in normalized or "доступ" in normalized or "скуд" in normalized:
         return "access_control"
-    if "охран" in normalized or "задым" in normalized or "утеч" in normalized:
+    if (
+        "охран" in normalized
+        or "безопас" in normalized
+        or "задым" in normalized
+        or "утеч" in normalized
+    ):
         return "security_alarm"
     return CATEGORY_BY_SECTION.get(code.split(".", 1)[0], "smart_home_core")
 

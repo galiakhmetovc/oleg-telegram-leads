@@ -43,6 +43,7 @@ document.addEventListener("DOMContentLoaded", () => {
   if (page === "login") bindLogin();
   if (page === "leads-inbox") initInbox();
   if (page === "sources") initSources();
+  if (page === "catalog") initCatalog();
   if (page === "crm") initCrm();
   if (page === "admin") initAdmin();
 });
@@ -730,6 +731,152 @@ async function resetSourceCheckpoint(event, sourceId, state) {
 function sourceStatusClass(status) {
   if (status === "checking_access" || status === "preview_ready") return "is-warn";
   if (status === "access_denied" || status === "error") return "is-danger";
+  return "";
+}
+
+function initCatalog() {
+  const state = { items: [], selectedId: null };
+  document.querySelector("#catalog-refresh")?.addEventListener("click", () =>
+    loadCatalogCandidates(state)
+  );
+  document.querySelector("#catalog-filters")?.addEventListener("change", () =>
+    loadCatalogCandidates(state)
+  );
+  loadCatalogCandidates(state);
+}
+
+async function loadCatalogCandidates(state) {
+  const params = new URLSearchParams();
+  const form = document.querySelector("#catalog-filters");
+  if (form) {
+    const data = new FormData(form);
+    for (const [key, value] of data.entries()) {
+      if (value) params.set(key, value);
+    }
+  }
+  const payload = await api(`/api/catalog/candidates?${params.toString()}`);
+  state.items = payload.items || [];
+  const selectedStillVisible = state.items.some((item) => item.id === state.selectedId);
+  state.selectedId = selectedStillVisible ? state.selectedId : state.items[0]?.id || null;
+  renderCatalogCandidateList(state);
+  renderCatalogCandidateDetail(state);
+}
+
+function renderCatalogCandidateList(state) {
+  const target = document.querySelector("#catalog-candidate-list");
+  if (!target) return;
+  if (!state.items.length) {
+    target.innerHTML = `<div class="empty-state">No candidates</div>`;
+    return;
+  }
+  target.innerHTML = state.items
+    .map((item) => {
+      const active = item.id === state.selectedId ? "is-active" : "";
+      const value = item.normalized_value || {};
+      const subtitle = [item.candidate_type, value.category_slug, value.item_type]
+        .filter(Boolean)
+        .join(" / ");
+      return `<button class="queue-item ${active}" type="button" data-id="${item.id}">
+        <strong>${escapeHtml(item.canonical_name)}</strong>
+        <span class="muted">${escapeHtml(subtitle || item.proposed_action)}</span>
+        <span class="queue-meta">
+          ${badge(item.status, catalogStatusClass(item.status))}
+          ${badge(Math.round((item.confidence || 0) * 100) + "%")}
+          ${item.evidence_count ? badge(`evidence ${item.evidence_count}`) : ""}
+        </span>
+      </button>`;
+    })
+    .join("");
+  target.querySelectorAll(".queue-item").forEach((button) => {
+    button.addEventListener("click", () => {
+      state.selectedId = button.dataset.id;
+      renderCatalogCandidateList(state);
+      renderCatalogCandidateDetail(state);
+    });
+  });
+}
+
+function renderCatalogCandidateDetail(state) {
+  const target = document.querySelector("#catalog-candidate-detail");
+  if (!target) return;
+  const item = state.items.find((candidate) => candidate.id === state.selectedId);
+  if (!item) {
+    target.innerHTML = `<div class="empty-state">Select a candidate</div>`;
+    return;
+  }
+  const value = item.normalized_value || {};
+  const terms = Array.isArray(value.terms) ? value.terms : [];
+  target.innerHTML = `<div class="detail-grid">
+    <header class="detail-header">
+      <div>
+        <h2>${escapeHtml(item.canonical_name)}</h2>
+        <p class="muted">${escapeHtml(item.id)}</p>
+      </div>
+      <div class="badges">
+        ${badge(item.status, catalogStatusClass(item.status))}
+        ${badge(item.candidate_type)}
+        ${badge(item.proposed_action)}
+      </div>
+    </header>
+    <section class="detail-section">
+      <h3>Value</h3>
+      <div class="detail-meta">
+        ${value.category_slug ? badge(value.category_slug) : ""}
+        ${value.item_type ? badge(value.item_type) : ""}
+        ${value.price_text ? badge(value.price_text, "is-warn") : ""}
+        ${badge(`confidence ${Math.round((item.confidence || 0) * 100)}%`)}
+      </div>
+      ${
+        value.description
+          ? `<p>${escapeHtml(value.description)}</p>`
+          : ""
+      }
+    </section>
+    <section class="detail-section">
+      <h3>Terms</h3>
+      <div class="detail-meta">
+        ${terms.map((term) => badge(term)).join("") || '<span class="muted">No terms</span>'}
+      </div>
+    </section>
+    <section class="detail-section">
+      <h3>Raw payload</h3>
+      <pre class="json-block">${escapeHtml(JSON.stringify(value, null, 2))}</pre>
+    </section>
+    <section class="detail-section">
+      <h3>Review</h3>
+      <div class="source-action-bar">
+        <button type="button" data-catalog-action="approve">Approve</button>
+        <button type="button" data-catalog-action="needs_review">Needs review</button>
+        <button type="button" data-catalog-action="reject">Reject</button>
+        <button type="button" data-catalog-action="mute">Mute</button>
+      </div>
+      <p id="catalog-status" class="status-line" role="status"></p>
+    </section>
+  </div>`;
+  target.querySelectorAll("[data-catalog-action]").forEach((button) => {
+    button.addEventListener("click", () =>
+      reviewCatalogCandidate(item.id, button.dataset.catalogAction, state)
+    );
+  });
+}
+
+async function reviewCatalogCandidate(candidateId, action, state) {
+  const status = document.querySelector("#catalog-status");
+  try {
+    await api(`/api/catalog/candidates/${candidateId}/review`, {
+      method: "POST",
+      body: JSON.stringify({ action }),
+    });
+    if (status) status.textContent = "Saved";
+    await loadCatalogCandidates(state);
+  } catch (error) {
+    if (status) status.textContent = error.message;
+  }
+}
+
+function catalogStatusClass(status) {
+  if (status === "auto_pending" || status === "needs_review") return "is-warn";
+  if (status === "rejected" || status === "muted") return "is-danger";
   return "";
 }
 

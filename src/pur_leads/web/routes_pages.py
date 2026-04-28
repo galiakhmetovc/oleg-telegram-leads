@@ -64,6 +64,7 @@ def inbox_page(
                 <nav>
                   <a href="/">Inbox</a>
                   <a href="/sources">Sources</a>
+                  <a href="/catalog">Catalog</a>
                   <a href="/crm">CRM</a>
                   <a href="/admin">Admin</a>
                   <button id="logout-button" type="button">Logout</button>
@@ -126,6 +127,7 @@ def admin_page(
                 <nav>
                   <a href="/">Inbox</a>
                   <a href="/sources">Sources</a>
+                  <a href="/catalog">Catalog</a>
                   <a href="/crm">CRM</a>
                   <a href="/admin">Admin</a>
                   <button id="logout-button" type="button">Logout</button>
@@ -206,6 +208,7 @@ def crm_page(
                 <nav>
                   <a href="/">Inbox</a>
                   <a href="/sources">Sources</a>
+                  <a href="/catalog">Catalog</a>
                   <a href="/crm">CRM</a>
                   <a href="/admin">Admin</a>
                   <button id="logout-button" type="button">Logout</button>
@@ -288,6 +291,7 @@ def sources_page(
                 <nav>
                   <a href="/">Inbox</a>
                   <a href="/sources">Sources</a>
+                  <a href="/catalog">Catalog</a>
                   <a href="/crm">CRM</a>
                   <a href="/admin">Admin</a>
                   <button id="logout-button" type="button">Logout</button>
@@ -326,6 +330,67 @@ def sources_page(
                     <p id="source-status" class="status-line" role="status"></p>
                   </form>
                 </aside>
+              </section>
+            </main>
+            """,
+        )
+    )
+
+
+@router.get("/catalog", response_class=HTMLResponse)
+def catalog_page(
+    request: Request,
+    auth_service: WebAuthService = Depends(get_auth_service),
+) -> Response:
+    if not _has_page_session(request, auth_service):
+        return RedirectResponse("/login", status_code=303)
+    return HTMLResponse(
+        _page(
+            page="catalog",
+            title="Catalog",
+            main="""
+            <main class="workspace">
+              <header class="topbar">
+                <div>
+                  <span class="eyebrow">PUR Leads</span>
+                  <h1>Catalog</h1>
+                </div>
+                <nav>
+                  <a href="/">Inbox</a>
+                  <a href="/sources">Sources</a>
+                  <a href="/catalog">Catalog</a>
+                  <a href="/crm">CRM</a>
+                  <a href="/admin">Admin</a>
+                  <button id="logout-button" type="button">Logout</button>
+                </nav>
+              </header>
+              <section class="catalog-layout">
+                <aside class="queue-pane" aria-label="Catalog candidates">
+                  <div class="section-head">
+                    <h2>Candidates</h2>
+                    <button id="catalog-refresh" type="button">Refresh</button>
+                  </div>
+                  <form id="catalog-filters" class="filter-grid">
+                    <select name="status" aria-label="Status">
+                      <option value="auto_pending">Auto pending</option>
+                      <option value="needs_review">Needs review</option>
+                      <option value="approved">Approved</option>
+                      <option value="rejected">Rejected</option>
+                      <option value="">All status</option>
+                    </select>
+                    <select name="candidate_type" aria-label="Type">
+                      <option value="">All types</option>
+                      <option value="item">Items</option>
+                      <option value="offer">Offers</option>
+                      <option value="lead_phrase">Lead phrases</option>
+                      <option value="negative_phrase">Negative phrases</option>
+                    </select>
+                  </form>
+                  <div id="catalog-candidate-list" class="queue-list" aria-live="polite"></div>
+                </aside>
+                <section id="catalog-candidate-detail" class="detail-pane" aria-live="polite">
+                  <div class="empty-state">Select a candidate</div>
+                </section>
               </section>
             </main>
             """,

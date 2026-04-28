@@ -117,3 +117,33 @@ async def test_heuristic_extractor_extracts_access_solution_and_offer(extractor_
     )
     assert offer.value_json["price_text"] == "от 120 000 руб"
     assert offer.value_json["currency"] == "RUB"
+
+
+@pytest.mark.asyncio
+async def test_heuristic_extractor_splits_joined_technical_marker(extractor_session):
+    source = CatalogSourceService(extractor_session).upsert_source(
+        source_type="telegram_message",
+        origin="telegram:purmaster",
+        external_id="17",
+        raw_text="catalog",
+    )
+    chunk = CatalogSourceService(extractor_session).replace_parsed_chunks(
+        source.id,
+        chunks=[
+            """
+            4.2 Уведомления безопасностиУстановка датчика задымления, утечки газа
+            Не является заменой систем безопасности.
+            """
+        ],
+        parser_name="test",
+        parser_version="1",
+    )[0]
+
+    facts = await HeuristicCatalogExtractor(extractor_session).extract_catalog_facts(
+        source_id=source.id,
+        chunk_id=chunk.id,
+        payload={},
+    )
+
+    assert [fact.canonical_name for fact in facts] == ["Уведомления безопасности"]
+    assert facts[0].value_json["category_slug"] == "security_alarm"

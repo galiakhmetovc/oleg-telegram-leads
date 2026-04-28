@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import dataclass
 from typing import Any
 
 from sqlalchemy.orm import Session
@@ -14,14 +15,76 @@ from pur_leads.repositories.catalog_candidates import (
     ExtractedFactRecord,
     ExtractionRunRecord,
 )
+from pur_leads.services.audit import AuditService
+
+PROMOTABLE_CANDIDATE_TYPES = {"item", "lead_phrase", "negative_phrase"}
 
 LOW_CONFIDENCE_THRESHOLD = 0.6
+
+
+@dataclass(frozen=True)
+class CandidateReviewResult:
+    candidate: CatalogCandidateRecord
+    promotion: Any | None
 
 
 class CatalogCandidateService:
     def __init__(self, session: Session) -> None:
         self.session = session
         self.repository = CatalogCandidateRepository(session)
+        self.audit = AuditService(session)
+
+    def list_candidates(
+        self,
+        *,
+        status: str | None = None,
+        candidate_type: str | None = None,
+        limit: int = 100,
+    ) -> list[CatalogCandidateRecord]:
+        return self.repository.list_candidates(
+            status=status,
+            candidate_type=candidate_type,
+            limit=limit,
+        )
+
+    def review_candidate(
+        self,
+        candidate_id: str,
+        *,
+        action: str,
+        actor: str,
+        reason: str | None = None,
+    ) -> CandidateReviewResult:
+        before = self.repository.get_candidate(candidate_id)
+        if before is None:
+            raise KeyError(candidate_id)
+
+        status = _review_status(action)
+        candidate = self.repository.update_candidate(
+            candidate_id,
+            status=status,
+            updated_at=utc_now(),
+        )
+        self.audit.record_change(
+            actor=actor,
+            action="catalog_candidate.review",
+            entity_type="catalog_candidate",
+            entity_id=candidate_id,
+            old_value_json={"status": before.status},
+            new_value_json={"status": status, "review_action": action, "reason": reason},
+        )
+
+        promotion = None
+        if action == "approve" and candidate.candidate_type in PROMOTABLE_CANDIDATE_TYPES:
+            from pur_leads.services.catalog import CatalogService
+
+            promotion = CatalogService(self.session).promote_candidate(candidate.id, actor=actor)
+        else:
+            self.session.commit()
+        reviewed = self.repository.get_candidate(candidate_id)
+        if reviewed is None:
+            raise KeyError(candidate_id)
+        return CandidateReviewResult(candidate=reviewed, promotion=promotion)
 
     def start_extraction_run(
         self,
@@ -228,6 +291,19 @@ def _candidate_status(fact: ExtractedFactRecord, candidate_type: str) -> str:
             return "auto_pending"
         return "needs_review"
     return "auto_pending"
+
+
+def _review_status(action: str) -> str:
+    statuses = {
+        "approve": "approved",
+        "reject": "rejected",
+        "needs_review": "needs_review",
+        "mute": "muted",
+    }
+    try:
+        return statuses[action]
+    except KeyError as exc:
+        raise ValueError(f"Unsupported review action: {action}") from exc
 
 
 def canonical_json(value: Any) -> str:

@@ -11,6 +11,7 @@ from pur_leads.db.session import create_session_factory
 from pur_leads.services.web_auth import WebAuthService
 from pur_leads.web.routes_admin import router as admin_router
 from pur_leads.web.routes_auth import router as auth_router
+from pur_leads.web.routes_catalog import router as catalog_router
 from pur_leads.web.routes_crm import router as crm_router
 from pur_leads.web.routes_health import router as health_router
 from pur_leads.web.routes_leads import router as leads_router
@@ -63,6 +64,7 @@ def create_app(
     app.include_router(auth_router)
     app.include_router(leads_router)
     app.include_router(crm_router)
+    app.include_router(catalog_router)
     app.include_router(sources_router)
     app.include_router(admin_router)
     app.include_router(pages_router)

@@ -167,6 +167,27 @@ class CatalogCandidateRepository:
         )
         return CatalogCandidateRecord(**dict(row)) if row is not None else None
 
+    def list_candidates(
+        self,
+        *,
+        status: str | None = None,
+        candidate_type: str | None = None,
+        limit: int = 100,
+    ) -> list[CatalogCandidateRecord]:
+        query = select(catalog_candidates_table)
+        if status:
+            query = query.where(catalog_candidates_table.c.status == status)
+        if candidate_type:
+            query = query.where(catalog_candidates_table.c.candidate_type == candidate_type)
+        rows = (
+            self.session.execute(
+                query.order_by(catalog_candidates_table.c.updated_at.desc()).limit(limit)
+            )
+            .mappings()
+            .all()
+        )
+        return [CatalogCandidateRecord(**dict(row)) for row in rows]
+
     def ensure_candidate_fact_link(
         self,
         *,

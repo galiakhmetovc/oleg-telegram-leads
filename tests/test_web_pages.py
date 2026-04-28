@@ -41,11 +41,13 @@ def test_workspace_and_admin_pages_are_protected_and_render_shells(tmp_path):
     admin_denied = client.get("/admin", follow_redirects=False)
     crm_denied = client.get("/crm", follow_redirects=False)
     sources_denied = client.get("/sources", follow_redirects=False)
+    catalog_denied = client.get("/catalog", follow_redirects=False)
     _login(client)
     workspace_response = client.get("/")
     admin_response = client.get("/admin")
     crm_response = client.get("/crm")
     sources_response = client.get("/sources")
+    catalog_response = client.get("/catalog")
     js_response = client.get("/static/app.js")
 
     assert workspace_denied.status_code == 303
@@ -56,9 +58,12 @@ def test_workspace_and_admin_pages_are_protected_and_render_shells(tmp_path):
     assert crm_denied.headers["location"] == "/login"
     assert sources_denied.status_code == 303
     assert sources_denied.headers["location"] == "/login"
+    assert catalog_denied.status_code == 303
+    assert catalog_denied.headers["location"] == "/login"
     assert workspace_response.status_code == 200
     assert 'data-page="leads-inbox"' in workspace_response.text
     assert '<a href="/sources">Sources</a>' in workspace_response.text
+    assert '<a href="/catalog">Catalog</a>' in workspace_response.text
     assert '<a href="/crm">CRM</a>' in workspace_response.text
     assert 'id="lead-queue"' in workspace_response.text
     assert 'id="lead-detail"' in workspace_response.text
@@ -68,6 +73,7 @@ def test_workspace_and_admin_pages_are_protected_and_render_shells(tmp_path):
     assert admin_response.status_code == 200
     assert 'data-page="admin"' in admin_response.text
     assert '<a href="/sources">Sources</a>' in admin_response.text
+    assert '<a href="/catalog">Catalog</a>' in admin_response.text
     assert '<a href="/crm">CRM</a>' in admin_response.text
     assert 'id="admin-users"' in admin_response.text
     assert 'id="userbot-form"' in admin_response.text
@@ -76,6 +82,7 @@ def test_workspace_and_admin_pages_are_protected_and_render_shells(tmp_path):
     assert crm_response.status_code == 200
     assert 'data-page="crm"' in crm_response.text
     assert '<a href="/sources">Sources</a>' in crm_response.text
+    assert '<a href="/catalog">Catalog</a>' in crm_response.text
     assert 'id="crm-client-list"' in crm_response.text
     assert 'id="crm-client-form"' in crm_response.text
     assert sources_response.status_code == 200
@@ -83,9 +90,15 @@ def test_workspace_and_admin_pages_are_protected_and_render_shells(tmp_path):
     assert 'id="source-list"' in sources_response.text
     assert 'id="source-form"' in sources_response.text
     assert 'id="source-detail"' in sources_response.text
+    assert catalog_response.status_code == 200
+    assert 'data-page="catalog"' in catalog_response.text
+    assert 'id="catalog-candidate-list"' in catalog_response.text
+    assert 'id="catalog-candidate-detail"' in catalog_response.text
+    assert 'id="catalog-filters"' in catalog_response.text
     assert "/api/crm/clients" in js_response.text
     assert "/crm/convert" in js_response.text
     assert "/api/sources" in js_response.text
+    assert "/api/catalog/candidates" in js_response.text
     assert "/api/admin/userbots" in js_response.text
 
 
