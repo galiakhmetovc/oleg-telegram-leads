@@ -20,7 +20,7 @@ class PdfArtifactParser:
         parser_version: str | None = None,
     ) -> None:
         self.reader_factory = reader_factory
-        self.parser_version = parser_version or getattr(pypdf, "__version__", "unknown")
+        self.parser_version = parser_version or str(getattr(pypdf, "__version__", "unknown"))
 
     async def parse_artifact(
         self,
