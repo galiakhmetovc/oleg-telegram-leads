@@ -20,7 +20,7 @@ services:
 
   worker:
     build: .
-    command: ["worker", "run", "--poll-interval-seconds", "${POLL_INTERVAL:-5}"]
+    command: ["worker", "run", "--poll-interval-seconds", "${WORKER_POLL_INTERVAL_SECONDS:-5}"]
     environment:
       PUR_DATABASE_PATH: /app/data/pur-leads.sqlite3
       PUR_LOG_LEVEL: ${PUR_LOG_LEVEL:-INFO}
