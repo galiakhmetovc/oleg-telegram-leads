@@ -19,6 +19,8 @@ from pur_leads.repositories.leads import (
     LeadEventRecord,
     LeadRepository,
 )
+from pur_leads.repositories.tasks import TaskRecord
+from pur_leads.services.tasks import TaskService
 
 
 @dataclass(frozen=True)
@@ -45,6 +47,12 @@ class LeadDetectionResult:
     notify_reason: str | None = None
     reason: str | None = None
     matches: list[LeadMatchInput] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class TakeIntoWorkResult:
+    feedback: FeedbackEventRecord
+    task: TaskRecord
 
 
 class LeadService:
@@ -336,6 +344,38 @@ class LeadService:
         )
         self.session.commit()
         return feedback
+
+    def take_into_work(
+        self,
+        cluster_id: str,
+        *,
+        actor: str,
+        owner_user_id: str | None = None,
+    ) -> TakeIntoWorkResult:
+        cluster = self.repository.get_cluster(cluster_id)
+        if cluster is None:
+            raise KeyError(cluster_id)
+        task = TaskService(self.session).create_contact_task_for_lead(
+            lead_cluster_id=cluster.id,
+            lead_event_id=cluster.primary_lead_event_id,
+            title="Contact lead",
+            description=cluster.summary,
+            owner_user_id=owner_user_id,
+            assignee_user_id=owner_user_id,
+        )
+        feedback = self.apply_cluster_action(
+            cluster.id,
+            action="lead_confirmed",
+            actor=actor,
+        )
+        self.repository.update_cluster(
+            cluster.id,
+            work_outcome="contact_task_created",
+            primary_task_id=task.id,
+            updated_at=utc_now(),
+        )
+        self.session.commit()
+        return TakeIntoWorkResult(feedback=feedback, task=task)
 
     def _create_cluster_for_event(
         self,

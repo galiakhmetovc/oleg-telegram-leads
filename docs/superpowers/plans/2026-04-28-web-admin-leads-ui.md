@@ -43,6 +43,8 @@ identity indexes and role/status/session/task constraints. Covered by `tests/tes
 
 ## Task 2: Auth Service
 
+- [x] Implement auth/task services and task-backed `take_into_work`.
+
 **Files:**
 - Create: `src/pur_leads/repositories/web_auth.py`
 - Create: `src/pur_leads/services/web_auth.py`
@@ -61,6 +63,11 @@ identity indexes and role/status/session/task constraints. Covered by `tests/tes
 - [ ] Implement adding Telegram admin accounts from an existing admin context.
 - [ ] Implement `take_into_work` as a service action: set cluster `in_work`/`confirmed`, write `lead_confirmed`, create a due-now contact task, store it in `lead_clusters.primary_task_id`, and do not create CRM records.
 - [ ] Record audit events for login success, denied login, logout, password change, and user creation.
+
+Completed: added PBKDF2 password hashing, local/bootstrap auth, Telegram payload verification,
+session lifecycle, Telegram admin creation, disabled-user handling, task creation service, and
+task-backed `LeadService.take_into_work`. Covered by `tests/test_web_auth_service.py` and
+`tests/test_lead_work_actions.py`.
 
 ## Task 3: Web App Dependencies And Auth Routes
 
