@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Protocol
 
 from pur_leads.integrations.telegram.types import (
     MessageContext,
     ResolvedTelegramSource,
     SourceAccessResult,
+    TelegramDocumentDownload,
     TelegramMessage,
 )
 
@@ -46,3 +48,12 @@ class TelegramClientPort(Protocol):
         reply_depth: int,
     ) -> MessageContext:
         """Fetch reply and neighboring context for one message."""
+
+    async def download_message_document(
+        self,
+        source: ResolvedTelegramSource,
+        *,
+        message_id: int,
+        destination_dir: str | Path,
+    ) -> TelegramDocumentDownload:
+        """Download document media for one message, skipping videos and non-documents."""

@@ -18,6 +18,7 @@ from pur_leads.integrations.telegram.types import (
     MessageContext,
     ResolvedTelegramSource,
     SourceAccessResult,
+    TelegramDocumentDownload,
     TelegramMessage,
 )
 from pur_leads.services.settings import SettingsService
@@ -237,6 +238,15 @@ class _UnconfiguredTelegramClient:
         after: int,
         reply_depth: int,
     ) -> MessageContext:
+        raise ValueError("telegram client is not configured")
+
+    async def download_message_document(
+        self,
+        source: ResolvedTelegramSource,
+        *,
+        message_id: int,
+        destination_dir: str | Path,
+    ) -> TelegramDocumentDownload:
         raise ValueError("telegram client is not configured")
 
 

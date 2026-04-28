@@ -1,10 +1,12 @@
 from datetime import datetime
+from pathlib import Path
 
 import pytest
 
 from pur_leads.integrations.telegram.client import TelegramClientPort
 from pur_leads.integrations.telegram.types import (
     MessageContext,
+    TelegramDocumentDownload,
     ResolvedTelegramSource,
     SourceAccessResult,
     TelegramMessage,
@@ -63,6 +65,23 @@ class FakeTelegramClient:
             neighbor_after=[],
         )
 
+    async def download_message_document(
+        self,
+        source: ResolvedTelegramSource,
+        *,
+        message_id: int,
+        destination_dir: str | Path,
+    ) -> TelegramDocumentDownload:
+        return TelegramDocumentDownload(
+            status="downloaded",
+            file_name="catalog.pdf",
+            mime_type="application/pdf",
+            file_size=12,
+            local_path=str(Path(destination_dir) / "catalog.pdf"),
+            skip_reason=None,
+            error=None,
+        )
+
 
 @pytest.mark.asyncio
 async def test_fake_client_satisfies_telegram_client_port():
@@ -73,12 +92,18 @@ async def test_fake_client_satisfies_telegram_client_port():
     preview = await client.fetch_preview_messages(source, limit=1)
     batch = await client.fetch_message_batch(source, after_message_id=42, limit=1)
     context = await client.fetch_context(source, message_id=43, before=1, after=1, reply_depth=1)
+    download = await client.download_message_document(
+        source,
+        message_id=43,
+        destination_dir=Path("/tmp/catalog"),
+    )
 
     assert source.username == "purmaster"
     assert access.status == "succeeded"
     assert preview[0].telegram_message_id == 42
     assert batch[0].telegram_message_id == 43
     assert context.target_message_id == 43
+    assert download.status == "downloaded"
 
 
 def _message(source: ResolvedTelegramSource, message_id: int) -> TelegramMessage:

@@ -1,4 +1,5 @@
 from datetime import UTC, datetime
+from pathlib import Path
 
 import pytest
 
@@ -83,6 +84,108 @@ async def test_telethon_client_fetches_preview_and_batches_after_checkpoint():
 
 
 @pytest.mark.asyncio
+async def test_telethon_client_marks_and_downloads_document_media(tmp_path):
+    fake = FakeTelethonClient(
+        entity=FakeEntity(id=-1002, username="chat", title="Chat", megagroup=True),
+        messages=[
+            _document_message(
+                51,
+                file_name="catalog.pdf",
+                mime_type="application/pdf",
+                size=7,
+            )
+        ],
+    )
+    client = TelethonTelegramClient(
+        session_path="/secure/userbot.session",
+        api_id=123,
+        api_hash="hash",
+        client_factory=lambda *args, **kwargs: fake,
+    )
+    source = ResolvedTelegramSource(
+        input_ref="@chat",
+        source_kind="telegram_supergroup",
+        telegram_id="-1002",
+        username="chat",
+        title="Chat",
+    )
+
+    preview = await client.fetch_preview_messages(source, limit=1)
+    downloaded = await client.download_message_document(
+        source,
+        message_id=51,
+        destination_dir=tmp_path,
+    )
+
+    assert preview[0].media_metadata_json == {
+        "type": "object",
+        "document": {
+            "file_name": "catalog.pdf",
+            "mime_type": "application/pdf",
+            "file_size": 7,
+            "downloadable": True,
+            "skip_reason": None,
+        },
+    }
+    assert downloaded.status == "downloaded"
+    assert downloaded.file_name == "catalog.pdf"
+    assert downloaded.mime_type == "application/pdf"
+    assert downloaded.file_size == 7
+    assert downloaded.local_path == str(tmp_path / "catalog.pdf")
+    assert (tmp_path / "catalog.pdf").read_bytes() == b"catalog"
+
+
+@pytest.mark.asyncio
+async def test_telethon_client_skips_video_documents(tmp_path):
+    fake = FakeTelethonClient(
+        entity=FakeEntity(id=-1002, username="chat", title="Chat", megagroup=True),
+        messages=[
+            _document_message(
+                52,
+                file_name="clip.mp4",
+                mime_type="video/mp4",
+                size=10,
+                video=True,
+            )
+        ],
+    )
+    client = TelethonTelegramClient(
+        session_path="/secure/userbot.session",
+        api_id=123,
+        api_hash="hash",
+        client_factory=lambda *args, **kwargs: fake,
+    )
+    source = ResolvedTelegramSource(
+        input_ref="@chat",
+        source_kind="telegram_supergroup",
+        telegram_id="-1002",
+        username="chat",
+        title="Chat",
+    )
+
+    preview = await client.fetch_preview_messages(source, limit=1)
+    downloaded = await client.download_message_document(
+        source,
+        message_id=52,
+        destination_dir=tmp_path,
+    )
+
+    assert preview[0].media_metadata_json == {
+        "type": "object",
+        "document": {
+            "file_name": "clip.mp4",
+            "mime_type": "video/mp4",
+            "file_size": 10,
+            "downloadable": False,
+            "skip_reason": "video",
+        },
+    }
+    assert downloaded.status == "skipped"
+    assert downloaded.skip_reason == "video"
+    assert downloaded.local_path is None
+
+
+@pytest.mark.asyncio
 async def test_telethon_client_requires_authorized_session():
     fake = FakeTelethonClient(
         entity=FakeEntity(id=-1001, username="purmaster", title="PUR", broadcast=True),
@@ -123,6 +226,11 @@ class FakeTelethonClient:
     async def get_entity(self, input_ref):
         return self.entity
 
+    async def download_media(self, message, file):
+        destination = Path(file) / message.document.attributes[0].file_name
+        destination.write_bytes(b"catalog")
+        return str(destination)
+
     async def iter_messages(self, entity, **kwargs):
         self.iter_calls.append({"entity": entity, **kwargs})
         limit = kwargs.get("limit")
@@ -156,6 +264,32 @@ class FakeSender:
         self.title = None
 
 
+class FakeDocument:
+    def __init__(
+        self,
+        *,
+        file_name: str,
+        mime_type: str,
+        size: int,
+        video: bool,
+    ) -> None:
+        attributes = [FakeDocumentAttributeFilename(file_name)]
+        if video:
+            attributes.append(FakeDocumentAttributeVideo())
+        self.attributes = attributes
+        self.mime_type = mime_type
+        self.size = size
+
+
+class FakeDocumentAttributeFilename:
+    def __init__(self, file_name: str) -> None:
+        self.file_name = file_name
+
+
+class FakeDocumentAttributeVideo:
+    pass
+
+
 class FakeMessage:
     def __init__(
         self,
@@ -166,6 +300,7 @@ class FakeMessage:
         sender_name: str | None,
         has_media: bool,
         reply_to_message_id: int | None,
+        document: FakeDocument | None = None,
     ) -> None:
         self.id = id
         self.date = datetime(2026, 4, 28, 12, 0, id % 60, tzinfo=UTC)
@@ -173,6 +308,7 @@ class FakeMessage:
         self.sender_id = sender_id
         self.sender = FakeSender(sender_name) if sender_name else None
         self.media = object() if has_media else None
+        self.document = document
         self.reply_to_msg_id = reply_to_message_id
         self.reply_to = None
         self.fwd_from = None
@@ -197,4 +333,28 @@ def _message(
         sender_name=sender_name,
         has_media=has_media,
         reply_to_message_id=reply_to_message_id,
+    )
+
+
+def _document_message(
+    message_id: int,
+    *,
+    file_name: str,
+    mime_type: str,
+    size: int,
+    video: bool = False,
+) -> FakeMessage:
+    return FakeMessage(
+        id=message_id,
+        text=file_name,
+        sender_id=None,
+        sender_name=None,
+        has_media=True,
+        reply_to_message_id=None,
+        document=FakeDocument(
+            file_name=file_name,
+            mime_type=mime_type,
+            size=size,
+            video=video,
+        ),
     )

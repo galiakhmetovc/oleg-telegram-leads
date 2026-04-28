@@ -13,6 +13,7 @@ from pur_leads.integrations.telegram.types import (
     MessageContext,
     ResolvedTelegramSource,
     SourceAccessResult,
+    TelegramDocumentDownload,
     TelegramMessage,
 )
 
@@ -154,6 +155,66 @@ class TelethonTelegramClient:
             neighbor_after=neighbor_after,
         )
 
+    async def download_message_document(
+        self,
+        source: ResolvedTelegramSource,
+        *,
+        message_id: int,
+        destination_dir: str | Path,
+    ) -> TelegramDocumentDownload:
+        client = await self._get_client()
+        entity = await client.get_entity(_entity_ref(source))
+        message = await _get_message(client, entity, message_id)
+        if message is None:
+            return TelegramDocumentDownload(
+                status="skipped",
+                file_name=None,
+                mime_type=None,
+                file_size=None,
+                local_path=None,
+                skip_reason="message_not_found",
+            )
+
+        document_metadata = _document_metadata(message)
+        if document_metadata is None:
+            return TelegramDocumentDownload(
+                status="skipped",
+                file_name=None,
+                mime_type=None,
+                file_size=None,
+                local_path=None,
+                skip_reason="no_document",
+            )
+        if document_metadata["downloadable"] is not True:
+            return TelegramDocumentDownload(
+                status="skipped",
+                file_name=document_metadata["file_name"],
+                mime_type=document_metadata["mime_type"],
+                file_size=document_metadata["file_size"],
+                local_path=None,
+                skip_reason=document_metadata["skip_reason"] or "not_downloadable",
+            )
+
+        destination = Path(destination_dir)
+        destination.mkdir(parents=True, exist_ok=True)
+        downloaded_path = await client.download_media(message, file=str(destination))
+        if downloaded_path is None:
+            return TelegramDocumentDownload(
+                status="failed",
+                file_name=document_metadata["file_name"],
+                mime_type=document_metadata["mime_type"],
+                file_size=document_metadata["file_size"],
+                local_path=None,
+                error="download_media returned no path",
+            )
+        return TelegramDocumentDownload(
+            status="downloaded",
+            file_name=document_metadata["file_name"],
+            mime_type=document_metadata["mime_type"],
+            file_size=document_metadata["file_size"],
+            local_path=str(downloaded_path),
+        )
+
     async def _get_client(self) -> Any:
         if self._client is None:
             client = self.client_factory(
@@ -249,7 +310,45 @@ def _sender_display(sender: Any) -> str | None:
 
 def _media_metadata(message: Any) -> dict[str, Any]:
     media = getattr(message, "media", None)
-    return {"type": media.__class__.__name__} if media is not None else {}
+    if media is None:
+        return {}
+    metadata: dict[str, Any] = {"type": media.__class__.__name__}
+    document_metadata = _document_metadata(message)
+    if document_metadata is not None:
+        metadata["document"] = document_metadata
+    return metadata
+
+
+def _document_metadata(message: Any) -> dict[str, Any] | None:
+    document = getattr(message, "document", None)
+    if document is None:
+        return None
+    mime_type = _blank_to_none(getattr(document, "mime_type", None))
+    is_video = _is_video_document(document, mime_type)
+    return {
+        "file_name": _document_file_name(document),
+        "mime_type": mime_type,
+        "file_size": _int_or_none(getattr(document, "size", None)),
+        "downloadable": not is_video,
+        "skip_reason": "video" if is_video else None,
+    }
+
+
+def _document_file_name(document: Any) -> str | None:
+    for attribute in getattr(document, "attributes", []) or []:
+        file_name = _blank_to_none(getattr(attribute, "file_name", None))
+        if file_name:
+            return file_name
+    return None
+
+
+def _is_video_document(document: Any, mime_type: str | None) -> bool:
+    if mime_type and mime_type.startswith("video/"):
+        return True
+    return any(
+        attribute.__class__.__name__ == "DocumentAttributeVideo"
+        for attribute in getattr(document, "attributes", []) or []
+    )
 
 
 def _forward_metadata(message: Any) -> dict[str, Any] | None:
@@ -277,3 +376,7 @@ def _blank_to_none(value: Any) -> str | None:
 
 def _string_or_none(value: Any) -> str | None:
     return str(value) if value is not None else None
+
+
+def _int_or_none(value: Any) -> int | None:
+    return int(value) if value is not None else None
