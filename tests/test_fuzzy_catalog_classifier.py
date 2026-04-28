@@ -55,6 +55,34 @@ async def test_fuzzy_catalog_classifier_uses_latest_snapshot_for_lead_maybe_and_
     assert results[2].matches == []
 
 
+@pytest.mark.asyncio
+async def test_fuzzy_catalog_classifier_flags_generic_equipment_request_without_catalog_match(
+    tmp_path,
+):
+    engine = create_sqlite_engine(tmp_path / "test.db")
+    upgrade_database(engine)
+    session_factory = create_session_factory(engine)
+
+    with session_factory() as session:
+        classifier = FuzzyCatalogLeadClassifier(session)
+
+        results = await classifier.classify_message_batch(
+            messages=[
+                _message(
+                    "message-1",
+                    "Какие домофоны ставите в проекты? Нужен минималистичный черный экран.",
+                )
+            ],
+            payload={},
+        )
+
+    assert len(results) == 1
+    assert results[0].decision == "lead"
+    assert results[0].notify_reason == "generic_equipment_request"
+    assert results[0].reason == "Detected buying intent for equipment outside catalog terms"
+    assert results[0].matches == []
+
+
 def _message(source_message_id: str, text: str) -> LeadMessageForClassification:
     return LeadMessageForClassification(
         source_message_id=source_message_id,

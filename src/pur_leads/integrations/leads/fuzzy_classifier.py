@@ -49,6 +49,31 @@ NEGATIVE_INTENT_TERMS = (
     "уже купили",
 )
 
+GENERIC_EQUIPMENT_TERMS = (
+    "домофон",
+    "видеодомофон",
+    "камера",
+    "видеонаблюдение",
+    "датчик",
+    "реле",
+    "выключатель",
+    "розетка",
+    "щит",
+    "автомат",
+    "освещение",
+    "свет",
+    "теплый пол",
+    "тёплый пол",
+    "термостат",
+    "терморегулятор",
+    "сигнализация",
+    "замок",
+    "контроллер",
+    "wi-fi",
+    "wifi",
+    "умный дом",
+)
+
 KEYWORD_ENTRY_TYPES = {"term", "example", "candidate", "candidate_term", "item"}
 
 
@@ -141,6 +166,7 @@ class FuzzyCatalogLeadClassifier:
         matches = _matches(normalized_text, entries)
         has_intent = _contains_any(normalized_text, BUYING_INTENT_TERMS)
         has_negative = _contains_any(normalized_text, NEGATIVE_INTENT_TERMS)
+        has_generic_equipment = _contains_equipment_term(normalized_text)
 
         if matches and has_intent and not has_negative:
             decision = "lead"
@@ -148,6 +174,12 @@ class FuzzyCatalogLeadClassifier:
             notify_reason = "catalog_match_with_intent"
             reason = "Matched catalog terms with buying intent"
             commercial_value_score = 0.7
+        elif has_intent and has_generic_equipment and not has_negative:
+            decision = "lead"
+            confidence = 0.68
+            notify_reason = "generic_equipment_request"
+            reason = "Detected buying intent for equipment outside catalog terms"
+            commercial_value_score = 0.55
         elif matches and not has_negative:
             decision = "maybe"
             confidence = min(0.82, 0.52 + matches[0].score * 0.18)
@@ -169,7 +201,13 @@ class FuzzyCatalogLeadClassifier:
             confidence=confidence,
             commercial_value_score=commercial_value_score,
             negative_score=0.7 if has_negative else 0.0,
-            high_value_signals_json=[match.matched_text for match in matches] if matches else [],
+            high_value_signals_json=(
+                [match.matched_text for match in matches]
+                if matches
+                else ["generic_equipment_request"]
+                if has_intent and has_generic_equipment and not has_negative
+                else []
+            ),
             negative_signals_json=["negative_intent"] if has_negative else [],
             notify_reason=notify_reason,
             reason=reason,
@@ -213,6 +251,10 @@ def _lead_match_type(entry: KeywordEntry) -> str:
 
 def _contains_any(value: str, terms: tuple[str, ...]) -> bool:
     return any(term in value for term in terms)
+
+
+def _contains_equipment_term(value: str) -> bool:
+    return any(_term_matches(term, value) for term in GENERIC_EQUIPMENT_TERMS)
 
 
 def _term_matches(term: str, value: str) -> bool:
