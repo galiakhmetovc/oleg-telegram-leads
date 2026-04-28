@@ -19,11 +19,12 @@ The system must continuously read the PUR Telegram channel, parse messages and d
 - Video is not downloaded by default. Documents are downloaded and parsed.
 - Telegraph and configured external pages are fetched and parsed.
 - Oleg can manually add examples of leads, non-leads, catalog facts, or source links.
-- The web interface uses Telegram authentication and role-based permissions.
-- Approval rights, `auto_pending` notification styling, campaign expiry, and external fetch domains are configurable in the web interface.
+- The web interface starts with one role: `admin`.
+- A built-in local administrator account exists for bootstrap. Telegram admin accounts are added through that account.
+- `auto_pending` notification styling, campaign expiry, and external fetch domains are configurable in the web interface.
 - CRM is included as a lightweight client-memory layer, not a heavy sales pipeline.
 - CRM starts empty. Clients, interests, assets, and notes can be created manually or from confirmed leads.
-- Oleg is the only active CRM user at first, but tables include ownership/assignee fields for future expansion.
+- The first version assumes a single active admin user workflow, but tables include ownership/assignee fields for future expansion.
 - A central CRM job is generating reasons to contact existing or previously interested clients when catalog changes create a useful follow-up opportunity.
 - Runtime work is processed by a continuous job loop, not a single monolithic polling cycle.
 - Start with one Telegram userbot session and one Telegram worker. Additional userbot sessions are a future configurable expansion through the web UI.
@@ -1743,7 +1744,7 @@ Key fields:
 
 Rules:
 
-- `owner_user_id` and `assignee_user_id` are stored now but hidden in the first UI because only Oleg uses CRM initially.
+- `owner_user_id` and `assignee_user_id` are stored now but hidden in the first UI because the first version uses a single admin workflow.
 - `do_not_contact` suppresses generated contact reasons and Telegram reminders.
 
 ### `contacts`
@@ -2021,8 +2022,7 @@ Key settings:
 - `catalog_candidate_merge_similarity_threshold = 0.85`
 - `manual_catalog_add_enabled = true`
 - `manual_catalog_create_candidate_first = true`
-- `manual_catalog_default_status_for_owner = "approved"`
-- `manual_catalog_default_status_for_non_owner = "auto_pending"`
+- `manual_catalog_default_status_for_admin = "approved"`
 - `manual_catalog_requires_evidence_note = true`
 - `manual_catalog_allow_direct_approved = true`
 - `use_auto_pending_in_classifier = true`
@@ -2082,9 +2082,13 @@ Key settings:
 - `auto_expire_campaign_prices = true`
 - `default_campaign_price_ttl_days = 30`
 - `default_offer_ttl_days = 30`
-- `approval_roles_json = ["owner", "admin", "catalog_manager"]`
-- `lead_review_roles_json = ["owner", "admin", "catalog_manager", "lead_reviewer"]`
-- `manual_input_roles_json = ["owner", "admin", "catalog_manager", "lead_reviewer"]`
+- `active_web_roles_json = ["admin"]`
+- `future_web_roles_enabled = false`
+- `bootstrap_admin_enabled = true`
+- `bootstrap_admin_username = "admin"`
+- `bootstrap_admin_password_change_required = true`
+- `telegram_admin_add_enabled = true`
+- `telegram_admin_only_after_bootstrap = true`
 - `feedback_not_lead_requires_reason = true`
 - `feedback_default_scope_for_work_outcomes = "crm_outcome"`
 - `feedback_work_outcomes_affect_classifier = false`
@@ -2244,7 +2248,11 @@ Key fields:
 - `telegram_user_id`
 - `telegram_username`
 - `display_name`
-- `role`: `owner`, `admin`, `catalog_manager`, `lead_reviewer`, `viewer`
+- `auth_type`: `local`, `telegram`
+- `local_username`
+- `password_hash`
+- `must_change_password`
+- `role`: `admin`
 - `status`: `active`, `disabled`, `pending`
 - `created_at`
 - `updated_at`
@@ -2252,9 +2260,12 @@ Key fields:
 
 Rules:
 
-- Oleg is seeded as an `owner` or `admin`.
-- Additional approvers are configured in the web UI by users whose role is listed in `approval_roles_json`.
-- Disabled users cannot log in even if Telegram authentication succeeds.
+- First implementation has only one active role: `admin`.
+- A built-in local `admin` user is seeded for bootstrap.
+- The built-in admin can add Telegram accounts with role `admin`.
+- Telegram-authenticated users cannot log in until their Telegram user id is added by an existing admin.
+- More specific roles such as catalog manager, lead reviewer, and viewer are a future expansion, not part of the first UI.
+- Disabled users cannot log in even if local password or Telegram authentication succeeds.
 
 ### `web_auth_sessions`
 
@@ -2560,8 +2571,8 @@ Manual catalog addition:
 - Manual additions are allowed from Catalog UI, Leads Inbox, and Manual Input.
 - Manual additions create `manual_inputs` and `sources` rows.
 - Manual additions create catalog candidates before catalog rows unless direct approved add is explicitly allowed.
-- If Oleg/owner adds a manual catalog fact, default status can be `approved`.
-- If another role adds it, default status can be `auto_pending` or `needs_review`.
+- If an admin adds a manual catalog fact, default status can be `approved`.
+- Non-admin catalog roles are a future expansion.
 - Manual evidence note is required by default.
 
 Manual add examples:
@@ -2619,24 +2630,33 @@ Default landing screen:
 Purpose:
 
 - authenticate site users through Telegram;
-- authorize actions through local roles stored in SQLite.
+- allow bootstrap through a built-in local administrator account;
+- authorize first-version actions through a single `admin` role.
 
 Requirements:
 
-- login via Telegram authentication flow;
+- login via local admin credentials for bootstrap;
+- require password change for the seeded bootstrap admin account;
+- login via Telegram authentication flow for Telegram admin accounts;
 - verify Telegram auth payload server-side before creating a session;
 - map Telegram user id to `web_users.telegram_user_id`;
-- deny access for unknown users unless invite/pending-user mode is enabled in settings;
-- expose role management in Settings/Admin screens;
+- deny access for unknown Telegram users;
+- allow local admin to add Telegram admin accounts;
+- expose admin account management in Settings/Admin screens;
 - write login, logout, role change, and denied-access events to `audit_log`.
 
 Role model:
 
-- `owner`: all actions, settings, user management.
-- `admin`: all operational actions except owner transfer.
-- `catalog_manager`: catalog review, source review, manual inputs, lead feedback.
-- `lead_reviewer`: lead feedback and manual examples.
-- `viewer`: read-only.
+- `admin`: all actions, settings, and user management.
+
+Future roles:
+
+- `catalog_manager`;
+- `lead_reviewer`;
+- `viewer`;
+- other scoped roles if multi-user workflow becomes necessary.
+
+These future roles should remain represented only as an extension path until the first admin-only version is working.
 
 ### Today
 
@@ -3225,7 +3245,7 @@ Required controls:
 - auto-add items/terms/attributes;
 - catalog candidate thresholds and statuses;
 - whether candidates auto-create operational catalog rows;
-- manual catalog add defaults for owner/non-owner;
+- manual catalog add defaults for admin;
 - manual evidence-note requirement;
 - use `auto_pending`;
 - use `needs_review`;
@@ -3234,14 +3254,15 @@ Required controls:
 - allowed external domains;
 - whether `auto_pending` matches are visually marked in Telegram notifications;
 - default campaign/offer expiry rules;
-- which roles can approve/reject catalog facts;
-- which roles can review leads and add manual examples;
+- local bootstrap admin account;
+- Telegram admin account management;
+- future scoped roles enablement;
 - feedback reason codes;
 - whether `not_lead` requires a reason;
 - whether commercial outcomes can affect classifier training;
 - whether wrong term/match feedback creates review items or auto-mutates catalog;
 - whether expert/advice feedback updates sender profiles;
-- Telegram authentication/session settings;
+- authentication/session settings;
 - CRM enabled/disabled;
 - whether confirmed leads can create client/contact candidates automatically;
 - whether lead clusters generate CRM conversion candidates;
@@ -3683,8 +3704,9 @@ Integration tests:
 
 - process archived `@purmaster` corpus into catalog candidates;
 - same product from message, PDF, and Telegraph becomes one candidate with multiple evidence rows;
-- manual catalog item added by Oleg can become approved with manual evidence;
-- manual catalog item added by non-owner follows configured default status;
+- manual catalog item added by admin can become approved with manual evidence;
+- unknown Telegram user cannot access web UI until added by bootstrap/admin user;
+- local bootstrap admin can add Telegram admin accounts;
 - noisy broad term becomes `needs_review` instead of active high-weight term;
 - add public Telegram group through web onboarding: draft -> checking_access -> preview_ready -> active;
 - inaccessible/private/captcha source creates `access_issue` and operator notification policy;
@@ -3734,10 +3756,10 @@ Live/smoke tests:
 
 These policies are not hard-coded. They are settings in the web interface:
 
-- which users/roles besides Oleg can approve or reject catalog facts;
 - whether `auto_pending` matches are visually marked as lower-confidence in Telegram notifications;
 - whether old campaign prices auto-expire when no explicit date is found;
 - the default expiry period for campaign prices and offers;
 - which external domains besides Telegraph are fetched automatically.
+- which Telegram accounts have `admin` access.
 
-The web interface itself is protected by Telegram authentication.
+The web interface is protected by a built-in bootstrap admin account and Telegram authentication for added admin users.
