@@ -12,6 +12,7 @@ from pur_leads.integrations.telegram.types import (
     SourceAccessResult,
     TelegramMessage,
 )
+from pur_leads.models.catalog import parsed_chunks_table, sources_table
 from pur_leads.models.scheduler import scheduler_jobs_table
 from pur_leads.models.telegram_sources import monitored_sources_table, source_messages_table
 from pur_leads.services.scheduler import SchedulerService
@@ -129,6 +130,73 @@ async def test_poll_active_source_persists_messages_and_checkpoint(polling_sessi
 
 
 @pytest.mark.asyncio
+async def test_poll_catalog_source_creates_raw_source_chunks_and_document_job(tmp_path):
+    engine = create_sqlite_engine(tmp_path / "test.db")
+    upgrade_database(engine)
+    session_factory = create_session_factory(engine)
+
+    with session_factory() as session:
+        service = TelegramSourceService(session)
+        source = service.create_draft(
+            "https://t.me/purmaster",
+            purpose="catalog_ingestion",
+            added_by="admin",
+        )
+        service.activate(source.id, actor="admin")
+        service.reset_checkpoint(source.id, message_id=40, actor="admin", confirm=True)
+        job = SchedulerService(session).enqueue(
+            job_type="poll_monitored_source",
+            scope_type="telegram_source",
+            monitored_source_id=source.id,
+        )
+        client = FakeTelegramClient(
+            [
+                _message_with_values(
+                    41,
+                    text="Dahua Hero A1 camera",
+                    caption="PDF catalog",
+                    media_metadata={
+                        "type": "MessageMediaDocument",
+                        "document": {
+                            "file_name": "catalog.pdf",
+                            "mime_type": "application/pdf",
+                            "file_size": 1234,
+                            "downloadable": True,
+                        },
+                    },
+                )
+            ]
+        )
+        worker = TelegramPollingWorker(session, client)
+
+        result = await worker.poll_monitored_source(source.id, scheduler_job_id=job.id, limit=100)
+
+        message_row = session.execute(select(source_messages_table)).mappings().one()
+        raw_source = session.execute(select(sources_table)).mappings().one()
+        chunk = session.execute(select(parsed_chunks_table)).mappings().one()
+        jobs = (
+            session.execute(
+                select(scheduler_jobs_table).order_by(scheduler_jobs_table.c.created_at)
+            )
+            .mappings()
+            .all()
+        )
+        document_job = [row for row in jobs if row["job_type"] == "download_artifact"][0]
+        assert result.inserted_count == 1
+        assert message_row["raw_source_id"] == raw_source["id"]
+        assert raw_source["source_type"] == "telegram_message"
+        assert raw_source["origin"] == "telegram:purmaster"
+        assert raw_source["external_id"] == "41"
+        assert raw_source["raw_text"] == "Dahua Hero A1 camera\nPDF catalog"
+        assert chunk["source_id"] == raw_source["id"]
+        assert chunk["text"] == "Dahua Hero A1 camera\nPDF catalog"
+        assert document_job["source_message_id"] == message_row["id"]
+        assert document_job["monitored_source_id"] == source.id
+        assert document_job["payload_json"]["source_id"] == raw_source["id"]
+        assert document_job["payload_json"]["telegram_message_id"] == 41
+
+
+@pytest.mark.asyncio
 async def test_poll_deduplicates_by_source_and_message_id(polling_session):
     session, source_id = polling_session
     client = FakeTelegramClient([_message(41), _message(41), _message(42)])
@@ -168,16 +236,31 @@ async def test_poll_skips_non_active_sources(tmp_path):
 
 
 def _message(message_id: int) -> TelegramMessage:
+    return _message_with_values(
+        message_id,
+        text=f"text {message_id}",
+        caption=f"caption {message_id}",
+        media_metadata={"kind": "photo"},
+    )
+
+
+def _message_with_values(
+    message_id: int,
+    *,
+    text: str,
+    caption: str | None,
+    media_metadata: dict | None,
+) -> TelegramMessage:
     return TelegramMessage(
         monitored_source_ref="@example",
         telegram_message_id=message_id,
         message_date=datetime(2026, 4, 28, 12, 0, message_id % 60),
         sender_id="sender-1",
         sender_display="Sender One",
-        text=f"text {message_id}",
-        caption=f"caption {message_id}",
-        has_media=True,
-        media_metadata_json={"kind": "photo"},
+        text=text,
+        caption=caption,
+        has_media=media_metadata is not None,
+        media_metadata_json=media_metadata,
         reply_to_message_id=message_id - 1,
         thread_id="thread-1",
         forward_metadata_json={"from": "source"},
