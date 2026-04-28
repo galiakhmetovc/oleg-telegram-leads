@@ -16,6 +16,8 @@ This plan implements only Telegram source and message ingestion. It does not imp
 
 ## Task 1: Telegram Source Schema
 
+- [x] Implement migration/model tables and verify with migration tests.
+
 **Files:**
 - Create: `migrations/versions/0002_telegram_sources.py`
 - Create: `src/pur_leads/models/telegram_sources.py`
