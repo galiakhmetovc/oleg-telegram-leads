@@ -1067,7 +1067,14 @@ Key fields:
 - `detection_mode`: `live`, `reclassification`, `retro_research`, `manual`
 - `confidence`
 - `reason`
-- `status`: `new`, `reviewed`, `closed`, `ignored`
+- `inbox_status`: `new`, `in_work`, `maybe`, `snoozed`, `not_lead`, `duplicate`, `converted`, `closed`
+- `review_status`: `unreviewed`, `confirmed`, `rejected`, `needs_more_info`
+- `work_outcome`: `none`, `contact_task_created`, `contacted`, `no_response`, `opportunity_created`, `support_case_created`, `client_interest_created`, `closed_no_action`
+- `snoozed_until`
+- `duplicate_of_lead_event_id`
+- `primary_task_id`
+- `converted_entity_type`
+- `converted_entity_id`
 - `is_retro`
 - `original_detected_at`
 - `created_at`
@@ -1082,6 +1089,9 @@ Rules:
 - Retro leads are visually marked in UI and Telegram notifications.
 - Retro lead notifications must explain that the message is historical and why it surfaced now.
 - Reclassification never mutates the old decision in place; it creates a new auditable result tied to the new classifier version.
+- AI detection state is preserved separately from inbox/work state.
+- `in_work` means the lead requires action, not that a client or opportunity already exists.
+- CRM objects are created only after clarification or explicit action.
 
 ### `lead_matches`
 
@@ -2071,6 +2081,39 @@ Rules:
 - If a lead is wrong, the UI should encourage narrow feedback: lead reason, matched item, matched term, or category.
 - `auto_pending` matches must be visually clear because feedback on them can immediately improve the classifier.
 - `maybe` stays in the web inbox by default and does not trigger Telegram notifications.
+
+Lead state model:
+
+- AI detection is historical evidence: `decision`, `confidence`, `detection_mode`, `classifier_version_id`, reason, and matches.
+- Inbox status is Oleg's workflow: `new`, `in_work`, `maybe`, `snoozed`, `not_lead`, `duplicate`, `converted`, `closed`.
+- Work outcome is the commercial/support result: task, touchpoint, opportunity, support case, client interest, contact reason, or closed without action.
+
+`Take into work` flow:
+
+- set `inbox_status = in_work`;
+- set `review_status = confirmed`;
+- write feedback action `lead_confirmed`;
+- create a task "contact about lead" due now;
+- store that task in `primary_task_id`;
+- do not automatically create client, opportunity, support case, or client interest.
+
+After `Take into work`, the card offers clarification actions:
+
+- create or link client;
+- create client interest;
+- create opportunity;
+- create support case;
+- create contact reason;
+- record touchpoint;
+- snooze retry/no-response task;
+- close without CRM conversion;
+- change decision to `not_lead` with a reason.
+
+Reasoning:
+
+- `Take into work` means "this requires human action".
+- Creating CRM objects requires clarification, because many Telegram leads will be incomplete or noisy.
+- This keeps lead review fast while preserving a path into CRM when the lead is real.
 
 ### Lead Detail
 
