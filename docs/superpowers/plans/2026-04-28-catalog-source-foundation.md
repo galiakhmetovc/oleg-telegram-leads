@@ -46,6 +46,8 @@ This plan implements catalog/source storage and deterministic catalog mutation s
 
 ## Task 3: Catalog Candidate And Evidence Services
 
+- [x] Implement candidate/evidence services and verify lifecycle/status/dedupe tests.
+
 **Files:**
 - Create: `src/pur_leads/repositories/catalog_candidates.py`
 - Create: `src/pur_leads/services/catalog_candidates.py`
