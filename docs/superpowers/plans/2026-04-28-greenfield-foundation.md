@@ -139,7 +139,7 @@ Responsibilities:
 - Replace: `docker-compose.yml`
 - Keep local only: `.env`, `*.session`, `sessions/`, `data/`, `artifacts/`
 
-- [ ] **Step 1: Confirm dirty state before deletion**
+- [x] **Step 1: Confirm dirty state before deletion**
 
 Run:
 
@@ -149,11 +149,11 @@ git status --short
 
 Expected: legacy files may be dirty. Confirm the product owner has explicitly approved deleting legacy code despite those local changes.
 
-- [ ] **Step 2: Delete tracked legacy files**
+- [x] **Step 2: Delete tracked legacy files**
 
 Use `apply_patch` delete hunks or `git rm` for tracked files only. Do not delete untracked `.env`, session files, runtime `data/`, or `artifacts/`.
 
-- [ ] **Step 3: Create placeholder greenfield README**
+- [x] **Step 3: Create placeholder greenfield README**
 
 Create `README.md`:
 
@@ -165,7 +165,7 @@ Greenfield implementation for PUR catalog source-of-truth, Telegram lead detecti
 The current source of truth is `docs/superpowers/specs/2026-04-28-pur-catalog-source-of-truth-design.md`.
 ```
 
-- [ ] **Step 4: Verify no legacy Python package remains**
+- [x] **Step 4: Verify no legacy Python package remains**
 
 Run:
 
@@ -175,7 +175,7 @@ rg -n "Pipeline|KeywordScanner|AIAnalyzer|chats.json|leads.json|/run|/recheck" .
 
 Expected: no matches outside deleted legacy diffs or the historical spec, if the spec mentions migration context.
 
-- [ ] **Step 5: Commit purge**
+- [x] **Step 5: Commit purge**
 
 Run:
 

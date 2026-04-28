@@ -1,40 +1,35 @@
-# === Secrets and config ===
+# Secrets and local runtime state
 .env
-.env.example
 sessions/
 *.session
 *.session-journal
 *.session-wal
-.deploy_key
-.deploy_key.pub
+*.deploy_key
+*.deploy_key.pub
 
-# === Runtime data ===
-data/checkpoints.json
-data/leads.json
-data/chats.json
-data/lead_examples.json
+# Runtime data
+data/
+artifacts/
+vault/
 
-# === Python ===
+# Python
 __pycache__/
-*.pyc
-*.pyo
-*.pyb broken
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+dist/
+build/
+*.egg-info/
 tg-venv/
 venv/
 .venv/
 
-# === IDE ===
+# IDE and OS files
 .idea/
 .vscode/
 *.swp
-
-# === OS ===
 .DS_Store
 Thumbs.db
-
-# === Temp/test files ===
-tmp_*.py
-_test_*.py
-artifacts/
-containers/
-vault/
