@@ -18,12 +18,12 @@
 - Modify: `src/pur_leads/models/__init__.py`
 - Test: `tests/test_crm_migration.py`
 
-- [ ] Write a failing migration test proving all CRM tables and key indexes exist after `upgrade_database`.
-- [ ] Run `uv run --extra dev pytest tests/test_crm_migration.py -q` and verify it fails because CRM tables do not exist.
-- [ ] Implement migration/model definitions for `clients`, `contacts`, `client_objects`, `client_interests`, `client_assets`, `opportunities`, `support_cases`, `contact_reasons`, and `touchpoints`.
-- [ ] Include enum check constraints matching the source-of-truth spec and foreign keys to lead/catalog/task/auth tables where available.
-- [ ] Run `uv run --extra dev pytest tests/test_crm_migration.py -q` and verify it passes.
-- [ ] Commit as `feat: add crm memory schema`.
+- [x] Write a failing migration test proving all CRM tables and key indexes exist after `upgrade_database`.
+- [x] Run `uv run --extra dev pytest tests/test_crm_migration.py -q` and verify it fails because CRM tables do not exist.
+- [x] Implement migration/model definitions for `clients`, `contacts`, `client_objects`, `client_interests`, `client_assets`, `opportunities`, `support_cases`, `contact_reasons`, and `touchpoints`.
+- [x] Include enum check constraints matching the source-of-truth spec and foreign keys to lead/catalog/task/auth tables where available.
+- [x] Run `uv run --extra dev pytest tests/test_crm_migration.py -q` and verify it passes.
+- [x] Commit as `feat: add crm memory schema`.
 
 ### Task 2: CRM Repository And Manual Service
 
