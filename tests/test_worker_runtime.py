@@ -101,6 +101,36 @@ async def test_worker_once_executes_registered_handler_and_marks_succeeded(runti
 
 
 @pytest.mark.asyncio
+async def test_worker_once_delays_retry_when_handler_exposes_retry_after(runtime_session):
+    class RetryLaterError(Exception):
+        retry_after_seconds = 37
+
+    scheduler = SchedulerService(runtime_session)
+    job = scheduler.enqueue(job_type="send_notifications", scope_type="global")
+    queued_peer = scheduler.enqueue(job_type="send_notifications", scope_type="global")
+    before = utc_now()
+
+    async def handler(acquired_job):
+        raise RetryLaterError("Telegram rate limit")
+
+    runtime = WorkerRuntime(runtime_session, handlers={"send_notifications": handler})
+
+    result = await runtime.run_once()
+
+    stored = scheduler.repository.get(job.id)
+    stored_peer = scheduler.repository.get(queued_peer.id)
+    assert stored is not None
+    assert stored_peer is not None
+    assert result.status == "failed"
+    assert stored.status == "queued"
+    assert stored.last_error == "Telegram rate limit"
+    assert stored.next_retry_at is not None
+    assert stored.next_retry_at >= before + timedelta(seconds=37)
+    assert stored_peer.status == "queued"
+    assert stored_peer.run_after_at >= stored.next_retry_at
+
+
+@pytest.mark.asyncio
 async def test_worker_once_fails_unsupported_job_with_operational_event(runtime_session):
     scheduler = SchedulerService(runtime_session)
     job = scheduler.enqueue(job_type="parse_artifact", scope_type="parser")

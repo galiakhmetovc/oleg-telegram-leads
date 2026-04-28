@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import asdict, dataclass, is_dataclass, replace
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Any, Protocol, cast
 
@@ -216,7 +216,8 @@ class WorkerRuntime:
         )
 
     def _fail_job(self, job: SchedulerJobRecord, exc: Exception) -> WorkerRunResult:
-        error = str(exc) or exc.__class__.__name__
+        error = _safe_exception_message(exc)
+        retry_at = _retry_at_for_exception(exc)
         self.audit.record_event(
             event_type="scheduler",
             severity="error",
@@ -225,7 +226,8 @@ class WorkerRuntime:
             entity_id=job.id,
             details_json={"reason": "handler_exception", "job_type": job.job_type},
         )
-        self.scheduler.fail(job.id, error=error, retry_at=utc_now())
+        _delay_queued_peer_jobs_after_retry(self.session, job=job, retry_at=retry_at)
+        self.scheduler.fail(job.id, error=error, retry_at=retry_at)
         return WorkerRunResult(
             status="failed",
             job_id=job.id,
@@ -1054,6 +1056,55 @@ def _truthy(value: Any) -> bool:
     if isinstance(value, str):
         return value.strip().casefold() in {"1", "true", "yes", "on"}
     return bool(value)
+
+
+def _safe_exception_message(exc: Exception) -> str:
+    return str(exc) or exc.__class__.__name__
+
+
+def _retry_at_for_exception(exc: Exception) -> datetime:
+    retry_after_seconds = getattr(exc, "retry_after_seconds", None)
+    if isinstance(retry_after_seconds, int | float) and retry_after_seconds > 0:
+        return utc_now() + timedelta(seconds=int(retry_after_seconds))
+    return utc_now()
+
+
+def _delay_queued_peer_jobs_after_retry(
+    session: Session,
+    *,
+    job: SchedulerJobRecord,
+    retry_at: datetime,
+) -> None:
+    if job.job_type != "send_notifications":
+        return
+    if retry_at <= utc_now():
+        return
+    rows = (
+        session.execute(
+            select(scheduler_jobs_table.c.id)
+            .where(
+                scheduler_jobs_table.c.job_type == job.job_type,
+                scheduler_jobs_table.c.status == "queued",
+                scheduler_jobs_table.c.id != job.id,
+                scheduler_jobs_table.c.run_after_at < _to_db_datetime(retry_at),
+            )
+            .order_by(scheduler_jobs_table.c.created_at)
+        )
+        .mappings()
+        .all()
+    )
+    now = utc_now()
+    for index, row in enumerate(rows):
+        scheduled_at = retry_at + timedelta(seconds=index + 1)
+        session.execute(
+            update(scheduler_jobs_table)
+            .where(scheduler_jobs_table.c.id == row["id"])
+            .values(
+                run_after_at=_to_db_datetime(scheduled_at),
+                next_retry_at=_to_db_datetime(scheduled_at),
+                updated_at=_to_db_datetime(now),
+            )
+        )
 
 
 def _mark_message_classified(session: Session, source_message_id: str) -> None:
