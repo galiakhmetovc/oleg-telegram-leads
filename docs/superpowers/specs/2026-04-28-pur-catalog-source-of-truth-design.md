@@ -553,9 +553,14 @@ Key fields:
 - `target_ref`
 - `entity_type`
 - `entity_id`
+- `notification_policy`: `immediate`, `digest`, `web_only`, `suppressed`
 - `status`: `queued`, `sent`, `failed`, `suppressed`
 - `priority`: `low`, `normal`, `high`, `urgent`
+- `dedupe_key`
+- `cooldown_until`
+- `suppression_reason`
 - `payload_summary`
+- `decision_snapshot_json`
 - `error`
 - `sent_at`
 - `created_at`
@@ -565,6 +570,7 @@ Purpose:
 - Audit what was sent to Telegram and why.
 - Avoid duplicate urgent notifications.
 - Support notification cooldowns and digests.
+- Prove that a lead was only shown in web when Telegram delivery was intentionally suppressed.
 
 ### `archive_segments`
 
@@ -1635,9 +1641,29 @@ Key settings:
 - `external_fetch_allowed_domains_json = ["telegra.ph"]`
 - `notify_catalog_candidates = true`
 - `notify_leads = true`
+- `notify_live_leads = true`
+- `notify_maybe = false`
+- `notify_retro_leads = false`
+- `notify_reclassification_leads = false`
+- `notify_high_value_low_confidence = true`
+- `lead_notify_min_confidence = 0.70`
+- `lead_notify_high_value_min_confidence = 0.45`
+- `lead_notify_categories_json = []`
+- `lead_notify_source_priorities_json = ["high", "normal"]`
+- `lead_notify_duplicate_suppression_window_hours = 24`
 - `notify_ai_errors = true`
 - `telegram_notify_auto_pending_confidence = true`
 - `telegram_auto_pending_label = "auto_pending"`
+- `telegram_notification_cooldown_minutes = 15`
+- `telegram_error_repeat_threshold = 3`
+- `telegram_error_repeat_window_minutes = 30`
+- `telegram_digest_enabled = true`
+- `telegram_digest_times_json = ["09:00", "18:00"]`
+- `telegram_digest_timezone = "Europe/Moscow"`
+- `telegram_digest_include_catalog_candidates = true`
+- `telegram_digest_include_maybe = true`
+- `telegram_digest_include_contact_reasons = true`
+- `telegram_digest_include_source_errors = true`
 - `auto_expire_campaign_prices = true`
 - `default_campaign_price_ttl_days = 30`
 - `default_offer_ttl_days = 30`
@@ -2419,6 +2445,11 @@ Required controls:
 - S3-compatible archive backend settings for the next phase;
 - provider policy warning acknowledgement;
 - Telegram notification toggles;
+- live lead notification confidence thresholds;
+- high-value low-confidence notification rules;
+- maybe/retro/reclassification notification policies;
+- Telegram digest times and digest contents;
+- notification cooldowns and duplicate suppression windows;
 - sync interval;
 - max document size.
 
@@ -2428,18 +2459,75 @@ Purpose:
 
 - show who changed what and when.
 
+## Telegram Notification Policy
+
+Telegram is an urgent signal channel. It must not become a duplicate of the web inbox.
+
+Sending a Telegram notification never changes lead state. A notified lead remains in `Leads Inbox` until Oleg takes an action in the web UI or an explicitly enabled Telegram acknowledgement flow handles it.
+
+Immediate Telegram notifications:
+
+- live actionable lead: `decision = lead`, confidence above `lead_notify_min_confidence`, not a duplicate, source not muted;
+- high-value low-confidence lead: lower confidence, but category/source/AI reason suggests meaningful commercial value;
+- operator action required: `needs_join`, `needs_captcha`, `private_or_no_access`, `banned`, repeated source failure, long flood wait, userbot down, AI/API unavailable, repeated parser failure;
+- urgent CRM/task/support item: high/urgent priority contact reason, task, or support case.
+
+Web-only by default:
+
+- `maybe`;
+- catalog candidates and `auto_pending` facts;
+- normal contact reasons;
+- research matches;
+- retro leads;
+- reclassification results;
+- transient errors that are still inside retry thresholds.
+
+Digest by default:
+
+- new leads count;
+- in-work leads count;
+- `maybe` count;
+- catalog candidates awaiting review;
+- source/userbot issues;
+- contact reasons and due tasks.
+
+Lead notification content:
+
+- short AI summary of what the person wants;
+- source chat;
+- author/sender when available;
+- message time;
+- category;
+- matched terms/items;
+- confidence;
+- `approved`/`auto_pending` fact markers;
+- links to `Leads Inbox` and the original Telegram message.
+
+Retro lead notification content, when enabled:
+
+- clear `retro` label;
+- original message date;
+- trigger reason: catalog change, prompt change, feedback change, manual research, or settings change;
+- link to web review.
+
+Deduplication/cooldown rules:
+
+- duplicate Telegram notifications are suppressed by `dedupe_key`;
+- one source or provider failure should not spam Telegram repeatedly;
+- suppressed notifications still create `notification_events` rows with `notification_policy = suppressed`.
+
 ## Telegram Role
 
 Telegram remains an information channel.
 
 Bot sends:
 
-- new lead notification;
+- immediate live/actionable lead notification;
 - daily/periodic status summary;
-- catalog candidates waiting for review;
-- contact reasons and due-task summaries;
-- support follow-up reminders;
-- AI/parser/sync errors;
+- digest summaries;
+- urgent contact reasons and due-task reminders;
+- urgent support follow-up reminders;
+- operator-required AI/parser/sync/userbot/access errors;
 - links to the web UI.
 
 Bot accepts:
@@ -2585,6 +2673,9 @@ Unit tests:
 - archive pointer creation after hot-row removal;
 - archive restore job scope selection;
 - embedding rows stay disabled/inactive when semantic search is off.
+- Telegram notification policy selection: immediate, digest, web-only, suppressed;
+- notification deduplication and cooldown key generation;
+- `maybe` and retro leads stay web-only by default.
 
 Integration tests:
 
@@ -2600,6 +2691,9 @@ Integration tests:
 - archived messages can be restored for research without moving monitoring checkpoints;
 - archive write failure does not delete hot rows;
 - local `parquet_zstd` archive round-trips messages, parsed chunks, and AI usage rows.
+- immediate live lead creates `notification_events` but leaves inbox status `new`;
+- duplicate lead does not create repeated Telegram notification inside suppression window;
+- repeated access/userbot issue escalates to Telegram only after configured thresholds.
 
 Live/smoke tests:
 
@@ -2611,6 +2705,7 @@ Live/smoke tests:
 - unauthorized Telegram users cannot access the web UI;
 - CRM Today screen can load leads, contact reasons, and due tasks from SQLite.
 - Storage / Archives screen shows local archive segments, verification status, and restore job status.
+- Telegram lead notification links open both `Leads Inbox` and the original Telegram message.
 
 ## Resolved Configuration Decisions
 
