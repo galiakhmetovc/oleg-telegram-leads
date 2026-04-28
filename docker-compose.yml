@@ -1,0 +1,29 @@
+services:
+  leads-finder:
+    build: .
+    container_name: leads-finder
+    restart: always
+    env_file:
+      - .env
+    volumes:
+      # Telegram сессии (обязательно — Telethon хранит SQLite)
+      - ./sessions:/app/sessions
+      # Данные runtime (чаты, чекпоинты, лиды, примеры)
+      - ./data:/app/data
+      # Obsidian — отчёты
+      - ./vault:/app/vault
+      # Логи и артефакты
+      - ./artifacts:/app/artifacts
+    environment:
+      # Путь к сессии userbot внутри контейнера
+      - SESSION_PATH=/app/sessions/krab-tg-session
+      - BOT_SESSION_PATH=/app/sessions/bot-session
+      - OBSIDIAN_DIR=/app/vault/05-Journal/oleg-telegram-leads
+      # z.ai API (явно задаём, чтобы не зависеть от env_file)
+      - ZAI_BASE_URL=https://api.z.ai/api/coding/paas/v4
+      - ZAI_MODEL=glm-4.5
+      # Logging
+      - LOG_LEVEL=DEBUG
+      - LOG_DIR=/app/artifacts/logs
+    stdin_open: true
+    tty: true

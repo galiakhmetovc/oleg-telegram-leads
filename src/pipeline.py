@@ -8,12 +8,14 @@
   python pipeline.py              — daemon (слушает группу + запускает циклы)
   python pipeline.py --once       — один цикл и выход
   python pipeline.py --daemon     — явный daemon
+
 """
 
 import argparse
 import asyncio
 import json
 import logging
+import logging.handlers
 import os
 import re
 import signal
@@ -24,6 +26,8 @@ from pathlib import Path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from telethon import TelegramClient, events
+from telethon.tl.functions.bots import SetBotCommandsRequest
+from telethon.tl.types import BotCommand, BotCommandScopeDefault
 
 from src import config
 from src.fetcher import Fetcher
@@ -31,11 +35,27 @@ from src.keyword_scanner import KeywordScanner
 from src.ai_analyzer import AIAnalyzer
 from src.notifier import Notifier
 
+import json as _json
+
+# ── Logging setup ────────────────────────────────────
+_log_level = getattr(logging, os.getenv("LOG_LEVEL", "DEBUG"), logging.DEBUG)
+_log_dir = Path(os.getenv("LOG_DIR", str(Path(__file__).resolve().parent.parent / "artifacts" / "logs")))
+_log_dir.mkdir(parents=True, exist_ok=True)
+
+_log_file = _log_dir / "leads-finder.log"
+_file_handler = logging.handlers.RotatingFileHandler(
+    str(_log_file), maxBytes=10 * 1024 * 1024, backupCount=5, encoding="utf-8"
+)
+_file_handler.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s"))
+_file_handler.setLevel(logging.DEBUG)
+
 logging.basicConfig(
-    level=logging.INFO,
+    level=_log_level,
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    handlers=[logging.StreamHandler(), _file_handler],
 )
 logger = logging.getLogger("pipeline")
+logger.info("Logging: level=%s, file=%s", _log_level, _log_file)
 
 # ── Graceful shutdown ────────────────────────────────────
 _shutdown = False
@@ -76,6 +96,7 @@ HELP_TEXT = """🤖 **Leads Finder — Команды**
 
 💡 **Обучение AI:**
 Перешлите сообщение из уже мониторимого чата — оно сохранится как пример лида.
+
 """
 
 MONTHS_RU = ["", "января", "февраля", "марта", "апреля", "мая", "июня",
@@ -92,6 +113,7 @@ class Pipeline:
     def __init__(self, bot, userbot):
         self.bot = bot
         self.userbot = userbot
+        self.bot_user_id = None
         self.scanner = KeywordScanner()
         self.analyzer = AIAnalyzer()
         self.notifier = Notifier(bot)
@@ -116,10 +138,13 @@ class Pipeline:
             for chat in chats:
                 chat_id = chat.get("id")
                 chat_title = chat.get("title", str(chat_id))
-                access = await fetcher.check_chat_access(chat_id, chat_title)
-                if not access.get("ok") and access.get("captcha"):
-                    skipped_chats.append(chat_title)
-                    logger.warning("Чат %s пропущен: captch'а", chat_title)
+                try:
+                    access = await fetcher.check_chat_access(chat_id, chat_title)
+                    if not access.get("ok") and access.get("captcha"):
+                        skipped_chats.append(chat_title)
+                        logger.warning("Чат %s пропущен: captch'а", chat_title)
+                except Exception as e:
+                    logger.warning("Проверка доступа %s: %s", chat_title, e)
 
             if skipped_chats:
                 await self.bot.send_message(
@@ -140,25 +165,56 @@ class Pipeline:
                 return f"Новых сообщений нет ({len(chats)} чатов)"
 
             logger.info("Получено %d сообщений из %d чатов", len(messages), len(chats))
+            for _m in messages[:5]:
+                logger.debug("   msg id=%s from=%s text=%r", _m.get("id"), _m.get("sender_name", "?"), _m.get("text", "")[:80])
 
             # 2. Keyword scan
             keyword_results = self.scanner.scan(messages)
             logger.info("Keyword matches: %d / %d", len(keyword_results), len(messages))
+            for _kw in keyword_results[:5]:
+                logger.debug("   kw hit: msg_id=%s words=%s", _kw.get("message", {}).get("id"), _kw.get("matched_keywords"))
 
-            # 3. AI analyze (все сообщения — ADR-002)
+            # 3. AI analyze — отправляем ВСЕ сообщения (ADR-002)
             ai_results = await self.analyzer.analyze(messages)
-            logger.info("AI leads: %d", len(ai_results))
+            logger.info("AI leads: %d (model=%s)", len(ai_results), config.ZAI_MODEL)
+            for _a in ai_results[:5]:
+                logger.debug("   AI lead: id=%s reason=%r", _a.get("id"), _a.get("reason", "")[:100])
 
-            # 4. Merge keyword + AI results (dedup по message_id)
-            all_leads = self._merge_results(keyword_results, ai_results)
+            # 4. Обогащаем AI-результаты keyword-данными
+            kw_map = {}
+            for kw_result in keyword_results:
+                msg_id = kw_result.get("message", {}).get("id")
+                if msg_id:
+                    kw_map[msg_id] = kw_result.get("matched_keywords", [])
+
+            enriched_leads = []
+            for lead in ai_results:
+                msg_id = lead.get("message", {}).get("id")
+                lead["matched_keywords"] = kw_map.get(msg_id, [])
+                lead["categories"] = kw_map.get(msg_id, [])
+                enriched_leads.append(lead)
+
+            # 4b. Keyword fallback: если AI пустой, но keyword нашёл — логируем, НЕ отправляем
+            if not ai_results and keyword_results:
+                logger.info(
+                    "AI вернул 0 лидов, keyword scanner нашёл %d совпадений (не отправляем — только AI лиды)",
+                    len(keyword_results),
+                )
 
             # 5. Dedup с историей
-            new_leads = self._dedup_leads(all_leads)
+            # 5. Dedup с историей
+            # Проверяем, есть ли pending_scan_ids (recheck mode)
+            pending_ids = set()
+            for chat in chats:
+                pids = chat.get("pending_scan_ids")
+                if pids:
+                    pending_ids.update(pids)
+            new_leads = self._dedup_leads(enriched_leads, skip_ids=pending_ids if pending_ids else None)
 
-            # 6. Notify + @mention
             if new_leads:
                 await self.notifier.notify(new_leads, mention_anton=True)
                 await self._save_leads(new_leads)
+                self._save_to_obsidian(messages, keyword_results, new_leads)
                 logger.info("📤 Отправлено %d лидов, @Anton уведомлён", len(new_leads))
             else:
                 await self._send_status(
@@ -169,14 +225,11 @@ class Pipeline:
                     leads=0,
                     message=f"✅ Проверено {len(messages)} сообщений, лидов нет"
                 )
-
-            # 7. Save to Obsidian
-            self._save_to_obsidian(messages, keyword_results, new_leads)
-
+            return f"Сообщений: {len(messages)} | Keyword: {len(keyword_results)} | AI: {len(ai_results)} | Новых лидов: {len(new_leads)}"
             return f"Сообщений: {len(messages)} | Keyword: {len(keyword_results)} | AI: {len(ai_results)} | Новых лидов: {len(new_leads)}"
 
         except Exception as e:
-            logger.error("Ошибка цикла: %s", e, exc_info=True)
+            logger.error("PIPELINE CYCLE ERROR: %s", e, exc_info=True)
             await self.notifier.send_error(str(e))
             raise
 
@@ -200,12 +253,6 @@ class Pipeline:
 
     async def cmd_list(self, chat_id: int):
         """Список мониторимых чатов."""
-        chats = config.load_chats()
-        checkpoints = config.load_checkpoints()
-        if not chats:
-            await self.bot.send_message(chat_id, "📭 Список чатов пуст. Перешлите сообщение или отправьте ссылку.")
-            return
-
         lines = [f"📂 **Мониторимые чаты ({len(chats)}):**\n"]
         for c in chats:
             cp = checkpoints.get(str(c.get("id", "?")), "нет")
@@ -219,6 +266,181 @@ class Pipeline:
 
         await self.bot.send_message(chat_id, "\n".join(lines), parse_mode="markdown")
 
+    async def cmd_leads(self, chat_id: int):
+        """Показать последние лиды."""
+        leads = self._load_leads()
+        if not leads:
+            await self.bot.send_message(chat_id, "📭 Лидов пока нет.")
+            return
+
+        last_leads = leads[-10:]
+        lines = [f"📋 **Последние {len(last_leads)} лидов (из {len(leads)}):**\n"]
+        for i, lead in enumerate(last_leads, 1):
+            lines.append(f"**{i}.** [{lead.get('chat_title', '?')}]")
+            text = lead.get("text", "")
+            if text:
+                lines.append(f"💬 _{text[:100]}_")
+            # Keyword triggers
+            matched_kw = lead.get("categories", [])
+            if matched_kw:
+                kw_names = []
+                for kw in matched_kw:
+                    if isinstance(kw, dict):
+                        kw_names.append(f"{kw.get('keyword', '')} ({kw.get('score', 0)}%)")
+                    elif isinstance(kw, str):
+                        kw_names.append(kw)
+                if kw_names:
+                    lines.append(f"🔑 Слова: {' , '.join(kw_names)}")
+            # AI verdict
+            source = lead.get("source", "")
+            reason = lead.get("reason", "")
+            if source == "ai":
+                lines.append(f"🤖 AI: ✅ лид — {reason}" if reason else "🤖 AI: ✅ лид")
+            elif source == "keyword":
+                lines.append("⚠️ Keyword-матч (без AI)")
+            if lead.get("link"):
+                lines.append(f"🔗 {lead['link']}")
+            lines.append("")
+        await self.bot.send_message(chat_id, "\n".join(lines), parse_mode="markdown")
+
+    async def cmd_recheck(self, chat_id: int, arg: str):
+        """Перепроверить конкретные сообщения через AI.
+
+        Поддерживает:
+        - Один ID: /recheck 716288
+        - Несколько ID через пробел: /recheck 716254 716288
+        - Ссылку: /recheck https://t.me/chat/716288
+        """
+        # Парсим message IDs из аргумента
+        msg_ids = []
+
+        # Ссылка t.me/chat/123
+        link_match = TG_LINK_RE.search(arg)
+        if link_match:
+            msg_ids.append(int(link_match.group(2)))
+        else:
+            # Пробуем распарсить как числа
+            for token in arg.split():
+                token = token.strip()
+                # Проверяем, не ссылка ли это частичная
+                sub_match = TG_LINK_RE.search(token)
+                if sub_match:
+                    msg_ids.append(int(sub_match.group(2)))
+                else:
+                    try:
+                        msg_ids.append(int(token))
+                    except ValueError:
+                        pass
+
+        if not msg_ids:
+            await self.bot.send_message(chat_id, "❌ Не удалось распознать ID сообщений.")
+            return
+
+        # Убираем дубли
+        msg_ids = list(dict.fromkeys(msg_ids))
+
+        # Определяем чат: берем первый мониторящийся или пытаемся найти из ссылки
+        chats = config.load_chats()
+        if not chats:
+            await self.bot.send_message(chat_id, "📭 Нет чатов для мониторинга.")
+            return
+
+        # Если была ссылка — определяем чат из username
+        target_chat = None
+        link_match = TG_LINK_RE.search(arg)
+        if link_match:
+            link_username = link_match.group(1)
+            for c in chats:
+                uname = (c.get("username") or "").lstrip("@").lower()
+                if uname == link_username.lower():
+                    target_chat = c
+                    break
+
+        if not target_chat:
+            if len(chats) == 1:
+                target_chat = chats[0]
+            else:
+                await self.bot.send_message(
+                    chat_id,
+                    f"❓ Укажите чат (несколько в мониторинге):\n" +
+                    "\n".join(f"• {c.get('title', '?')} (id={c.get('id')})" for c in chats) +
+                    f"\n\nИспользуйте: `/recheck <chat_id> <msg_ids>`",
+                    parse_mode="markdown",
+                )
+                return
+
+        chat_id_int = target_chat.get("id")
+        chat_title = target_chat.get("title", str(chat_id_int))
+
+        # Устанавливаем pending_scan_ids
+        await self.bot.send_message(
+            chat_id,
+            f"🔍 Перепроверяю {len(msg_ids)} сообщений в **{chat_title}**...\n"
+            f"📋 ID: {', '.join(str(i) for i in msg_ids)}",
+            parse_mode="markdown",
+        )
+        logger.info("recheck: %d сообщений для чата %s: %s", len(msg_ids), chat_title, msg_ids)
+
+        # Сохраняем pending_scan_ids в конфиг чата
+        target_chat["pending_scan_ids"] = msg_ids
+        config.save_chats(chats)
+
+        # Сбрасываем лиды (чтобы дедуп не мешал)
+        # НЕ сбрасываем checkpoint — он останется как есть
+
+        # Запускаем один цикл
+        try:
+            result = await self.run_once()
+            await self.bot.send_message(chat_id, f"✅ Перепроверка завершена.\n{result}")
+        except Exception as e:
+            logger.error("Ошибка перепроверки: %s", e, exc_info=True)
+            await self.bot.send_message(chat_id, f"❌ Ошибка: {e}")
+    async def cmd_leads(self, chat_id: int):
+        """Показать последние лиды."""
+        leads = self._load_leads()
+        if not leads:
+            await self.bot.send_message(chat_id, "📭 Лидов пока нет.")
+            return
+
+        last_leads = leads[-10:]
+        lines = [f"📋 **Последние {len(last_leads)} лидов (из {len(leads)}):**\n"]
+        for i, lead in enumerate(last_leads, 1):
+            lines.append(f"**{i}.** [{lead.get('chat_title', '?')}]")
+            text = lead.get("text", "")
+            if text:
+                lines.append(f"💬 _{text[:100]}_")
+            # Keyword triggers
+            matched_kw = lead.get("categories", [])
+            if matched_kw:
+                kw_names = []
+                for kw in matched_kw:
+                    if isinstance(kw, dict):
+                        kw_names.append(f"{kw.get('keyword', '')} ({kw.get('score', 0)}%)")
+                    elif isinstance(kw, str):
+                        kw_names.append(kw)
+                if kw_names:
+                    lines.append(f"🔑 Слова: {' , '.join(kw_names)}")
+            # AI verdict
+            source = lead.get("source", "")
+            reason = lead.get("reason", "")
+            if source == "ai":
+                lines.append(f"🤖 AI: ✅ лид — {reason}" if reason else "🤖 AI: ✅ лид")
+            elif source == "keyword":
+                lines.append("⚠️ Keyword-матч (без AI)")
+            if lead.get("link"):
+                lines.append(f"🔗 {lead['link']}")
+            lines.append("")
+        await self.bot.send_message(chat_id, "\n".join(lines), parse_mode="markdown")
+
+    async def cmd_run(self, chat_id: int):
+        """Запустить проверку вручную."""
+        await self.bot.send_message(chat_id, "▶ Запускаю проверку...")
+        try:
+            result = await self.run_once()
+        except Exception as e:
+            logger.error("Ошибка ручного запуска: %s", e, exc_info=True)
+            await self.bot.send_message(chat_id, f"❌ Ошибка: {e}")
+
     async def cmd_reset(self, chat_id: int, chat_ref: str):
         """Сбросить чекпоинт чата."""
         chat_id_int = await self._resolve_chat_id(chat_ref, chat_id)
@@ -226,13 +448,9 @@ class Pipeline:
             return
 
         checkpoints = config.load_checkpoints()
-        key = str(chat_id_int)
-        if key in checkpoints:
-            del checkpoints[key]
-            config.save_checkpoints(checkpoints)
-            await self.bot.send_message(chat_id, f"🔄 Чекпоинт сброшен для чата `{chat_id_int}`\nСледующий цикл начнёт с текущего момента.", parse_mode="markdown")
-        else:
-            await self.bot.send_message(chat_id, f"ℹ️ У чата `{chat_id_int}` нет чекпоинта (или он уже сброшен).", parse_mode="markdown")
+        checkpoints[str(chat_id_int)] = 0
+        config.save_checkpoints(checkpoints)
+        await self.bot.send_message(chat_id, f"🔄 Чекпоинт чата `{chat_id_int}` сброшен.", parse_mode="markdown")
 
     async def cmd_remove(self, chat_id: int, chat_ref: str):
         """Удалить чат из мониторинга."""
@@ -241,94 +459,27 @@ class Pipeline:
             return
 
         chats = config.load_chats()
-        original_len = len(chats)
+        before = len(chats)
         chats = [c for c in chats if c.get("id") != chat_id_int]
-        if len(chats) < original_len:
+        if len(chats) < before:
             config.save_chats(chats)
-            checkpoints = config.load_checkpoints()
-            key = str(chat_id_int)
-            if key in checkpoints:
-                del checkpoints[key]
-                config.save_checkpoints(checkpoints)
             await self.bot.send_message(chat_id, f"🗑 Чат `{chat_id_int}` удалён из мониторинга.", parse_mode="markdown")
         else:
             await self.bot.send_message(chat_id, f"⚠️ Чат `{chat_id_int}` не найден в списке.", parse_mode="markdown")
-
-    async def cmd_leads(self, chat_id: int):
-        """Последние найденные лиды."""
-        leads = self._load_leads()
-        if not leads:
-            await self.bot.send_message(chat_id, "📋 Лидов пока нет.")
-            return
-
-        last_leads = leads[-10:]
-        lines = [f"📋 **Последние {len(last_leads)} лидов (из {len(leads)}):**\n"]
-        for i, lead in enumerate(last_leads, 1):
-            msg = lead.get("message", {})
-            lines.append(f"**{i}.** [{msg.get('chat_title', '?')}]")
-            lines.append(f"💬 _{(msg.get('text', '') or '')[:100]}_")
-            if msg.get("link"):
-                lines.append(f"🔗 {msg['link']}")
-            if lead.get("reason"):
-                lines.append(f"🤖 {lead['reason']}")
-            lines.append("")
-
-        await self.bot.send_message(chat_id, "\n".join(lines), parse_mode="markdown")
-
-    async def cmd_run(self, chat_id: int):
-        """Запустить цикл вручную."""
-        await self.bot.send_message(chat_id, "▶ Запускаю проверку...")
-        try:
-            result = await self.run_once()
-            await self.bot.send_message(chat_id, f"✅ Готово:\n{result}")
-        except Exception as e:
-            await self.bot.send_message(chat_id, f"❌ Ошибка: {e}")
-
-    # ── Обработка пересылок и ссылок ─────────────────────
-    async def handle_forward(self, event: events.NewMessage.Event):
-        """Обрабатывает пересланные сообщения.
-
-        Сценарий 1: Чат НЕ в мониторинге → добавить чат, чекпоинт = ID пересланного сообщения
-        Сценарий 2: Чат УЖЕ в мониторинге → сохранить как пример лида
-        """
-        if not event.forward:
-            return
-
-        fwd = event.forward
-
-        # Шаг 1: Извлечь chat_id из пересылки
-        chat_id = self._extract_chat_id_from_forward(fwd)
-
-        # Шаг 2: Если не удалось — fallback через userbot
-        if not chat_id:
-            chat_id = await self._find_chat_via_userbot(fwd)
-
-        if not chat_id:
-            await self.bot.send_message(
-                event.chat_id,
-                "⚠️ Не удалось определить исходный чат.\n\n"
-                "Попробуйте:\n"
-                "• Переслать сообщение вручную (не через бота)\n"
-                "• Отправить ссылку: `t.me/chat_name/123`"
-            )
-            return
-
-        # Шаг 3: Определяем сценарий
         chats = config.load_chats()
         existing = next((c for c in chats if c.get("id") == chat_id), None)
 
         if existing:
-            await self._save_lead_example(event, fwd, chat_id, existing)
+            # Сценарий 2: пример лида
+            fwd_text = fwd.message or ""
+            sender_name = fwd.from_name or "Unknown"
+            await self._save_lead_example_with_text(event, chat_id, existing, fwd_text, fwd.id, sender_name)
         else:
-            await self._add_chat_from_forward(event, fwd, chat_id)
+            # Сценарий 1: добавить чат
+            await self._add_chat(event, chat_id, fwd.from_name or "Unknown", None, fwd.id)
 
     async def handle_link(self, event: events.NewMessage.Event, link: str):
-        """Обрабатывает ссылку t.me/chat/123.
-
-        Шаг 1: Мгновенный отклик — «принял, валидирую»
-        Шаг 2: Если чат уже в мониторинге — «пример лида получен, обновляю БД»
-        Шаг 3: Если новый чат — «присоединяюсь» → captch'а или «поставлен на мониторинг»
-        """
+        """Обрабатывает ссылку t.me/chat/123."""
         match = TG_LINK_RE.search(link)
         if not match:
             await self.bot.send_message(event.chat_id, "⚠️ Не удалось распарсить ссылку.\nФормат: `t.me/chat_name/123`")
@@ -369,7 +520,6 @@ class Pipeline:
 
         if existing:
             # Сценарий 2: чат уже мониторится → пример лида
-            # Сначала получим текст сообщения из чата
             try:
                 msgs = await self.userbot.get_messages(chat_id, ids=message_id)
                 fwd_text = msgs.text if msgs and msgs.text else ""
@@ -378,65 +528,24 @@ class Pipeline:
             await self._save_lead_example_with_text(event, chat_id, existing, fwd_text, message_id)
             return
 
-        # Шаг 4: Проверяем доступ (captch'а, бан)
-        fetcher = Fetcher(self.userbot)
-        access = await fetcher.check_chat_access(chat_id, chat_title)
+        # Шаг 4: Новый чат — проверка доступа + добавление
+        await self._add_chat(event, chat_id, chat_title, username, message_id)
 
-        if not access.get("ok"):
-            # Ошибка доступа (captcha / not_joined / banned / etc)
-            reason = access.get("reason", "unknown")
-            chats = config.load_chats()
-            # Не дублируем, если уже в списке
-            if not any(c.get("id") == chat_id for c in chats):
-                new_chat = {
-                    "id": chat_id,
-                    "title": chat_title,
-                    "username": username,
-                    "added": datetime.now().isoformat(),
-                    "status": "captcha" if reason == "captcha" else "blocked",
-                }
-                chats.append(new_chat)
-                config.save_chats(chats)
+    # ── Внутренние: добавление чата ──────────────────────
+    async def _add_chat(self, event, chat_id, chat_title, username, checkpoint_msg_id):
+        """Добавляет чат в мониторинг с проверкой доступа."""
+        from telethon.tl.types import Channel, Chat
 
-            checkpoints = config.load_checkpoints()
-            checkpoints[str(chat_id)] = message_id
-            config.save_checkpoints(checkpoints)
-
-            await self.bot.send_message(
-                event.chat_id,
-                access.get("message", "⚠️ Проблема с доступом к чату."),
-                parse_mode="markdown",
-            )
-            logger.warning("Чат %s добавлен с проблемой: %s", chat_title, reason)
-            return
-
-        # Шаг 5: Всё ОК — ставим на мониторинг
-        now = datetime.now()
-        new_chat = {
-            "id": chat_id,
-            "title": chat_title,
-            "username": username,
-            "added": now.isoformat(),
-            "status": "active",
-        }
-        chats.append(new_chat)
-        config.save_chats(chats)
-
-        checkpoints = config.load_checkpoints()
-        checkpoints[str(chat_id)] = message_id
-        config.save_checkpoints(checkpoints)
-
-        await self.bot.send_message(
-            event.chat_id,
-            f"✅ **Группа \"{chat_title}\" поставлена на мониторинг**\n\n"
-            f"📅 {_format_date_ru(now)}\n"
-            f"🔗 @{username}\n"
-            f"🔑 ID: `{chat_id}`\n"
-            f"📍 Чекпоинт: сообщение {message_id} (история до него пропущена)\n\n"
-            f"Следующий цикл начнёт читать новые сообщения.",
-            parse_mode="markdown",
-        )
-        logger.info("Добавлен чат %s (%s) по ссылке, чекпоинт = %d", chat_title, chat_id, message_id)
+        # Попробуем определить username через entity
+        resolved_username = username
+        if not resolved_username:
+            try:
+                entity = await self.userbot.get_entity(chat_id)
+                resolved_username = getattr(entity, "username", None)
+                if resolved_username:
+                    resolved_username = f"@{resolved_username}"
+            except Exception:
+                pass
 
         # Мгновенный отклик
         await self.bot.send_message(
@@ -445,13 +554,16 @@ class Pipeline:
             parse_mode="markdown",
         )
 
-        # Проверяем доступ (captch'а, бан)
+        # Проверяем доступ
+        fetcher = Fetcher(self.userbot)
         access = await fetcher.check_chat_access(chat_id, chat_title)
 
-        # Сохраняем чекпоинт = ID пересланного сообщения
+        # Сохраняем чекпоинт: message_id - 1, чтобы self.include сообщение с этим ID
         checkpoints = config.load_checkpoints()
-        checkpoints[str(chat_id)] = fwd.id
+        checkpoint_value = max(0, checkpoint_msg_id - 1) if checkpoint_msg_id else 0
+        checkpoints[str(chat_id)] = checkpoint_value
         config.save_checkpoints(checkpoints)
+        logger.info("Чекпоинт для %s: %d (message_id=%d, checkpoint-1)", chat_title, checkpoint_value, checkpoint_msg_id)
 
         if not access.get("ok"):
             reason = access.get("reason", "unknown")
@@ -460,7 +572,7 @@ class Pipeline:
                 new_chat = {
                     "id": chat_id,
                     "title": chat_title,
-                    "username": username,
+                    "username": resolved_username,
                     "added": datetime.now().isoformat(),
                     "status": "captcha" if reason == "captcha" else "blocked",
                 }
@@ -480,25 +592,29 @@ class Pipeline:
         new_chat = {
             "id": chat_id,
             "title": chat_title,
-            "username": username,
+            "username": resolved_username,
             "added": now.isoformat(),
             "status": "active",
+            "initial_scan_msg_id": checkpoint_msg_id if checkpoint_msg_id else None,
         }
         chats.append(new_chat)
         config.save_chats(chats)
 
-        extra = f"\n🔗 @{username}" if username else ""
+        extra = f"\n🔗 {resolved_username}" if resolved_username else ""
         await self.bot.send_message(
             event.chat_id,
-            f"✅ **Группа \"{chat_title}\" поставлена на мониторинг**\n\n"
+            f'✅ **Группа "{chat_title}" поставлена на мониторинг**\n\n'
             f"📅 {_format_date_ru(now)}\n"
             f"{extra}\n"
             f"🔑 ID: `{chat_id}`\n"
-            f"📍 Чекпоинт: сообщение {fwd.id} (история до него пропущена)\n\n"
+            f"📍 Чекпоинт: сообщение {checkpoint_msg_id} (история до него пропущена)\n\n"
             f"Следующий цикл начнёт читать новые сообщения.",
             parse_mode="markdown",
         )
-        logger.info("Добавлен чат %s (%s) по пересылке, чекпоинт = %d", chat_title, chat_id, fwd.id)
+        logger.info("Добавлен чат %s (%s), чекпоинт=%d (msg_id=%d)", chat_title, chat_id, checkpoint_value, checkpoint_msg_id)
+
+    # ── Внутренние: извлечение chat_id из пересылки ──────
+    def _extract_chat_id_from_forward(self, fwd) -> int | None:
         """Извлекает chat_id напрямую из объекта пересылки."""
         if fwd.chat_id:
             return fwd.chat_id
@@ -512,6 +628,7 @@ class Pipeline:
                 return None  # Это ЛС
 
         return None
+
     async def _find_chat_via_userbot(self, fwd) -> int | None:
         """Fallback: ищет чат через userbot по from_name."""
         if not fwd.from_name:
@@ -521,6 +638,7 @@ class Pipeline:
         logger.info("Ищем чат через userbot по имени: %s", search_name)
 
         try:
+            from telethon.tl.types import Channel, Chat
             async for dialog in self.userbot.iter_dialogs(limit=200):
                 entity = dialog.entity
                 title = getattr(entity, "title", "") or ""
@@ -530,7 +648,6 @@ class Pipeline:
                     search_name.lower() in username.lower() or
                     title.lower() in search_name.lower()):
 
-                    from telethon.tl.types import Channel, Chat
                     if isinstance(entity, (Channel, Chat)):
                         if isinstance(entity, Channel):
                             chat_id = int(f"-100{entity.id}")
@@ -540,8 +657,10 @@ class Pipeline:
                         return chat_id
         except Exception as e:
             logger.warning("Ошибка поиска чата через userbot: %s", e)
-        await self._save_lead_example_with_text(event, chat_id, existing, fwd_text, message_id, sender_name)
 
+        return None
+
+    # ── Внутренние: сохранение примера лида ──────────────
     async def _save_lead_example_with_text(self, event, chat_id, existing, fwd_text, message_id, sender_name="Unknown"):
         """Сохраняет пример лида в БД и отправляет подтверждение."""
         if not fwd_text:
@@ -631,9 +750,19 @@ class Pipeline:
 
         return all_leads
 
-    def _dedup_leads(self, leads: list) -> list:
-        """Убрать лиды, которые уже были отправлены."""
-        seen = self._load_seen_lead_ids()
+    def _dedup_leads(self, leads: list, skip_ids: set = None) -> list:
+        """Убрать лиды, которые уже были отправлены.
+
+        Args:
+            leads: список найденных лидов
+            skip_ids: если передан, только эти ID исключаются из dedup (recheck)
+        """
+        if skip_ids is not None:
+            # Recheck mode: исключаем из dedup только указанные ID
+            seen = self._load_seen_lead_ids() - skip_ids
+            logger.info("dedup: recheck mode, исключаем из seen: %s", skip_ids)
+        else:
+            seen = self._load_seen_lead_ids()
         return [l for l in leads if l.get("message", {}).get("id") not in seen]
 
     def _load_seen_lead_ids(self) -> set:
@@ -659,11 +788,6 @@ class Pipeline:
         return []
 
     def _count_leads(self) -> int:
-        return len(self._load_leads())
-
-    async def _save_leads(self, leads: list):
-        """Сохранить новые лиды в leads.json."""
-        leads_file = config.DATA_DIR / "leads.json"
         existing = self._load_leads()
         for lead in leads:
             existing.append({
@@ -684,7 +808,7 @@ class Pipeline:
 
     async def _send_status(self, chats_count: int, fetched: int, kw: int, ai: int, leads: int, message: str):
         """Отправить статусный репорт в группу."""
-        await self.notifier.send_text(f"📊 {message}\n\n✉️ {fetched} сообщений | 🔑 {kw} keyword | 🤖 {ai} AI | 🎯 {leads} лидов | 📂 {chats_count} чатов")
+        await self.notifier.send_text(f"📊 {message}\n\n✉️ {fetched} сообщений | 🤖 {ai} AI-лидов | 🎯 {leads} новых | 📂 {chats_count} чатов")
 
     def _save_to_obsidian(self, messages: list, keyword_results: list, new_leads: list):
         """Сохраняет результаты цикла в Obsidian."""
@@ -719,7 +843,6 @@ class Pipeline:
             logger.error("Ошибка сохранения в Obsidian: %s", e)
 
 
-# ── Daemon ───────────────────────────────────────────────
 async def daemon_mode() -> None:
     """Daemon: слушает управляющую группу + запускает циклы по расписанию."""
     global _shutdown
@@ -732,10 +855,46 @@ async def daemon_mode() -> None:
     )
     await bot.start(bot_token=config.BOT_TOKEN)
 
+    # Verify bot started correctly
     me = await bot.get_me()
-    logger.info("🤖 Бот запущен: @%s", me.username)
+    if not me or not me.bot:
+        logger.error("❌ Не удалось запустить бота! Проверьте BOT_TOKEN.")
+        return
 
-    # Userbot client — чтение чатов + поиск чатов (постоянное подключение)
+    logger.info("🤖 Бот запущен: @%s (id=%s)", me.username, me.id)
+    bot_user_id = me.id
+
+    # Test message sending to group
+    try:
+        test_msg = await bot.send_message(config.GROUP_CHAT_ID, "🧪 Проверка доступа...")
+        await asyncio.sleep(1)
+        await test_msg.delete()
+        logger.info("✅ Бот может отправлять сообщения в группу")
+    except Exception as e:
+        logger.error("❌ Бот не может отправлять сообщения в группу: %s", e)
+        logger.error("Проверьте: 1) Бот добавлен в группу  2) Group Privacy = Disable")
+        await asyncio.sleep(5)
+        return
+
+    # Регистрируем команды бота
+    await bot(SetBotCommandsRequest(
+        scope=BotCommandScopeDefault(),
+        lang_code="",
+        commands=[
+            BotCommand(command="status", description="Статус системы"),
+            BotCommand(command="run", description="Запустить проверку сейчас"),
+            BotCommand(command="list", description="Список чатов под мониторингом"),
+            BotCommand(command="reset", description="Сбросить чекпоинт чата"),
+            BotCommand(command="remove", description="Удалить чат из мониторинга"),
+            BotCommand(command="remove", description="Удалить чат из мониторинга"),
+            BotCommand(command="leads", description="Последние найденные лиды"),
+            BotCommand(command="recheck", description="Перепроверить конкретные сообщения"),
+            BotCommand(command="help", description="Справка"),
+        ],
+    ))
+    logger.info("📋 Команды бота зарегистрированы")
+
+    # Userbot client — чтение чатов (постоянное подключение)
     userbot = TelegramClient(
         str(config.SESSION_PATH),
         config.TELEGRAM_API_ID,
@@ -751,10 +910,15 @@ async def daemon_mode() -> None:
     logger.info("👤 Userbot подключён: %s (ID: %s)", userbot_me.first_name, userbot_me.id)
 
     pipeline = Pipeline(bot, userbot)
+    pipeline.bot_user_id = bot_user_id
 
     # Handler для всех сообщений в группе
     @bot.on(events.NewMessage(chats=config.GROUP_CHAT_ID))
     async def group_message_handler(event):
+        # Игнорируем свои собственные сообщения
+        if event.sender_id == bot_user_id:
+            return
+
         text = (event.text or "").strip()
         logger.info(
             "📨 Входящее от %s: text=%r fwd=%s",
@@ -783,41 +947,56 @@ async def daemon_mode() -> None:
         if not text.startswith("/"):
             return
 
-        logger.info("Команда от %s: %s", event.sender_id, text)
-        if text == "/help":
-            await bot.send_message(event.chat_id, HELP_TEXT, parse_mode="markdown")
-        elif text == "/status":
-            await pipeline.cmd_status(event.chat_id)
-        elif text == "/list":
-            await pipeline.cmd_list(event.chat_id)
-        elif text == "/leads":
-            await pipeline.cmd_leads(event.chat_id)
-        elif text == "/run":
-            await pipeline.cmd_run(event.chat_id)
-        elif text.startswith("/reset"):
-            arg = text[6:].strip()
-            if not arg:
-                await bot.send_message(event.chat_id, "❌ Укажите chat_id: `/reset <chat_id>`\nИли используйте `/list` для просмотра.", parse_mode="markdown")
-                return
-            await pipeline.cmd_reset(event.chat_id, arg)
-        elif text.startswith("/remove"):
-            arg = text[7:].strip()
-            if not arg:
-                await bot.send_message(event.chat_id, "❌ Укажите chat_id: `/remove <chat_id>`\nИли используйте `/list` для просмотра.", parse_mode="markdown")
-                return
-            await pipeline.cmd_remove(event.chat_id, arg)
+        logger.info("🛠 Команда от %s: %s", event.sender_id, text)
+        cmd = text.split("@")[0].strip().lower()
+
+        try:
+            if cmd == "/help":
+                await bot.send_message(event.chat_id, HELP_TEXT, parse_mode="markdown")
+            elif cmd == "/status":
+                await pipeline.cmd_status(event.chat_id)
+            elif cmd == "/list":
+                await pipeline.cmd_list(event.chat_id)
+            elif cmd == "/leads":
+                await pipeline.cmd_leads(event.chat_id)
+            elif cmd == "/run":
+                await pipeline.cmd_run(event.chat_id)
+            elif cmd.startswith("/reset"):
+                arg = text[6:].strip()
+                if not arg:
+                    await bot.send_message(event.chat_id, "❌ Укажите chat_id: `/reset <chat_id>`\nИли используйте `/list` для просмотра.", parse_mode="markdown")
+                    return
+                await pipeline.cmd_reset(event.chat_id, arg)
+            elif cmd.startswith("/remove"):
+                arg = text[7:].strip()
+                if not arg:
+                    await bot.send_message(event.chat_id, "❌ Укажите chat_id: `/remove <chat_id>`\nИли используйте `/list` для просмотра.", parse_mode="markdown")
+                    return
+                await pipeline.cmd_remove(event.chat_id, arg)
+            elif cmd.startswith("/recheck"):
+                # /recheck <message_ids> — перепроверить конкретные сообщения
+                # Поддерживает: один ID, несколько через пробел, или ссылку t.me/chat/123
+                arg = text[9:].strip()
+                if not arg:
+                    await bot.send_message(event.chat_id,
+                        "❌ Укажите сообщения для перепроверки:\n"
+                        "• `/recheck 716288`\n"
+                        "• `/recheck 716254 716288 717000`\n"
+                        "• `/recheck https://t.me/chat/716288`",
+                        parse_mode="markdown")
+                    return
+                await pipeline.cmd_recheck(event.chat_id, arg)
+                await pipeline.cmd_recheck(event.chat_id, arg)
+            else:
+                await bot.send_message(event.chat_id, f"❓ Неизвестная команда: {cmd}\n/help — список команд")
+        except Exception as e:
+            logger.error("Ошибка обработки команды %s: %s", cmd, e, exc_info=True)
+            try:
+                await bot.send_message(event.chat_id, f"❌ Ошибка: {e}")
+            except Exception:
+                pass
 
     logger.info("Слушаю управляющую группу (ID: %s)", config.GROUP_CHAT_ID)
-    logger.info("Интервал циклов: %d сек", config.POLL_INTERVAL)
-
-    await bot.send_message(
-        config.GROUP_CHAT_ID,
-        "🟢 **Leads Finder запущен!**\n\n"
-        f"⏱ Интервал: {config.POLL_INTERVAL // 60} мин\n"
-        f"🤖 Модель: {config.ZAI_MODEL}\n"
-        "📋 /help — список команд\n"
-        "📦 Перешлите сообщение или отправьте ссылку (t.me/chat/123) — добавлю в мониторинг"
-    )
 
     async def scheduler():
         while not _shutdown:
@@ -852,7 +1031,6 @@ if __name__ == "__main__":
     args = parser.parse_args()
     if args.interval:
         config.POLL_INTERVAL = args.interval
-
     if args.once:
         async def run_once_mode():
             bot = TelegramClient(

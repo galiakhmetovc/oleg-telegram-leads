@@ -1,11 +1,14 @@
-# === Секреты и конфигурация ===
+# === Secrets and config ===
 .env
-config.py
+.env.example
+sessions/
 *.session
 *.session-journal
 *.session-wal
+.deploy_key
+.deploy_key.pub
 
-# === Данные (runtime) ===
+# === Runtime data ===
 data/checkpoints.json
 data/leads.json
 data/chats.json
@@ -15,7 +18,7 @@ data/lead_examples.json
 __pycache__/
 *.pyc
 *.pyo
-*.py.broken
+*.pyb broken
 tg-venv/
 venv/
 .venv/
@@ -29,12 +32,9 @@ venv/
 .DS_Store
 Thumbs.db
 
-# === Временные/тестовые файлы ===
+# === Temp/test files ===
+tmp_*.py
 _test_*.py
-test_*.py
-_register_commands.py
-setup_bot.py
 artifacts/
-
-# === TeamD runtime ===
 containers/
+vault/
