@@ -87,6 +87,29 @@ class PartialLeadClassifier(FakeLeadClassifier):
         return results[:1]
 
 
+class PayloadModeLeadClassifier(FakeLeadClassifier):
+    async def classify_message_batch(self, *, messages: list, payload: dict):
+        results = await super().classify_message_batch(messages=messages, payload=payload)
+        mode = payload.get("detection_mode", "live")
+        return [
+            LeadClassifierResult(
+                source_message_id=result.source_message_id,
+                classifier_version_id=result.classifier_version_id,
+                decision=result.decision,
+                detection_mode=mode,
+                confidence=result.confidence,
+                commercial_value_score=result.commercial_value_score,
+                negative_score=result.negative_score,
+                high_value_signals_json=result.high_value_signals_json,
+                negative_signals_json=result.negative_signals_json,
+                notify_reason=result.notify_reason,
+                reason=result.reason,
+                matches=result.matches,
+            )
+            for result in results
+        ]
+
+
 class FakeLeadNotifier:
     def __init__(self) -> None:
         self.sent: list[dict] = []
@@ -354,6 +377,94 @@ async def test_classify_message_batch_without_adapter_fails_visibly(runtime_sess
     assert stored.last_error == "classify_message_batch adapter is not configured"
     assert event["event_type"] == "scheduler"
     assert event["details_json"]["reason"] == "handler_exception"
+
+
+@pytest.mark.asyncio
+async def test_reclassify_messages_creates_retro_clusters_without_telegram_notification(
+    runtime_session,
+):
+    session = runtime_session["session"]
+    message_id = _insert_source_message(
+        session,
+        runtime_session["source_id"],
+        telegram_message_id=130,
+        sender_id="sender-1",
+        text="нужна камера после обновления каталога",
+        status="classified",
+    )
+    _insert_source_message(
+        session,
+        runtime_session["source_id"],
+        telegram_message_id=131,
+        sender_id="sender-2",
+        text="новое сообщение еще не трогаем",
+        status="queued",
+    )
+    SettingsService(session).set(
+        "telegram_lead_notification_chat_id",
+        "operator-chat",
+        value_type="string",
+        updated_by="admin",
+    )
+    classifier = PayloadModeLeadClassifier(
+        classifier_version_id=runtime_session["classifier_version_id"],
+        snapshot_entry_id=runtime_session["snapshot_entry_id"],
+        category_id=runtime_session["category_id"],
+        term_id=runtime_session["term_id"],
+    )
+    notifier = FakeLeadNotifier()
+    job = SchedulerService(session).enqueue(
+        job_type="reclassify_messages",
+        scope_type="telegram_source",
+        monitored_source_id=runtime_session["source_id"],
+        payload_json={"limit": 10, "trigger_reason": "catalog_change"},
+    )
+    runtime = WorkerRuntime(
+        session,
+        handlers=build_lead_handler_registry(
+            session,
+            classifier=classifier,
+            notifier=notifier,
+        ),
+    )
+
+    result = await runtime.run_once()
+
+    stored = SchedulerService(session).repository.get(job.id)
+    event = session.execute(select(lead_events_table)).mappings().one()
+    cluster = session.execute(select(lead_clusters_table)).mappings().one()
+    jobs = (
+        session.execute(select(scheduler_jobs_table).order_by(scheduler_jobs_table.c.created_at))
+        .mappings()
+        .all()
+    )
+    message_status = session.execute(
+        select(source_messages_table.c.classification_status).where(
+            source_messages_table.c.id == message_id
+        )
+    ).scalar_one()
+    assert stored is not None
+    assert result.status == "succeeded"
+    assert stored.result_summary_json == {
+        "message_count": 1,
+        "event_count": 1,
+        "cluster_count": 1,
+    }
+    assert classifier.seen_payload == {
+        "limit": 10,
+        "trigger_reason": "catalog_change",
+        "classification_statuses": ["classified"],
+        "detection_mode": "retro_research",
+    }
+    assert event["source_message_id"] == message_id
+    assert event["detection_mode"] == "retro_research"
+    assert event["is_retro"] is True
+    assert event["original_detected_at"] is not None
+    assert cluster["primary_source_message_id"] == message_id
+    assert message_status == "classified"
+    assert [row["job_type"] for row in jobs].count("fetch_message_context") == 1
+    assert [row["job_type"] for row in jobs].count("send_notifications") == 0
+    assert notifier.sent == []
 
 
 def _insert_monitored_source(session) -> str:

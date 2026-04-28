@@ -99,6 +99,7 @@ class FuzzyCatalogLeadClassifier:
         payload: dict[str, Any],
     ) -> list[LeadClassifierResult]:
         version = self._latest_version()
+        detection_mode = _detection_mode(payload)
         if version is None or payload.get("rebuild_snapshot"):
             built_version = ClassifierSnapshotService(self.session).build_snapshot(
                 created_by="system",
@@ -110,7 +111,10 @@ class FuzzyCatalogLeadClassifier:
         else:
             version_id = version["id"]
         entries = self._keyword_entries(version_id)
-        return [self._classify_message(message, version_id, entries) for message in messages]
+        return [
+            self._classify_message(message, version_id, entries, detection_mode=detection_mode)
+            for message in messages
+        ]
 
     def _latest_version(self) -> dict[str, Any] | None:
         row = (
@@ -161,6 +165,8 @@ class FuzzyCatalogLeadClassifier:
         message: LeadMessageForClassification,
         classifier_version_id: str,
         entries: list[KeywordEntry],
+        *,
+        detection_mode: str,
     ) -> LeadClassifierResult:
         normalized_text = _normalize(message.normalized_text or message.message_text or "")
         matches = _matches(normalized_text, entries)
@@ -197,7 +203,7 @@ class FuzzyCatalogLeadClassifier:
             source_message_id=message.source_message_id,
             classifier_version_id=classifier_version_id,
             decision=decision,
-            detection_mode="live",
+            detection_mode=detection_mode,
             confidence=confidence,
             commercial_value_score=commercial_value_score,
             negative_score=0.7 if has_negative else 0.0,
@@ -255,6 +261,11 @@ def _contains_any(value: str, terms: tuple[str, ...]) -> bool:
 
 def _contains_equipment_term(value: str) -> bool:
     return any(_term_matches(term, value) for term in GENERIC_EQUIPMENT_TERMS)
+
+
+def _detection_mode(payload: dict[str, Any]) -> str:
+    value = payload.get("detection_mode")
+    return value if isinstance(value, str) and value else "live"
 
 
 def _term_matches(term: str, value: str) -> bool:

@@ -83,6 +83,25 @@ async def test_fuzzy_catalog_classifier_flags_generic_equipment_request_without_
     assert results[0].matches == []
 
 
+@pytest.mark.asyncio
+async def test_fuzzy_catalog_classifier_honors_detection_mode_payload(tmp_path):
+    engine = create_sqlite_engine(tmp_path / "test.db")
+    upgrade_database(engine)
+    session_factory = create_session_factory(engine)
+
+    with session_factory() as session:
+        _insert_candidate(session, canonical_name="Видеонаблюдение", terms=["камера"])
+        ClassifierSnapshotService(session).build_snapshot(created_by="system")
+        classifier = FuzzyCatalogLeadClassifier(session)
+
+        results = await classifier.classify_message_batch(
+            messages=[_message("message-1", "Нужна камера на дачу")],
+            payload={"detection_mode": "retro_research"},
+        )
+
+    assert results[0].detection_mode == "retro_research"
+
+
 def _message(source_message_id: str, text: str) -> LeadMessageForClassification:
     return LeadMessageForClassification(
         source_message_id=source_message_id,

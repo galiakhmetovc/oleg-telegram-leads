@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import hashlib
 from collections.abc import Awaitable, Callable, Mapping
-from dataclasses import asdict, dataclass, is_dataclass
+from dataclasses import asdict, dataclass, is_dataclass, replace
 from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Any, Protocol, cast
@@ -504,12 +504,49 @@ def build_lead_handler_registry(
     async def classify_message_batch(job: SchedulerJobRecord) -> JobHandlerResult:
         if classifier is None:
             raise ValueError("classify_message_batch adapter is not configured")
-        payload = job.payload_json or {}
+        return await _run_classification_job(
+            job,
+            default_statuses=["queued", "unclassified"],
+            force_detection_mode=None,
+            mark_messages_classified=True,
+            notify_retro=False,
+        )
+
+    async def reclassify_messages(job: SchedulerJobRecord) -> JobHandlerResult:
+        if classifier is None:
+            raise ValueError("classify_message_batch adapter is not configured")
+        return await _run_classification_job(
+            job,
+            default_statuses=["classified"],
+            force_detection_mode="retro_research",
+            mark_messages_classified=False,
+            notify_retro=_truthy((job.payload_json or {}).get("notify_retro")),
+        )
+
+    async def _run_classification_job(
+        job: SchedulerJobRecord,
+        *,
+        default_statuses: list[str],
+        force_detection_mode: str | None,
+        mark_messages_classified: bool,
+        notify_retro: bool,
+    ) -> JobHandlerResult:
+        if classifier is None:
+            raise ValueError("classify_message_batch adapter is not configured")
+        payload = dict(job.payload_json or {})
+        if force_detection_mode is not None:
+            payload.setdefault("classification_statuses", default_statuses)
+            payload["detection_mode"] = force_detection_mode
+        statuses = (
+            _classification_statuses(payload)
+            if "classification_statuses" in payload
+            else default_statuses
+        )
         messages = _load_messages_for_classification(
             session,
             monitored_source_id=job.monitored_source_id,
             source_message_id=job.source_message_id,
-            statuses=_classification_statuses(payload),
+            statuses=statuses,
             limit=_positive_int(payload.get("limit"), default=50),
         )
         if not messages:
@@ -518,6 +555,8 @@ def build_lead_handler_registry(
             )
 
         results = await classifier.classify_message_batch(messages=messages, payload=payload)
+        if force_detection_mode is not None:
+            results = [replace(result, detection_mode=force_detection_mode) for result in results]
         message_ids = {message.source_message_id for message in messages}
         _validate_classifier_results(message_ids, results)
         cluster_ids: set[str] = set()
@@ -568,16 +607,18 @@ def build_lead_handler_registry(
                     scheduler,
                     source_message_id=result.source_message_id,
                 )
-                _enqueue_lead_notification(
-                    scheduler,
-                    settings,
-                    cluster_id=cluster.id,
-                    event=event,
-                    decision=result.decision,
-                    confidence=result.confidence,
-                    notify_reason=result.notify_reason,
-                )
-            _mark_message_classified(session, result.source_message_id)
+                if result.detection_mode != "retro_research" or notify_retro:
+                    _enqueue_lead_notification(
+                        scheduler,
+                        settings,
+                        cluster_id=cluster.id,
+                        event=event,
+                        decision=result.decision,
+                        confidence=result.confidence,
+                        notify_reason=result.notify_reason,
+                    )
+            if mark_messages_classified:
+                _mark_message_classified(session, result.source_message_id)
 
         return JobHandlerResult(
             result_summary={
@@ -612,6 +653,7 @@ def build_lead_handler_registry(
 
     return {
         "classify_message_batch": classify_message_batch,
+        "reclassify_messages": reclassify_messages,
         "send_notifications": send_notifications,
     }
 
@@ -885,6 +927,14 @@ def _positive_int(value: Any, *, default: int) -> int:
     if parsed <= 0:
         return default
     return parsed
+
+
+def _truthy(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.strip().casefold() in {"1", "true", "yes", "on"}
+    return bool(value)
 
 
 def _mark_message_classified(session: Session, source_message_id: str) -> None:
