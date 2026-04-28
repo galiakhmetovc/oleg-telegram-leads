@@ -199,7 +199,7 @@ Expected: one commit removing old runtime files and replacing README only.
 - Create: `tests/conftest.py`
 - Create: `tests/test_app_health.py`
 
-- [ ] **Step 1: Write failing health test**
+- [x] **Step 1: Write failing health test**
 
 ```python
 from fastapi.testclient import TestClient
@@ -216,7 +216,7 @@ def test_health_returns_ok():
     assert response.json() == {"status": "ok"}
 ```
 
-- [ ] **Step 2: Add dependencies and tooling**
+- [x] **Step 2: Add dependencies and tooling**
 
 Create `pyproject.toml` with:
 
@@ -255,11 +255,11 @@ testpaths = ["tests"]
 pythonpath = ["src"]
 ```
 
-- [ ] **Step 3: Implement app factory and health route**
+- [x] **Step 3: Implement app factory and health route**
 
 Create `src/pur_leads/web/app.py` and `src/pur_leads/web/routes_health.py` with a minimal FastAPI app and `/health` route.
 
-- [ ] **Step 4: Run test**
+- [x] **Step 4: Run test**
 
 Run:
 
@@ -269,7 +269,7 @@ python -m pytest tests/test_app_health.py -q
 
 Expected: pass.
 
-- [ ] **Step 5: Run formatting and linting**
+- [x] **Step 5: Run formatting and linting**
 
 Run:
 
@@ -280,7 +280,7 @@ python -m ruff check .
 
 Expected: pass.
 
-- [ ] **Step 6: Commit scaffold**
+- [x] **Step 6: Commit scaffold**
 
 ```bash
 git add pyproject.toml src tests
