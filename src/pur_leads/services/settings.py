@@ -28,7 +28,10 @@ class SettingDefault:
 
 DEFAULT_SETTINGS: dict[str, SettingDefault] = {
     "telegram_worker_count": SettingDefault(1, "int"),
+    "telegram_default_userbot_account_id": SettingDefault(None, "string"),
     "telegram_read_jobs_per_userbot": SettingDefault(1, "int"),
+    "telegram_flood_sleep_threshold_seconds": SettingDefault(60, "int"),
+    "telegram_get_history_wait_seconds": SettingDefault(1, "int"),
     "catalog_ingestion_pur_channel_enabled": SettingDefault(True, "bool"),
     "lead_monitoring_public_groups_enabled": SettingDefault(True, "bool"),
     "backup_sessions_enabled": SettingDefault(False, "bool"),

@@ -18,12 +18,12 @@
 - Modify: `src/pur_leads/services/settings.py`
 - Test: `tests/test_userbot_service.py`
 
-- [ ] Write failing tests for creating/listing userbots, selecting configured default, falling back to first active userbot, and auditing changes.
-- [ ] Run `uv run --extra dev pytest tests/test_userbot_service.py -q` and verify expected failures.
-- [ ] Implement userbot repository/service with safe public payloads and `select_default_userbot`.
-- [ ] Add default settings for `telegram_default_userbot_account_id`, `telegram_flood_sleep_threshold_seconds`, and `telegram_get_history_wait_seconds`.
-- [ ] Run `uv run --extra dev pytest tests/test_userbot_service.py -q` and verify it passes.
-- [ ] Commit as `feat: add userbot account service`.
+- [x] Write failing tests for creating/listing userbots, selecting configured default, falling back to first active userbot, and auditing changes.
+- [x] Run `uv run --extra dev pytest tests/test_userbot_service.py -q` and verify expected failures.
+- [x] Implement userbot repository/service with safe public payloads and `select_default_userbot`.
+- [x] Add default settings for `telegram_default_userbot_account_id`, `telegram_flood_sleep_threshold_seconds`, and `telegram_get_history_wait_seconds`.
+- [x] Run `uv run --extra dev pytest tests/test_userbot_service.py -q` and verify it passes.
+- [x] Commit as `feat: add userbot account service`.
 
 ### Task 2: Source Assignment
 
