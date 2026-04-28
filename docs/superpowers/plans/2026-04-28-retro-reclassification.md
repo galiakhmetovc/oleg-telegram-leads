@@ -42,5 +42,18 @@
 - [x] Run `node --check src/pur_leads/web/static/app.js`.
 - [x] Run `TMPDIR=/home/admin/AI-AGENT/data/tmp/oleg-telegram-leads-pytest uv run --extra dev pytest -q`.
 - [x] Run `docker compose config >/tmp/oleg-telegram-leads-compose.out && wc -l /tmp/oleg-telegram-leads-compose.out`.
-- [ ] Commit and push `main`.
-- [ ] Deploy on `teamd-ams1`, restart worker/web if needed, verify `/health`, and enqueue initial retro reclassification.
+- [x] Commit and push `main` (`3eae4b1`, follow-up cursor fix `0a72458`).
+- [x] Deploy on `teamd-ams1`, restart worker/web if needed, verify `/health`, and enqueue initial retro reclassification.
+
+### Task 4: Production-Safe Batch Chaining
+
+**Files:**
+- Modify: `src/pur_leads/workers/runtime.py`
+- Test: `tests/test_lead_runtime_handlers.py`
+
+- [x] Write a failing test that proves `reclassify_messages` chains to the next batch by cursor.
+- [x] Add cursor filtering over `(message_date, telegram_message_id, source_message_id)`.
+- [x] Load `limit + 1` messages to detect whether another batch is needed.
+- [x] Enqueue the next `reclassify_messages` job with a stable idempotency key.
+- [x] Verify focused runtime tests and full local verification.
+- [x] Deploy `0a72458` to `teamd-ams1`, verify `/health`, and enqueue three source-scoped retro jobs with `limit=100`, low priority, and Telegram notifications disabled.
