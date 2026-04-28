@@ -44,6 +44,9 @@ The system must continuously read the PUR Telegram channel, parse messages and d
 - `Take into work` creates an action task only. Client, interest, opportunity, support case, and contact reason conversion happens after clarification.
 - Catalog ingestion uses a layered pipeline: immutable source, parsed chunks, extracted facts, deduplicated catalog candidates, then operational catalog.
 - Manual catalog additions use the same source/evidence/candidate path as AI extraction, with faster approval defaults for Oleg/admin.
+- Quality/evaluation is part of the product: golden sets, feedback-derived regression cases, precision/recall metrics, and quality dashboards are required.
+- Backup, restore, and secret hygiene are required first-class operational features.
+- There is no separate reduced MVP. The first production target is the full first-phase spec, with only explicitly agreed next-phase items left out.
 - Embeddings/semantic matching are designed into the schema but disabled initially.
 - Retention is based on time and hot database size. Large/old data is archived and rotated, not simply deleted.
 - Local archive storage is the first phase. S3-compatible storage is represented in the schema and planned for a later phase.
@@ -2002,6 +2005,204 @@ Rules:
 - First UI shows tasks as Oleg's personal reminders.
 - Assignment fields exist for later team expansion.
 
+### `evaluation_datasets`
+
+Stores named quality datasets.
+
+Key fields:
+
+- `id`
+- `name`
+- `dataset_type`: `golden`, `feedback_regression`, `retro_research`, `catalog_extraction`, `notification_policy`, `crm_conversion`
+- `description`
+- `status`: `active`, `archived`, `draft`
+- `created_by`
+- `created_at`
+- `updated_at`
+
+Purpose:
+
+- Keep stable samples for measuring classifier/catalog/notification quality.
+- Separate hand-labeled golden sets from automatically collected feedback cases.
+
+### `evaluation_cases`
+
+Stores expected outcomes for quality checks.
+
+Key fields:
+
+- `id`
+- `evaluation_dataset_id`
+- `source_message_id`
+- `lead_cluster_id`
+- `lead_event_id`
+- `source_id`
+- `message_text`
+- `context_json`
+- `expected_decision`: `lead`, `maybe`, `not_lead`
+- `expected_category_id`
+- `expected_catalog_item_ids_json`
+- `expected_reason_code`
+- `expected_notification_policy`: `immediate`, `digest`, `web_only`, `suppressed`
+- `expected_cluster_behavior`: `new_cluster`, `merge`, `context_only`, `split`
+- `expected_crm_candidate_json`
+- `label_source`: `manual`, `feedback`, `import`, `synthetic`
+- `created_by`
+- `created_at`
+- `updated_at`
+
+Rules:
+
+- Feedback can promote real mistakes into regression cases.
+- Evaluation cases should keep enough context to reproduce the decision.
+
+### `evaluation_runs`
+
+Stores evaluation executions against a classifier/catalog/prompt version.
+
+Key fields:
+
+- `id`
+- `evaluation_dataset_id`
+- `run_type`: `lead_detection`, `catalog_extraction`, `notification_policy`, `clustering`, `crm_conversion`, `full_pipeline`
+- `classifier_version_id`
+- `catalog_hash`
+- `prompt_hash`
+- `model`
+- `settings_hash`
+- `status`: `queued`, `running`, `completed`, `failed`, `cancelled`
+- `started_at`
+- `finished_at`
+- `metrics_json`
+- `error`
+- `created_by`
+- `created_at`
+
+### `evaluation_results`
+
+Stores per-case evaluation output.
+
+Key fields:
+
+- `id`
+- `evaluation_run_id`
+- `evaluation_case_id`
+- `actual_decision`
+- `actual_category_id`
+- `actual_catalog_item_ids_json`
+- `actual_notification_policy`
+- `actual_cluster_behavior`
+- `actual_crm_candidate_json`
+- `passed`
+- `failure_type`: `false_positive`, `false_negative`, `wrong_category`, `wrong_item`, `wrong_notification`, `wrong_cluster`, `wrong_crm_candidate`, `parse_error`, `other`
+- `details_json`
+- `created_at`
+
+### `quality_metric_snapshots`
+
+Stores aggregate quality metrics over time.
+
+Key fields:
+
+- `id`
+- `scope`: `overall`, `source`, `category`, `model`, `classifier_version`, `notification_policy`, `catalog_extraction`
+- `scope_id`
+- `period_start`
+- `period_end`
+- `precision`
+- `recall`
+- `f1`
+- `false_positive_count`
+- `false_negative_count`
+- `maybe_count`
+- `maybe_resolution_rate`
+- `high_value_precision`
+- `retro_precision`
+- `telegram_notification_precision`
+- `catalog_candidate_accept_rate`
+- `catalog_candidate_reject_rate`
+- `feedback_count`
+- `metrics_json`
+- `created_at`
+
+Purpose:
+
+- Show whether lead quality is improving or degrading after catalog/prompt/setting changes.
+- Let admin compare model/prompt/classifier versions.
+
+### `secret_refs`
+
+Stores references to secrets without exposing secret values.
+
+Key fields:
+
+- `id`
+- `secret_type`: `telegram_session`, `telegram_api`, `ai_api_key`, `web_session_secret`, `bootstrap_admin_password`, `archive_s3_credentials`, `other`
+- `display_name`
+- `storage_backend`: `env`, `file`, `system_keyring`, `external_secret_manager`
+- `storage_ref`
+- `status`: `active`, `rotating`, `revoked`, `missing`
+- `last_rotated_at`
+- `last_checked_at`
+- `created_at`
+- `updated_at`
+
+Rules:
+
+- Secret values are never stored in SQLite plaintext.
+- UI/logs may show display name and status, not the value.
+- Rotation and failed secret checks are audited.
+
+### `backup_runs`
+
+Stores backup job metadata.
+
+Key fields:
+
+- `id`
+- `backup_type`: `sqlite`, `archives`, `artifacts`, `sessions`, `config`, `secrets_manifest`, `full`
+- `storage_backend`: `local`, `s3_compatible`
+- `storage_uri`
+- `status`: `queued`, `running`, `completed`, `failed`, `verified`, `expired`
+- `started_at`
+- `finished_at`
+- `size_bytes`
+- `sha256`
+- `manifest_json`
+- `error`
+- `created_at`
+
+Rules:
+
+- SQLite backup must use a consistent backup/snapshot mechanism, not a raw copy of a live database.
+- Backup artifacts must be verified before old backups are expired.
+- Telegram sessions and config are backed up according to explicit secret policy.
+
+### `restore_runs`
+
+Stores restore attempts and validation.
+
+Key fields:
+
+- `id`
+- `backup_run_id`
+- `restore_type`: `sqlite`, `archives`, `artifacts`, `sessions`, `config`, `full`, `dry_run`
+- `status`: `queued`, `running`, `completed`, `failed`, `cancelled`
+- `target_path`
+- `validation_status`: `not_checked`, `passed`, `failed`
+- `validation_details_json`
+- `started_at`
+- `finished_at`
+- `error`
+- `created_by`
+- `created_at`
+
+Rules:
+
+- Restore should support dry-run validation.
+- Restore actions are admin-only and audited.
+- Full restore must include post-restore health checks.
+
 ### `settings`
 
 Stores configurable behavior.
@@ -2235,6 +2436,36 @@ Key settings:
 - `archive_auto_restore_for_reclassification = false`
 - `archive_auto_restore_for_research = false`
 - `archive_restore_requires_manual_confirmation = true`
+- `quality_evaluation_enabled = true`
+- `quality_auto_create_regression_cases_from_feedback = true`
+- `quality_golden_set_required_before_prompt_change = true`
+- `quality_run_on_catalog_change = true`
+- `quality_run_on_prompt_change = true`
+- `quality_run_on_model_change = true`
+- `quality_min_precision_threshold = 0.80`
+- `quality_min_recall_threshold = 0.60`
+- `quality_track_maybe_resolution = true`
+- `quality_track_high_value_precision = true`
+- `quality_track_retro_precision = true`
+- `quality_track_notification_precision = true`
+- `quality_dashboard_enabled = true`
+- `backup_enabled = true`
+- `backup_storage_backend = "local"`
+- `backup_path = "artifacts/backups"`
+- `backup_sqlite_enabled = true`
+- `backup_archives_enabled = true`
+- `backup_artifacts_enabled = true`
+- `backup_sessions_enabled = true`
+- `backup_config_enabled = true`
+- `backup_secrets_manifest_enabled = true`
+- `backup_schedule_cron = "0 3 * * *"`
+- `backup_retention_days = 30`
+- `backup_verify_after_write = true`
+- `restore_dry_run_required = true`
+- `secrets_never_log_values = true`
+- `secrets_mask_in_ui = true`
+- `secret_rotation_audit_enabled = true`
+- `first_release_scope = "full_spec"`
 
 Settings are editable in the web interface and versioned through `audit_log`.
 
@@ -2617,6 +2848,108 @@ Archive jobs must be conservative:
 - record all archive/restore operations in `operational_events` and `audit_log` when user-triggered.
 
 Research and reclassification can work against the hot DB by default. If the needed time window is archived, they create `archive_restore_jobs`. Automatic restore is configurable; the default is manual confirmation so an exploratory research run cannot silently expand local disk usage.
+
+## Quality And Evaluation
+
+Quality is a product feature, not a one-time test.
+
+Evaluation should cover:
+
+- live lead detection;
+- `maybe` handling;
+- high-value low-confidence notifications;
+- retro/reclassification results;
+- lead clustering and split/merge behavior;
+- catalog extraction and candidate status;
+- notification policy;
+- CRM conversion candidates.
+
+Datasets:
+
+- golden set: hand-labeled lead/not-lead/maybe cases;
+- feedback regression set: real mistakes promoted from feedback;
+- catalog extraction set: PUR source chunks with expected catalog facts;
+- notification set: expected immediate/web-only/digest/suppressed behavior;
+- clustering set: multi-message examples with expected cluster behavior.
+
+Metrics:
+
+- precision, recall, F1;
+- false positives and false negatives;
+- `maybe` volume and resolution rate;
+- high-value precision;
+- retro lead precision;
+- notification precision;
+- catalog candidate accept/reject/merge rates;
+- feedback volume by reason and source;
+- quality by source, category, model, prompt, and classifier version.
+
+Rules:
+
+- Prompt/model/catalog changes should be evaluable before rollout.
+- Regression cases should be created from meaningful feedback.
+- Evaluation runs must store classifier version, catalog hash, prompt hash, settings hash, model, and per-case results.
+- Quality dashboard should show trends and recent regressions.
+- Quality thresholds are configurable; threshold misses create web warnings, not silent failures.
+
+## Backup, Restore, And Secrets
+
+Backup/recovery covers the operational system, not only the archive layer.
+
+Backed up data:
+
+- SQLite database;
+- archive manifests and archive files;
+- downloaded artifacts/documents;
+- Telegram session files when explicitly enabled;
+- runtime config;
+- secret manifest/references, never raw secret values unless an explicit local encrypted backup policy is configured.
+
+Backup rules:
+
+- SQLite backup uses a consistent backup/snapshot mechanism.
+- Backup files are hashed and verified after write.
+- Old backups expire only after newer verified backups exist.
+- Backup and restore events are stored in `backup_runs`, `restore_runs`, `operational_events`, and `audit_log` when user-triggered.
+- Local backup is first phase; S3-compatible backup uses the same `storage_backend` pattern later.
+
+Restore rules:
+
+- Dry-run restore validation is required by default.
+- Full restore validates database integrity, required config, archive manifests, session availability, and worker startup readiness.
+- Restore must not leak secrets into logs or UI.
+- Restore actions are admin-only.
+
+Secret hygiene:
+
+- Secret values are never logged.
+- Secret values are never stored in SQLite plaintext.
+- UI shows secret display name/status only.
+- Telegram session paths, API keys, web session secrets, bootstrap admin credentials, and S3 credentials are referenced through `secret_refs`.
+- Rotation, missing secret checks, and failed secret access are audited.
+
+## First Production Scope
+
+There is no separate reduced MVP. The first production target is the full first-phase design in this spec.
+
+Included in first production scope:
+
+- SQLite operational database and migrations;
+- PUR channel ingestion with documents and configured external pages;
+- catalog extraction, catalog candidates, evidence, manual catalog add, Catalog Review;
+- monitored source onboarding, access checks, previews, polling, checkpoints;
+- lead detection, clustering, notification policy, `Leads Inbox`, feedback loop;
+- CRM memory, conversion candidates, conversion wizard, contact reasons, tasks, support/opportunity basics;
+- web UI with bootstrap local admin and Telegram admin accounts;
+- settings, audit, operational logs;
+- quality/evaluation dashboards and regression sets;
+- archive/retention, local backup/restore, and secret hygiene.
+
+Explicit next-phase items that remain outside first production until the spec is changed:
+
+- S3-compatible archive/backup implementation;
+- scoped web roles beyond `admin`;
+- enabled semantic/vector matching if embeddings remain disabled in settings.
 
 ## Web Interface
 
@@ -3199,6 +3532,61 @@ Rules:
 - destructive cleanup requires successful verification and audit record;
 - restoring archived messages should not move monitoring checkpoints.
 
+### Quality / Evaluation
+
+Purpose:
+
+- show whether lead detection, catalog extraction, clustering, notifications, and CRM suggestions are improving;
+- make feedback-derived regressions visible.
+
+Views:
+
+- quality dashboard;
+- golden datasets;
+- feedback regression cases;
+- evaluation runs;
+- failed cases by reason;
+- metrics by source/category/model/prompt/classifier version.
+
+Actions:
+
+- create or edit evaluation case;
+- promote feedback into regression case;
+- run evaluation;
+- compare two runs;
+- open failed case in source/lead/catalog context;
+- acknowledge threshold warning.
+
+### Backup / Recovery / Secrets
+
+Purpose:
+
+- make backup and restore status visible;
+- manage secret references without exposing secret values.
+
+Views:
+
+- backup runs;
+- restore runs;
+- backup verification failures;
+- secret references and health;
+- secret rotation history.
+
+Actions:
+
+- run backup now;
+- verify backup;
+- dry-run restore;
+- restore selected backup;
+- check secret availability;
+- rotate/update secret reference.
+
+Rules:
+
+- secret values are never displayed;
+- restore and secret actions are admin-only and audited;
+- failed backup/restore/secret checks create operational warnings.
+
 ### Manual Input
 
 Purpose:
@@ -3298,6 +3686,13 @@ Required controls:
 - archive verification and deletion policy;
 - archive restore policy for research/reclassification;
 - S3-compatible archive backend settings for the next phase;
+- quality evaluation enablement;
+- golden/regression dataset behavior;
+- quality thresholds and run triggers;
+- backup schedule, retention, and verification;
+- restore dry-run requirement;
+- secret masking and rotation audit policy;
+- first production scope marker;
 - provider policy warning acknowledgement;
 - Telegram notification toggles;
 - live lead notification confidence thresholds;
@@ -3633,6 +4028,9 @@ Feedback events do not need to immediately mutate catalog rows in every case. So
 - Telegram flood wait should pause the specific sync job and record retry time.
 - Archive write/verification failures must keep hot rows intact and create visible operational errors.
 - Restore failures must leave existing hot data untouched and keep the restore job retryable or cancellable.
+- Evaluation failures must not mutate classifier/catalog state; they create quality warnings and per-case results.
+- Backup verification failures must keep the backup marked unusable.
+- Secret access failures must be surfaced without logging secret values.
 
 ## Migration From Current Project
 
@@ -3649,7 +4047,7 @@ Migration path:
 
 1. Add SQLite database alongside JSON files.
 2. Import existing chats/checkpoints/leads/examples into SQLite.
-3. Seed empty CRM tables and Oleg's Telegram-authenticated web user.
+3. Seed empty CRM tables and the built-in local bootstrap admin user.
 4. Keep the current Telegram bot/userbot runtime.
 5. Replace JSON lead persistence with SQLite `lead_events` and `lead_clusters`.
 6. Add PUR channel sync into the same userbot runtime.
@@ -3694,6 +4092,10 @@ Unit tests:
 - archive pointer creation after hot-row removal;
 - archive restore job scope selection;
 - embedding rows stay disabled/inactive when semantic search is off.
+- evaluation dataset/case/run/result persistence;
+- quality metric snapshot calculation;
+- backup manifest/hash verification;
+- secret references never expose secret values;
 - Telegram notification policy selection: immediate, digest, web-only, suppressed;
 - notification deduplication and cooldown key generation;
 - `maybe` and retro leads stay web-only by default.
@@ -3733,6 +4135,10 @@ Integration tests:
 - archived messages can be restored for research without moving monitoring checkpoints;
 - archive write failure does not delete hot rows;
 - local `parquet_zstd` archive round-trips messages, parsed chunks, and AI usage rows.
+- feedback mistake can be promoted into evaluation regression case;
+- evaluation run compares classifier versions without mutating production decisions;
+- verified SQLite backup can be dry-run restored;
+- secret access failure creates masked operational warning;
 - immediate live lead creates `notification_events` but leaves cluster status `new`;
 - duplicate/continued lead event does not create repeated Telegram notification inside suppression window;
 - repeated access/userbot issue escalates to Telegram only after configured thresholds.
@@ -3746,10 +4152,13 @@ Live/smoke tests:
 - document downloads skip videos and fetch PDFs;
 - bot can send notifications;
 - web settings persist;
-- Telegram login payload is verified and mapped to a local user;
+- bootstrap local admin can log in and is required to change password;
+- Telegram login payload is verified and mapped to an added admin user;
 - unauthorized Telegram users cannot access the web UI;
 - CRM Today screen can load leads, contact reasons, and due tasks from SQLite.
 - Storage / Archives screen shows local archive segments, verification status, and restore job status.
+- Quality / Evaluation screen shows latest metrics and failed cases.
+- Backup / Recovery / Secrets screen shows backup status, restore dry-runs, and masked secret refs.
 - Telegram lead notification links open both `Leads Inbox` and the original Telegram message.
 
 ## Resolved Configuration Decisions
