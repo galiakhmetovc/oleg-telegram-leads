@@ -28,11 +28,11 @@
 - Modify: `src/pur_leads/cli.py`
 - Test: `tests/test_cli.py`
 
-- [ ] Write a failing test for `pur-leads worker run --poll-interval-seconds 0 --max-iterations 2`.
-- [ ] Run `uv run --extra dev pytest tests/test_cli.py::test_cli_worker_run_supports_bounded_polling_loop -q` and verify expected failure.
-- [ ] Implement `worker run` around the same `WorkerRuntime` and registry used by `worker once`.
-- [ ] Run `uv run --extra dev pytest tests/test_cli.py -q` and verify it passes.
-- [ ] Commit as `feat: add worker run loop`.
+- [x] Write a failing test for `pur-leads worker run --poll-interval-seconds 0 --max-iterations 2`.
+- [x] Run `uv run --extra dev pytest tests/test_cli.py::test_cli_worker_run_supports_bounded_polling_loop -q` and verify expected failure.
+- [x] Implement `worker run` around the same `WorkerRuntime` and registry used by `worker once`.
+- [x] Run `uv run --extra dev pytest tests/test_cli.py -q` and verify it passes.
+- [x] Commit as `feat: add worker run loop`.
 
 ### Task 3: Full Verification And Deploy
 

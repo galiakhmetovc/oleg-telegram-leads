@@ -90,6 +90,27 @@ def test_cli_worker_once_routes_telegram_jobs_through_canonical_registry(tmp_pat
     assert event["details_json"]["reason"] == "handler_exception"
 
 
+def test_cli_worker_run_supports_bounded_polling_loop(tmp_path, capsys):
+    db_path = tmp_path / "cli.db"
+    main(["--database-path", str(db_path), "db", "upgrade"])
+
+    main(
+        [
+            "--database-path",
+            str(db_path),
+            "worker",
+            "run",
+            "--poll-interval-seconds",
+            "0",
+            "--max-iterations",
+            "2",
+        ]
+    )
+
+    output = capsys.readouterr().out
+    assert "worker stopped after 2 iterations" in output
+
+
 def test_cli_web_uses_database_path_and_bootstrap_env(tmp_path, monkeypatch):
     db_path = tmp_path / "cli.db"
     main(["--database-path", str(db_path), "db", "upgrade"])

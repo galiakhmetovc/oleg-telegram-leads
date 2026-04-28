@@ -57,6 +57,10 @@ def build_parser() -> argparse.ArgumentParser:
     worker_commands = worker_parser.add_subparsers(required=True)
     worker_once = worker_commands.add_parser("once")
     worker_once.set_defaults(handler=_worker_once)
+    worker_run = worker_commands.add_parser("run")
+    worker_run.add_argument("--poll-interval-seconds", type=float, default=5.0)
+    worker_run.add_argument("--max-iterations", type=int, default=None)
+    worker_run.set_defaults(handler=_worker_run)
 
     web_parser = subcommands.add_parser("web")
     web_parser.set_defaults(handler=_web)
@@ -101,6 +105,30 @@ def _worker_once(args: argparse.Namespace) -> None:
             print("no queued jobs")
             return
         print(f"{result.status} job {result.job_id} ({result.job_type})")
+
+
+def _worker_run(args: argparse.Namespace) -> None:
+    iterations = asyncio.run(_worker_run_loop(args))
+    print(f"worker stopped after {iterations} iterations")
+
+
+async def _worker_run_loop(args: argparse.Namespace) -> int:
+    iterations = 0
+    with _session_from_args(args) as session:
+        runtime = WorkerRuntime(
+            session,
+            handlers=_build_worker_handlers(session),
+            worker_name="cli-worker",
+        )
+        while args.max_iterations is None or iterations < args.max_iterations:
+            result = await runtime.run_once()
+            iterations += 1
+            if result.status != "idle":
+                print(f"{result.status} job {result.job_id} ({result.job_type})")
+                continue
+            if args.poll_interval_seconds > 0:
+                await asyncio.sleep(args.poll_interval_seconds)
+    return iterations
 
 
 def _web(args: argparse.Namespace) -> None:
