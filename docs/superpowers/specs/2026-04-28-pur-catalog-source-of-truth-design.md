@@ -1072,6 +1072,11 @@ Key fields:
 - `decision`: `lead`, `not_lead`, `maybe`
 - `detection_mode`: `live`, `reclassification`, `retro_research`, `manual`
 - `confidence`
+- `commercial_value_score`
+- `negative_score`
+- `high_value_signals_json`
+- `negative_signals_json`
+- `notify_reason`
 - `reason`
 - `inbox_status`: `new`, `in_work`, `maybe`, `snoozed`, `not_lead`, `duplicate`, `converted`, `closed`
 - `review_status`: `unreviewed`, `confirmed`, `rejected`, `needs_more_info`
@@ -1098,6 +1103,7 @@ Rules:
 - AI detection state is preserved separately from inbox/work state.
 - `in_work` means the lead requires action, not that a client or opportunity already exists.
 - CRM objects are created only after clarification or explicit action.
+- Commercial value is scored separately from lead confidence so uncertain but potentially valuable requests can be surfaced without pretending they are confirmed leads.
 
 ### `lead_matches`
 
@@ -1648,6 +1654,15 @@ Key settings:
 - `notify_high_value_low_confidence = true`
 - `lead_notify_min_confidence = 0.70`
 - `lead_notify_high_value_min_confidence = 0.45`
+- `commercial_value_scoring_enabled = true`
+- `high_value_notify_enabled = true`
+- `high_value_notify_threshold = 0.75`
+- `high_value_negative_score_max = 0.35`
+- `high_value_requires_human_review = true`
+- `high_value_categories_json = []`
+- `high_value_source_priorities_json = ["high", "normal"]`
+- `high_value_signals_json = ["whole_object", "turnkey", "installer_needed", "project_or_estimate", "multiple_systems", "urgent", "quantity", "b2b_or_hoa", "known_client"]`
+- `negative_value_signals_json = ["expert_advice", "diy_only", "free_or_too_cheap", "not_commercial", "already_solved_elsewhere"]`
 - `lead_notify_categories_json = []`
 - `lead_notify_source_priorities_json = ["high", "normal"]`
 - `lead_notify_duplicate_suppression_window_hours = 24`
@@ -2472,6 +2487,37 @@ Immediate Telegram notifications:
 - operator action required: `needs_join`, `needs_captcha`, `private_or_no_access`, `banned`, repeated source failure, long flood wait, userbot down, AI/API unavailable, repeated parser failure;
 - urgent CRM/task/support item: high/urgent priority contact reason, task, or support case.
 
+High-value low-confidence rule:
+
+- `decision` is `lead` or `maybe`;
+- lead confidence is below `lead_notify_min_confidence`;
+- lead confidence is at or above `lead_notify_high_value_min_confidence`;
+- `commercial_value_score` is at or above `high_value_notify_threshold`;
+- `negative_score` is below `high_value_negative_score_max`;
+- source and category are not muted;
+- notification is not suppressed as a duplicate.
+
+High-value positive signals:
+
+- whole object: house, cottage, dacha, apartment renovation, cottage settlement, office, warehouse, production site;
+- turnkey or contractor intent: "под ключ", "кто занимается", "кто установит", "посоветуйте подрядчика";
+- multiple systems: cameras plus intercom, network, access control, gate/barrier, smart home, power/electric;
+- project/survey/estimate/selection language;
+- urgency;
+- quantity or multiple objects;
+- buyer language: price, cost, buy, install, quote;
+- B2B/HOA/management-company context;
+- priority category/source;
+- known client or CRM match.
+
+High-value negative signals:
+
+- expert discussion or advice without buying intent;
+- DIY-only request;
+- explicitly free/too-cheap intent when it is outside PUR format;
+- complaint about equipment bought elsewhere without support request;
+- adjacent but non-commercial topic.
+
 Web-only by default:
 
 - `maybe`;
@@ -2500,8 +2546,11 @@ Lead notification content:
 - category;
 - matched terms/items;
 - confidence;
+- commercial value score and high-value signals when relevant;
 - `approved`/`auto_pending` fact markers;
 - links to `Leads Inbox` and the original Telegram message.
+
+High-value low-confidence notification content must explicitly say that AI is uncertain and human review is needed.
 
 Retro lead notification content, when enabled:
 
@@ -2563,12 +2612,34 @@ Each classifier build creates `classifier_versions`.
 Lead detection output must include:
 
 - decision;
+- lead confidence;
+- commercial value score;
+- negative score;
+- high-value signals;
+- negative signals;
+- notification reason when the message should be surfaced despite uncertainty;
 - reason;
 - matched category;
 - matched items;
 - matched terms;
 - evidence references;
 - classifier version.
+
+Example AI output:
+
+```json
+{
+  "decision": "maybe",
+  "lead_confidence": 0.52,
+  "commercial_value_score": 0.84,
+  "negative_score": 0.12,
+  "high_value_signals": ["whole_object: house", "turnkey", "installer_needed"],
+  "negative_signals": [],
+  "notify_reason": "AI is uncertain, but the message looks like a potential project lead"
+}
+```
+
+Commercial value is not the same as lead confidence. It estimates whether the request is worth quick human attention if it is real.
 
 For reclassification output:
 
@@ -2676,6 +2747,8 @@ Unit tests:
 - Telegram notification policy selection: immediate, digest, web-only, suppressed;
 - notification deduplication and cooldown key generation;
 - `maybe` and retro leads stay web-only by default.
+- commercial value scoring stays independent from lead confidence;
+- high-value low-confidence notification rule respects positive/negative thresholds.
 
 Integration tests:
 
@@ -2694,6 +2767,8 @@ Integration tests:
 - immediate live lead creates `notification_events` but leaves inbox status `new`;
 - duplicate lead does not create repeated Telegram notification inside suppression window;
 - repeated access/userbot issue escalates to Telegram only after configured thresholds.
+- uncertain high-value lead creates a clearly marked Telegram notification and remains unconfirmed in `Leads Inbox`;
+- high negative score suppresses high-value notification even when commercial signals are present.
 
 Live/smoke tests:
 
