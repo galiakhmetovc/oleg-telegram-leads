@@ -12,11 +12,18 @@ from pur_leads.core.config import load_settings
 from pur_leads.db.engine import create_sqlite_engine
 from pur_leads.db.migrations import upgrade_database
 from pur_leads.db.session import create_session_factory
+from pur_leads.integrations.telegram.types import (
+    MessageContext,
+    ResolvedTelegramSource,
+    SourceAccessResult,
+    TelegramMessage,
+)
 from pur_leads.services.settings import SettingsService
 from pur_leads.workers.runtime import (
     WorkerRuntime,
     build_catalog_handler_registry,
     build_lead_handler_registry,
+    build_telegram_handler_registry,
 )
 
 
@@ -87,9 +94,7 @@ def _settings_set(args: argparse.Namespace) -> None:
 
 def _worker_once(args: argparse.Namespace) -> None:
     with _session_from_args(args) as session:
-        handlers = {}
-        handlers.update(build_catalog_handler_registry(session))
-        handlers.update(build_lead_handler_registry(session))
+        handlers = _build_worker_handlers(session)
         runtime = WorkerRuntime(session, handlers=handlers, worker_name="cli-worker")
         result = asyncio.run(runtime.run_once())
         if result.status == "idle":
@@ -120,6 +125,50 @@ def _session_from_args(args: argparse.Namespace):
 def _engine_from_args(args: argparse.Namespace):
     path = args.database_path or load_settings().database_path
     return create_sqlite_engine(path)
+
+
+def _build_worker_handlers(session):
+    handlers = {}
+    handlers.update(build_catalog_handler_registry(session))
+    handlers.update(build_lead_handler_registry(session))
+    handlers.update(build_telegram_handler_registry(session, _UnconfiguredTelegramClient()))
+    return handlers
+
+
+class _UnconfiguredTelegramClient:
+    async def resolve_source(self, input_ref: str) -> ResolvedTelegramSource:
+        raise ValueError("telegram client is not configured")
+
+    async def check_access(self, source: ResolvedTelegramSource) -> SourceAccessResult:
+        raise ValueError("telegram client is not configured")
+
+    async def fetch_preview_messages(
+        self,
+        source: ResolvedTelegramSource,
+        *,
+        limit: int,
+    ) -> list[TelegramMessage]:
+        raise ValueError("telegram client is not configured")
+
+    async def fetch_message_batch(
+        self,
+        source: ResolvedTelegramSource,
+        *,
+        after_message_id: int | None,
+        limit: int,
+    ) -> list[TelegramMessage]:
+        raise ValueError("telegram client is not configured")
+
+    async def fetch_context(
+        self,
+        source: ResolvedTelegramSource,
+        *,
+        message_id: int,
+        before: int,
+        after: int,
+        reply_depth: int,
+    ) -> MessageContext:
+        raise ValueError("telegram client is not configured")
 
 
 def _infer_value_type(value) -> str:  # type: ignore[no-untyped-def]

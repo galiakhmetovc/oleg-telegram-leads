@@ -16,11 +16,11 @@
 - Modify: `src/pur_leads/cli.py`
 - Test: `tests/test_cli.py`
 
-- [ ] Write a failing test proving `worker once` routes `check_source_access` through a Telegram handler and fails with `telegram client is not configured`.
-- [ ] Run `uv run --extra dev pytest tests/test_cli.py::test_cli_worker_once_routes_telegram_jobs_through_canonical_registry -q` and verify expected failure.
-- [ ] Add an unconfigured Telegram client port implementation and use `build_telegram_handler_registry` in the CLI handler builder.
-- [ ] Run `uv run --extra dev pytest tests/test_cli.py::test_cli_worker_once_routes_telegram_jobs_through_canonical_registry -q` and verify it passes.
-- [ ] Commit as `feat: wire telegram handlers into cli worker`.
+- [x] Write a failing test proving `worker once` routes `check_source_access` through a Telegram handler and fails with `telegram client is not configured`.
+- [x] Run `uv run --extra dev pytest tests/test_cli.py::test_cli_worker_once_routes_telegram_jobs_through_canonical_registry -q` and verify expected failure.
+- [x] Add an unconfigured Telegram client port implementation and use `build_telegram_handler_registry` in the CLI handler builder.
+- [x] Run `uv run --extra dev pytest tests/test_cli.py::test_cli_worker_once_routes_telegram_jobs_through_canonical_registry -q` and verify it passes.
+- [x] Commit as `feat: wire telegram handlers into cli worker`.
 
 ### Task 2: Continuous Worker Command
 
