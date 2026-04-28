@@ -1885,6 +1885,11 @@ Research and reclassification can work against the hot DB by default. If the nee
 
 ## Web Interface
 
+Default landing screen:
+
+- `Leads Inbox` is the primary working screen.
+- `Today` is a secondary overview for reminders, contact reasons, tasks, and operational issues.
+
 ### Authentication
 
 Purpose:
@@ -1913,7 +1918,8 @@ Role model:
 
 Purpose:
 
-- give Oleg a light daily working screen instead of a heavy CRM dashboard.
+- give Oleg a compact overview of non-lead work that needs attention.
+- avoid competing with `Leads Inbox` as the main screen.
 
 Sections:
 
@@ -1991,7 +1997,8 @@ Features:
 
 Purpose:
 
-- review detected leads.
+- review detected leads as the primary daily workflow.
+- quickly decide whether a message requires action, feedback, CRM follow-up, or no action.
 
 Each lead shows:
 
