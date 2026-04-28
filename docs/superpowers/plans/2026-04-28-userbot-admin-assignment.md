@@ -31,11 +31,11 @@
 - Modify: `src/pur_leads/services/telegram_sources.py`
 - Test: `tests/test_telegram_source_service.py`
 
-- [ ] Write failing tests proving new sources inherit the default active userbot and queued source jobs carry `userbot_account_id`.
-- [ ] Run `uv run --extra dev pytest tests/test_telegram_source_service.py -q` and verify expected failures.
-- [ ] Update source creation to assign the selected default userbot when available.
-- [ ] Run `uv run --extra dev pytest tests/test_telegram_source_service.py -q` and verify it passes.
-- [ ] Commit as `feat: assign sources to default userbot`.
+- [x] Write failing tests proving new sources inherit the default active userbot and queued source jobs carry `userbot_account_id`.
+- [x] Run `uv run --extra dev pytest tests/test_telegram_source_service.py -q` and verify expected failures.
+- [x] Update source creation to assign the selected default userbot when available.
+- [x] Run `uv run --extra dev pytest tests/test_telegram_source_service.py -q` and verify it passes.
+- [x] Commit as `feat: assign sources to default userbot`.
 
 ### Task 3: Admin API And UI
 

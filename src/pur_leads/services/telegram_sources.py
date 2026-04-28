@@ -18,6 +18,7 @@ from pur_leads.repositories.telegram_sources import (
 )
 from pur_leads.services.audit import AuditService
 from pur_leads.services.scheduler import SchedulerService
+from pur_leads.services.userbots import UserbotAccountService
 
 
 class CheckpointResetRequiresConfirmation(ValueError):
@@ -73,6 +74,7 @@ class TelegramSourceService:
         parsed = parse_source_input(input_ref, purpose)
         now = utc_now()
         lead_enabled, catalog_enabled = _purpose_flags(purpose)
+        default_userbot = UserbotAccountService(self.session).select_default_userbot()
         source = self.repository.create(
             source_kind=parsed.source_kind,
             telegram_id=None,
@@ -81,7 +83,7 @@ class TelegramSourceService:
             invite_link_hash=parsed.invite_link_hash,
             input_ref=parsed.input_ref,
             source_purpose=purpose,
-            assigned_userbot_account_id=None,
+            assigned_userbot_account_id=default_userbot.id if default_userbot else None,
             priority="normal",
             status="draft",
             lead_detection_enabled=lead_enabled,
@@ -117,6 +119,7 @@ class TelegramSourceService:
                 "input_ref": source.input_ref,
                 "purpose": source.source_purpose,
                 "status": source.status,
+                "assigned_userbot_account_id": source.assigned_userbot_account_id,
             },
         )
         return source

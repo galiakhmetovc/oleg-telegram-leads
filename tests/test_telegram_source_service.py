@@ -14,6 +14,7 @@ from pur_leads.services.telegram_sources import (
     CheckpointResetRequiresConfirmation,
     TelegramSourceService,
 )
+from pur_leads.services.userbots import UserbotAccountService
 
 
 @pytest.fixture
@@ -114,6 +115,27 @@ def test_source_onboarding_controls_enqueue_jobs_and_list_detail(source_service)
 
     source_row = session.execute(select(scheduler_jobs_table)).mappings().first()
     assert source_row is not None
+
+
+def test_new_sources_and_jobs_use_default_active_userbot(source_service):
+    service, session = source_service
+    userbot = UserbotAccountService(session).create_account(
+        display_name="Main userbot",
+        session_name="main",
+        session_path="/secure/main.session",
+        actor="admin",
+    )
+
+    source = service.create_draft("@example_chat", added_by="admin")
+    access_job = service.request_access_check(source.id, actor="admin")
+    service.set_status(source.id, "preview_ready", actor="system")
+    preview_job = service.request_preview(source.id, actor="admin", limit=5)
+    _activated, poll_job = service.activate_from_web(source.id, actor="admin")
+
+    assert source.assigned_userbot_account_id == userbot.id
+    assert access_job.userbot_account_id == userbot.id
+    assert preview_job.userbot_account_id == userbot.id
+    assert poll_job.userbot_account_id == userbot.id
 
 
 def test_activate_from_web_requires_preview_and_enqueues_poll(source_service):
