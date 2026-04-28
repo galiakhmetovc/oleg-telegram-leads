@@ -70,6 +70,8 @@ def test_workspace_and_admin_pages_are_protected_and_render_shells(tmp_path):
     assert '<a href="/sources">Sources</a>' in admin_response.text
     assert '<a href="/crm">CRM</a>' in admin_response.text
     assert 'id="admin-users"' in admin_response.text
+    assert 'id="userbot-form"' in admin_response.text
+    assert 'id="userbot-accounts"' in admin_response.text
     assert 'id="settings-list"' in admin_response.text
     assert crm_response.status_code == 200
     assert 'data-page="crm"' in crm_response.text
@@ -84,6 +86,7 @@ def test_workspace_and_admin_pages_are_protected_and_render_shells(tmp_path):
     assert "/api/crm/clients" in js_response.text
     assert "/crm/convert" in js_response.text
     assert "/api/sources" in js_response.text
+    assert "/api/admin/userbots" in js_response.text
 
 
 def _client(tmp_path) -> TestClient:

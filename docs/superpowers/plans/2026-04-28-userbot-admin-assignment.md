@@ -46,12 +46,12 @@
 - Test: `tests/test_web_admin_routes.py`
 - Test: `tests/test_web_pages.py`
 
-- [ ] Write failing API tests for auth-required `/api/admin/userbots` list/create.
-- [ ] Write failing page/static tests proving Admin renders userbot controls and JS calls `/api/admin/userbots`.
-- [ ] Run `uv run --extra dev pytest tests/test_web_admin_routes.py tests/test_web_pages.py -q` and verify expected failures.
-- [ ] Implement protected userbot API routes and Admin workspace controls.
-- [ ] Run `uv run --extra dev pytest tests/test_web_admin_routes.py tests/test_web_pages.py -q` and verify it passes.
-- [ ] Commit as `feat: add userbot admin UI`.
+- [x] Write failing API tests for auth-required `/api/admin/userbots` list/create.
+- [x] Write failing page/static tests proving Admin renders userbot controls and JS calls `/api/admin/userbots`.
+- [x] Run `uv run --extra dev pytest tests/test_web_admin_routes.py tests/test_web_pages.py -q` and verify expected failures.
+- [x] Implement protected userbot API routes and Admin workspace controls.
+- [x] Run `uv run --extra dev pytest tests/test_web_admin_routes.py tests/test_web_pages.py -q` and verify it passes.
+- [x] Commit as `feat: add userbot admin UI`.
 
 ### Task 4: Full Verification And Deploy
 

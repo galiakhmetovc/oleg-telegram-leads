@@ -9,8 +9,10 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from pur_leads.repositories.settings import SettingRecord
+from pur_leads.repositories.userbots import UserbotAccountRecord
 from pur_leads.repositories.web_auth import WebUserRecord
 from pur_leads.services.settings import DEFAULT_SETTINGS, RawSecretValueError, SettingsService
+from pur_leads.services.userbots import UserbotAccountService
 from pur_leads.services.web_auth import (
     AuthError,
     SessionValidationResult,
@@ -41,6 +43,19 @@ class SettingUpdateRequest(BaseModel):
     reason: str | None = None
     description: str | None = None
     requires_restart: bool = False
+
+
+class UserbotCreateRequest(BaseModel):
+    display_name: str
+    session_name: str
+    session_path: str
+    telegram_user_id: str | None = None
+    telegram_username: str | None = None
+    status: str = "active"
+    priority: str = "normal"
+    max_parallel_telegram_jobs: int = 1
+    flood_sleep_threshold_seconds: int = 60
+    make_default: bool = False
 
 
 @router.get("/admin/users")
@@ -95,6 +110,49 @@ def update_admin_user(
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return {"user": _user_payload(user)}
+
+
+@router.get("/admin/userbots")
+def list_userbot_accounts(
+    _validated: SessionValidationResult = Depends(current_admin),
+    session: Session = Depends(get_session),
+) -> dict[str, Any]:
+    service = UserbotAccountService(session)
+    return {"items": [_userbot_payload(service, account) for account in service.list_accounts()]}
+
+
+@router.post("/admin/userbots")
+def create_userbot_account(
+    payload: UserbotCreateRequest,
+    validated: SessionValidationResult = Depends(current_admin),
+    session: Session = Depends(get_session),
+) -> dict[str, Any]:
+    actor = _actor(validated)
+    service = UserbotAccountService(session)
+    try:
+        account = service.create_account(
+            display_name=payload.display_name,
+            session_name=payload.session_name,
+            session_path=payload.session_path,
+            actor=actor,
+            telegram_user_id=payload.telegram_user_id,
+            telegram_username=payload.telegram_username,
+            status=payload.status,
+            priority=payload.priority,
+            max_parallel_telegram_jobs=payload.max_parallel_telegram_jobs,
+            flood_sleep_threshold_seconds=payload.flood_sleep_threshold_seconds,
+        )
+        if payload.make_default:
+            SettingsService(session).set(
+                "telegram_default_userbot_account_id",
+                account.id,
+                value_type="string",
+                updated_by=actor,
+                reason="userbot created as default",
+            )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"userbot": _userbot_payload(service, account)}
 
 
 @router.get("/settings")
@@ -193,3 +251,10 @@ def _setting_payload(record: SettingRecord, *, is_default: bool) -> dict[str, An
         "updated_at": record.updated_at,
         "is_default": is_default,
     }
+
+
+def _userbot_payload(
+    service: UserbotAccountService,
+    account: UserbotAccountRecord,
+) -> dict[str, Any]:
+    return service.public_payload(account)

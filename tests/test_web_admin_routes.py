@@ -215,6 +215,41 @@ def test_admin_settings_routes_update_settings_and_audit_denials(tmp_path):
     assert any(row["action"] == "web_auth.protected_route_denied" for row in audit_rows)
 
 
+def test_admin_userbot_routes_create_list_and_set_default(tmp_path):
+    fixture = _setup_admin_app(tmp_path)
+    client = fixture["client"]
+
+    denied_response = client.get("/api/admin/userbots")
+    _login_local(client)
+    create_response = client.post(
+        "/api/admin/userbots",
+        json={
+            "display_name": "Main userbot",
+            "session_name": "main",
+            "session_path": "/secure/main.session",
+            "make_default": True,
+        },
+    )
+    list_response = client.get("/api/admin/userbots")
+    settings_response = client.get("/api/settings")
+
+    assert denied_response.status_code == 401
+    assert create_response.status_code == 200
+    account = create_response.json()["userbot"]
+    assert account["display_name"] == "Main userbot"
+    assert account["session_name"] == "main"
+    assert account["status"] == "active"
+    assert "session_path" not in account
+    assert list_response.status_code == 200
+    assert [row["id"] for row in list_response.json()["items"]] == [account["id"]]
+    assert any(
+        row["key"] == "telegram_default_userbot_account_id"
+        and row["value"] == account["id"]
+        and row["is_default"] is False
+        for row in settings_response.json()["items"]
+    )
+
+
 def _setup_admin_app(tmp_path):
     db_path = tmp_path / "test.db"
     engine = create_sqlite_engine(db_path)

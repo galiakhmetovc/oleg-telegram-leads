@@ -734,8 +734,9 @@ function sourceStatusClass(status) {
 }
 
 async function initAdmin() {
-  await Promise.all([loadUsers(), loadSettings()]);
+  await Promise.all([loadUsers(), loadUserbots(), loadSettings()]);
   document.querySelector("#telegram-admin-form")?.addEventListener("submit", addTelegramAdmin);
+  document.querySelector("#userbot-form")?.addEventListener("submit", addUserbot);
   document.querySelector("#setting-form")?.addEventListener("submit", saveSetting);
 }
 
@@ -765,6 +766,42 @@ async function addTelegramAdmin(event) {
   });
   event.currentTarget.reset();
   await loadUsers();
+}
+
+async function loadUserbots() {
+  const payload = await api("/api/admin/userbots");
+  const target = document.querySelector("#userbot-accounts");
+  if (!target) return;
+  target.innerHTML =
+    (payload.items || [])
+      .map(
+        (account) => `<div class="table-row">
+        <div>
+          <strong>${escapeHtml(account.display_name)}</strong>
+          <p class="muted">${escapeHtml(account.session_name)} / ${escapeHtml(account.status)}</p>
+        </div>
+        <span>${escapeHtml(account.priority)}</span>
+      </div>`
+      )
+      .join("") || '<div class="empty-state">No userbots</div>';
+}
+
+async function addUserbot(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const data = new FormData(form);
+  await api("/api/admin/userbots", {
+    method: "POST",
+    body: JSON.stringify({
+      display_name: data.get("display_name"),
+      session_name: data.get("session_name"),
+      session_path: data.get("session_path"),
+      make_default: data.get("make_default") === "on",
+    }),
+  });
+  form.reset();
+  form.querySelector('[name="make_default"]').checked = true;
+  await Promise.all([loadUserbots(), loadSettings()]);
 }
 
 async function loadSettings() {

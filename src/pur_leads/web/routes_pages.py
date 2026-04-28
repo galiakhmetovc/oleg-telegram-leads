@@ -146,6 +146,22 @@ def admin_page(
                 </section>
                 <section>
                   <div class="section-head">
+                    <h2>Userbots</h2>
+                  </div>
+                  <form id="userbot-form" class="inline-form">
+                    <input name="display_name" placeholder="Userbot name" required>
+                    <input name="session_name" placeholder="Session name" required>
+                    <input name="session_path" placeholder="Session path" required>
+                    <label class="checkbox-line">
+                      <input name="make_default" type="checkbox" checked>
+                      Default
+                    </label>
+                    <button type="submit">Add userbot</button>
+                  </form>
+                  <div id="userbot-accounts" class="table-list"></div>
+                </section>
+                <section>
+                  <div class="section-head">
                     <h2>Settings</h2>
                   </div>
                   <form id="setting-form" class="inline-form">
