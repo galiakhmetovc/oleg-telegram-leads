@@ -1,11 +1,17 @@
-import pytest
-from sqlalchemy import select
+from datetime import timedelta
 
+import pytest
+from sqlalchemy import select, update
+
+from pur_leads.core.time import utc_now
 from pur_leads.db.engine import create_sqlite_engine
 from pur_leads.db.migrations import upgrade_database
 from pur_leads.db.session import create_session_factory
 from pur_leads.models.audit import operational_events_table
+from pur_leads.models.scheduler import scheduler_jobs_table
+from pur_leads.models.telegram_sources import monitored_sources_table
 from pur_leads.services.scheduler import SchedulerService
+from pur_leads.services.telegram_sources import TelegramSourceService
 from pur_leads.workers.runtime import JobHandlerResult, WorkerRuntime
 
 
@@ -27,6 +33,47 @@ async def test_worker_once_reports_idle_without_due_jobs(runtime_session):
 
     assert result.status == "idle"
     assert result.job_id is None
+
+
+@pytest.mark.asyncio
+async def test_worker_once_schedules_due_active_source_poll_before_idling(runtime_session):
+    source = TelegramSourceService(runtime_session).create_draft(
+        "@example",
+        purpose="lead_monitoring",
+        added_by="admin",
+    )
+    TelegramSourceService(runtime_session).activate(source.id, actor="admin")
+    due_at = utc_now() - timedelta(seconds=1)
+    runtime_session.execute(
+        update(monitored_sources_table)
+        .where(monitored_sources_table.c.id == source.id)
+        .values(next_poll_at=due_at, poll_interval_seconds=60)
+    )
+    runtime_session.commit()
+    handled: list[str] = []
+
+    async def handler(acquired_job):
+        handled.append(acquired_job.monitored_source_id)
+        return JobHandlerResult(result_summary={"handled": acquired_job.monitored_source_id})
+
+    runtime = WorkerRuntime(runtime_session, handlers={"poll_monitored_source": handler})
+
+    result = await runtime.run_once()
+
+    poll_job = (
+        runtime_session.execute(
+            select(scheduler_jobs_table).where(
+                scheduler_jobs_table.c.job_type == "poll_monitored_source"
+            )
+        )
+        .mappings()
+        .one()
+    )
+    assert result.status == "succeeded"
+    assert handled == [source.id]
+    assert poll_job["status"] == "succeeded"
+    assert poll_job["monitored_source_id"] == source.id
+    assert poll_job["idempotency_key"] == f"source:{source.id}:poll:active"
 
 
 @pytest.mark.asyncio

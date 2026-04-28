@@ -36,6 +36,7 @@ class ParsedSourceInput:
     username: str | None
     source_kind: str
     invite_link_hash: str | None = None
+    start_message_id: int | None = None
 
 
 @dataclass(frozen=True)
@@ -90,8 +91,8 @@ class TelegramSourceService:
             lead_detection_enabled=lead_enabled,
             catalog_ingestion_enabled=catalog_enabled,
             phase_enabled=True,
-            start_mode="from_now",
-            start_message_id=None,
+            start_mode="from_message" if parsed.start_message_id is not None else "from_now",
+            start_message_id=parsed.start_message_id,
             start_recent_limit=None,
             start_recent_days=None,
             historical_backfill_policy="retro_web_only",
@@ -290,14 +291,22 @@ def parse_source_input(input_ref: str, purpose: str) -> ParsedSourceInput:
 
     parsed = urlparse(normalized)
     if parsed.netloc in {"t.me", "telegram.me"}:
-        username_from_path: str | None = parsed.path.strip("/").split("/", 1)[0] or None
+        path_parts = [part for part in parsed.path.strip("/").split("/") if part]
+        username_from_path: str | None = path_parts[0] if path_parts else None
+        message_id = _public_message_id(path_parts)
+        input_ref = (
+            f"{parsed.scheme}://{parsed.netloc}/{username_from_path}"
+            if username_from_path and message_id is not None
+            else normalized
+        )
         source_kind = (
             "telegram_channel" if purpose == "catalog_ingestion" else "telegram_supergroup"
         )
         return ParsedSourceInput(
-            input_ref=normalized,
+            input_ref=input_ref,
             username=username_from_path,
             source_kind=source_kind,
+            start_message_id=message_id,
         )
 
     if "joinchat" in normalized or normalized.startswith("https://t.me/+"):
@@ -309,6 +318,12 @@ def parse_source_input(input_ref: str, purpose: str) -> ParsedSourceInput:
         )
 
     return ParsedSourceInput(input_ref=normalized, username=None, source_kind="telegram_supergroup")
+
+
+def _public_message_id(path_parts: list[str]) -> int | None:
+    if len(path_parts) < 2 or not path_parts[1].isdigit():
+        return None
+    return int(path_parts[1])
 
 
 def _purpose_flags(purpose: str) -> tuple[bool, bool]:

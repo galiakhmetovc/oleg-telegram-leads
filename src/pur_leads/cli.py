@@ -16,6 +16,7 @@ from pur_leads.db.session import create_session_factory
 from pur_leads.integrations.catalog.heuristic_extractor import HeuristicCatalogExtractor
 from pur_leads.integrations.documents.pdf_parser import PdfArtifactParser
 from pur_leads.integrations.leads.fuzzy_classifier import FuzzyCatalogLeadClassifier
+from pur_leads.integrations.telegram.bot_notifier import TelegramBotLeadNotifier
 from pur_leads.integrations.telegram.telethon_client import TelethonTelegramClient
 from pur_leads.integrations.telegram.types import (
     MessageContext,
@@ -173,7 +174,11 @@ def _build_worker_handlers(session):
         )
     )
     handlers.update(
-        build_lead_handler_registry(session, classifier=FuzzyCatalogLeadClassifier(session))
+        build_lead_handler_registry(
+            session,
+            classifier=FuzzyCatalogLeadClassifier(session),
+            notifier=_build_lead_notifier(settings),
+        )
     )
     handlers.update(
         build_telegram_handler_registry(
@@ -183,6 +188,12 @@ def _build_worker_handlers(session):
         )
     )
     return handlers
+
+
+def _build_lead_notifier(settings):
+    if not settings.telegram_bot_token:
+        return None
+    return TelegramBotLeadNotifier(settings.telegram_bot_token)
 
 
 def _build_telegram_client(session):

@@ -63,6 +63,22 @@ def test_catalog_ingestion_source_sets_catalog_flags(source_service):
     assert source.catalog_ingestion_enabled is True
 
 
+def test_create_draft_from_public_message_link_sets_chat_and_start_message(source_service):
+    service, _session = source_service
+
+    source = service.create_draft(
+        "https://t.me/chat_mila_kolpakova/716254",
+        purpose="lead_monitoring",
+        added_by="admin",
+    )
+
+    assert source.input_ref == "https://t.me/chat_mila_kolpakova"
+    assert source.username == "chat_mila_kolpakova"
+    assert source.source_kind == "telegram_supergroup"
+    assert source.start_mode == "from_message"
+    assert source.start_message_id == 716254
+
+
 def test_status_transitions_to_active(source_service):
     service, _session = source_service
     source = service.create_draft("@example_chat", added_by="admin")

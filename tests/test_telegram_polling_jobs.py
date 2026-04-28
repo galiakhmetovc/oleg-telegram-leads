@@ -102,7 +102,11 @@ async def test_poll_active_source_persists_messages_and_checkpoint(polling_sessi
 
     source_row = session.execute(select(monitored_sources_table)).mappings().one()
     message_rows = session.execute(select(source_messages_table)).mappings().all()
-    job_row = session.execute(select(scheduler_jobs_table)).mappings().one()
+    job_row = (
+        session.execute(select(scheduler_jobs_table).where(scheduler_jobs_table.c.id == job.id))
+        .mappings()
+        .one()
+    )
     assert result.status == "succeeded"
     assert result.fetched_count == 2
     assert result.inserted_count == 2
@@ -126,6 +130,43 @@ async def test_poll_active_source_persists_messages_and_checkpoint(polling_sessi
         "fetched_count": 2,
         "inserted_count": 2,
         "duplicate_count": 0,
+    }
+
+
+@pytest.mark.asyncio
+async def test_poll_lead_source_enqueues_classification_and_moves_next_poll(
+    polling_session,
+):
+    session, source_id = polling_session
+    service = TelegramSourceService(session)
+    service.reset_checkpoint(source_id, message_id=40, actor="admin", confirm=True)
+    job = SchedulerService(session).enqueue(
+        job_type="poll_monitored_source",
+        scope_type="telegram_source",
+        monitored_source_id=source_id,
+    )
+    client = FakeTelegramClient([_message(41)])
+    worker = TelegramPollingWorker(session, client)
+
+    result = await worker.poll_monitored_source(source_id, scheduler_job_id=job.id, limit=100)
+
+    source_row = session.execute(select(monitored_sources_table)).mappings().one()
+    jobs = (
+        session.execute(select(scheduler_jobs_table).order_by(scheduler_jobs_table.c.created_at))
+        .mappings()
+        .all()
+    )
+    classify_jobs = [row for row in jobs if row["job_type"] == "classify_message_batch"]
+    assert result.inserted_count == 1
+    assert source_row["next_poll_at"] is not None
+    assert source_row["next_poll_at"] > source_row["last_success_at"]
+    assert len(classify_jobs) == 1
+    assert classify_jobs[0]["status"] == "queued"
+    assert classify_jobs[0]["monitored_source_id"] == source_id
+    assert classify_jobs[0]["idempotency_key"] == f"source:{source_id}:classify:active"
+    assert classify_jobs[0]["payload_json"] == {
+        "limit": 100,
+        "trigger": "poll_monitored_source",
     }
 
 

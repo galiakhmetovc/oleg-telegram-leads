@@ -5,24 +5,26 @@ from __future__ import annotations
 import hashlib
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import asdict, dataclass, is_dataclass
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Any, Protocol, cast
 
-from sqlalchemy import select, update
+from sqlalchemy import or_, select, update
 from sqlalchemy.orm import Session
 
 from pur_leads.core.time import utc_now
 from pur_leads.integrations.telegram.client import TelegramClientPort
 from pur_leads.integrations.telegram.types import ResolvedTelegramSource
+from pur_leads.models.scheduler import scheduler_jobs_table
 from pur_leads.repositories.scheduler import SchedulerJobRecord
 from pur_leads.repositories.telegram_sources import MonitoredSourceRecord, TelegramSourceRepository
-from pur_leads.models.telegram_sources import source_messages_table
+from pur_leads.models.telegram_sources import monitored_sources_table, source_messages_table
 from pur_leads.services.audit import AuditService
 from pur_leads.services.catalog_candidates import CatalogCandidateService
 from pur_leads.services.catalog_sources import CatalogSourceService
 from pur_leads.services.leads import LeadDetectionResult, LeadMatchInput, LeadService
 from pur_leads.services.scheduler import SchedulerService
+from pur_leads.services.settings import SettingsService
 from pur_leads.workers.message_context import MessageContextWorker
 from pur_leads.workers.telegram_access import TelegramAccessWorker
 from pur_leads.workers.telegram_polling import TelegramPollingWorker
@@ -138,6 +140,11 @@ class LeadClassifierAdapter(Protocol):
         """Classify one batch of saved source messages into lead detection results."""
 
 
+class LeadNotifierAdapter(Protocol):
+    async def send_lead_notification(self, *, chat_id: str, text: str) -> Any:
+        """Send an urgent lead notification to an operator channel/chat."""
+
+
 class WorkerRuntime:
     def __init__(
         self,
@@ -155,7 +162,16 @@ class WorkerRuntime:
         self.audit = AuditService(session)
 
     async def run_once(self) -> WorkerRunResult:
-        job = self.scheduler.acquire_next(self.worker_name, lease_seconds=self.lease_seconds)
+        now = utc_now()
+        self.scheduler.recover_expired_leases(now)
+        if "poll_monitored_source" in self.handlers:
+            _enqueue_due_source_polls(self.session, self.scheduler, now)
+
+        job = self.scheduler.acquire_next(
+            self.worker_name,
+            now=now,
+            lease_seconds=self.lease_seconds,
+        )
         if job is None:
             return WorkerRunResult(status="idle")
 
@@ -456,8 +472,11 @@ def build_lead_handler_registry(
     session: Session,
     *,
     classifier: LeadClassifierAdapter | None = None,
+    notifier: LeadNotifierAdapter | None = None,
 ) -> dict[str, JobHandler]:
     lead_service = LeadService(session)
+    scheduler = SchedulerService(session)
+    settings = SettingsService(session)
 
     async def classify_message_batch(job: SchedulerJobRecord) -> JobHandlerResult:
         if classifier is None:
@@ -521,6 +540,20 @@ def build_lead_handler_registry(
                     window_minutes=window_minutes,
                 )
                 cluster_ids.add(cluster.id)
+                _enqueue_context_fetch(
+                    session,
+                    scheduler,
+                    source_message_id=result.source_message_id,
+                )
+                _enqueue_lead_notification(
+                    scheduler,
+                    settings,
+                    cluster_id=cluster.id,
+                    event=event,
+                    decision=result.decision,
+                    confidence=result.confidence,
+                    notify_reason=result.notify_reason,
+                )
             _mark_message_classified(session, result.source_message_id)
 
         return JobHandlerResult(
@@ -531,7 +564,182 @@ def build_lead_handler_registry(
             }
         )
 
-    return {"classify_message_batch": classify_message_batch}
+    async def send_notifications(job: SchedulerJobRecord) -> JobHandlerResult:
+        if notifier is None:
+            raise ValueError("lead notifier adapter is not configured")
+        payload = job.payload_json or {}
+        chat_id = payload.get("chat_id")
+        text = payload.get("text")
+        cluster_id = payload.get("cluster_id")
+        if not isinstance(chat_id, str) or not chat_id.strip():
+            raise ValueError("send_notifications requires payload.chat_id")
+        if not isinstance(text, str) or not text.strip():
+            raise ValueError("send_notifications requires payload.text")
+        if not isinstance(cluster_id, str) or not cluster_id.strip():
+            raise ValueError("send_notifications requires payload.cluster_id")
+        provider_result = await notifier.send_lead_notification(chat_id=chat_id, text=text)
+        cluster = lead_service.mark_cluster_notified(cluster_id)
+        return JobHandlerResult(
+            result_summary={
+                "cluster_id": cluster.id,
+                "notify_update_count": cluster.notify_update_count,
+                "provider_result": provider_result,
+            }
+        )
+
+    return {
+        "classify_message_batch": classify_message_batch,
+        "send_notifications": send_notifications,
+    }
+
+
+def _enqueue_due_source_polls(
+    session: Session,
+    scheduler: SchedulerService,
+    now: datetime,
+) -> None:
+    rows = (
+        session.execute(
+            select(monitored_sources_table).where(
+                monitored_sources_table.c.status == "active",
+                monitored_sources_table.c.phase_enabled.is_(True),
+                or_(
+                    monitored_sources_table.c.next_poll_at.is_(None),
+                    monitored_sources_table.c.next_poll_at <= _to_db_datetime(now),
+                ),
+            )
+        )
+        .mappings()
+        .all()
+    )
+    for row in rows:
+        source_id = row["id"]
+        if _has_active_poll_job(session, source_id):
+            continue
+        scheduler.enqueue(
+            job_type="poll_monitored_source",
+            scope_type="telegram_source",
+            scope_id=source_id,
+            userbot_account_id=row["assigned_userbot_account_id"],
+            monitored_source_id=source_id,
+            idempotency_key=f"source:{source_id}:poll:active",
+            run_after_at=now,
+            checkpoint_before_json={"message_id": row["checkpoint_message_id"]},
+            payload_json={"limit": 100, "scheduled_by": "worker_due_poll"},
+        )
+
+
+def _has_active_poll_job(session: Session, source_id: str) -> bool:
+    row = (
+        session.execute(
+            select(scheduler_jobs_table.c.id).where(
+                scheduler_jobs_table.c.job_type == "poll_monitored_source",
+                scheduler_jobs_table.c.monitored_source_id == source_id,
+                scheduler_jobs_table.c.status.in_(["queued", "running"]),
+            )
+        )
+        .mappings()
+        .first()
+    )
+    return row is not None
+
+
+def _enqueue_context_fetch(
+    session: Session,
+    scheduler: SchedulerService,
+    *,
+    source_message_id: str,
+) -> None:
+    scheduler.enqueue(
+        job_type="fetch_message_context",
+        scope_type="telegram_source",
+        source_message_id=source_message_id,
+        userbot_account_id=_message_userbot_account_id(session, source_message_id),
+        idempotency_key=f"context:{source_message_id}",
+        payload_json={"before": 2, "after": 2, "reply_depth": 2},
+    )
+
+
+def _enqueue_lead_notification(
+    scheduler: SchedulerService,
+    settings: SettingsService,
+    *,
+    cluster_id: str,
+    event: Any,
+    decision: str,
+    confidence: float,
+    notify_reason: str | None,
+) -> None:
+    if settings.get("telegram_lead_notifications_enabled") is False:
+        return
+    chat_id = settings.get("telegram_lead_notification_chat_id")
+    if not isinstance(chat_id, str) or not chat_id.strip():
+        return
+    scheduler.enqueue(
+        job_type="send_notifications",
+        scope_type="global",
+        scope_id=cluster_id,
+        monitored_source_id=event.monitored_source_id,
+        source_message_id=event.source_message_id,
+        idempotency_key=f"lead-notify:{cluster_id}:{event.id}",
+        priority="high",
+        payload_json={
+            "cluster_id": cluster_id,
+            "lead_event_id": event.id,
+            "chat_id": chat_id.strip(),
+            "text": _lead_notification_text(
+                decision=decision,
+                confidence=confidence,
+                message_text=event.message_text,
+                notify_reason=notify_reason,
+                reason=event.reason,
+                message_url=event.message_url,
+            ),
+        },
+    )
+
+
+def _lead_notification_text(
+    *,
+    decision: str,
+    confidence: float,
+    message_text: str | None,
+    notify_reason: str | None,
+    reason: str | None,
+    message_url: str | None,
+) -> str:
+    lines = [
+        f"Новый лид: {decision} ({round(confidence * 100)}%)",
+        message_text or "(без текста)",
+        f"Причина: {notify_reason or reason or 'требуется проверка'}",
+    ]
+    if message_url:
+        lines.append(f"Источник: {message_url}")
+    return "\n".join(lines)
+
+
+def _message_userbot_account_id(session: Session, source_message_id: str) -> str | None:
+    row = (
+        session.execute(
+            select(monitored_sources_table.c.assigned_userbot_account_id)
+            .select_from(
+                source_messages_table.join(
+                    monitored_sources_table,
+                    source_messages_table.c.monitored_source_id == monitored_sources_table.c.id,
+                )
+            )
+            .where(source_messages_table.c.id == source_message_id)
+        )
+        .mappings()
+        .first()
+    )
+    return row["assigned_userbot_account_id"] if row is not None else None
+
+
+def _to_db_datetime(value: datetime) -> datetime:
+    if value.tzinfo is not None:
+        return value.astimezone(UTC).replace(tzinfo=None)
+    return value
 
 
 def _checkpoint_after(handler_result: Any) -> Any:

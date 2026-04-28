@@ -377,6 +377,20 @@ class LeadService:
         self.session.commit()
         return TakeIntoWorkResult(feedback=feedback, task=task)
 
+    def mark_cluster_notified(self, cluster_id: str) -> LeadClusterRecord:
+        cluster = self.repository.get_cluster(cluster_id)
+        if cluster is None:
+            raise KeyError(cluster_id)
+        now = utc_now()
+        updated = self.repository.update_cluster(
+            cluster.id,
+            last_notified_at=now,
+            notify_update_count=cluster.notify_update_count + 1,
+            updated_at=now,
+        )
+        self.session.commit()
+        return updated
+
     def _create_cluster_for_event(
         self,
         *,

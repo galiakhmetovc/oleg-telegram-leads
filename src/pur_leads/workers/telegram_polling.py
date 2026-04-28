@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import timedelta
 from typing import Any
 
 from sqlalchemy import insert, select, update
@@ -128,10 +129,14 @@ class TelegramPollingWorker:
                 self._mirror_catalog_source(source, source_message_id, message)
 
         checkpoint_after = _checkpoint_after(checkpoint_before, messages)
+        next_poll_at = now + timedelta(seconds=max(source.poll_interval_seconds, 1))
+        if inserted_count > 0 and source.lead_detection_enabled:
+            self._enqueue_classification(source)
         self.sources.update(
             source.id,
             checkpoint_message_id=checkpoint_after,
             checkpoint_date=now,
+            next_poll_at=next_poll_at,
             last_success_at=now,
             last_error=None,
             last_error_at=None,
@@ -150,6 +155,16 @@ class TelegramPollingWorker:
 
         self.session.commit()
         return result
+
+    def _enqueue_classification(self, source: MonitoredSourceRecord) -> None:
+        self.scheduler.enqueue(
+            job_type="classify_message_batch",
+            scope_type="telegram_source",
+            scope_id=source.id,
+            monitored_source_id=source.id,
+            idempotency_key=f"source:{source.id}:classify:active",
+            payload_json={"limit": 100, "trigger": "poll_monitored_source"},
+        )
 
     def _existing_messages(self, source_id: str) -> dict[int, ExistingSourceMessage]:
         rows = self.session.execute(
