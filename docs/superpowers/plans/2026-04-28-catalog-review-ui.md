@@ -59,6 +59,6 @@ This layer is for human review of extracted facts. It does not replace the later
 - [x] Run `uv run --extra dev mypy src`.
 - [x] Run `uv run --extra dev pytest -q`.
 - [x] Run `docker compose config >/tmp/oleg-telegram-leads-compose.out` and report only line count.
-- [ ] Commit and push to `main`.
-- [ ] Deploy on `teamd-ams1`, restart web/worker, and verify `/health` plus `docker compose ps web worker`.
-- [ ] Rebuild server-side extracted candidates with the improved heuristic extractor.
+- [x] Commit and push to `main`.
+- [x] Deploy on `teamd-ams1`, restart web/worker, and verify `/health` plus `docker compose ps web worker`.
+- [x] Rebuild server-side extracted candidates with the improved heuristic extractor.

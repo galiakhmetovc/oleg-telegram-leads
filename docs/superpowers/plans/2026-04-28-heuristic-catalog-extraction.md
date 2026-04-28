@@ -57,5 +57,5 @@ This is not the final AI extractor. It is a deterministic bootstrap extractor fo
 - [x] Run `uv run --extra dev pytest -q`.
 - [x] Run `docker compose config >/tmp/oleg-telegram-leads-compose.out` and report only line count.
 - [x] Commit and push to `main`.
-- [ ] Deploy on `teamd-ams1`, restart web/worker, and verify `/health` plus `docker compose ps web worker`.
-- [ ] Enqueue extraction for existing parsed chunks and verify candidates/facts appear.
+- [x] Deploy on `teamd-ams1`, restart web/worker, and verify `/health` plus `docker compose ps web worker`.
+- [x] Enqueue extraction for existing parsed chunks and verify candidates/facts appear.
