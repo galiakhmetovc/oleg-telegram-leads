@@ -32,13 +32,13 @@
 - Create: `src/pur_leads/services/crm.py`
 - Test: `tests/test_crm_service.py`
 
-- [ ] Write failing tests for manual client creation with contact, object, interest, asset, contact reason, and touchpoint records.
-- [ ] Write failing tests for duplicate hints by Telegram user id, username, phone, and email.
-- [ ] Run `uv run --extra dev pytest tests/test_crm_service.py -q` and verify failures are missing CRM service/repository behavior.
-- [ ] Implement repository dataclasses and CRUD/list/detail helpers.
-- [ ] Implement `CrmService.create_client_profile`, related-record creation, duplicate hint lookup, and audit entries.
-- [ ] Run `uv run --extra dev pytest tests/test_crm_service.py -q` and verify it passes.
-- [ ] Commit as `feat: add crm memory service`.
+- [x] Write failing tests for manual client creation with contact, object, interest, asset, contact reason, and touchpoint records.
+- [x] Write failing tests for duplicate hints by Telegram user id, username, phone, and email.
+- [x] Run `uv run --extra dev pytest tests/test_crm_service.py -q` and verify failures are missing CRM service/repository behavior.
+- [x] Implement repository dataclasses and CRUD/list/detail helpers.
+- [x] Implement `CrmService.create_client_profile`, related-record creation, duplicate hint lookup, and audit entries.
+- [x] Run `uv run --extra dev pytest tests/test_crm_service.py -q` and verify it passes.
+- [x] Commit as `feat: add crm memory service`.
 
 ### Task 3: Lead Cluster CRM Conversion
 
