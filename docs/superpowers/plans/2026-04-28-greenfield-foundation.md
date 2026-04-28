@@ -300,7 +300,7 @@ git commit -m "chore: scaffold greenfield app"
 - Create: `migrations/versions/0001_foundation.py`
 - Test: `tests/test_db_migrations.py`
 
-- [ ] **Step 1: Write migration test**
+- [x] **Step 1: Write migration test**
 
 ```python
 from sqlalchemy import inspect
@@ -319,7 +319,7 @@ def test_foundation_migration_creates_core_tables(tmp_path):
     assert {"settings", "settings_revisions", "audit_log", "operational_events"}.issubset(tables)
 ```
 
-- [ ] **Step 2: Implement SQLite engine pragmas**
+- [x] **Step 2: Implement SQLite engine pragmas**
 
 `create_sqlite_engine()` must enable:
 
@@ -327,7 +327,7 @@ def test_foundation_migration_creates_core_tables(tmp_path):
 - `PRAGMA journal_mode = WAL`
 - `PRAGMA busy_timeout = 5000`
 
-- [ ] **Step 3: Add Alembic baseline migration**
+- [x] **Step 3: Add Alembic baseline migration**
 
 Migration `0001_foundation.py` creates these first tables:
 
@@ -341,7 +341,7 @@ Migration `0001_foundation.py` creates these first tables:
 
 Keep only foundation columns from the spec. Do not add Telegram/catalog/CRM tables in this task.
 
-- [ ] **Step 4: Run migration test**
+- [x] **Step 4: Run migration test**
 
 ```bash
 python -m pytest tests/test_db_migrations.py -q
@@ -349,7 +349,7 @@ python -m pytest tests/test_db_migrations.py -q
 
 Expected: pass.
 
-- [ ] **Step 5: Commit database baseline**
+- [x] **Step 5: Commit database baseline**
 
 ```bash
 git add alembic.ini migrations src/pur_leads/db src/pur_leads/models tests/test_db_migrations.py
