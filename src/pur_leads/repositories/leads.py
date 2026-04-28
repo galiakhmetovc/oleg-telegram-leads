@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 
 from pur_leads.core.ids import new_id
 from pur_leads.models.leads import (
+    feedback_events_table,
     lead_cluster_actions_table,
     lead_cluster_members_table,
     lead_clusters_table,
@@ -86,6 +87,25 @@ class LeadClusterRecord:
     crm_conversion_action_id: str | None
     created_at: datetime
     updated_at: datetime
+
+
+@dataclass(frozen=True)
+class FeedbackEventRecord:
+    id: str
+    target_type: str
+    target_id: str
+    action: str
+    reason_code: str | None
+    feedback_scope: str
+    learning_effect: str
+    application_status: str
+    applied_entity_type: str | None
+    applied_entity_id: str | None
+    applied_at: datetime | None
+    comment: str | None
+    created_by: str
+    created_at: datetime
+    metadata_json: Any
 
 
 class LeadRepository:
@@ -183,6 +203,34 @@ class LeadRepository:
         action_id = new_id()
         self.session.execute(insert(lead_cluster_actions_table).values(id=action_id, **values))
         return action_id
+
+    def create_feedback_event(self, **values) -> FeedbackEventRecord:  # type: ignore[no-untyped-def]
+        feedback_id = new_id()
+        self.session.execute(insert(feedback_events_table).values(id=feedback_id, **values))
+        row = (
+            self.session.execute(
+                select(feedback_events_table).where(feedback_events_table.c.id == feedback_id)
+            )
+            .mappings()
+            .one()
+        )
+        return FeedbackEventRecord(**dict(row))
+
+    def update_cluster_member_by_event(
+        self,
+        *,
+        cluster_id: str,
+        lead_event_id: str,
+        **values,
+    ) -> None:  # type: ignore[no-untyped-def]
+        self.session.execute(
+            update(lead_cluster_members_table)
+            .where(
+                lead_cluster_members_table.c.lead_cluster_id == cluster_id,
+                lead_cluster_members_table.c.lead_event_id == lead_event_id,
+            )
+            .values(**values)
+        )
 
     def find_compatible_cluster(
         self,

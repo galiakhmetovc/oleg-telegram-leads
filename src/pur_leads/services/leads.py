@@ -13,7 +13,12 @@ from pur_leads.core.time import utc_now
 from pur_leads.models.catalog import classifier_snapshot_entries_table
 from pur_leads.models.leads import lead_matches_table
 from pur_leads.models.telegram_sources import source_messages_table
-from pur_leads.repositories.leads import LeadClusterRecord, LeadEventRecord, LeadRepository
+from pur_leads.repositories.leads import (
+    FeedbackEventRecord,
+    LeadClusterRecord,
+    LeadEventRecord,
+    LeadRepository,
+)
 
 
 @dataclass(frozen=True)
@@ -173,6 +178,164 @@ class LeadService:
             category_id=category_id,
         )
 
+    def record_feedback(
+        self,
+        *,
+        target_type: str,
+        target_id: str,
+        action: str,
+        created_by: str,
+        reason_code: str | None = None,
+        feedback_scope: str | None = None,
+        learning_effect: str | None = None,
+        application_status: str = "recorded",
+        applied_entity_type: str | None = None,
+        applied_entity_id: str | None = None,
+        comment: str | None = None,
+        metadata_json: Any | None = None,
+    ) -> FeedbackEventRecord:
+        feedback = self._create_feedback_event(
+            target_type=target_type,
+            target_id=target_id,
+            action=action,
+            created_by=created_by,
+            reason_code=reason_code,
+            feedback_scope=feedback_scope,
+            learning_effect=learning_effect,
+            application_status=application_status,
+            applied_entity_type=applied_entity_type,
+            applied_entity_id=applied_entity_id,
+            comment=comment,
+            metadata_json=metadata_json,
+        )
+        self.session.commit()
+        return feedback
+
+    def apply_cluster_action(
+        self,
+        cluster_id: str,
+        *,
+        action: str,
+        actor: str,
+        reason_code: str | None = None,
+        comment: str | None = None,
+        snoozed_until: datetime | None = None,
+        duplicate_of_cluster_id: str | None = None,
+        lead_event_id: str | None = None,
+    ) -> FeedbackEventRecord:
+        cluster = self.repository.get_cluster(cluster_id)
+        if cluster is None:
+            raise KeyError(cluster_id)
+        if action not in _CLUSTER_FEEDBACK_ACTIONS:
+            raise ValueError(f"Unsupported cluster action: {action}")
+        if action == "not_lead" and not reason_code:
+            raise ValueError("reason_code is required for not_lead feedback")
+
+        now = utc_now()
+        metadata: dict[str, Any] = {}
+        if action == "lead_confirmed":
+            self.repository.update_cluster(
+                cluster.id,
+                cluster_status="in_work",
+                review_status="confirmed",
+                updated_at=now,
+            )
+        elif action == "not_lead":
+            self.repository.update_cluster(
+                cluster.id,
+                cluster_status="not_lead",
+                review_status="rejected",
+                updated_at=now,
+            )
+        elif action == "maybe":
+            self.repository.update_cluster(
+                cluster.id,
+                cluster_status="maybe",
+                review_status="needs_more_info",
+                updated_at=now,
+            )
+        elif action == "snooze":
+            if snoozed_until is None:
+                raise ValueError("snoozed_until is required for snooze")
+            metadata["snoozed_until"] = snoozed_until.isoformat()
+            self.repository.update_cluster(
+                cluster.id,
+                cluster_status="snoozed",
+                snoozed_until=snoozed_until,
+                updated_at=now,
+            )
+        elif action == "duplicate":
+            if duplicate_of_cluster_id is None:
+                raise ValueError("duplicate_of_cluster_id is required for duplicate")
+            if self.repository.get_cluster(duplicate_of_cluster_id) is None:
+                raise KeyError(duplicate_of_cluster_id)
+            metadata["duplicate_of_cluster_id"] = duplicate_of_cluster_id
+            self.repository.update_cluster(
+                cluster.id,
+                cluster_status="duplicate",
+                review_status="rejected",
+                duplicate_of_cluster_id=duplicate_of_cluster_id,
+                updated_at=now,
+            )
+            self.repository.create_cluster_action(
+                action_type="mark_duplicate",
+                from_cluster_id=cluster.id,
+                to_cluster_id=duplicate_of_cluster_id,
+                source_message_id=cluster.primary_source_message_id,
+                lead_event_id=cluster.primary_lead_event_id,
+                actor=actor,
+                reason=reason_code,
+                details_json=metadata,
+                created_at=now,
+            )
+        elif action == "mark_context_only":
+            if lead_event_id is None:
+                raise ValueError("lead_event_id is required for mark_context_only")
+            event = self.repository.get_event(lead_event_id)
+            if event is None:
+                raise KeyError(lead_event_id)
+            if event.lead_cluster_id != cluster.id:
+                raise ValueError("lead_event_id does not belong to cluster")
+            self.repository.update_event(
+                event.id,
+                event_status="context_only",
+                event_review_status="confirmed",
+            )
+            self.repository.update_cluster_member_by_event(
+                cluster_id=cluster.id,
+                lead_event_id=event.id,
+                member_role="context",
+                merge_reason=reason_code or "context_only",
+            )
+            self.repository.create_cluster_action(
+                action_type="mark_context_only",
+                from_cluster_id=None,
+                to_cluster_id=cluster.id,
+                source_message_id=event.source_message_id,
+                lead_event_id=event.id,
+                actor=actor,
+                reason=reason_code,
+                details_json={"reason_code": reason_code},
+                created_at=now,
+            )
+
+        feedback = self._create_feedback_event(
+            target_type="lead_cluster",
+            target_id=cluster.id,
+            action=action,
+            created_by=actor,
+            reason_code=reason_code,
+            feedback_scope=None,
+            learning_effect=None,
+            application_status="applied",
+            applied_entity_type="lead_cluster",
+            applied_entity_id=cluster.id,
+            comment=comment,
+            metadata_json=metadata,
+        )
+        self.session.commit()
+        return feedback
+
     def _create_cluster_for_event(
         self,
         *,
@@ -309,6 +472,42 @@ class LeadService:
         )
         return dict(row) if row is not None else None
 
+    def _create_feedback_event(
+        self,
+        *,
+        target_type: str,
+        target_id: str,
+        action: str,
+        created_by: str,
+        reason_code: str | None,
+        feedback_scope: str | None,
+        learning_effect: str | None,
+        application_status: str,
+        applied_entity_type: str | None,
+        applied_entity_id: str | None,
+        comment: str | None,
+        metadata_json: Any | None,
+    ) -> FeedbackEventRecord:
+        if action == "not_lead" and not reason_code:
+            raise ValueError("reason_code is required for not_lead feedback")
+        now = utc_now()
+        return self.repository.create_feedback_event(
+            target_type=target_type,
+            target_id=target_id,
+            action=action,
+            reason_code=reason_code,
+            feedback_scope=feedback_scope or _default_feedback_scope(action),
+            learning_effect=learning_effect or _default_learning_effect(action),
+            application_status=application_status,
+            applied_entity_type=applied_entity_type,
+            applied_entity_id=applied_entity_id,
+            applied_at=now if application_status == "applied" else None,
+            comment=comment,
+            created_by=created_by,
+            created_at=now,
+            metadata_json=metadata_json or {},
+        )
+
     def _event_category_id(self, event_id: str) -> str | None:
         row = (
             self.session.execute(
@@ -328,6 +527,46 @@ class LeadService:
 def _message_text(message: dict[str, Any]) -> str | None:
     parts = [part for part in (message.get("text"), message.get("caption")) if part]
     return "\n".join(parts) if parts else None
+
+
+_CLUSTER_FEEDBACK_ACTIONS = {
+    "lead_confirmed",
+    "not_lead",
+    "maybe",
+    "snooze",
+    "duplicate",
+    "mark_context_only",
+}
+
+_COMMERCIAL_OUTCOME_ACTIONS = {
+    "commercial_no_answer",
+    "commercial_too_expensive",
+    "commercial_bought_elsewhere",
+    "commercial_postponed",
+    "commercial_not_region",
+}
+
+
+def _default_feedback_scope(action: str) -> str:
+    if action in _COMMERCIAL_OUTCOME_ACTIONS:
+        return "crm_outcome"
+    if action in {"duplicate", "mark_context_only"}:
+        return "clustering"
+    if action in {"maybe", "snooze"}:
+        return "none"
+    return "classifier"
+
+
+def _default_learning_effect(action: str) -> str:
+    if action in _COMMERCIAL_OUTCOME_ACTIONS or action in {"maybe", "snooze"}:
+        return "no_classifier_learning"
+    if action in {"duplicate", "mark_context_only"}:
+        return "cluster_training"
+    if action == "lead_confirmed":
+        return "positive_example"
+    if action == "not_lead":
+        return "negative_example"
+    return "no_classifier_learning"
 
 
 def _cluster_status_for_decision(decision: str) -> str:

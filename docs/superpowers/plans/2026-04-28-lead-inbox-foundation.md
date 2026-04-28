@@ -62,6 +62,8 @@ same-source/sender/category window auto-merge, member rows, aggregate updates, a
 
 ## Task 4: Feedback And Inbox Actions
 
+- [x] Implement feedback recording and cluster action state transitions.
+
 **Files:**
 - Modify: `src/pur_leads/services/leads.py`
 - Test: `tests/test_lead_feedback_service.py`
@@ -71,7 +73,13 @@ same-source/sender/category window auto-merge, member rows, aggregate updates, a
 - [ ] Implement `lead_confirmed`, `not_lead`, `maybe`, `snooze`, `duplicate`, and `mark_context_only` cluster actions.
 - [ ] Distinguish classifier feedback from commercial outcomes through `feedback_scope` and `learning_effect`.
 
+Completed: implemented feedback event recording, `not_lead` reason enforcement,
+cluster workflow transitions, duplicate/context cluster action audit rows, and default
+classifier vs commercial learning scope behavior. Covered by `tests/test_lead_feedback_service.py`.
+
 ## Task 5: Leads Inbox Query Service
+
+- [x] Implement cluster queue/detail read model.
 
 **Files:**
 - Create: `src/pur_leads/services/lead_inbox.py`
@@ -80,6 +88,9 @@ same-source/sender/category window auto-merge, member rows, aggregate updates, a
 - [ ] Return cluster queue rows with primary message, status, confidence, category, matched terms/items, retro/maybe/auto_pending flags, event count, and feedback count.
 - [ ] Support filters for status, source, category, retro, maybe, and minimum confidence.
 - [ ] Return detail payload with cluster timeline, events, matches, and feedback.
+
+Completed: implemented `LeadInboxService` queue/detail read model with evidence flags,
+filters, timeline, events, matches, and feedback payloads. Covered by `tests/test_lead_inbox_service.py`.
 
 ## Task 6: Runtime Classification Handler
 
