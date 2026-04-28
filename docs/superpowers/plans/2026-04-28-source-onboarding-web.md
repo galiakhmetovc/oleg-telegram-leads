@@ -54,10 +54,10 @@
 
 ### Task 4: Full Verification And Deploy
 
-- [ ] Run `uv run --extra dev ruff check`.
-- [ ] Run `uv run --extra dev ruff format --check`.
-- [ ] Run `uv run --extra dev mypy src`.
-- [ ] Run `uv run --extra dev pytest -q`.
-- [ ] Run `docker compose config >/tmp/oleg-telegram-leads-compose.out && wc -l /tmp/oleg-telegram-leads-compose.out`.
+- [x] Run `uv run --extra dev ruff check`.
+- [x] Run `uv run --extra dev ruff format --check`.
+- [x] Run `uv run --extra dev mypy src`.
+- [x] Run `uv run --extra dev pytest -q`.
+- [x] Run `docker compose config >/tmp/oleg-telegram-leads-compose.out && wc -l /tmp/oleg-telegram-leads-compose.out`.
 - [ ] Push `main`.
 - [ ] SSH to `teamd-ams1`, pull fast-forward, rebuild web, run migrations if needed, restart `web`, and verify `/health` and `/sources`.
