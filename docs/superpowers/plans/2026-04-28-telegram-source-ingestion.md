@@ -86,6 +86,8 @@ Tests use fake clients. Do not require live Telegram access.
 
 ## Task 4: Source Access And Preview Jobs
 
+- [x] Implement access/preview jobs and verify with fake Telegram client tests.
+
 **Files:**
 - Create: `src/pur_leads/workers/telegram_access.py`
 - Test: `tests/test_telegram_access_jobs.py`
