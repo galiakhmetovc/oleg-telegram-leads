@@ -14,6 +14,7 @@ from pur_leads.core.ids import new_id
 from pur_leads.core.time import utc_now
 from pur_leads.models.catalog import (
     catalog_attributes_table,
+    catalog_candidates_table,
     catalog_items_table,
     catalog_offers_table,
     catalog_terms_table,
@@ -72,7 +73,8 @@ class ClassifierSnapshotService:
                 "weight": entry["weight"],
             }
             for entry in entries
-            if entry["entry_type"] in {"term", "example"} and entry["normalized_value"]
+            if entry["entry_type"] in {"term", "example", "candidate", "candidate_term"}
+            and entry["normalized_value"]
         ]
         catalog_prompt = _catalog_prompt(entries)
         token_estimate = _estimate_tokens(catalog_prompt)
@@ -196,6 +198,8 @@ class ClassifierSnapshotService:
             )
             for row in self._rows(catalog_offers_table, statuses)
         )
+        for candidate in self._candidate_rows(statuses):
+            entries.extend(_candidate_entries(candidate))
         examples = (
             self.session.execute(
                 select(classifier_examples_table).where(
@@ -228,6 +232,21 @@ class ClassifierSnapshotService:
     def _rows(self, table, statuses: list[str]) -> list[dict[str, Any]]:  # type: ignore[no-untyped-def]
         rows = (
             self.session.execute(select(table).where(table.c.status.in_(statuses))).mappings().all()
+        )
+        return [dict(row) for row in rows]
+
+    def _candidate_rows(self, statuses: list[str]) -> list[dict[str, Any]]:
+        rows = (
+            self.session.execute(
+                select(catalog_candidates_table).where(
+                    catalog_candidates_table.c.status.in_(statuses),
+                    catalog_candidates_table.c.candidate_type.in_(
+                        ["item", "lead_phrase", "negative_phrase"]
+                    ),
+                )
+            )
+            .mappings()
+            .all()
         )
         return [dict(row) for row in rows]
 
@@ -275,6 +294,61 @@ def _entry(
     return payload
 
 
+def _candidate_entries(row: dict[str, Any]) -> list[dict[str, Any]]:
+    value = row["normalized_value_json"] if isinstance(row["normalized_value_json"], dict) else {}
+    canonical = _normalize_text(row["canonical_name"])
+    metadata = {
+        "candidate_type": row["candidate_type"],
+        "proposed_action": row["proposed_action"],
+        "normalized_value": value,
+        "category_slug": value.get("category_slug"),
+        "item_type": value.get("item_type"),
+    }
+    entries = [
+        _entry(
+            entry_type="candidate",
+            entity_type="catalog_candidate",
+            entity_id=row["id"],
+            status_at_build=row["status"],
+            weight=row["confidence"],
+            text_value=row["canonical_name"],
+            normalized_value=canonical,
+            metadata_json=metadata,
+        )
+    ]
+    for term in _candidate_terms(value, canonical):
+        entries.append(
+            _entry(
+                entry_type="candidate_term",
+                entity_type="catalog_candidate",
+                entity_id=row["id"],
+                status_at_build=row["status"],
+                weight=row["confidence"],
+                text_value=term,
+                normalized_value=_normalize_text(term),
+                metadata_json=metadata,
+            )
+        )
+    return entries
+
+
+def _candidate_terms(value: dict[str, Any], canonical: str) -> list[str]:
+    terms = value.get("terms")
+    if not isinstance(terms, list):
+        return []
+    result: list[str] = []
+    seen = {canonical}
+    for term in terms:
+        if not isinstance(term, str):
+            continue
+        normalized = _normalize_text(term)
+        if not normalized or normalized in seen:
+            continue
+        result.append(term)
+        seen.add(normalized)
+    return result
+
+
 def _catalog_prompt(entries: list[dict[str, Any]]) -> str:
     return "\n".join(
         f"{entry['entry_type']}:{entry['normalized_value']}"
@@ -284,6 +358,10 @@ def _catalog_prompt(entries: list[dict[str, Any]]) -> str:
 
 def _estimate_tokens(value: str) -> int:
     return len(value.split())
+
+
+def _normalize_text(value: str) -> str:
+    return " ".join(value.casefold().split())
 
 
 def _hash_json(value: Any) -> str:

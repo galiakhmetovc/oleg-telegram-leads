@@ -7,6 +7,7 @@ from pur_leads.db.migrations import upgrade_database
 from pur_leads.db.session import create_session_factory
 from pur_leads.models.catalog import (
     catalog_attributes_table,
+    catalog_candidates_table,
     catalog_items_table,
     catalog_offers_table,
     catalog_terms_table,
@@ -63,6 +64,52 @@ def test_build_classifier_snapshot_includes_allowed_catalog_entries(tmp_path):
             "token_estimate",
         }
         assert all(len(row["content_hash"]) == 64 for row in entries)
+
+
+def test_build_classifier_snapshot_includes_auto_pending_candidate_terms(tmp_path):
+    engine = create_sqlite_engine(tmp_path / "test.db")
+    upgrade_database(engine)
+    session_factory = create_session_factory(engine)
+
+    with session_factory() as session:
+        candidate_id = _insert_candidate(
+            session,
+            canonical_name="Видеонаблюдение",
+            status="auto_pending",
+            normalized_value_json={
+                "item_type": "service",
+                "category_slug": "video_surveillance",
+                "terms": ["видеонаблюдение", "камера на дачу"],
+            },
+        )
+        rejected_candidate_id = _insert_candidate(
+            session,
+            canonical_name="Rejected camera",
+            status="rejected",
+            normalized_value_json={"terms": ["не использовать"]},
+        )
+
+        snapshot = ClassifierSnapshotService(session).build_snapshot(created_by="system")
+
+        entries = session.execute(select(classifier_snapshot_entries_table)).mappings().all()
+        artifacts = session.execute(select(classifier_version_artifacts_table)).mappings().all()
+    candidate_entries = [row for row in entries if row["entity_type"] == "catalog_candidate"]
+    assert snapshot.version == 1
+    assert {(row["entry_type"], row["entity_id"]) for row in candidate_entries} == {
+        ("candidate", candidate_id),
+        ("candidate_term", candidate_id),
+    }
+    assert {row["normalized_value"] for row in candidate_entries} == {
+        "видеонаблюдение",
+        "камера на дачу",
+    }
+    assert all(row["entity_id"] != rejected_candidate_id for row in candidate_entries)
+    keyword_index = next(
+        artifact["content_json"]
+        for artifact in artifacts
+        if artifact["artifact_type"] == "keyword_index"
+    )
+    assert "камера на дачу" in {entry["term"] for entry in keyword_index}
 
 
 def _insert_item(
@@ -205,6 +252,40 @@ def _insert_example(session, item_id: str, term_id: str, *, status: str) -> str:
             weight=1.0,
             created_from="manual_input",
             created_by="test",
+            created_at=now,
+            updated_at=now,
+        )
+    )
+    session.commit()
+    return row_id
+
+
+def _insert_candidate(
+    session,
+    *,
+    canonical_name: str,
+    status: str,
+    normalized_value_json: dict,
+) -> str:
+    row_id = new_id()
+    now = utc_now()
+    session.execute(
+        insert(catalog_candidates_table).values(
+            id=row_id,
+            candidate_type="item",
+            proposed_action="create",
+            canonical_name=canonical_name,
+            normalized_value_json=normalized_value_json,
+            source_count=1,
+            evidence_count=1,
+            confidence=0.8,
+            status=status,
+            target_entity_type=None,
+            target_entity_id=None,
+            merge_target_candidate_id=None,
+            first_seen_at=now,
+            last_seen_at=now,
+            created_by="system",
             created_at=now,
             updated_at=now,
         )

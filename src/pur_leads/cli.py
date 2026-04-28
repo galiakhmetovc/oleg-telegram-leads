@@ -15,6 +15,7 @@ from pur_leads.db.migrations import upgrade_database
 from pur_leads.db.session import create_session_factory
 from pur_leads.integrations.catalog.heuristic_extractor import HeuristicCatalogExtractor
 from pur_leads.integrations.documents.pdf_parser import PdfArtifactParser
+from pur_leads.integrations.leads.fuzzy_classifier import FuzzyCatalogLeadClassifier
 from pur_leads.integrations.telegram.telethon_client import TelethonTelegramClient
 from pur_leads.integrations.telegram.types import (
     MessageContext,
@@ -171,7 +172,9 @@ def _build_worker_handlers(session):
             extractor=HeuristicCatalogExtractor(session),
         )
     )
-    handlers.update(build_lead_handler_registry(session))
+    handlers.update(
+        build_lead_handler_registry(session, classifier=FuzzyCatalogLeadClassifier(session))
+    )
     handlers.update(
         build_telegram_handler_registry(
             session,

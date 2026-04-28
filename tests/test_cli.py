@@ -1,15 +1,25 @@
+from datetime import UTC, datetime
+
+from sqlalchemy import insert
 from sqlalchemy import inspect
 from sqlalchemy import select
 from fastapi.testclient import TestClient
 
 from pur_leads.cli import main
+from pur_leads.core.ids import new_id
+from pur_leads.core.time import utc_now
 from pur_leads.db.engine import create_sqlite_engine
 from pur_leads.db.migrations import upgrade_database
 from pur_leads.db.session import create_session_factory
 from pur_leads.integrations.telegram.types import ResolvedTelegramSource, SourceAccessResult
 from pur_leads.models.audit import operational_events_table
 from pur_leads.models.catalog import catalog_candidates_table, parsed_chunks_table
-from pur_leads.models.telegram_sources import source_access_checks_table
+from pur_leads.models.leads import lead_clusters_table, lead_events_table
+from pur_leads.models.telegram_sources import (
+    monitored_sources_table,
+    source_access_checks_table,
+    source_messages_table,
+)
 from pur_leads.services.catalog_sources import CatalogSourceService
 from pur_leads.services.scheduler import SchedulerService
 from pur_leads.services.telegram_sources import TelegramSourceService
@@ -63,12 +73,61 @@ def test_cli_worker_once_uses_canonical_handler_registry(tmp_path, capsys):
 
     with session_factory() as session:
         stored = SchedulerService(session).repository.get(job.id)
-        event = session.execute(select(operational_events_table)).mappings().one()
+        events = session.execute(select(operational_events_table)).mappings().all()
     output = capsys.readouterr().out
     assert stored is not None
-    assert "failed job" in output
-    assert stored.last_error == "classify_message_batch adapter is not configured"
-    assert event["details_json"]["reason"] == "handler_exception"
+    assert "succeeded job" in output
+    assert stored.result_summary_json == {
+        "message_count": 0,
+        "event_count": 0,
+        "cluster_count": 0,
+    }
+    assert events == []
+
+
+def test_cli_worker_once_uses_builtin_fuzzy_classifier(tmp_path, capsys):
+    db_path = tmp_path / "cli.db"
+    engine = create_sqlite_engine(db_path)
+    upgrade_database(engine)
+    session_factory = create_session_factory(engine)
+    with session_factory() as session:
+        source_id = _insert_monitored_source(session)
+        message_id = _insert_source_message(
+            session,
+            source_id,
+            text="Нужна камера на дачу",
+        )
+        _insert_candidate(session, canonical_name="Видеонаблюдение", terms=["камера"])
+        job = SchedulerService(session).enqueue(
+            job_type="classify_message_batch",
+            scope_type="telegram_source",
+            monitored_source_id=source_id,
+            payload_json={"limit": 10},
+        )
+
+    main(["--database-path", str(db_path), "worker", "once"])
+
+    with session_factory() as session:
+        stored = SchedulerService(session).repository.get(job.id)
+        message_status = session.execute(
+            select(source_messages_table.c.classification_status).where(
+                source_messages_table.c.id == message_id
+            )
+        ).scalar_one()
+        event = session.execute(select(lead_events_table)).mappings().one()
+        cluster = session.execute(select(lead_clusters_table)).mappings().one()
+    output = capsys.readouterr().out
+    assert stored is not None
+    assert "succeeded job" in output
+    assert stored.result_summary_json == {
+        "message_count": 1,
+        "event_count": 1,
+        "cluster_count": 1,
+    }
+    assert message_status == "classified"
+    assert event["source_message_id"] == message_id
+    assert event["decision"] == "lead"
+    assert cluster["primary_source_message_id"] == message_id
 
 
 def test_cli_worker_once_routes_telegram_jobs_through_canonical_registry(tmp_path, capsys):
@@ -275,6 +334,99 @@ def test_cli_web_uses_database_path_and_bootstrap_env(tmp_path, monkeypatch):
     assert captured["host"] == "127.0.0.1"
     assert captured["port"] == 8000
     assert login_response.status_code == 200
+
+
+def _insert_monitored_source(session) -> str:
+    row_id = new_id()
+    now = utc_now()
+    session.execute(
+        insert(monitored_sources_table).values(
+            id=row_id,
+            source_kind="telegram_supergroup",
+            input_ref="@test",
+            source_purpose="lead_monitoring",
+            priority="normal",
+            status="active",
+            lead_detection_enabled=True,
+            catalog_ingestion_enabled=False,
+            phase_enabled=True,
+            start_mode="from_now",
+            historical_backfill_policy="retro_web_only",
+            poll_interval_seconds=60,
+            added_by="test",
+            created_at=now,
+            updated_at=now,
+        )
+    )
+    session.commit()
+    return row_id
+
+
+def _insert_source_message(session, source_id: str, *, text: str) -> str:
+    row_id = new_id()
+    now = utc_now()
+    session.execute(
+        insert(source_messages_table).values(
+            id=row_id,
+            monitored_source_id=source_id,
+            raw_source_id=None,
+            telegram_message_id=101,
+            sender_id="sender-1",
+            message_date=datetime(2026, 4, 28, 12, 0, tzinfo=UTC),
+            text=text,
+            caption=None,
+            normalized_text=text.casefold(),
+            has_media=False,
+            media_metadata_json=None,
+            reply_to_message_id=None,
+            thread_id=None,
+            forward_metadata_json=None,
+            raw_metadata_json={},
+            fetched_at=now,
+            classification_status="queued",
+            archive_pointer_id=None,
+            is_archived_stub=False,
+            text_archived=False,
+            caption_archived=False,
+            metadata_archived=False,
+            created_at=now,
+            updated_at=now,
+        )
+    )
+    session.commit()
+    return row_id
+
+
+def _insert_candidate(session, *, canonical_name: str, terms: list[str]) -> str:
+    row_id = new_id()
+    now = utc_now()
+    session.execute(
+        insert(catalog_candidates_table).values(
+            id=row_id,
+            candidate_type="item",
+            proposed_action="create",
+            canonical_name=canonical_name,
+            normalized_value_json={
+                "item_type": "service",
+                "category_slug": "video_surveillance",
+                "terms": terms,
+            },
+            source_count=1,
+            evidence_count=1,
+            confidence=0.8,
+            status="auto_pending",
+            target_entity_type=None,
+            target_entity_id=None,
+            merge_target_candidate_id=None,
+            first_seen_at=now,
+            last_seen_at=now,
+            created_by="system",
+            created_at=now,
+            updated_at=now,
+        )
+    )
+    session.commit()
+    return row_id
 
 
 class FakeConfiguredTelegramClient:
