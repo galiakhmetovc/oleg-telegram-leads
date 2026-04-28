@@ -469,7 +469,7 @@ git commit -m "feat: add audit and secret references"
 - Create: `src/pur_leads/services/scheduler.py`
 - Test: `tests/test_scheduler_jobs.py`
 
-- [ ] **Step 1: Write scheduler tests**
+- [x] **Step 1: Write scheduler tests**
 
 Cover:
 
@@ -480,7 +480,7 @@ Cover:
 - failed job increments attempt count and schedules `next_retry_at`;
 - Telegram jobs are serialized per `userbot_account_id`.
 
-- [ ] **Step 2: Implement repository queries**
+- [x] **Step 2: Implement repository queries**
 
 Repository methods:
 
@@ -490,11 +490,11 @@ Repository methods:
 - `fail(job_id, error, retry_at)`
 - `recover_expired_leases(now)`
 
-- [ ] **Step 3: Implement service policy**
+- [x] **Step 3: Implement service policy**
 
 Use SQL-visible fields from the spec. Do not hide source/account scope only in `payload_json`.
 
-- [ ] **Step 4: Run tests**
+- [x] **Step 4: Run tests**
 
 ```bash
 python -m pytest tests/test_scheduler_jobs.py -q
@@ -502,7 +502,7 @@ python -m pytest tests/test_scheduler_jobs.py -q
 
 Expected: pass.
 
-- [ ] **Step 5: Commit scheduler foundation**
+- [x] **Step 5: Commit scheduler foundation**
 
 ```bash
 git add src/pur_leads/models/scheduler.py src/pur_leads/repositories/scheduler.py src/pur_leads/services/scheduler.py tests/test_scheduler_jobs.py
