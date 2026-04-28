@@ -30,6 +30,8 @@ This plan implements catalog/source storage and deterministic catalog mutation s
 
 ## Task 2: Raw Source And Manual Input Services
 
+- [x] Implement raw source/manual input services and verify service tests.
+
 **Files:**
 - Create: `src/pur_leads/repositories/catalog_sources.py`
 - Create: `src/pur_leads/services/catalog_sources.py`
