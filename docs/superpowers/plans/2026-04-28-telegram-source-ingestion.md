@@ -67,6 +67,8 @@ Behaviors:
 
 ## Task 3: Telegram Client Port
 
+- [x] Define Telegram client protocol and DTOs; verify with fake client tests.
+
 **Files:**
 - Create: `src/pur_leads/integrations/telegram/client.py`
 - Create: `src/pur_leads/integrations/telegram/types.py`
