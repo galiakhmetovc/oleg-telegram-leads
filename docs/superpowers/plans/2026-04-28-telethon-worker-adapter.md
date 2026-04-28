@@ -18,11 +18,11 @@
 - Modify: `uv.lock`
 - Test: `tests/test_telethon_client_adapter.py`
 
-- [ ] Write failing adapter tests with a fake low-level Telethon client for source resolution, preview fetch, batch fetch, and authorization failure.
-- [ ] Run `uv run --extra dev pytest tests/test_telethon_client_adapter.py -q` and verify expected failures.
-- [ ] Add Telethon dependency pinned to the current 1.x major and implement the adapter without requiring live Telegram in tests.
-- [ ] Run `uv run --extra dev pytest tests/test_telethon_client_adapter.py -q` and verify it passes.
-- [ ] Commit as `feat: add telethon telegram client adapter`.
+- [x] Write failing adapter tests with a fake low-level Telethon client for source resolution, preview fetch, batch fetch, and authorization failure.
+- [x] Run `uv run --extra dev pytest tests/test_telethon_client_adapter.py -q` and verify expected failures.
+- [x] Add Telethon dependency pinned to the current 1.x major and implement the adapter without requiring live Telegram in tests.
+- [x] Run `uv run --extra dev pytest tests/test_telethon_client_adapter.py -q` and verify it passes.
+- [x] Commit as `feat: add telethon telegram client adapter`.
 
 ### Task 2: CLI Runtime Selection
 
