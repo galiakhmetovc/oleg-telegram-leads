@@ -96,5 +96,5 @@
 - [x] Run `uv run --extra dev mypy src`.
 - [x] Run `uv run --extra dev pytest -q`.
 - [x] Run `docker compose config >/tmp/oleg-telegram-leads-compose.out && wc -l /tmp/oleg-telegram-leads-compose.out`.
-- [ ] Push `main`.
-- [ ] SSH to `teamd-ams1`, pull fast-forward, rebuild web, run migrations, restart `web`, and verify `/health`.
+- [x] Push `main`.
+- [x] SSH to `teamd-ams1`, pull fast-forward, rebuild web, run migrations, restart `web`, and verify `/health`.
