@@ -37,6 +37,8 @@ The system must continuously read the PUR Telegram channel, parse messages and d
 - `Leads Inbox` works with `lead_clusters`, not raw `lead_events`, so multiple related messages become one work item.
 - `lead_events` remain auditable detection facts tied to exact messages, classifier versions, and matches.
 - Automatic lead clustering is configurable and manually correctable through merge/split/context-only actions.
+- Feedback distinguishes classifier quality from commercial outcome. "Not a lead" teaches detection; "no answer", "too expensive", or "bought elsewhere" are CRM/work outcomes, not negative classifier examples.
+- `not_lead` feedback requires a reason and should be applied to the narrowest useful target: cluster, event, match, term, sender, or message.
 - Embeddings/semantic matching are designed into the schema but disabled initially.
 - Retention is based on time and hot database size. Large/old data is archived and rotated, not simply deleted.
 - Local archive storage is the first phase. S3-compatible storage is represented in the schema and planned for a later phase.
@@ -415,6 +417,35 @@ Rules:
 - Media-only messages are stored as metadata records.
 - Message text should be indexed with FTS5 while in the hot DB.
 - Archived messages keep a hot pointer/snippet so UI and research can request restore.
+
+### `sender_profiles`
+
+Stores observed Telegram senders and manual/feedback-derived role hints.
+
+Key fields:
+
+- `id`
+- `telegram_user_id`
+- `telegram_username`
+- `display_name`
+- `first_seen_source_id`
+- `first_seen_at`
+- `last_seen_at`
+- `sender_role`: `unknown`, `potential_customer`, `customer`, `expert`, `vendor`, `bot`, `own_account`, `ignored`
+- `role_confidence`
+- `role_source`: `system`, `feedback`, `manual`, `crm`
+- `crm_contact_id`
+- `crm_client_id`
+- `feedback_count`
+- `notes`
+- `created_at`
+- `updated_at`
+
+Rules:
+
+- Sender role is a hint, not a hard block, unless explicitly set to `ignored`.
+- `expert` and `vendor` senders can still provide context but should not become customer leads by default.
+- Feedback such as `expert_or_advice` can create or update a sender role review candidate.
 
 ### `message_context_links`
 
@@ -1488,10 +1519,16 @@ Stores all Oleg/admin feedback.
 Key fields:
 
 - `id`
-- `target_type`: `lead_cluster`, `lead`, `lead_match`, `source_message`, `catalog_item`, `catalog_term`, `category`, `source`, `manual_input`, `client`, `contact`, `client_object`, `client_interest`, `client_asset`, `opportunity`, `support_case`, `contact_reason`, `task`
+- `target_type`: `lead_cluster`, `lead_event`, `lead_match`, `source_message`, `sender_profile`, `catalog_item`, `catalog_term`, `category`, `source`, `manual_input`, `client`, `contact`, `client_object`, `client_interest`, `client_asset`, `opportunity`, `support_case`, `contact_reason`, `task`
 - `target_id`
 - `action`
 - `reason_code`
+- `feedback_scope`: `classifier`, `catalog`, `clustering`, `crm_outcome`, `source_quality`, `manual_example`, `none`
+- `learning_effect`: `positive_example`, `negative_example`, `match_correction`, `term_weight_down`, `term_review`, `sender_role_hint`, `cluster_training`, `source_quality_signal`, `no_classifier_learning`
+- `application_status`: `recorded`, `queued`, `applied`, `needs_review`, `ignored`
+- `applied_entity_type`
+- `applied_entity_id`
+- `applied_at`
 - `comment`
 - `created_by`
 - `created_at`
@@ -1502,8 +1539,13 @@ Initial action set:
 - `lead_confirmed`
 - `not_lead`
 - `maybe`
+- `duplicate`
+- `snooze`
+- `take_into_work`
+- `correct_match`
 - `wrong_category`
 - `wrong_item`
+- `wrong_product_or_term`
 - `approve_item`
 - `reject_item`
 - `mute_item`
@@ -1512,8 +1554,18 @@ Initial action set:
 - `mute_term`
 - `term_too_broad`
 - `expert_not_customer`
+- `expert_or_advice`
 - `no_buying_intent`
 - `not_our_topic`
+- `diy_only`
+- `too_cheap_or_free`
+- `spam_or_noise`
+- `old_irrelevant`
+- `commercial_no_answer`
+- `commercial_too_expensive`
+- `commercial_bought_elsewhere`
+- `commercial_postponed`
+- `commercial_not_region`
 - `source_outdated`
 - `source_wrong`
 - `manual_positive_example`
@@ -1533,6 +1585,13 @@ Initial action set:
 - `support_done`
 
 The UI can expose a small button set at first while the DB supports richer feedback.
+
+Rules:
+
+- `not_lead` requires a `reason_code`.
+- Commercial outcomes use `feedback_scope = crm_outcome` and `learning_effect = no_classifier_learning` by default.
+- Classifier feedback should target the narrowest object that caused the error.
+- Feedback may create review tasks instead of mutating catalog/terms immediately.
 
 ### `clients`
 
@@ -1881,6 +1940,16 @@ Key settings:
 - `approval_roles_json = ["owner", "admin", "catalog_manager"]`
 - `lead_review_roles_json = ["owner", "admin", "catalog_manager", "lead_reviewer"]`
 - `manual_input_roles_json = ["owner", "admin", "catalog_manager", "lead_reviewer"]`
+- `feedback_not_lead_requires_reason = true`
+- `feedback_default_scope_for_work_outcomes = "crm_outcome"`
+- `feedback_work_outcomes_affect_classifier = false`
+- `feedback_term_too_broad_creates_review = true`
+- `feedback_wrong_match_creates_catalog_review = true`
+- `feedback_expert_reason_updates_sender_profile = true`
+- `feedback_context_only_updates_clustering = true`
+- `feedback_wrong_merge_updates_clustering = true`
+- `feedback_auto_apply_catalog_mutations = false`
+- `feedback_reason_codes_json = ["no_buying_intent", "expert_or_advice", "not_our_topic", "wrong_category", "wrong_product_or_term", "term_too_broad", "diy_only", "too_cheap_or_free", "spam_or_noise", "old_irrelevant", "context_only", "wrong_merge"]`
 - `telegram_auth_enabled = true`
 - `crm_enabled = true`
 - `crm_auto_create_client_from_confirmed_lead = false`
@@ -2453,24 +2522,34 @@ Each cluster shows:
 - why messages/events were merged;
 - previous feedback if any.
 
-Actions:
+Primary actions:
 
 - take into work;
 - not lead;
 - maybe;
+- duplicate;
 - snooze;
+- correct.
+
+Follow-up actions:
+
 - create task;
 - create or link client;
 - create client interest;
 - create contact reason;
+- add comment;
+- create catalog item/term from message.
+
+Correction/detail actions:
+
 - wrong category;
 - wrong item;
+- wrong product or term;
 - term too broad;
 - not our topic;
 - expert/not customer;
 - no buying intent;
-- add comment;
-- create catalog item/term from message.
+- mark `auto_pending` fact wrong;
 - merge clusters;
 - split from cluster;
 - mark message as context only;
@@ -2483,16 +2562,34 @@ Fast `not lead` reasons:
 - expert/advice, not a customer;
 - not our topic;
 - wrong product/category;
+- wrong product or term;
 - term too broad;
-- duplicate;
+- DIY only;
+- too cheap/free;
 - spam/noise;
+- context only;
+- wrong merge;
 - outdated historical message.
+
+Duplicate is a separate action, not a negative classifier reason.
+
+Commercial outcomes that are not `not_lead` reasons:
+
+- no answer;
+- client changed mind;
+- too expensive;
+- bought elsewhere;
+- postponed;
+- already solved;
+- not our region/object type.
 
 Rules:
 
 - The first decision should be possible in 5-15 seconds.
 - Catalog and CRM actions are available from the card, but should not block quick lead triage.
 - If a lead is wrong, the UI should encourage narrow feedback: lead reason, matched item, matched term, or category.
+- `Not lead` requires a reason.
+- `Maybe`, `snooze`, and commercial outcomes do not train the classifier as negative examples by default.
 - `auto_pending` matches must be visually clear because feedback on them can immediately improve the classifier.
 - `maybe` stays in the web inbox by default and does not trigger Telegram notifications.
 - The inbox shows one row per `lead_cluster`; raw `lead_events` are visible inside the cluster detail.
@@ -2809,6 +2906,11 @@ Required controls:
 - default campaign/offer expiry rules;
 - which roles can approve/reject catalog facts;
 - which roles can review leads and add manual examples;
+- feedback reason codes;
+- whether `not_lead` requires a reason;
+- whether commercial outcomes can affect classifier training;
+- whether wrong term/match feedback creates review items or auto-mutates catalog;
+- whether expert/advice feedback updates sender profiles;
 - Telegram authentication/session settings;
 - CRM enabled/disabled;
 - whether confirmed leads can create client/contact candidates automatically;
@@ -3075,14 +3177,66 @@ Research behavior:
 
 Feedback should update the system at the narrowest useful level.
 
-Examples:
+Primary UI actions:
 
-- If a message is not a lead because the person is an expert giving advice, store feedback on the lead.
+- `Take into work`: positive lead feedback and task creation.
+- `Maybe`: keeps the cluster in web review and does not create negative training data.
+- `Not lead`: requires a reason and creates classifier/catalog/clustering feedback.
+- `Duplicate`: links to another cluster and suppresses duplicate work/notifications.
+- `Snooze`: work-state change only.
+- `Correct`: opens detailed correction controls for category, item, term, match, sender, and cluster membership.
+
+Fast `not_lead` reason codes:
+
+- `no_buying_intent`: discussion without buying intent.
+- `expert_or_advice`: advice/expert/vendor answer, not a customer request.
+- `not_our_topic`: outside PUR scope.
+- `wrong_category`: lead may exist, but category is wrong.
+- `wrong_product_or_term`: wrong product/service/term caused the match.
+- `term_too_broad`: a broad term caused noise.
+- `diy_only`: wants to do it themselves and does not need PUR equipment/service.
+- `too_cheap_or_free`: explicitly outside PUR commercial format.
+- `spam_or_noise`: spam, joke, irrelevant noise.
+- `old_irrelevant`: historical message is no longer actionable.
+- `context_only`: message belongs in context but is not a lead trigger.
+- `wrong_merge`: clustering joined unrelated messages.
+
+Commercial outcomes that must not become negative classifier examples by default:
+
+- no answer;
+- client changed mind;
+- too expensive;
+- bought elsewhere;
+- postponed;
+- already solved;
+- not our region/object type;
+- no budget after qualification.
+
+These outcomes belong in `work_outcome`, `opportunities`, `touchpoints`, `tasks`, or CRM notes. They describe sales/support result, not detection quality.
+
+Learning effects:
+
+- If a message is not a lead because the person is giving expert advice, store feedback on the cluster/event and a sender role hint.
 - If "камера" creates too much noise, mute/reduce the term, not the entire video category.
 - If `Dahua Hero A1` is correct, approve the item and its precise model terms.
 - If a price is outdated, expire the offer/attribute, not the product.
 - If a contact reason is not useful, dismiss or snooze the reason without deleting the underlying client interest.
 - If an old interest becomes relevant because of a new catalog item, create a contact reason rather than mutating the original interest.
+- If the wrong term caused a match, attach feedback to `lead_matches` and `catalog_terms`.
+- If the wrong category was chosen, store a category correction example.
+- If a message is context only, mark the `lead_cluster_member` role and train clustering/context builder.
+- If the system merged unrelated messages, write `lead_cluster_actions` and clustering feedback.
+- If the person is consistently an expert/vendor, update or review `sender_profiles`.
+
+Correction mode:
+
+- show matched category, items, terms, evidence, and `auto_pending` status;
+- allow rejecting/muting one matched term without rejecting the item;
+- allow changing category without rejecting the entire lead;
+- allow setting a different primary message;
+- allow splitting/merging clusters;
+- allow marking one message as context only;
+- allow adding the message as positive/negative example.
 
 Feedback events do not need to immediately mutate catalog rows in every case. Some actions can create review tasks first. The audit log records any resulting mutation.
 
@@ -3140,6 +3294,10 @@ Unit tests:
 - cluster member role assignment;
 - cluster update notification suppression;
 - feedback event handling;
+- `not_lead` feedback requires reason code;
+- commercial work outcomes do not become negative classifier feedback;
+- wrong term feedback targets `lead_matches` / `catalog_terms`;
+- expert/advice feedback can update `sender_profiles`;
 - manual client/contact/interest/asset creation;
 - contact reason generation from catalog changes;
 - task and touchpoint persistence.
@@ -3166,6 +3324,10 @@ Integration tests:
 - cross-sender similar messages require manual merge by default;
 - split/merge actions preserve original `source_messages` and `lead_events`;
 - feedback `term_too_broad` changes future classifier behavior;
+- `not_lead -> wrong_product_or_term` creates narrow match/catalog feedback without rejecting whole category;
+- `commercial_no_answer`/`commercial_too_expensive` updates work outcome without weakening classifier examples;
+- `expert_or_advice` marks sender as expert/context candidate and suppresses future customer-lead treatment by default;
+- `context_only` removes a message from lead trigger role without deleting it from cluster context;
 - duplicate message ids across chats do not deduplicate incorrectly;
 - confirmed lead can be linked to a client and interest;
 - new catalog item creates a contact reason for an old matching interest;
