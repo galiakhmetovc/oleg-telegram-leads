@@ -34,6 +34,9 @@ The system must continuously read the PUR Telegram channel, parse messages and d
 - AI batching, reclassification, and retro research behavior are configurable because they will need tuning after real traffic is observed.
 - Retro research is a separate product workflow for testing new commercial directions against historical chat demand before adding them to the operational catalog.
 - All readable monitoring-source messages are stored, even if they are not leads, because reclassification, research, deduplication, sender intelligence, and future semantic search depend on historical data.
+- `Leads Inbox` works with `lead_clusters`, not raw `lead_events`, so multiple related messages become one work item.
+- `lead_events` remain auditable detection facts tied to exact messages, classifier versions, and matches.
+- Automatic lead clustering is configurable and manually correctable through merge/split/context-only actions.
 - Embeddings/semantic matching are designed into the schema but disabled initially.
 - Retention is based on time and hot database size. Large/old data is archived and rotated, not simply deleted.
 - Local archive storage is the first phase. S3-compatible storage is represented in the schema and planned for a later phase.
@@ -207,6 +210,20 @@ Design implication:
   -> Oleg feedback
   -> catalog/classifier updates
   -> contact reason generation
+```
+
+Lead monitoring flow:
+
+```text
+monitored source message
+  -> source_messages
+  -> context fetch
+  -> AI/classifier decision
+  -> lead_events + lead_matches
+  -> lead clustering
+  -> lead_clusters for Leads Inbox
+  -> notification policy per cluster
+  -> Oleg feedback / CRM follow-up
 ```
 
 Runtime execution uses a continuous scheduler:
@@ -616,7 +633,7 @@ Stores outbound Telegram/web notifications.
 Key fields:
 
 - `id`
-- `notification_type`: `lead`, `retro_lead`, `research_summary`, `task`, `contact_reason`, `access_issue`, `ai_error`, `sync_error`, `digest`
+- `notification_type`: `lead`, `lead_update`, `retro_lead`, `research_summary`, `task`, `contact_reason`, `access_issue`, `ai_error`, `sync_error`, `digest`
 - `target_channel`: `telegram`, `web`, `email`, `none`
 - `target_ref`
 - `entity_type`
@@ -1123,7 +1140,7 @@ Rule:
 
 ### `lead_events`
 
-Stores detected leads.
+Stores auditable lead-detection events tied to exact messages.
 
 Key fields:
 
@@ -1135,6 +1152,7 @@ Key fields:
 - `sender_id`
 - `sender_name`
 - `message_text`
+- `lead_cluster_id`
 - `detected_at`
 - `classifier_version_id`
 - `decision`: `lead`, `not_lead`, `maybe`
@@ -1146,14 +1164,9 @@ Key fields:
 - `negative_signals_json`
 - `notify_reason`
 - `reason`
-- `inbox_status`: `new`, `in_work`, `maybe`, `snoozed`, `not_lead`, `duplicate`, `converted`, `closed`
-- `review_status`: `unreviewed`, `confirmed`, `rejected`, `needs_more_info`
-- `work_outcome`: `none`, `contact_task_created`, `contacted`, `no_response`, `opportunity_created`, `support_case_created`, `client_interest_created`, `closed_no_action`
-- `snoozed_until`
+- `event_status`: `active`, `context_only`, `duplicate`, `superseded`, `ignored`
+- `event_review_status`: `unreviewed`, `confirmed`, `rejected`, `needs_more_info`
 - `duplicate_of_lead_event_id`
-- `primary_task_id`
-- `converted_entity_type`
-- `converted_entity_id`
 - `is_retro`
 - `original_detected_at`
 - `created_at`
@@ -1161,17 +1174,106 @@ Key fields:
 Uniqueness:
 
 - `(chat_id, message_id, classifier_version_id)` for audit.
-- Operational dedup can use `(chat_id, message_id)` for notification suppression.
+- Operational notification suppression is cluster-based; `(chat_id, message_id)` only prevents exact event duplicates.
 
 Rules:
 
-- Retro leads are visually marked in UI and Telegram notifications.
-- Retro lead notifications must explain that the message is historical and why it surfaced now.
+- Retro events/clusters are visually marked in UI and Telegram notifications.
+- Retro notifications must explain that the message is historical and why it surfaced now.
 - Reclassification never mutates the old decision in place; it creates a new auditable result tied to the new classifier version.
-- AI detection state is preserved separately from inbox/work state.
-- `in_work` means the lead requires action, not that a client or opportunity already exists.
-- CRM objects are created only after clarification or explicit action.
+- AI detection state is preserved separately from cluster inbox/work state.
+- `lead_events` are not the primary `Leads Inbox` work item when clustering is enabled.
 - Commercial value is scored separately from lead confidence so uncertain but potentially valuable requests can be surfaced without pretending they are confirmed leads.
+
+### `lead_clusters`
+
+Stores the work items shown in `Leads Inbox`.
+
+Key fields:
+
+- `id`
+- `source_id`
+- `chat_id`
+- `primary_sender_id`
+- `primary_sender_name`
+- `primary_lead_event_id`
+- `primary_source_message_id`
+- `category_id`
+- `summary`
+- `cluster_status`: `new`, `in_work`, `maybe`, `snoozed`, `not_lead`, `duplicate`, `converted`, `closed`
+- `review_status`: `unreviewed`, `confirmed`, `rejected`, `needs_more_info`
+- `work_outcome`: `none`, `contact_task_created`, `contacted`, `no_response`, `opportunity_created`, `support_case_created`, `client_interest_created`, `contact_reason_created`, `closed_no_action`
+- `first_message_at`
+- `last_message_at`
+- `message_count`
+- `lead_event_count`
+- `confidence_max`
+- `commercial_value_score_max`
+- `negative_score_min`
+- `dedupe_key`
+- `merge_strategy`: `auto`, `manual`, `imported`, `none`
+- `merge_reason`
+- `last_notified_at`
+- `notify_update_count`
+- `snoozed_until`
+- `duplicate_of_cluster_id`
+- `primary_task_id`
+- `converted_entity_type`
+- `converted_entity_id`
+- `created_at`
+- `updated_at`
+
+Rules:
+
+- `Leads Inbox` lists clusters, not individual events.
+- Telegram lead notifications are sent per cluster, not per event.
+- `in_work` means the cluster requires human action, not that a client or opportunity already exists.
+- CRM objects are created only after clarification or explicit action.
+- Cluster status changes never delete underlying messages or lead events.
+
+### `lead_cluster_members`
+
+Links messages and lead events to clusters.
+
+Key fields:
+
+- `id`
+- `lead_cluster_id`
+- `source_message_id`
+- `lead_event_id`
+- `member_role`: `primary`, `trigger`, `clarification`, `context`, `negative_context`, `system`
+- `added_by`: `system`, `oleg`, `admin`
+- `merge_score`
+- `merge_reason`
+- `created_at`
+
+Purpose:
+
+- Keep the cluster timeline visible.
+- Explain why messages/events were grouped.
+- Allow a message to be marked as context without becoming a separate work item.
+
+### `lead_cluster_actions`
+
+Stores merge/split/context corrections.
+
+Key fields:
+
+- `id`
+- `action_type`: `auto_merge`, `manual_merge`, `split`, `mark_context_only`, `set_primary`, `mark_duplicate`, `undo_merge`
+- `from_cluster_id`
+- `to_cluster_id`
+- `source_message_id`
+- `lead_event_id`
+- `actor`
+- `reason`
+- `details_json`
+- `created_at`
+
+Purpose:
+
+- Make automatic clustering auditable and reversible.
+- Preserve manual corrections for future clustering/prompt tuning.
 
 ### `lead_matches`
 
@@ -1335,6 +1437,7 @@ Key fields:
 - `reason`
 - `context_message_ids_json`
 - `created_lead_event_id`
+- `created_lead_cluster_id`
 - `created_contact_reason_id`
 - `created_at`
 
@@ -1372,7 +1475,7 @@ Key fields:
 - `id`
 - `research_hypothesis_id`
 - `research_run_id`
-- `conversion_type`: `catalog_category`, `catalog_item`, `catalog_term`, `lead_event`, `client_interest`, `contact_reason`, `manual_note`
+- `conversion_type`: `catalog_category`, `catalog_item`, `catalog_term`, `lead_event`, `lead_cluster`, `client_interest`, `contact_reason`, `manual_note`
 - `target_entity_type`
 - `target_entity_id`
 - `created_by`
@@ -1385,7 +1488,7 @@ Stores all Oleg/admin feedback.
 Key fields:
 
 - `id`
-- `target_type`: `lead`, `lead_match`, `catalog_item`, `catalog_term`, `category`, `source`, `manual_input`, `client`, `contact`, `client_object`, `client_interest`, `client_asset`, `opportunity`, `support_case`, `contact_reason`, `task`
+- `target_type`: `lead_cluster`, `lead`, `lead_match`, `source_message`, `catalog_item`, `catalog_term`, `category`, `source`, `manual_input`, `client`, `contact`, `client_object`, `client_interest`, `client_asset`, `opportunity`, `support_case`, `contact_reason`, `task`
 - `target_id`
 - `action`
 - `reason_code`
@@ -1415,6 +1518,11 @@ Initial action set:
 - `source_wrong`
 - `manual_positive_example`
 - `manual_negative_example`
+- `merge_clusters`
+- `split_cluster`
+- `mark_context_only`
+- `set_primary_message`
+- `mark_duplicate_cluster`
 - `create_client`
 - `create_interest`
 - `create_asset`
@@ -1565,6 +1673,7 @@ Key fields:
 - `id`
 - `client_id`
 - `client_object_id`
+- `source_lead_cluster_id`
 - `source_lead_event_id`
 - `primary_category_id`
 - `title`
@@ -1583,7 +1692,7 @@ Key fields:
 Rules:
 
 - A lead does not have to become an opportunity.
-- Oleg can create an opportunity from a lead, client interest, contact reason, or manual note.
+- Oleg can create an opportunity from a lead cluster, lead event, client interest, contact reason, or manual note.
 - The first UI should not expose complex team assignment even though fields exist.
 
 ### `support_cases`
@@ -1596,6 +1705,7 @@ Key fields:
 - `client_id`
 - `client_object_id`
 - `client_asset_id`
+- `source_lead_cluster_id`
 - `source_lead_event_id`
 - `title`
 - `status`: `new`, `in_progress`, `waiting_client`, `resolved`, `closed`
@@ -1628,6 +1738,8 @@ Key fields:
 - `catalog_item_id`
 - `catalog_attribute_id`
 - `source_id`
+- `source_lead_cluster_id`
+- `source_lead_event_id`
 - `reason_type`: `new_matching_product`, `new_matching_offer`, `support_followup`, `maintenance_due`, `warranty_followup`, `upgrade_available`, `price_change`, `seasonal`, `catalog_reactivation`, `manual`
 - `title`
 - `reason_text`
@@ -1657,6 +1769,8 @@ Key fields:
 - `opportunity_id`
 - `support_case_id`
 - `contact_reason_id`
+- `lead_cluster_id`
+- `lead_event_id`
 - `channel`: `telegram`, `phone`, `whatsapp`, `email`, `meeting`, `other`
 - `direction`: `inbound`, `outbound`, `internal_note`
 - `summary`
@@ -1677,6 +1791,8 @@ Key fields:
 
 - `id`
 - `client_id`
+- `lead_cluster_id`
+- `lead_event_id`
 - `opportunity_id`
 - `support_case_id`
 - `contact_reason_id`
@@ -1734,6 +1850,18 @@ Key settings:
 - `lead_notify_categories_json = []`
 - `lead_notify_source_priorities_json = ["high", "normal"]`
 - `lead_notify_duplicate_suppression_window_hours = 24`
+- `lead_clustering_enabled = true`
+- `lead_cluster_window_minutes = 60`
+- `lead_cluster_same_sender_required = false`
+- `lead_cluster_allow_reply_merge = true`
+- `lead_cluster_allow_topic_merge = true`
+- `lead_cluster_allow_ai_continuation_signal = true`
+- `lead_cluster_similarity_threshold = 0.75`
+- `lead_cluster_manual_merge_required_for_cross_sender = true`
+- `lead_cluster_notify_on_update = false`
+- `lead_cluster_notify_update_min_value_delta = 0.20`
+- `lead_cluster_update_cooldown_minutes = 60`
+- `lead_cluster_split_requires_reason = true`
 - `notify_ai_errors = true`
 - `telegram_notify_auto_pending_confidence = true`
 - `telegram_auto_pending_label = "auto_pending"`
@@ -1958,7 +2086,7 @@ Oleg pastes t.me/chat/message
   -> userbot fetches message
   -> sources row created
   -> parsed_chunks row created
-  -> optional lead_event created as manual example
+  -> optional lead_event and lead_cluster created as manual example
   -> feedback_events row records Oleg intent
 ```
 
@@ -2044,6 +2172,59 @@ Polling policy:
 - Checkpoints are saved after every successful batch.
 - `FLOOD_WAIT` pauses the affected source/account scope and the scheduler moves to other work.
 - Resetting checkpoints requires explicit confirmation and creates an audit event.
+
+## Lead Clustering And Deduplication
+
+The system stores all raw messages and all lead-detection events. Deduplication happens at the working layer through `lead_clusters`.
+
+Automatic clustering should group messages/events when strong evidence says they are part of the same request:
+
+- same source/chat;
+- same sender within `lead_cluster_window_minutes`;
+- explicit reply chain to an already clustered message;
+- same topic/thread and sufficiently similar topic;
+- similar category, terms, or matched items;
+- AI marks the new message as continuation, clarification, budget, deadline, or update for the same request.
+
+Automatic clustering should not group:
+
+- different people each asking for themselves;
+- the same author asking about a different category or object later;
+- old and new requests separated by a meaningful time gap;
+- expert/vendor replies as new customer leads;
+- simple "thanks/found it" messages as new leads.
+
+Cluster timeline roles:
+
+- `primary`: the best message to show as the main request;
+- `trigger`: a message that independently produced a lead event;
+- `clarification`: budget, timing, requirements, location, object size;
+- `context`: surrounding message needed to understand the request;
+- `negative_context`: message that explains why it is not a lead;
+- `system`: service/system message that affects context.
+
+Manual correction actions:
+
+- merge clusters;
+- split selected message/event into a new cluster;
+- mark message as context only;
+- set primary message;
+- mark duplicate of another cluster;
+- undo a wrong merge when possible.
+
+Notification behavior:
+
+- Telegram lead notifications are sent per cluster, not per lead event.
+- New events inside an already notified cluster do not notify Telegram by default.
+- A cluster update can notify only if enabled and the new event materially changes value, urgency, contact info, budget, deadline, or requirements.
+- Duplicate/cooldown state is tracked on the cluster through `dedupe_key`, `last_notified_at`, and `notify_update_count`.
+
+Rules:
+
+- Cluster changes never delete `source_messages` or `lead_events`.
+- Manual merge/split actions are stored in `lead_cluster_actions` and `audit_log`.
+- Feedback can target a cluster, one lead event, one lead match, or one message.
+- Cross-sender clustering is manual by default unless settings explicitly allow automatic grouping.
 
 ## Storage And Archive Policy
 
@@ -2231,14 +2412,14 @@ Features:
 
 Purpose:
 
-- review detected leads as the primary daily workflow.
+- review lead clusters as the primary daily workflow.
 - quickly decide whether a message requires action, feedback, CRM follow-up, or no action.
 - work as a triage pipeline, not a heavy CRM form.
 
 Layout:
 
-- compact lead queue on the left;
-- selected lead detail card on the right;
+- compact cluster queue on the left;
+- selected cluster detail card on the right;
 - filters for status, source, category, confidence, `auto_pending`, `retro`, and operator issues;
 - keyboard-friendly next/previous/decision flow can be added later.
 
@@ -2251,21 +2432,25 @@ Queue row shows:
 - matched category;
 - confidence;
 - badges: `auto_pending`, `retro`, `maybe`, `needs operator`, `duplicate`;
-- whether the lead already has feedback, task, client, or contact reason.
+- message/event count;
+- whether the cluster already has feedback, task, client, or contact reason.
 
-Each lead shows:
+Each cluster shows:
 
 - short AI summary;
-- source chat and message link;
-- author/sender information when available;
-- detection mode: `live`, `retro`, `manual`, `reclassification`;
+- source chat and primary message link;
+- primary author/sender information when available;
+- detection modes represented in the cluster: `live`, `retro`, `manual`, `reclassification`;
 - original message date and trigger reason for retro leads;
-- message text;
+- primary message text;
+- timeline of clustered messages;
 - reply-chain and neighboring context;
 - AI reason;
+- all matched lead events;
 - matched category/items/terms;
 - whether matches are `approved` or `auto_pending`;
-- classifier version;
+- classifier versions represented in the cluster;
+- why messages/events were merged;
 - previous feedback if any.
 
 Actions:
@@ -2286,6 +2471,11 @@ Actions:
 - no buying intent;
 - add comment;
 - create catalog item/term from message.
+- merge clusters;
+- split from cluster;
+- mark message as context only;
+- set primary message;
+- mark duplicate of another cluster.
 
 Fast `not lead` reasons:
 
@@ -2305,20 +2495,22 @@ Rules:
 - If a lead is wrong, the UI should encourage narrow feedback: lead reason, matched item, matched term, or category.
 - `auto_pending` matches must be visually clear because feedback on them can immediately improve the classifier.
 - `maybe` stays in the web inbox by default and does not trigger Telegram notifications.
+- The inbox shows one row per `lead_cluster`; raw `lead_events` are visible inside the cluster detail.
+- Auto-merge decisions must be visible and correctable.
 
 Lead state model:
 
 - AI detection is historical evidence: `decision`, `confidence`, `detection_mode`, `classifier_version_id`, reason, and matches.
-- Inbox status is Oleg's workflow: `new`, `in_work`, `maybe`, `snoozed`, `not_lead`, `duplicate`, `converted`, `closed`.
-- Work outcome is the commercial/support result: task, touchpoint, opportunity, support case, client interest, contact reason, or closed without action.
+- Cluster status is Oleg's workflow: `new`, `in_work`, `maybe`, `snoozed`, `not_lead`, `duplicate`, `converted`, `closed`.
+- Cluster work outcome is the commercial/support result: task, touchpoint, opportunity, support case, client interest, contact reason, or closed without action.
 
 `Take into work` flow:
 
-- set `inbox_status = in_work`;
-- set `review_status = confirmed`;
+- set `lead_clusters.cluster_status = in_work`;
+- set `lead_clusters.review_status = confirmed`;
 - write feedback action `lead_confirmed`;
 - create a task "contact about lead" due now;
-- store that task in `primary_task_id`;
+- store that task in `lead_clusters.primary_task_id`;
 - do not automatically create client, opportunity, support case, or client interest.
 
 After `Take into work`, the card offers clarification actions:
@@ -2343,13 +2535,16 @@ Reasoning:
 
 Purpose:
 
-- deep review of one lead.
+- deep review of one lead cluster.
 
 Shows:
 
 - full source context;
+- cluster timeline;
+- cluster members and roles;
 - matched evidence chain;
 - item/term statuses at detection time;
+- merge/split history;
 - suggested catalog edits;
 - manual correction controls.
 
@@ -2651,6 +2846,8 @@ Required controls:
 - live lead notification confidence thresholds;
 - high-value low-confidence notification rules;
 - maybe/retro/reclassification notification policies;
+- lead clustering enablement, merge window, similarity threshold, and cross-sender policy;
+- lead cluster update notification policy;
 - Telegram digest times and digest contents;
 - notification cooldowns and duplicate suppression windows;
 - sync interval;
@@ -2666,7 +2863,14 @@ Purpose:
 
 Telegram is an urgent signal channel. It must not become a duplicate of the web inbox.
 
-Sending a Telegram notification never changes lead state. A notified lead remains in `Leads Inbox` until Oleg takes an action in the web UI or an explicitly enabled Telegram acknowledgement flow handles it.
+Sending a Telegram notification never changes lead state. A notified cluster remains in `Leads Inbox` until Oleg takes an action in the web UI or an explicitly enabled Telegram acknowledgement flow handles it.
+
+Lead notifications are cluster-based:
+
+- the first qualifying event in a cluster can notify Telegram;
+- later events in the same cluster update the web card and timeline;
+- later events do not notify by default;
+- cluster update notifications require explicit setting and meaningful new information.
 
 Immediate Telegram notifications:
 
@@ -2683,7 +2887,7 @@ High-value low-confidence rule:
 - `commercial_value_score` is at or above `high_value_notify_threshold`;
 - `negative_score` is below `high_value_negative_score_max`;
 - source and category are not muted;
-- notification is not suppressed as a duplicate.
+- notification is not suppressed as a duplicate cluster/update.
 
 High-value positive signals:
 
@@ -2731,6 +2935,7 @@ Lead notification content:
 - source chat;
 - author/sender when available;
 - message time;
+- cluster message/event count when greater than one;
 - category;
 - matched terms/items;
 - confidence;
@@ -2749,7 +2954,8 @@ Retro lead notification content, when enabled:
 
 Deduplication/cooldown rules:
 
-- duplicate Telegram notifications are suppressed by `dedupe_key`;
+- duplicate Telegram notifications are suppressed by cluster `dedupe_key`;
+- cluster update notifications respect `lead_cluster_update_cooldown_minutes` and `lead_cluster_notify_update_min_value_delta`;
 - one source or provider failure should not spam Telegram repeatedly;
 - suppressed notifications still create `notification_events` rows with `notification_policy = suppressed`.
 
@@ -2812,6 +3018,7 @@ Lead detection output must include:
 - matched terms;
 - evidence references;
 - classifier version.
+- clustering hint: `new_request`, `continuation`, `clarification`, `context_only`, or `separate_intent`.
 
 Example AI output:
 
@@ -2823,7 +3030,8 @@ Example AI output:
   "negative_score": 0.12,
   "high_value_signals": ["whole_object: house", "turnkey", "installer_needed"],
   "negative_signals": [],
-  "notify_reason": "AI is uncertain, but the message looks like a potential project lead"
+  "notify_reason": "AI is uncertain, but the message looks like a potential project lead",
+  "clustering_hint": "new_request"
 }
 ```
 
@@ -2833,8 +3041,8 @@ For reclassification output:
 
 - preserve the original live decision;
 - store the new decision under the new classifier version;
-- create retro leads when historical messages become leads;
-- mark retro leads clearly in UI and Telegram;
+- create retro lead events and clusters when historical messages become leads;
+- mark retro clusters clearly in UI and Telegram;
 - keep `maybe` web-only by default.
 
 Retro lead notification copy must include:
@@ -2906,7 +3114,7 @@ Migration path:
 2. Import existing chats/checkpoints/leads/examples into SQLite.
 3. Seed empty CRM tables and Oleg's Telegram-authenticated web user.
 4. Keep the current Telegram bot/userbot runtime.
-5. Replace JSON lead persistence with SQLite.
+5. Replace JSON lead persistence with SQLite `lead_events` and `lead_clusters`.
 6. Add PUR channel sync into the same userbot runtime.
 7. Add parser/extractor pipeline.
 8. Generate classifier prompt/keyword index from SQLite.
@@ -2927,6 +3135,10 @@ Unit tests:
 - catalog status inclusion;
 - classifier version creation;
 - lead match persistence;
+- lead cluster creation from one or more lead events;
+- automatic cluster merge/split rules;
+- cluster member role assignment;
+- cluster update notification suppression;
 - feedback event handling;
 - manual client/contact/interest/asset creation;
 - contact reason generation from catalog changes;
@@ -2950,6 +3162,9 @@ Integration tests:
 - historical backfill creates retro/web-only lead events by default;
 - manual Telegram link creates source and example;
 - `auto_pending` term triggers lead and stores `lead_matches`;
+- several same-sender messages in a short window produce one `lead_cluster`;
+- cross-sender similar messages require manual merge by default;
+- split/merge actions preserve original `source_messages` and `lead_events`;
 - feedback `term_too_broad` changes future classifier behavior;
 - duplicate message ids across chats do not deduplicate incorrectly;
 - confirmed lead can be linked to a client and interest;
@@ -2959,10 +3174,10 @@ Integration tests:
 - archived messages can be restored for research without moving monitoring checkpoints;
 - archive write failure does not delete hot rows;
 - local `parquet_zstd` archive round-trips messages, parsed chunks, and AI usage rows.
-- immediate live lead creates `notification_events` but leaves inbox status `new`;
-- duplicate lead does not create repeated Telegram notification inside suppression window;
+- immediate live lead creates `notification_events` but leaves cluster status `new`;
+- duplicate/continued lead event does not create repeated Telegram notification inside suppression window;
 - repeated access/userbot issue escalates to Telegram only after configured thresholds.
-- uncertain high-value lead creates a clearly marked Telegram notification and remains unconfirmed in `Leads Inbox`;
+- uncertain high-value cluster creates a clearly marked Telegram notification and remains unconfirmed in `Leads Inbox`;
 - high negative score suppresses high-value notification even when commercial signals are present.
 
 Live/smoke tests:
