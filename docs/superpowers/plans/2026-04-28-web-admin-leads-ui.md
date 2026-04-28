@@ -32,11 +32,11 @@ This slice intentionally does not implement full CRM entities, rich catalog edit
 - Create: `src/pur_leads/models/tasks.py`
 - Test: `tests/test_web_auth_migration.py`
 
-- [ ] Add `web_users` with Telegram and local auth fields from the spec.
-- [ ] Add `web_auth_sessions` with hashed session tokens, expiry, last seen, and revoke fields.
-- [ ] Add `tasks` with `lead_cluster_id`, `lead_event_id`, client/opportunity/support/contact-reason links, status, priority, due date, owner/assignee, and completion fields.
-- [ ] Add indexes for `local_username`, `telegram_user_id`, and session token lookup.
-- [ ] Verify role/status/auth/task constraints and session token uniqueness.
+- [x] Add `web_users` with Telegram and local auth fields from the spec.
+- [x] Add `web_auth_sessions` with hashed session tokens, expiry, last seen, and revoke fields.
+- [x] Add `tasks` with `lead_cluster_id`, `lead_event_id`, client/opportunity/support/contact-reason links, status, priority, due date, owner/assignee, and completion fields.
+- [x] Add indexes for `local_username`, `telegram_user_id`, and session token lookup.
+- [x] Verify role/status/auth/task constraints and session token uniqueness.
 
 Completed: added `web_users`, `web_auth_sessions`, and `tasks` schema/model files with
 identity indexes and role/status/session/task constraints. Covered by `tests/test_web_auth_migration.py`.
@@ -55,14 +55,14 @@ identity indexes and role/status/session/task constraints. Covered by `tests/tes
 - Test: `tests/test_web_auth_service.py`
 - Test: `tests/test_lead_work_actions.py`
 
-- [ ] Implement stdlib PBKDF2 password hashing and constant-time verification.
-- [ ] Implement `ensure_bootstrap_admin(username, password)` creating local `admin` with `must_change_password=true`.
-- [ ] Implement local login that rejects disabled/pending users and creates a hashed session token.
-- [ ] Implement session validation, touch, revoke/logout, and password change.
-- [ ] Implement Telegram login payload verification using bot token secret material, mapped to pre-approved `web_users.telegram_user_id`.
-- [ ] Implement adding Telegram admin accounts from an existing admin context.
-- [ ] Implement `take_into_work` as a service action: set cluster `in_work`/`confirmed`, write `lead_confirmed`, create a due-now contact task, store it in `lead_clusters.primary_task_id`, and do not create CRM records.
-- [ ] Record audit events for login success, denied login, logout, password change, and user creation.
+- [x] Implement stdlib PBKDF2 password hashing and constant-time verification.
+- [x] Implement `ensure_bootstrap_admin(username, password)` creating local `admin` with `must_change_password=true`.
+- [x] Implement local login that rejects disabled/pending users and creates a hashed session token.
+- [x] Implement session validation, touch, revoke/logout, and password change.
+- [x] Implement Telegram login payload verification using bot token secret material, mapped to pre-approved `web_users.telegram_user_id`.
+- [x] Implement adding Telegram admin accounts from an existing admin context.
+- [x] Implement `take_into_work` as a service action: set cluster `in_work`/`confirmed`, write `lead_confirmed`, create a due-now contact task, store it in `lead_clusters.primary_task_id`, and do not create CRM records.
+- [x] Record audit events for login success, denied login, logout, password change, and user creation.
 
 Completed: added PBKDF2 password hashing, local/bootstrap auth, Telegram payload verification,
 session lifecycle, Telegram admin creation, disabled-user handling, task creation service, and
@@ -79,13 +79,13 @@ task-backed `LeadService.take_into_work`. Covered by `tests/test_web_auth_servic
 - Modify: `src/pur_leads/web/app.py`
 - Test: `tests/test_web_auth_routes.py`
 
-- [ ] Add app state for engine/session factory and request-scoped DB sessions.
-- [ ] Add current-admin dependency reading `pur_session` HTTP-only cookie.
-- [ ] Add `POST /api/auth/local`, `POST /api/auth/telegram`, `POST /api/auth/logout`, and `GET /api/me`.
-- [ ] Add `POST /api/auth/change-password`; force bootstrap users with `must_change_password=true` into this flow before normal app access.
-- [ ] Set secure cookie attributes configurable for local/dev vs production.
-- [ ] Verify unauthenticated API calls return `401`, login sets cookie, password-change clears `must_change_password`, logout revokes session, and unknown Telegram users are denied.
-- [ ] Verify Telegram auth payload hash/signature using test bot token fixtures, not a placeholder.
+- [x] Add app state for engine/session factory and request-scoped DB sessions.
+- [x] Add current-admin dependency reading `pur_session` HTTP-only cookie.
+- [x] Add `POST /api/auth/local`, `POST /api/auth/telegram`, `POST /api/auth/logout`, and `GET /api/me`.
+- [x] Add `POST /api/auth/change-password`; force bootstrap users with `must_change_password=true` into this flow before normal app access.
+- [x] Set secure cookie attributes configurable for local/dev vs production.
+- [x] Verify unauthenticated API calls return `401`, login sets cookie, password-change clears `must_change_password`, logout revokes session, and unknown Telegram users are denied.
+- [x] Verify Telegram auth payload hash/signature using test bot token fixtures, not a placeholder.
 
 Completed: added app DB/session state, current-admin dependency, local/Telegram login routes,
 logout, `/api/me`, password change, cookie handling, and bootstrap admin app initialization.
