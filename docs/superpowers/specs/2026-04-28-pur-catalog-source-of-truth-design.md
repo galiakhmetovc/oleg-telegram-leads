@@ -264,6 +264,14 @@ Oleg link/forward/manual text
 
 ## SQLite Schema
 
+ID naming rules:
+
+- `sources.id` is the raw source/evidence identity for Telegram messages, documents, Telegraph pages, external pages, and manual inputs.
+- `monitored_sources.id` is the configured chat/channel/DM identity.
+- `source_messages.id` is the canonical identity for a fetched Telegram message used by lead detection, clustering, context, reclassification, and research.
+- New lead/research/AI tables should use explicit `source_message_id`, `monitored_source_id`, or `raw_source_id`; avoid ambiguous bare `source_id` except in raw-source/evidence tables.
+- In catalog/CRM/evidence tables, `source_id` means `sources.id`.
+
 ### `userbot_accounts`
 
 Stores Telegram userbot accounts that can read monitored Telegram sources.
@@ -288,7 +296,7 @@ Key fields:
 Rules:
 
 - First implementation uses one active userbot account and one Telegram worker.
-- The schema allows adding more userbot accounts later through the web UI.
+- The web UI may register additional userbot accounts, but default runtime concurrency remains one active Telegram worker and one read job per session until settings are changed.
 - Session files are secrets and must never be exposed in the UI or logs.
 
 ### `monitored_sources`
@@ -333,7 +341,8 @@ Key fields:
 
 Rules:
 
-- First implementation enables public groups/supergroups.
+- First implementation enables public groups/supergroups for lead monitoring.
+- Catalog ingestion enables configured channels, including `@purmaster`.
 - Other source kinds are represented in the schema but can be hidden or marked "later" in UI.
 - Chats are added from the web interface, not through Telegram commands.
 - New live monitoring sources default to `start_mode = from_now`.
@@ -399,7 +408,7 @@ Key fields:
 
 - `id`
 - `monitored_source_id`
-- `source_id`
+- `raw_source_id`
 - `telegram_message_id`
 - `sender_id`
 - `message_date`
@@ -415,6 +424,10 @@ Key fields:
 - `fetched_at`
 - `classification_status`: `unclassified`, `queued`, `classified`, `skipped`, `archived`
 - `archive_pointer_id`
+- `is_archived_stub`
+- `text_archived`
+- `caption_archived`
+- `metadata_archived`
 - `created_at`
 - `updated_at`
 
@@ -424,7 +437,8 @@ Rules:
 - Text and captions are stored for all readable messages.
 - Media-only messages are stored as metadata records.
 - Message text should be indexed with FTS5 while in the hot DB.
-- Archived messages keep a hot pointer/snippet so UI and research can request restore.
+- Retention must keep the identity row as a hot stub; archive jobs move large text/caption/metadata payloads, not the primary row.
+- Archived message stubs keep a hot pointer/snippet so UI and research can request restore without breaking foreign keys.
 
 ### `sender_profiles`
 
@@ -533,11 +547,22 @@ Key fields:
 - `job_type`: `poll_monitored_source`, `check_source_access`, `fetch_message_context`, `build_ai_batch`, `classify_message_batch`, `reclassify_messages`, `retro_research_scan`, `sync_pur_channel`, `download_artifact`, `parse_artifact`, `extract_catalog_facts`, `generate_contact_reasons`, `send_notifications`
 - `status`: `queued`, `running`, `succeeded`, `failed`, `paused`, `cancelled`
 - `priority`: `low`, `normal`, `high`
+- `scope_type`: `global`, `telegram_userbot`, `telegram_source`, `ai_provider`, `ai_model`, `parser`, `archive`, `backup`
+- `scope_id`
+- `userbot_account_id`
+- `monitored_source_id`
+- `source_message_id`
+- `idempotency_key`
 - `run_after_at`
+- `next_retry_at`
 - `locked_by`
 - `locked_at`
+- `lease_expires_at`
 - `attempt_count`
 - `max_attempts`
+- `checkpoint_before_json`
+- `checkpoint_after_json`
+- `result_summary_json`
 - `payload_json`
 - `last_error`
 - `created_at`
@@ -546,6 +571,11 @@ Key fields:
 Rules:
 
 - Telegram jobs are serialized per `userbot_account_id`.
+- Telegram/source/account scope fields must be SQL-visible for locking and rate-limit routing; they must not live only inside `payload_json`.
+- `idempotency_key` prevents duplicate bounded jobs from processing the same source/window.
+- `lease_expires_at` lets another worker recover abandoned jobs.
+- Checkpoint fields store before/after cursors for resumability and audit.
+- `result_summary_json` stores compact counters; detailed logs go to `job_runs` and `operational_events`.
 - AI and parse jobs can run in parallel according to provider/parser settings.
 - Jobs must be small and resumable.
 
@@ -659,11 +689,18 @@ Key fields:
 
 - `id`
 - `ai_batch_id`
-- `source_id`
-- `message_id`
+- `source_message_id`
+- `monitored_source_id`
+- `raw_source_id`
+- `telegram_message_id`
 - `role`: `target`, `reply_context`, `neighbor_before`, `neighbor_after`, `thread_context`
 - `sort_order`
 - `created_at`
+
+Rules:
+
+- Target and context rows reference `source_messages.id`.
+- `monitored_source_id` and `telegram_message_id` are denormalized only for fast diagnostics and batch debugging.
 
 ### `notification_events`
 
@@ -727,7 +764,7 @@ Rules:
 - Default archive format is `parquet_zstd` when dependencies are available.
 - `jsonl_zstd` is the fallback for simple inspection and emergency recovery.
 - `sqlite_zstd` is optional for compact whole-table snapshots.
-- Archive writes must be verified before hot rows are deleted.
+- Archive writes must be verified before hot payload columns are cleared or unreferenced rows are deleted.
 - Archive manifests must contain schema version, table names, row counts, hashes, and source query/window metadata.
 
 ### `archive_files`
@@ -769,6 +806,7 @@ Purpose:
 - Let UI show that a historical message/log exists in archive.
 - Enable restore jobs for research/reclassification.
 - Keep enough metadata to search and request restore without keeping full text in the hot DB forever.
+- Provide a stable pointer even when the hot row is only a retained stub.
 
 ### `archive_restore_jobs`
 
@@ -965,6 +1003,29 @@ Key fields:
 - `created_catalog_entity_count`
 - `token_usage_json`
 
+### `catalog_versions`
+
+Stores snapshots of operational catalog state used by extraction, classifier builds, and evaluation.
+
+Key fields:
+
+- `id`
+- `version`
+- `catalog_hash`
+- `candidate_hash`
+- `item_count`
+- `term_count`
+- `offer_count`
+- `included_statuses_json`
+- `created_by`
+- `created_at`
+- `notes`
+
+Purpose:
+
+- Make extraction/classifier runs reproducible.
+- Distinguish catalog snapshots from classifier prompt/model snapshots.
+
 ### `extracted_facts`
 
 Stores raw extracted facts before or alongside catalog insertion.
@@ -1150,6 +1211,42 @@ Examples:
 - `connectivity = 4G`
 - `storage = MicroSD up to 256GB`
 
+### `catalog_offers`
+
+Stores prices, campaigns, promotions, and time-bound commercial terms.
+
+Key fields:
+
+- `id`
+- `item_id`
+- `category_id`
+- `offer_type`: `price`, `promotion`, `bundle_price`, `service_price`, `campaign`, `terms`
+- `title`
+- `description`
+- `price_amount`
+- `currency`
+- `price_text`
+- `terms_json`
+- `status`: `auto_pending`, `approved`, `needs_review`, `expired`, `rejected`, `muted`
+- `valid_from`
+- `valid_to`
+- `ttl_days`
+- `ttl_source`: `explicit`, `default_setting`, `manual`, `none`
+- `first_seen_source_id`
+- `last_seen_source_id`
+- `last_seen_at`
+- `expired_at`
+- `created_by`
+- `created_at`
+- `updated_at`
+
+Rules:
+
+- Offers/prices are first-class because expiry, price-change contact reasons, and evidence depend on them.
+- Offers with no explicit validity use configured TTL and default review policy.
+- Expired offers remain for audit and historical classifier/evaluation reconstruction.
+- Offer evidence is stored through `catalog_evidence` with `entity_type = offer`.
+
 ### `catalog_relations`
 
 Stores relationships between catalog items.
@@ -1203,6 +1300,7 @@ Key fields:
 
 - `id`
 - `input_type`: `telegram_link`, `forwarded_message`, `manual_text`, `catalog_note`, `lead_example`, `catalog_item`, `catalog_term`, `catalog_offer`, `catalog_relation`, `catalog_attribute`
+- `submission_channel`: `web`, `telegram_bot`, `import`
 - `text`
 - `url`
 - `chat_ref`
@@ -1220,6 +1318,43 @@ Manual inputs can become:
 - catalog item proposals;
 - feedback events.
 
+Rules:
+
+- First-phase manual input is submitted through the web UI.
+- `submission_channel = telegram_bot` exists for future optional forwarding input and is disabled by default.
+
+### `classifier_examples`
+
+Stores durable positive/negative training and prompt examples for classifier builds.
+
+Key fields:
+
+- `id`
+- `example_type`: `lead_positive`, `lead_negative`, `maybe`, `high_value`, `retro`, `catalog_extraction`, `notification_policy`, `clustering`
+- `polarity`: `positive`, `negative`, `neutral`
+- `status`: `active`, `muted`, `rejected`, `archived`
+- `source_message_id`
+- `raw_source_id`
+- `lead_cluster_id`
+- `lead_event_id`
+- `category_id`
+- `catalog_item_id`
+- `catalog_term_id`
+- `reason_code`
+- `example_text`
+- `context_json`
+- `weight`
+- `created_from`: `manual_input`, `feedback`, `evaluation_case`, `import`
+- `created_by`
+- `created_at`
+- `updated_at`
+
+Rules:
+
+- Feedback can create classifier examples, but only when the learning effect says classifier training should change.
+- Active examples are included in classifier snapshots and evaluation metadata.
+- Commercial outcomes do not become negative examples by default.
+
 ### `classifier_versions`
 
 Stores snapshots of catalog state used by lead detection.
@@ -1228,18 +1363,67 @@ Key fields:
 
 - `id`
 - `version`
+- `catalog_version_id`
 - `created_at`
 - `created_by`
 - `included_statuses_json`
 - `catalog_hash`
+- `example_hash`
 - `prompt_hash`
 - `keyword_index_hash`
 - `settings_hash`
+- `model`
+- `model_config_hash`
 - `notes`
 
 Rule:
 
 - Every lead event records the classifier version used.
+- A classifier version must be reconstructable from `classifier_snapshot_entries` and `classifier_version_artifacts`; hashes alone are not sufficient.
+
+### `classifier_snapshot_entries`
+
+Stores the actual catalog/example entries included in a classifier version.
+
+Key fields:
+
+- `id`
+- `classifier_version_id`
+- `entry_type`: `category`, `item`, `term`, `attribute`, `offer`, `example`, `negative_pattern`, `prompt_section`
+- `entity_type`
+- `entity_id`
+- `status_at_build`
+- `weight`
+- `text_value`
+- `normalized_value`
+- `metadata_json`
+- `content_hash`
+- `created_at`
+
+Purpose:
+
+- Reconstruct what the classifier actually saw, not only hashes.
+- Make feedback traceable to the exact term/item/example weight used at detection time.
+- Preserve included `auto_pending`, `approved`, muted/excluded summary decisions, and prompt-only examples as explicit entries.
+
+### `classifier_version_artifacts`
+
+Stores prompt and generated classifier assets.
+
+Key fields:
+
+- `id`
+- `classifier_version_id`
+- `artifact_type`: `system_prompt`, `catalog_prompt`, `keyword_index`, `settings_snapshot`, `model_config`, `full_prompt`, `token_estimate`
+- `content_text`
+- `content_json`
+- `content_hash`
+- `created_at`
+
+Rules:
+
+- Prompt text and settings/model snapshots must be retained or archived with restore pointers.
+- Artifacts can be large and are eligible for archive after hot retention, but their identity rows remain available.
 
 ### `lead_events`
 
@@ -1248,9 +1432,11 @@ Stores auditable lead-detection events tied to exact messages.
 Key fields:
 
 - `id`
-- `source_id`
+- `source_message_id`
+- `monitored_source_id`
+- `raw_source_id`
 - `chat_id`
-- `message_id`
+- `telegram_message_id`
 - `message_url`
 - `sender_id`
 - `sender_name`
@@ -1276,8 +1462,8 @@ Key fields:
 
 Uniqueness:
 
-- `(chat_id, message_id, classifier_version_id)` for audit.
-- Operational notification suppression is cluster-based; `(chat_id, message_id)` only prevents exact event duplicates.
+- `(source_message_id, classifier_version_id, detection_mode)` for audit.
+- Operational notification suppression is cluster-based; `source_message_id` only prevents exact event duplicates for the same classifier run.
 
 Rules:
 
@@ -1287,6 +1473,7 @@ Rules:
 - AI detection state is preserved separately from cluster inbox/work state.
 - `lead_events` are not the primary `Leads Inbox` work item when clustering is enabled.
 - Commercial value is scored separately from lead confidence so uncertain but potentially valuable requests can be surfaced without pretending they are confirmed leads.
+- `chat_id` and `telegram_message_id` are denormalized display/debug fields; `source_message_id` is the canonical FK.
 
 ### `lead_clusters`
 
@@ -1295,7 +1482,7 @@ Stores the work items shown in `Leads Inbox`.
 Key fields:
 
 - `id`
-- `source_id`
+- `monitored_source_id`
 - `chat_id`
 - `primary_sender_id`
 - `primary_sender_name`
@@ -1388,18 +1575,28 @@ Key fields:
 
 - `id`
 - `lead_event_id`
+- `source_message_id`
+- `classifier_snapshot_entry_id`
 - `catalog_item_id`
 - `catalog_term_id`
+- `catalog_offer_id`
 - `category_id`
-- `source_id`
 - `match_type`: `term`, `semantic`, `category`, `manual_example`, `llm_reason`
 - `matched_text`
 - `score`
 - `item_status_at_detection`
 - `term_status_at_detection`
+- `offer_status_at_detection`
+- `matched_weight`
+- `matched_status_snapshot`
 - `created_at`
 
 This table is required because `auto_pending` is active immediately. Feedback needs to target exact match causes.
+
+Rules:
+
+- `classifier_snapshot_entry_id` points to the exact term/item/offer/example entry seen by the classifier.
+- Status and weight snapshot fields allow review even after catalog terms are approved, muted, or reweighted.
 
 ### `reclassification_runs`
 
@@ -1439,8 +1636,10 @@ Key fields:
 
 - `id`
 - `reclassification_run_id`
-- `source_id`
-- `message_id`
+- `source_message_id`
+- `monitored_source_id`
+- `raw_source_id`
+- `telegram_message_id`
 - `old_lead_event_id`
 - `new_lead_event_id`
 - `old_decision`
@@ -1452,7 +1651,7 @@ Key fields:
 Rules:
 
 - `maybe` remains web-only by default.
-- Historical messages that become `lead` can notify Telegram as `retro_lead` if enabled.
+- Historical messages that become `lead` stay web-only by default and can notify Telegram as `retro_lead` only if explicitly enabled.
 - Retro notifications must not look like fresh live messages.
 
 ### `research_hypotheses`
@@ -1502,7 +1701,7 @@ Key fields:
 - `status`: `queued`, `running`, `completed`, `failed`, `cancelled`
 - `message_scope`: `saved_messages_only`, `temporary_backfill`, `mixed`
 - `source_scope`: `all`, `selected_sources`, `high_priority_only`
-- `selected_source_ids_json`
+- `selected_monitored_source_ids_json`
 - `history_depth_days`
 - `history_start_message_id`
 - `history_end_message_id`
@@ -1532,8 +1731,10 @@ Key fields:
 
 - `id`
 - `research_run_id`
-- `source_id`
-- `message_id`
+- `source_message_id`
+- `monitored_source_id`
+- `raw_source_id`
+- `telegram_message_id`
 - `sender_id`
 - `matched_terms_json`
 - `decision`: `strong_intent`, `weak_intent`, `discussion`, `not_relevant`, `unknown`
@@ -1545,6 +1746,11 @@ Key fields:
 - `created_lead_cluster_id`
 - `created_contact_reason_id`
 - `created_at`
+
+Rules:
+
+- Research matches use `source_message_id` when the message exists in the hot DB.
+- Temporary backfill can create a `source_messages` stub before storing the match so later conversion, feedback, and archive restore use the same identity model.
 
 ### `research_reports`
 
@@ -1676,7 +1882,7 @@ Key fields:
 - `id`
 - `lead_cluster_id`
 - `lead_event_id`
-- `candidate_type`: `client`, `contact`, `object`, `interest`, `opportunity`, `support_case`, `contact_reason`, `task`
+- `candidate_type`: `client_candidate`, `contact_candidate`, `object_candidate`, `interest_candidate`, `opportunity_candidate`, `support_case_candidate`, `contact_reason_candidate`, `task_candidate`
 - `extracted_json`
 - `display_summary`
 - `confidence`
@@ -1929,6 +2135,7 @@ Key fields:
 - `client_interest_id`
 - `client_asset_id`
 - `catalog_item_id`
+- `catalog_offer_id`
 - `catalog_attribute_id`
 - `source_id`
 - `source_lead_cluster_id`
@@ -2176,7 +2383,9 @@ Rules:
 
 - SQLite backup must use a consistent backup/snapshot mechanism, not a raw copy of a live database.
 - Backup artifacts must be verified before old backups are expired.
-- Telegram sessions and config are backed up according to explicit secret policy.
+- Telegram sessions are not backed up by default.
+- Session/secret-value backup requires an explicit encrypted local backup policy and a configured encryption secret reference.
+- Config and secret manifests can be backed up without raw secret values.
 
 ### `restore_runs`
 
@@ -2207,7 +2416,50 @@ Rules:
 
 Stores configurable behavior.
 
-Key settings:
+Key fields:
+
+- `id`
+- `key`
+- `value_json`
+- `value_type`: `bool`, `int`, `float`, `string`, `json`, `secret_ref`
+- `scope`: `global`, `userbot_account`, `monitored_source`, `ai_provider`, `ai_model`, `notification`, `archive`, `backup`
+- `scope_id`
+- `description`
+- `requires_restart`
+- `is_secret_ref`
+- `updated_by`
+- `updated_at`
+
+Rules:
+
+- Settings are versioned and audited.
+- Secret values are represented through `secret_refs`, not stored directly.
+- Runtime workers should read settings through one typed settings layer so web changes, scheduler behavior, and prompt building stay consistent.
+
+### `settings_revisions`
+
+Stores immutable setting-change history.
+
+Key fields:
+
+- `id`
+- `setting_key`
+- `scope`
+- `scope_id`
+- `old_value_hash`
+- `new_value_hash`
+- `old_value_json`
+- `new_value_json`
+- `changed_by`
+- `change_reason`
+- `created_at`
+
+Purpose:
+
+- Reconstruct behavior for classifier/evaluation runs.
+- Explain why notifications, archive policy, or source behavior changed.
+
+### Default Settings
 
 - `auto_add_catalog_items = true`
 - `auto_add_terms = true`
@@ -2226,6 +2478,8 @@ Key settings:
 - `manual_catalog_default_status_for_admin = "approved"`
 - `manual_catalog_requires_evidence_note = true`
 - `manual_catalog_allow_direct_approved = true`
+- `web_manual_forward_import_enabled = true`
+- `telegram_manual_forward_input_enabled = false`
 - `use_auto_pending_in_classifier = true`
 - `use_needs_review_in_classifier = false`
 - `download_documents = true`
@@ -2241,6 +2495,7 @@ Key settings:
 - `notify_retro_leads = false`
 - `notify_reclassification_leads = false`
 - `notify_high_value_low_confidence = true`
+- `high_value_maybe_notify_exception = true`
 - `lead_notify_min_confidence = 0.70`
 - `lead_notify_high_value_min_confidence = 0.45`
 - `commercial_value_scoring_enabled = true`
@@ -2309,7 +2564,7 @@ Key settings:
 - `crm_generate_conversion_candidates = true`
 - `crm_auto_convert_candidates = false`
 - `crm_conversion_wizard_enabled = true`
-- `crm_conversion_candidate_types_json = ["client", "contact", "object", "interest", "opportunity", "support_case", "contact_reason", "task"]`
+- `crm_conversion_candidate_types_json = ["client_candidate", "contact_candidate", "object_candidate", "interest_candidate", "opportunity_candidate", "support_case_candidate", "contact_reason_candidate", "task_candidate"]`
 - `crm_conversion_require_confirmation = true`
 - `crm_conversion_mark_cluster_converted_on_task_only = false`
 - `crm_conversion_duplicate_check_enabled = true`
@@ -2339,11 +2594,14 @@ Key settings:
 - `source_allow_both_purpose = false`
 - `source_reset_checkpoint_requires_confirmation = true`
 - `source_default_poll_interval_seconds = 60`
-- `source_public_groups_enabled = true`
-- `source_private_groups_enabled = false`
-- `source_channels_enabled = false`
-- `source_comments_enabled = false`
-- `source_dms_enabled = false`
+- `lead_monitoring_public_groups_enabled = true`
+- `lead_monitoring_private_groups_enabled = false`
+- `lead_monitoring_channels_enabled = false`
+- `lead_monitoring_comments_enabled = false`
+- `lead_monitoring_dms_enabled = false`
+- `catalog_ingestion_channels_enabled = true`
+- `catalog_ingestion_pur_channel_enabled = true`
+- `catalog_ingestion_external_pages_enabled = true`
 - `ai_max_parallel_calls = 2`
 - `ai_parse_max_parallel_jobs = 2`
 - `ai_default_provider_config_id = null`
@@ -2383,7 +2641,7 @@ Key settings:
 - `reclass_respect_rate_limits = true`
 - `reclass_create_new_lead_events = true`
 - `reclass_preserve_original_decision = true`
-- `reclass_notify_new_leads = true`
+- `reclass_notify_new_leads = false`
 - `reclass_notify_changed_to_maybe = false`
 - `reclass_notify_changed_to_not_lead = false`
 - `reclass_require_review_before_notify = false`
@@ -2431,8 +2689,10 @@ Key settings:
 - `archive_hot_db_max_size_mb = 2048`
 - `archive_tables_json = ["source_messages", "parsed_chunks", "operational_events", "ai_usage_events", "notification_events", "job_runs", "research_matches", "embeddings"]`
 - `archive_verify_after_write = true`
-- `archive_delete_from_hot_after_verify = true`
+- `archive_trim_payloads_after_verify = true`
+- `archive_delete_unreferenced_hot_rows_after_verify = false`
 - `archive_keep_hot_pointers = true`
+- `archive_keep_identity_stub_rows = true`
 - `archive_auto_restore_for_reclassification = false`
 - `archive_auto_restore_for_research = false`
 - `archive_restore_requires_manual_confirmation = true`
@@ -2455,9 +2715,12 @@ Key settings:
 - `backup_sqlite_enabled = true`
 - `backup_archives_enabled = true`
 - `backup_artifacts_enabled = true`
-- `backup_sessions_enabled = true`
+- `backup_sessions_enabled = false`
 - `backup_config_enabled = true`
 - `backup_secrets_manifest_enabled = true`
+- `backup_secret_values_enabled = false`
+- `backup_encryption_required_for_secrets = true`
+- `backup_encryption_secret_ref_id = null`
 - `backup_schedule_cron = "0 3 * * *"`
 - `backup_retention_days = 30`
 - `backup_verify_after_write = true`
@@ -2467,7 +2730,7 @@ Key settings:
 - `secret_rotation_audit_enabled = true`
 - `first_release_scope = "full_spec"`
 
-Settings are editable in the web interface and versioned through `audit_log`.
+Settings are editable in the web interface and versioned through both `settings_revisions` and `audit_log`.
 
 ### `web_users`
 
@@ -2500,12 +2763,13 @@ Rules:
 
 ### `web_auth_sessions`
 
-Stores web sessions created after Telegram login.
+Stores web sessions created after successful local or Telegram web login.
 
 Key fields:
 
 - `id`
 - `user_id`
+- `auth_method`: `local`, `telegram`
 - `session_token_hash`
 - `created_at`
 - `expires_at`
@@ -2540,7 +2804,7 @@ Key fields:
 Oleg must be able to add information in several ways:
 
 1. Paste a Telegram message link.
-2. Forward a message to the bot or management group.
+2. Paste or upload forwarded-message content in the web UI.
 3. Paste raw text into the web UI.
 4. Add a catalog note manually, such as "Dahua X is ours" or "do not treat this as a lead".
 5. Mark an existing lead as a good/bad example.
@@ -2573,7 +2837,9 @@ The UI should ask what kind of manual input this is:
 
 ### Forwarded Message Flow
 
-Forwarded messages are stored similarly. If the source chat can be resolved, the userbot fetches the original message to preserve link and metadata.
+First-phase forwarded-message input is web-only. Oleg/admin can paste forwarded text, an exported message block, or a Telegram message link into the web UI. If the original source chat and message id can be resolved, the userbot fetches the original message to preserve link and metadata.
+
+Telegram-bot forwarding is represented as a future optional input and is disabled by default through `telegram_manual_forward_input_enabled = false`.
 
 ### Manual Text Flow
 
@@ -2835,7 +3101,8 @@ Default archive layout:
 - `parquet_zstd` by default because it is compact and still practical to read back;
 - `jsonl_zstd` as fallback for emergency/manual inspection;
 - one manifest per archive segment;
-- one hot pointer per archived entity when the original hot row is removed.
+- one hot pointer per archived entity;
+- referenced entities such as `source_messages` keep their identity row as a hot stub and archive only large payload columns.
 
 S3-compatible object storage is not part of the first implementation, but the schema includes `storage_backend = s3_compatible`, bucket/endpoint/prefix settings, and URI fields so the next phase can move archive files without redesigning the database.
 
@@ -2843,9 +3110,11 @@ Archive jobs must be conservative:
 
 - write archive files;
 - write and verify manifest/hash/row counts;
-- only then remove eligible hot rows if configured;
+- only then clear eligible hot payload columns or remove rows that are known to have no hot FK dependencies;
 - keep searchable pointers/snippets in SQLite;
 - record all archive/restore operations in `operational_events` and `audit_log` when user-triggered.
+
+Archive jobs must not break foreign keys. A row referenced by lead, cluster, evaluation, feedback, or CRM tables stays in SQLite as an identity stub even after its full text or metadata is moved to archive.
 
 Research and reclassification can work against the hot DB by default. If the needed time window is archived, they create `archive_restore_jobs`. Automatic restore is configurable; the default is manual confirmation so an exploratory research run cannot silently expand local disk usage.
 
@@ -2912,6 +3181,7 @@ Backup rules:
 - Old backups expire only after newer verified backups exist.
 - Backup and restore events are stored in `backup_runs`, `restore_runs`, `operational_events`, and `audit_log` when user-triggered.
 - Local backup is first phase; S3-compatible backup uses the same `storage_backend` pattern later.
+- Telegram sessions and raw secret values are excluded unless encrypted backup is explicitly configured.
 
 Restore rules:
 
@@ -3240,7 +3510,7 @@ Rules:
 - `Not lead` requires a reason.
 - `Maybe`, `snooze`, and commercial outcomes do not train the classifier as negative examples by default.
 - `auto_pending` matches must be visually clear because feedback on them can immediately improve the classifier.
-- `maybe` stays in the web inbox by default and does not trigger Telegram notifications.
+- `maybe` stays in the web inbox by default and does not trigger Telegram notifications unless the high-value low-confidence exception is enabled and matched.
 - The inbox shows one row per `lead_cluster`; raw `lead_events` are visible inside the cluster detail.
 - Auto-merge decisions must be visible and correctable.
 
@@ -3596,7 +3866,7 @@ Purpose:
 Inputs:
 
 - Telegram link;
-- forwarded message;
+- forwarded-message text or exported message block pasted into web;
 - raw text;
 - catalog note;
 - direct catalog item/term/offer/service form;
@@ -3635,6 +3905,8 @@ Required controls:
 - whether candidates auto-create operational catalog rows;
 - manual catalog add defaults for admin;
 - manual evidence-note requirement;
+- web manual input and forwarded-message import;
+- disabled-by-default Telegram forwarding input for future use;
 - use `auto_pending`;
 - use `needs_review`;
 - document/video/photo download switches;
@@ -3667,7 +3939,7 @@ Required controls:
 - source priority and polling policy;
 - source onboarding preview requirement;
 - default source purpose and start mode;
-- enabled source kinds for first-phase UI;
+- enabled source kinds split by lead monitoring and catalog ingestion;
 - source backfill policy and retro/web-only behavior;
 - checkpoint reset confirmation policy;
 - AI provider credentials/config references;
@@ -3764,7 +4036,7 @@ High-value negative signals:
 
 Web-only by default:
 
-- `maybe`;
+- `maybe`, except explicitly configured high-value low-confidence notifications;
 - catalog candidates and `auto_pending` facts;
 - normal contact reasons;
 - research matches;
@@ -3833,6 +4105,7 @@ Bot does not accept:
 
 - adding monitored chats;
 - monitored chat links;
+- manual lead/catalog/CRM examples in the first phase;
 - changing checkpoints;
 - changing catalog/CRM/settings.
 
@@ -3853,7 +4126,7 @@ Inputs:
 - recent negative feedback patterns;
 - settings controlling included statuses.
 
-Each classifier build creates `classifier_versions`.
+Each classifier build creates `classifier_versions`, `classifier_snapshot_entries`, and `classifier_version_artifacts`.
 
 Lead detection output must include:
 
@@ -4072,7 +4345,10 @@ Unit tests:
 - manual catalog addition creates source/evidence/candidate;
 - catalog status inclusion;
 - classifier version creation;
+- classifier snapshot entries/artifacts reconstruct included terms, examples, prompt, model config, and settings;
+- classifier examples are included in snapshots according to status and weight;
 - lead match persistence;
+- lead matches reference the exact classifier snapshot entry that caused the match;
 - lead cluster creation from one or more lead events;
 - automatic cluster merge/split rules;
 - cluster member role assignment;
@@ -4087,20 +4363,26 @@ Unit tests:
 - cluster `converted` status rules;
 - manual client/contact/interest/asset creation;
 - contact reason generation from catalog changes;
+- contact reason generation from catalog offer TTL, expiry, and price changes;
 - task and touchpoint persistence.
 - archive segment manifest generation and hash verification;
-- archive pointer creation after hot-row removal;
+- archive pointer and hot-stub creation after payload archival;
+- archived `source_messages` keep identity rows and valid foreign keys;
 - archive restore job scope selection;
 - embedding rows stay disabled/inactive when semantic search is off.
 - evaluation dataset/case/run/result persistence;
 - quality metric snapshot calculation;
 - backup manifest/hash verification;
+- session backup remains disabled unless encrypted secret backup policy is configured;
 - secret references never expose secret values;
 - Telegram notification policy selection: immediate, digest, web-only, suppressed;
 - notification deduplication and cooldown key generation;
 - `maybe` and retro leads stay web-only by default.
+- high-value `maybe` notifications only fire through the explicit high-value exception.
 - commercial value scoring stays independent from lead confidence;
 - high-value low-confidence notification rule respects positive/negative thresholds.
+- scheduler job scopes, idempotency keys, leases, and before/after checkpoints route work correctly.
+- settings revisions preserve old/new values and setting hashes.
 
 Integration tests:
 
@@ -4115,6 +4397,7 @@ Integration tests:
 - new source defaults to `from_now`;
 - historical backfill creates retro/web-only lead events by default;
 - manual Telegram link creates source and example;
+- manual forwarded-message import works through the web UI while Telegram forwarding input stays disabled by default;
 - `auto_pending` term triggers lead and stores `lead_matches`;
 - several same-sender messages in a short window produce one `lead_cluster`;
 - cross-sender similar messages require manual merge by default;
@@ -4128,13 +4411,15 @@ Integration tests:
 - accepting CRM candidates creates client/contact/object/interest records and links them to the source cluster;
 - likely duplicate client is linked instead of creating a new client when Oleg confirms the match;
 - duplicate message ids across chats do not deduplicate incorrectly;
+- `source_message_id` disambiguates duplicate Telegram message ids across chats and classifier runs;
 - confirmed lead can be linked to a client and interest;
 - new catalog item creates a contact reason for an old matching interest;
 - dismissed contact reason does not delete the client interest;
 - manual installed asset can create a future support follow-up.
 - archived messages can be restored for research without moving monitoring checkpoints;
-- archive write failure does not delete hot rows;
+- archive write failure does not trim hot payloads or delete hot rows;
 - local `parquet_zstd` archive round-trips messages, parsed chunks, and AI usage rows.
+- archive retention clears payloads but keeps referenced message stubs and FK integrity.
 - feedback mistake can be promoted into evaluation regression case;
 - evaluation run compares classifier versions without mutating production decisions;
 - verified SQLite backup can be dry-run restored;
@@ -4152,6 +4437,7 @@ Live/smoke tests:
 - document downloads skip videos and fetch PDFs;
 - bot can send notifications;
 - web settings persist;
+- web setting changes create `settings_revisions` rows;
 - bootstrap local admin can log in and is required to change password;
 - Telegram login payload is verified and mapped to an added admin user;
 - unauthorized Telegram users cannot access the web UI;
