@@ -63,13 +63,13 @@
 - Modify: `src/pur_leads/web/routes_leads.py`
 - Test: `tests/test_web_crm_routes.py`
 
-- [ ] Write failing route tests for auth-required list/create/detail of clients.
-- [ ] Write failing route tests for `/api/leads/{cluster_id}/crm/convert`.
-- [ ] Run `uv run --extra dev pytest tests/test_web_crm_routes.py -q` and verify expected route failures.
-- [ ] Implement CRM payload models and protected routes.
-- [ ] Add feedback target support for CRM entity ids where needed.
-- [ ] Run `uv run --extra dev pytest tests/test_web_crm_routes.py -q` and verify it passes.
-- [ ] Commit as `feat: add crm web api`.
+- [x] Write failing route tests for auth-required list/create/detail of clients.
+- [x] Write failing route tests for `/api/leads/{cluster_id}/crm/convert`.
+- [x] Run `uv run --extra dev pytest tests/test_web_crm_routes.py -q` and verify expected route failures.
+- [x] Implement CRM payload models and protected routes.
+- [x] Add feedback target support for CRM entity ids where needed.
+- [x] Run `uv run --extra dev pytest tests/test_web_crm_routes.py -q` and verify it passes.
+- [x] Commit as `feat: add crm web api`.
 
 ### Task 5: Compact CRM UI
 
