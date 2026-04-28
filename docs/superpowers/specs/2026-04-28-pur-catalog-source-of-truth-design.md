@@ -41,6 +41,8 @@ The system must continuously read the PUR Telegram channel, parse messages and d
 - `not_lead` feedback requires a reason and should be applied to the narrowest useful target: cluster, event, match, term, sender, or message.
 - Confirmed clusters produce CRM conversion candidates, not full CRM records, unless Oleg explicitly accepts them.
 - `Take into work` creates an action task only. Client, interest, opportunity, support case, and contact reason conversion happens after clarification.
+- Catalog ingestion uses a layered pipeline: immutable source, parsed chunks, extracted facts, deduplicated catalog candidates, then operational catalog.
+- Manual catalog additions use the same source/evidence/candidate path as AI extraction, with faster approval defaults for Oleg/admin.
 - Embeddings/semantic matching are designed into the schema but disabled initially.
 - Retention is based on time and hot database size. Large/old data is archived and rotated, not simply deleted.
 - Local archive storage is the first phase. S3-compatible storage is represented in the schema and planned for a later phase.
@@ -952,6 +954,12 @@ Key fields:
 - `status`
 - `error`
 - `stats_json`
+- `source_scope_json`
+- `extractor_version`
+- `candidate_count`
+- `fact_count`
+- `created_catalog_entity_count`
+- `token_usage_json`
 
 ### `extracted_facts`
 
@@ -975,6 +983,58 @@ Purpose:
 - Keep model output auditable.
 - Allow re-processing with improved extraction prompts.
 - Avoid losing facts that are not immediately accepted into the catalog.
+
+### `catalog_candidates`
+
+Stores normalized, deduplicated proposals before or alongside catalog mutation.
+
+Key fields:
+
+- `id`
+- `candidate_type`: `category`, `item`, `term`, `attribute`, `offer`, `relation`, `lead_phrase`, `negative_phrase`
+- `proposed_action`: `create`, `update`, `merge`, `expire`, `ignore`
+- `canonical_name`
+- `normalized_value_json`
+- `source_count`
+- `evidence_count`
+- `confidence`
+- `status`: `auto_pending`, `approved`, `rejected`, `merged`, `needs_review`, `muted`
+- `target_entity_type`
+- `target_entity_id`
+- `merge_target_candidate_id`
+- `first_seen_at`
+- `last_seen_at`
+- `created_by`: `system`, `oleg`, `admin`
+- `created_at`
+- `updated_at`
+
+Purpose:
+
+- Avoid creating duplicate catalog rows when the same product/service/term appears in multiple PUR sources.
+- Give Catalog Review one queue for AI-extracted and manually proposed facts.
+- Preserve proposed actions and conflicts before mutating operational catalog.
+
+Rules:
+
+- Auto-add can create operational catalog rows from candidates using `auto_pending`.
+- Low-confidence, conflicting, too-broad, or price/offer candidates can be forced to `needs_review`.
+- Rejected or merged candidates remain for audit and future extractor tuning.
+
+### `catalog_candidate_facts`
+
+Links extracted facts to catalog candidates.
+
+Key fields:
+
+- `id`
+- `catalog_candidate_id`
+- `extracted_fact_id`
+- `created_at`
+
+Purpose:
+
+- Let one candidate aggregate evidence from many facts/sources.
+- Preserve the raw model outputs that produced a candidate.
 
 ### `catalog_categories`
 
@@ -1111,19 +1171,25 @@ Links catalog objects to source evidence.
 Key fields:
 
 - `id`
-- `entity_type`: `category`, `item`, `term`, `attribute`, `relation`, `offer`
+- `entity_type`: `category`, `item`, `term`, `attribute`, `relation`, `offer`, `catalog_candidate`, `extracted_fact`
 - `entity_id`
 - `source_id`
 - `artifact_id`
 - `chunk_id`
 - `quote`
+- `page_number`
+- `location_json`
+- `extractor_version`
+- `evidence_type`: `ai_quote`, `manual_note`, `source_link`, `document_quote`
 - `confidence`
+- `created_by`: `system`, `oleg`, `admin`
 - `created_at`
 
 Purpose:
 
 - Every fact should answer: "where did this come from?"
 - UI can show source proof next to catalog changes.
+- Manual additions still need evidence, even if the evidence is "manual note by Oleg".
 
 ### `manual_inputs`
 
@@ -1132,7 +1198,7 @@ Stores manual additions from Oleg/admin before they are processed.
 Key fields:
 
 - `id`
-- `input_type`: `telegram_link`, `forwarded_message`, `manual_text`, `catalog_note`, `lead_example`
+- `input_type`: `telegram_link`, `forwarded_message`, `manual_text`, `catalog_note`, `lead_example`, `catalog_item`, `catalog_term`, `catalog_offer`, `catalog_relation`, `catalog_attribute`
 - `text`
 - `url`
 - `chat_ref`
@@ -1944,6 +2010,21 @@ Key settings:
 - `auto_add_catalog_items = true`
 - `auto_add_terms = true`
 - `auto_add_attributes = true`
+- `catalog_candidates_enabled = true`
+- `catalog_candidate_auto_create_operational_rows = true`
+- `catalog_candidate_low_confidence_threshold = 0.55`
+- `catalog_candidate_auto_pending_threshold = 0.70`
+- `catalog_candidate_conflict_status = "needs_review"`
+- `catalog_candidate_price_status_default = "needs_review"`
+- `catalog_candidate_offer_requires_ttl = true`
+- `catalog_candidate_too_broad_term_status = "needs_review"`
+- `catalog_candidate_merge_similarity_threshold = 0.85`
+- `manual_catalog_add_enabled = true`
+- `manual_catalog_create_candidate_first = true`
+- `manual_catalog_default_status_for_owner = "approved"`
+- `manual_catalog_default_status_for_non_owner = "auto_pending"`
+- `manual_catalog_requires_evidence_note = true`
+- `manual_catalog_allow_direct_approved = true`
 - `use_auto_pending_in_classifier = true`
 - `use_needs_review_in_classifier = false`
 - `download_documents = true`
@@ -2417,6 +2498,81 @@ Duplicate checks:
 
 AI extraction should provide `crm_suggestions` in structured output, but the UI still requires confirmation before creating CRM records.
 
+## Catalog Ingestion
+
+Catalog ingestion turns PUR content into auditable operational catalog knowledge.
+
+Pipeline:
+
+```text
+raw source
+  -> artifact download / page fetch
+  -> parsed chunks
+  -> extraction run
+  -> extracted facts
+  -> catalog candidates
+  -> catalog evidence
+  -> operational catalog rows
+  -> classifier version
+```
+
+Raw sources are immutable. Extracted facts preserve model/parser output. Catalog candidates normalize and deduplicate those facts before catalog rows are created or updated.
+
+Extractable fact types:
+
+- categories;
+- products;
+- services;
+- brands and models;
+- bundles/solutions;
+- keywords, aliases, lead phrases, negative phrases;
+- attributes and technical parameters;
+- prices, offers, and promotions;
+- compatibility, replacement, and bundle relations;
+- source quotes/evidence.
+
+Candidate creation:
+
+- normalize brand/model/category names;
+- group duplicate facts across messages, PDFs, Telegraph pages, and manual inputs;
+- compare against existing catalog items/terms/attributes;
+- detect conflicting prices/attributes;
+- propose action: create, update, merge, expire, or ignore.
+
+Auto-add policy:
+
+- auto-add is enabled by default;
+- suitable candidates can create operational catalog rows as `auto_pending`;
+- `auto_pending` rows are active in the classifier if settings allow it;
+- price/offer candidates default to `needs_review` unless they have explicit validity or TTL;
+- broad/noisy terms default to `needs_review`;
+- low-confidence or conflicting candidates default to `needs_review`.
+
+Evidence rules:
+
+- Every extracted or manual fact must have evidence.
+- Evidence can be a Telegram message, document chunk, Telegraph/external page, or manual note.
+- PDF evidence should store page/location when available.
+- Catalog Review must show evidence next to each candidate.
+
+Manual catalog addition:
+
+- Manual additions are allowed from Catalog UI, Leads Inbox, and Manual Input.
+- Manual additions create `manual_inputs` and `sources` rows.
+- Manual additions create catalog candidates before catalog rows unless direct approved add is explicitly allowed.
+- If Oleg/owner adds a manual catalog fact, default status can be `approved`.
+- If another role adds it, default status can be `auto_pending` or `needs_review`.
+- Manual evidence note is required by default.
+
+Manual add examples:
+
+- add product/model and category;
+- add service or bundle;
+- add term/synonym/negative phrase;
+- add price/offer with TTL;
+- add relation/compatibility;
+- create catalog correction from a lead message.
+
 ## Storage And Archive Policy
 
 SQLite is the hot operational database. It keeps active catalog, CRM, settings, users, audit log, current jobs, recent messages, and recent evidence immediately queryable.
@@ -2566,7 +2722,7 @@ Add-source UI:
 
 Purpose:
 
-- review `auto_pending` facts.
+- review catalog candidates and `auto_pending` facts before or after they affect the classifier.
 
 Views:
 
@@ -2575,6 +2731,9 @@ Views:
 - new attributes/offers;
 - noisy terms by false-positive count;
 - conflicts and duplicates.
+- prices/offers with TTL;
+- merge suggestions;
+- manual additions awaiting review.
 
 Actions:
 
@@ -2585,6 +2744,16 @@ Actions:
 - edit;
 - move category;
 - add note.
+
+Candidate card shows:
+
+- proposed action and candidate type;
+- normalized value;
+- target catalog entity or merge suggestion;
+- confidence and status;
+- evidence quotes and source links;
+- similar existing items/terms;
+- classifier impact.
 
 ### Catalog
 
@@ -2598,6 +2767,7 @@ Features:
 - filter by status/category/source;
 - item detail with terms, attributes, relations, evidence, feedback history;
 - bulk approve/mute/reject.
+- manual add for item, service, bundle, term, offer, attribute, relation, lead phrase, and negative phrase.
 
 ### Leads Inbox
 
@@ -3020,7 +3190,8 @@ Inputs:
 - Telegram link;
 - forwarded message;
 - raw text;
-- catalog note.
+- catalog note;
+- direct catalog item/term/offer/service form;
 - client/contact note;
 - interest note;
 - installed equipment note;
@@ -3033,7 +3204,9 @@ Actions:
 - save as negative lead example;
 - parse as source;
 - create/edit catalog fact;
-- attach to existing item/category.
+- create catalog candidate;
+- approve manual catalog candidate when allowed;
+- attach to existing item/category;
 - create client/contact;
 - create client interest;
 - create installed asset;
@@ -3050,6 +3223,10 @@ Purpose:
 Required controls:
 
 - auto-add items/terms/attributes;
+- catalog candidate thresholds and statuses;
+- whether candidates auto-create operational catalog rows;
+- manual catalog add defaults for owner/non-owner;
+- manual evidence-note requirement;
 - use `auto_pending`;
 - use `needs_review`;
 - document/video/photo download switches;
@@ -3280,6 +3457,24 @@ Lead detection output must include:
 - clustering hint: `new_request`, `continuation`, `clarification`, `context_only`, or `separate_intent`.
 - CRM suggestions: contact, object, interest, opportunity/support/contact-reason hint, and next step.
 
+Catalog extraction output must include structured facts:
+
+```json
+{
+  "facts": [
+    {
+      "fact_type": "product",
+      "canonical_name": "Dahua Hero A1",
+      "category": "video_surveillance",
+      "terms": ["hero a1", "wi-fi камера", "поворотная камера"],
+      "attributes": [{"name": "connectivity", "value": "Wi-Fi"}],
+      "evidence_quote": "...",
+      "confidence": 0.86
+    }
+  ]
+}
+```
+
 Example AI output:
 
 ```json
@@ -3453,6 +3648,9 @@ Unit tests:
 - artifact download policy;
 - document parsing into chunks;
 - extracted fact normalization;
+- catalog candidate deduplication from multiple extracted facts;
+- catalog candidate status policy for low confidence, conflicts, broad terms, prices, and offers;
+- manual catalog addition creates source/evidence/candidate;
 - catalog status inclusion;
 - classifier version creation;
 - lead match persistence;
@@ -3484,6 +3682,10 @@ Unit tests:
 Integration tests:
 
 - process archived `@purmaster` corpus into catalog candidates;
+- same product from message, PDF, and Telegraph becomes one candidate with multiple evidence rows;
+- manual catalog item added by Oleg can become approved with manual evidence;
+- manual catalog item added by non-owner follows configured default status;
+- noisy broad term becomes `needs_review` instead of active high-weight term;
 - add public Telegram group through web onboarding: draft -> checking_access -> preview_ready -> active;
 - inaccessible/private/captcha source creates `access_issue` and operator notification policy;
 - new source defaults to `from_now`;
