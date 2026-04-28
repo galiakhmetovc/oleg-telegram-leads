@@ -92,6 +92,8 @@ This plan implements catalog/source storage and deterministic catalog mutation s
 
 ## Task 6: Runtime Handler Registration
 
+- [x] Implement catalog runtime handler registry and verify parser/extractor/failure tests.
+
 **Files:**
 - Modify: `src/pur_leads/workers/runtime.py`
 - Test: `tests/test_catalog_runtime_handlers.py`
