@@ -574,7 +574,7 @@ git commit -m "chore: add greenfield developer workflow"
 - Modify: `README.md`
 - Create: `docs/superpowers/plans/2026-04-28-telegram-source-ingestion.md`
 
-- [ ] **Step 1: Run full foundation verification**
+- [x] **Step 1: Run full foundation verification**
 
 ```bash
 python -m pytest -q
@@ -586,7 +586,7 @@ docker compose config
 
 Expected: all pass.
 
-- [ ] **Step 2: Verify no legacy runtime references remain**
+- [x] **Step 2: Verify no legacy runtime references remain**
 
 ```bash
 rg -n "chats.json|leads.json|KeywordScanner|AIAnalyzer|Pipeline|/recheck|/leads" README.md src tests Dockerfile docker-compose.yml
@@ -594,7 +594,7 @@ rg -n "chats.json|leads.json|KeywordScanner|AIAnalyzer|Pipeline|/recheck|/leads"
 
 Expected: no matches.
 
-- [ ] **Step 3: Commit acceptance docs**
+- [x] **Step 3: Commit acceptance docs**
 
 ```bash
 git add README.md docs/superpowers/plans/2026-04-28-telegram-source-ingestion.md
