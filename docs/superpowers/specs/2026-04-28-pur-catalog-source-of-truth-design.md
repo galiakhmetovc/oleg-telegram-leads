@@ -31,6 +31,10 @@ The system must continuously read the PUR Telegram channel, parse messages and d
 - Logging and audit are first-class requirements for source sync, access issues, AI calls, parser runs, catalog changes, CRM changes, and notifications.
 - AI batching, reclassification, and retro research behavior are configurable because they will need tuning after real traffic is observed.
 - Retro research is a separate product workflow for testing new commercial directions against historical chat demand before adding them to the operational catalog.
+- All readable monitoring-source messages are stored, even if they are not leads, because reclassification, research, deduplication, sender intelligence, and future semantic search depend on historical data.
+- Embeddings/semantic matching are designed into the schema but disabled initially.
+- Retention is based on time and hot database size. Large/old data is archived and rotated, not simply deleted.
+- Local archive storage is the first phase. S3-compatible storage is represented in the schema and planned for a later phase.
 
 ## Source Layers
 
@@ -292,6 +296,83 @@ Rules:
 - Other source kinds are represented in the schema but can be hidden or marked "later" in UI.
 - Chats are added from the web interface, not through Telegram commands.
 
+### `source_messages`
+
+Stores every readable message fetched from monitoring and catalog sources.
+
+Key fields:
+
+- `id`
+- `monitored_source_id`
+- `source_id`
+- `telegram_message_id`
+- `sender_id`
+- `message_date`
+- `text`
+- `caption`
+- `normalized_text`
+- `has_media`
+- `media_metadata_json`
+- `reply_to_message_id`
+- `thread_id`
+- `forward_metadata_json`
+- `raw_metadata_json`
+- `fetched_at`
+- `classification_status`: `unclassified`, `queued`, `classified`, `skipped`, `archived`
+- `archive_pointer_id`
+- `created_at`
+- `updated_at`
+
+Rules:
+
+- For monitoring sources, files are not downloaded by default, but media metadata is stored.
+- Text and captions are stored for all readable messages.
+- Media-only messages are stored as metadata records.
+- Message text should be indexed with FTS5 while in the hot DB.
+- Archived messages keep a hot pointer/snippet so UI and research can request restore.
+
+### `message_context_links`
+
+Stores context relationships between messages.
+
+Key fields:
+
+- `id`
+- `source_message_id`
+- `related_source_message_id`
+- `relation_type`: `reply_parent`, `reply_ancestor`, `neighbor_before`, `neighbor_after`, `same_thread`
+- `distance`
+- `created_at`
+
+Purpose:
+
+- Allow the classifier to include reply chains and neighboring messages.
+- Preserve context for reclassification and retro research.
+
+### `embeddings`
+
+Stores vector embeddings for future semantic search.
+
+Key fields:
+
+- `id`
+- `entity_type`: `source_message`, `parsed_chunk`, `catalog_item`, `catalog_term`, `client_interest`
+- `entity_id`
+- `provider`
+- `model`
+- `vector_blob`
+- `dimensions`
+- `text_hash`
+- `status`: `active`, `stale`, `archived`, `failed`
+- `created_at`
+- `updated_at`
+
+Rules:
+
+- Embedding generation is disabled initially.
+- Schema and jobs exist so it can be enabled later without redesign.
+- Semantic match component returns no matches while embeddings are disabled.
+
 ### `access_issues`
 
 Stores source access problems that require operator attention or retry.
@@ -484,6 +565,110 @@ Purpose:
 - Audit what was sent to Telegram and why.
 - Avoid duplicate urgent notifications.
 - Support notification cooldowns and digests.
+
+### `archive_segments`
+
+Stores archive segment metadata.
+
+Key fields:
+
+- `id`
+- `segment_type`: `messages`, `parsed_chunks`, `operational_events`, `ai_usage`, `notifications`, `job_runs`, `research`, `embeddings`, `mixed`
+- `period_start`
+- `period_end`
+- `storage_backend`: `local`, `s3_compatible`
+- `archive_format`: `parquet_zstd`, `jsonl_zstd`, `sqlite_zstd`
+- `compression`: `zstd`, `none`
+- `base_path`
+- `storage_uri`
+- `manifest_path`
+- `schema_version`
+- `sha256`
+- `size_bytes`
+- `row_count`
+- `status`: `writing`, `verified`, `failed`, `restored`, `deleted`
+- `created_at`
+- `updated_at`
+
+Rules:
+
+- First implementation uses `storage_backend = local`.
+- S3-compatible storage is planned for a later phase but represented in the schema.
+- Default archive format is `parquet_zstd` when dependencies are available.
+- `jsonl_zstd` is the fallback for simple inspection and emergency recovery.
+- `sqlite_zstd` is optional for compact whole-table snapshots.
+- Archive writes must be verified before hot rows are deleted.
+- Archive manifests must contain schema version, table names, row counts, hashes, and source query/window metadata.
+
+### `archive_files`
+
+Stores files belonging to archive segments.
+
+Key fields:
+
+- `id`
+- `archive_segment_id`
+- `storage_backend`
+- `path`
+- `storage_uri`
+- `table_name`
+- `format`
+- `compression`
+- `sha256`
+- `size_bytes`
+- `row_count`
+- `created_at`
+
+### `archive_pointers`
+
+Keeps lightweight hot-db pointers to archived entities.
+
+Key fields:
+
+- `id`
+- `entity_type`
+- `entity_id`
+- `archive_segment_id`
+- `lookup_key`
+- `snippet`
+- `content_hash`
+- `created_at`
+
+Purpose:
+
+- Let UI show that a historical message/log exists in archive.
+- Enable restore jobs for research/reclassification.
+- Keep enough metadata to search and request restore without keeping full text in the hot DB forever.
+
+### `archive_restore_jobs`
+
+Stores restore requests.
+
+Key fields:
+
+- `id`
+- `archive_segment_id`
+- `requested_by`
+- `reason`: `research`, `reclassification`, `manual_review`, `debug`, `export`
+- `status`: `queued`, `running`, `completed`, `failed`, `cancelled`
+- `restore_scope_json`
+- `started_at`
+- `finished_at`
+- `error`
+- `created_at`
+
+### `archive_manifests`
+
+Stores parsed manifest metadata for archive validation.
+
+Key fields:
+
+- `id`
+- `archive_segment_id`
+- `schema_version`
+- `manifest_json`
+- `verified_at`
+- `created_at`
 
 ### `rate_limit_states`
 
@@ -1524,6 +1709,40 @@ Key settings:
 - `research_notify_summary_to_telegram = true`
 - `research_retro_leads_are_web_first = true`
 - `research_retro_lead_telegram_label = "retro"`
+- `embeddings_enabled = false`
+- `embed_new_messages = false`
+- `embed_parsed_chunks = false`
+- `embed_catalog_items = false`
+- `embedding_default_provider_config_id = null`
+- `embedding_default_model = null`
+- `embedding_max_parallel_jobs = 1`
+- `retention_enabled = true`
+- `archive_enabled = true`
+- `archive_storage_backend = "local"`
+- `archive_s3_enabled = false`
+- `archive_s3_bucket = null`
+- `archive_s3_endpoint = null`
+- `archive_s3_region = null`
+- `archive_s3_prefix = null`
+- `archive_path = "artifacts/archives"`
+- `archive_format = "parquet_zstd"`
+- `archive_fallback_format = "jsonl_zstd"`
+- `archive_compression = "zstd"`
+- `archive_rotate_by = "month"`
+- `archive_max_segment_size_mb = 512`
+- `archive_hot_messages_retention_days = 365`
+- `archive_hot_operational_events_retention_days = 90`
+- `archive_hot_ai_usage_retention_days = 180`
+- `archive_hot_research_matches_retention_days = 365`
+- `archive_hot_embeddings_retention_days = 365`
+- `archive_hot_db_max_size_mb = 2048`
+- `archive_tables_json = ["source_messages", "parsed_chunks", "operational_events", "ai_usage_events", "notification_events", "job_runs", "research_matches", "embeddings"]`
+- `archive_verify_after_write = true`
+- `archive_delete_from_hot_after_verify = true`
+- `archive_keep_hot_pointers = true`
+- `archive_auto_restore_for_reclassification = false`
+- `archive_auto_restore_for_research = false`
+- `archive_restore_requires_manual_confirmation = true`
 
 Settings are editable in the web interface and versioned through `audit_log`.
 
@@ -1629,6 +1848,40 @@ Forwarded messages are stored similarly. If the source chat can be resolved, the
 ### Manual Text Flow
 
 Manual text becomes `source_type = manual_text`. It can still create extracted facts, lead examples, CRM notes, client interests, support cases, contact reasons, or feedback.
+
+## Storage And Archive Policy
+
+SQLite is the hot operational database. It keeps active catalog, CRM, settings, users, audit log, current jobs, recent messages, and recent evidence immediately queryable.
+
+Bulky historical data is archived instead of deleted:
+
+- monitoring-source messages and captions;
+- parsed chunks from documents/pages;
+- operational events and job runs;
+- AI usage/events and raw usage metadata;
+- notification events;
+- research matches;
+- embeddings when semantic search is enabled later.
+
+Default archive layout:
+
+- local storage first;
+- `parquet_zstd` by default because it is compact and still practical to read back;
+- `jsonl_zstd` as fallback for emergency/manual inspection;
+- one manifest per archive segment;
+- one hot pointer per archived entity when the original hot row is removed.
+
+S3-compatible object storage is not part of the first implementation, but the schema includes `storage_backend = s3_compatible`, bucket/endpoint/prefix settings, and URI fields so the next phase can move archive files without redesigning the database.
+
+Archive jobs must be conservative:
+
+- write archive files;
+- write and verify manifest/hash/row counts;
+- only then remove eligible hot rows if configured;
+- keep searchable pointers/snippets in SQLite;
+- record all archive/restore operations in `operational_events` and `audit_log` when user-triggered.
+
+Research and reclassification can work against the hot DB by default. If the needed time window is archived, they create `archive_restore_jobs`. Automatic restore is configurable; the default is manual confirmation so an exploratory research run cannot silently expand local disk usage.
 
 ## Web Interface
 
@@ -1958,6 +2211,37 @@ Actions:
 - snooze;
 - link to client/opportunity/support case/contact reason.
 
+### Storage / Archives
+
+Purpose:
+
+- show hot database size, archive size, retention state, and restore jobs;
+- make archive policy visible without turning it into an operator-only hidden config.
+
+Views:
+
+- hot DB usage by table;
+- archive segments by period/type/status;
+- restore jobs;
+- archive verification failures;
+- storage backend configuration.
+
+Actions:
+
+- run archive rotation now;
+- verify archive segment;
+- restore selected period/source/table;
+- cancel restore job;
+- switch archive policy values;
+- configure S3-compatible backend for the next phase.
+
+Rules:
+
+- first implementation stores archives locally;
+- S3 settings can exist disabled until the S3 phase;
+- destructive cleanup requires successful verification and audit record;
+- restoring archived messages should not move monitoring checkpoints.
+
 ### Manual Input
 
 Purpose:
@@ -2027,6 +2311,14 @@ Required controls:
 - retro lead notification styling;
 - research default message scope, backfill permissions, and limits;
 - research auto-conversion settings;
+- embedding enablement, provider, model, and concurrency;
+- retention windows by table;
+- hot database max size;
+- archive format/compression/rotation policy;
+- local archive path;
+- archive verification and deletion policy;
+- archive restore policy for research/reclassification;
+- S3-compatible archive backend settings for the next phase;
 - provider policy warning acknowledgement;
 - Telegram notification toggles;
 - sync interval;
@@ -2121,6 +2413,7 @@ Research behavior:
 
 - starts from a hypothesis and seed/negative terms;
 - can scan only already saved messages or perform configured temporary backfill;
+- can request restore of archived messages when the selected time window is no longer hot;
 - produces reports before creating catalog/CRM entities;
 - does not notify every historical match to Telegram;
 - can convert selected matches into catalog items, leads, client interests, or contact reasons.
@@ -2148,6 +2441,8 @@ Feedback events do not need to immediately mutate catalog rows in every case. So
 - Document parse failures keep artifact metadata and error text.
 - Duplicate source detection uses `(source_type, origin, external_id)` and content hash.
 - Telegram flood wait should pause the specific sync job and record retry time.
+- Archive write/verification failures must keep hot rows intact and create visible operational errors.
+- Restore failures must leave existing hot data untouched and keep the restore job retryable or cancellable.
 
 ## Migration From Current Project
 
@@ -2188,6 +2483,10 @@ Unit tests:
 - manual client/contact/interest/asset creation;
 - contact reason generation from catalog changes;
 - task and touchpoint persistence.
+- archive segment manifest generation and hash verification;
+- archive pointer creation after hot-row removal;
+- archive restore job scope selection;
+- embedding rows stay disabled/inactive when semantic search is off.
 
 Integration tests:
 
@@ -2200,6 +2499,9 @@ Integration tests:
 - new catalog item creates a contact reason for an old matching interest;
 - dismissed contact reason does not delete the client interest;
 - manual installed asset can create a future support follow-up.
+- archived messages can be restored for research without moving monitoring checkpoints;
+- archive write failure does not delete hot rows;
+- local `parquet_zstd` archive round-trips messages, parsed chunks, and AI usage rows.
 
 Live/smoke tests:
 
@@ -2210,6 +2512,7 @@ Live/smoke tests:
 - Telegram login payload is verified and mapped to a local user;
 - unauthorized Telegram users cannot access the web UI;
 - CRM Today screen can load leads, contact reasons, and due tasks from SQLite.
+- Storage / Archives screen shows local archive segments, verification status, and restore job status.
 
 ## Resolved Configuration Decisions
 
