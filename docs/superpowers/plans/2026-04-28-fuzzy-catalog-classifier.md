@@ -52,5 +52,5 @@
 - [x] Run `node --check src/pur_leads/web/static/app.js`.
 - [x] Run `TMPDIR=/home/admin/AI-AGENT/data/tmp/oleg-telegram-leads-pytest uv run --extra dev pytest -q`.
 - [x] Run `docker compose config >/tmp/oleg-telegram-leads-compose.out` and report only line count.
-- [ ] Commit and push to `main`.
-- [ ] Deploy on `teamd-ams1`, restart web/worker, and verify `/health` plus `docker compose ps web worker`.
+- [x] Commit and push to `main`.
+- [x] Deploy on `teamd-ams1`, restart web/worker, and verify `/health` plus `docker compose ps web worker`.
