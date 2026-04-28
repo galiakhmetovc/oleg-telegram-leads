@@ -196,7 +196,7 @@ class SchedulerRepository:
         ]
         if not expired_ids:
             return 0
-        result = self.session.execute(
+        self.session.execute(
             update(scheduler_jobs_table)
             .where(scheduler_jobs_table.c.id.in_(expired_ids))
             .values(
@@ -207,7 +207,7 @@ class SchedulerRepository:
                 updated_at=self._to_db_datetime(now),
             )
         )
-        return result.rowcount or 0
+        return len(expired_ids)
 
     def succeed(
         self, job_id: str, *, checkpoint_after: Any, result_summary: Any, now: datetime

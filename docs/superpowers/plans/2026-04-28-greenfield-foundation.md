@@ -518,7 +518,7 @@ git commit -m "feat: add scheduler job foundation"
 - Modify: `.env.example`
 - Modify: `README.md`
 
-- [ ] **Step 1: Add CLI commands**
+- [x] **Step 1: Add CLI commands**
 
 Commands:
 
@@ -528,7 +528,7 @@ Commands:
 - `pur-leads worker once`
 - `pur-leads web`
 
-- [ ] **Step 2: Add Docker entrypoints**
+- [x] **Step 2: Add Docker entrypoints**
 
 Compose services:
 
@@ -541,7 +541,7 @@ Use local volumes:
 - `./artifacts:/app/artifacts`
 - `./sessions:/app/sessions`
 
-- [ ] **Step 3: Update `.env.example`**
+- [x] **Step 3: Update `.env.example`**
 
 Include only non-secret examples and secret ref paths:
 
@@ -550,7 +550,7 @@ Include only non-secret examples and secret ref paths:
 - `PUR_WEB_HOST=0.0.0.0`
 - `PUR_WEB_PORT=8000`
 
-- [ ] **Step 4: Verify commands**
+- [x] **Step 4: Verify commands**
 
 ```bash
 python -m pytest -q
@@ -561,7 +561,7 @@ python -m mypy src
 
 Expected: pass.
 
-- [ ] **Step 5: Commit workflow**
+- [x] **Step 5: Commit workflow**
 
 ```bash
 git add Dockerfile docker-compose.yml .env.example README.md src/pur_leads/cli.py

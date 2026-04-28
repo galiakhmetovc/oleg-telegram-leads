@@ -1,0 +1,30 @@
+services:
+  web:
+    build: .
+    command: ["web"]
+    environment:
+      PUR_DATABASE_PATH: /app/data/pur-leads.sqlite3
+      PUR_LOG_LEVEL: ${PUR_LOG_LEVEL:-INFO}
+      PUR_WEB_HOST: 0.0.0.0
+      PUR_WEB_PORT: 8000
+    ports:
+      - "${PUR_WEB_PORT:-8000}:8000"
+    volumes:
+      - ./data:/app/data
+      - ./artifacts:/app/artifacts
+      - ./sessions:/app/sessions
+    restart: unless-stopped
+
+  worker:
+    build: .
+    command: ["worker", "once"]
+    environment:
+      PUR_DATABASE_PATH: /app/data/pur-leads.sqlite3
+      PUR_LOG_LEVEL: ${PUR_LOG_LEVEL:-INFO}
+      PUR_WEB_HOST: 0.0.0.0
+      PUR_WEB_PORT: 8000
+    volumes:
+      - ./data:/app/data
+      - ./artifacts:/app/artifacts
+      - ./sessions:/app/sessions
+    restart: "no"
