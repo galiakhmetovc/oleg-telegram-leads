@@ -4,18 +4,47 @@ from __future__ import annotations
 
 from dataclasses import asdict
 from typing import Any
+from urllib.parse import urlparse
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.encoders import jsonable_encoder
 from pydantic import BaseModel
+from sqlalchemy import insert, or_, select
 from sqlalchemy.orm import Session
 
+from pur_leads.core.ids import new_id
+from pur_leads.core.time import utc_now
+from pur_leads.models.catalog import classifier_examples_table
+from pur_leads.models.telegram_sources import monitored_sources_table, source_messages_table
 from pur_leads.repositories.catalog_candidates import CatalogCandidateRecord
 from pur_leads.services.catalog_candidates import CatalogCandidateService
+from pur_leads.services.catalog_sources import CatalogSourceService
+from pur_leads.services.classifier_snapshots import ClassifierSnapshotService
+from pur_leads.services.scheduler import SchedulerService
+from pur_leads.services.settings import SettingsService
 from pur_leads.services.web_auth import SessionValidationResult
 from pur_leads.web.dependencies import current_admin, get_session
 
 router = APIRouter(prefix="/api/catalog")
+
+CATALOG_MANUAL_INPUT_TYPES = {
+    "catalog_note",
+    "catalog_item",
+    "catalog_term",
+    "catalog_offer",
+    "catalog_relation",
+    "catalog_attribute",
+}
+EXAMPLE_INPUT_TYPES = {
+    "lead_example": ("lead_positive", "positive"),
+    "non_lead_example": ("lead_negative", "negative"),
+}
+ALLOWED_MANUAL_INPUT_TYPES = {
+    "telegram_link",
+    "manual_text",
+    *CATALOG_MANUAL_INPUT_TYPES,
+    *EXAMPLE_INPUT_TYPES.keys(),
+}
 
 
 class CandidateReviewRequest(BaseModel):
@@ -27,6 +56,17 @@ class CandidateUpdateRequest(BaseModel):
     canonical_name: str | None = None
     normalized_value: dict[str, Any] | None = None
     reason: str | None = None
+
+
+class ManualInputRequest(BaseModel):
+    input_type: str
+    text: str | None = None
+    url: str | None = None
+    chat_ref: str | None = None
+    message_id: int | None = None
+    evidence_note: str | None = None
+    metadata_json: dict[str, Any] | None = None
+    auto_extract: bool = True
 
 
 @router.get("/candidates")
@@ -104,6 +144,120 @@ def review_candidate(
     return {
         "candidate": _candidate_payload(result.candidate),
         "promotion": jsonable_encoder(asdict(result.promotion)) if result.promotion else None,
+    }
+
+
+@router.post("/manual-inputs")
+def create_manual_input(
+    payload: ManualInputRequest,
+    validated: SessionValidationResult = Depends(current_admin),
+    session: Session = Depends(get_session),
+) -> dict[str, Any]:
+    if not bool(SettingsService(session).get("manual_catalog_add_enabled")):
+        raise HTTPException(status_code=400, detail="Manual catalog additions are disabled")
+    if payload.input_type not in ALLOWED_MANUAL_INPUT_TYPES:
+        raise HTTPException(status_code=400, detail="Unsupported manual input_type")
+
+    actor = _actor(validated)
+    text = _clean_str(payload.text)
+    url = _clean_str(payload.url)
+    chat_ref = _clean_str(payload.chat_ref)
+    message_id = payload.message_id
+    if url:
+        parsed_link = _parse_telegram_message_url(url)
+        if parsed_link is not None:
+            chat_ref = chat_ref or parsed_link["chat_ref"]
+            message_id = message_id or parsed_link["message_id"]
+    if text is None and url is None:
+        raise HTTPException(status_code=400, detail="Manual input requires text or url")
+    if _requires_evidence_note(session, payload.input_type) and not _clean_str(
+        payload.evidence_note
+    ):
+        raise HTTPException(status_code=400, detail="evidence_note is required")
+
+    metadata_json = dict(payload.metadata_json or {})
+    metadata_json["input_type"] = payload.input_type
+    result = CatalogSourceService(session).submit_manual_input(
+        input_type=payload.input_type,
+        submitted_by=actor,
+        text=text,
+        url=url,
+        chat_ref=chat_ref,
+        message_id=message_id,
+        evidence_note=_clean_str(payload.evidence_note),
+        metadata_json=metadata_json,
+    )
+
+    queued_jobs = []
+    if (
+        result.source is not None
+        and text is not None
+        and payload.auto_extract
+        and payload.input_type in CATALOG_MANUAL_INPUT_TYPES | {"manual_text"}
+        and bool(SettingsService(session).get("manual_catalog_create_candidate_first"))
+    ):
+        chunk = CatalogSourceService(session).replace_parsed_chunks(
+            result.source.id,
+            chunks=[text],
+            parser_name="manual-input",
+            parser_version="1",
+        )[0]
+        job = SchedulerService(session).enqueue(
+            job_type="extract_catalog_facts",
+            scope_type="parser",
+            scope_id=chunk.id,
+            priority="low",
+            idempotency_key=f"manual-extract:{result.manual_input.id}:{chunk.id}",
+            payload_json={
+                "source_id": chunk.source_id,
+                "chunk_id": chunk.id,
+                "manual_input_id": result.manual_input.id,
+                "extractor_version": "manual-input",
+                "trigger": "manual_input",
+            },
+        )
+        queued_jobs.append(job)
+
+    classifier_example = None
+    classifier_snapshot = None
+    if payload.input_type in EXAMPLE_INPUT_TYPES:
+        source_message = _find_source_message_by_link(
+            session,
+            chat_ref=chat_ref,
+            message_id=message_id,
+        )
+        example_text = text or _source_message_text(source_message)
+        if example_text is None:
+            raise HTTPException(status_code=400, detail="Manual example requires readable text")
+        classifier_example = _create_classifier_example(
+            session,
+            input_type=payload.input_type,
+            example_text=example_text,
+            actor=actor,
+            raw_source_id=result.source.id if result.source is not None else None,
+            source_message_id=source_message["id"] if source_message is not None else None,
+            manual_input_id=result.manual_input.id,
+            evidence_note=_clean_str(payload.evidence_note),
+        )
+        classifier_snapshot = ClassifierSnapshotService(session).build_snapshot(
+            created_by=actor,
+            model="builtin-fuzzy",
+            settings_snapshot={
+                "trigger": "manual_input",
+                "manual_input_id": result.manual_input.id,
+                "classifier_example_id": classifier_example["id"],
+            },
+            notes="Automatically rebuilt after manual classifier example",
+        )
+
+    return {
+        "manual_input": jsonable_encoder(asdict(result.manual_input)),
+        "source": jsonable_encoder(asdict(result.source)) if result.source is not None else None,
+        "queued_jobs": [jsonable_encoder(asdict(job)) for job in queued_jobs],
+        "classifier_example": jsonable_encoder(classifier_example),
+        "classifier_snapshot": jsonable_encoder(asdict(classifier_snapshot))
+        if classifier_snapshot is not None
+        else None,
     }
 
 
@@ -192,3 +346,122 @@ def _excerpt(value: str | None, *, limit: int = 700) -> str | None:
     if len(normalized) <= limit:
         return normalized
     return normalized[: limit - 1].rstrip() + "…"
+
+
+def _clean_str(value: str | None) -> str | None:
+    if value is None:
+        return None
+    stripped = value.strip()
+    return stripped or None
+
+
+def _requires_evidence_note(session: Session, input_type: str) -> bool:
+    if input_type not in CATALOG_MANUAL_INPUT_TYPES:
+        return False
+    return bool(SettingsService(session).get("manual_catalog_requires_evidence_note"))
+
+
+def _parse_telegram_message_url(url: str) -> dict[str, Any] | None:
+    parsed = urlparse(url)
+    if parsed.netloc not in {"t.me", "telegram.me"}:
+        return None
+    parts = [part for part in parsed.path.split("/") if part]
+    if len(parts) < 2:
+        return None
+    if parts[0] == "c" and len(parts) >= 3:
+        chat_ref = f"c/{parts[1]}"
+        message_part = parts[2]
+    else:
+        chat_ref = parts[0]
+        message_part = parts[1]
+    if not message_part.isdigit():
+        return None
+    return {"chat_ref": chat_ref, "message_id": int(message_part)}
+
+
+def _find_source_message_by_link(
+    session: Session,
+    *,
+    chat_ref: str | None,
+    message_id: int | None,
+) -> dict[str, Any] | None:
+    if chat_ref is None or message_id is None:
+        return None
+    row = (
+        session.execute(
+            select(source_messages_table)
+            .select_from(
+                source_messages_table.join(
+                    monitored_sources_table,
+                    source_messages_table.c.monitored_source_id == monitored_sources_table.c.id,
+                )
+            )
+            .where(
+                source_messages_table.c.telegram_message_id == message_id,
+                or_(
+                    monitored_sources_table.c.username == chat_ref,
+                    monitored_sources_table.c.input_ref == chat_ref,
+                    monitored_sources_table.c.input_ref == f"@{chat_ref}",
+                    monitored_sources_table.c.input_ref == f"https://t.me/{chat_ref}",
+                ),
+            )
+        )
+        .mappings()
+        .first()
+    )
+    return dict(row) if row is not None else None
+
+
+def _source_message_text(row: dict[str, Any] | None) -> str | None:
+    if row is None:
+        return None
+    parts = [part for part in (row.get("text"), row.get("caption")) if part]
+    return "\n".join(parts) if parts else None
+
+
+def _create_classifier_example(
+    session: Session,
+    *,
+    input_type: str,
+    example_text: str,
+    actor: str,
+    raw_source_id: str | None,
+    source_message_id: str | None,
+    manual_input_id: str,
+    evidence_note: str | None,
+) -> dict[str, Any]:
+    example_type, polarity = EXAMPLE_INPUT_TYPES[input_type]
+    now = utc_now()
+    example_id = new_id()
+    session.execute(
+        insert(classifier_examples_table).values(
+            id=example_id,
+            example_type=example_type,
+            polarity=polarity,
+            status="active",
+            source_message_id=source_message_id,
+            raw_source_id=raw_source_id,
+            lead_cluster_id=None,
+            lead_event_id=None,
+            category_id=None,
+            catalog_item_id=None,
+            catalog_term_id=None,
+            reason_code=None,
+            example_text=example_text,
+            context_json={"manual_input_id": manual_input_id, "evidence_note": evidence_note},
+            weight=1.0,
+            created_from="manual_input",
+            created_by=actor,
+            created_at=now,
+            updated_at=now,
+        )
+    )
+    row = (
+        session.execute(
+            select(classifier_examples_table).where(classifier_examples_table.c.id == example_id)
+        )
+        .mappings()
+        .one()
+    )
+    session.commit()
+    return dict(row)

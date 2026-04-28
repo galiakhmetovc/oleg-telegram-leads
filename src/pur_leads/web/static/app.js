@@ -744,6 +744,9 @@ function initCatalog() {
   document.querySelector("#catalog-filters")?.addEventListener("change", () =>
     loadCatalogCandidates(state)
   );
+  document.querySelector("#manual-input-form")?.addEventListener("submit", (event) =>
+    submitManualInput(event, state)
+  );
   loadCatalogCandidates(state);
 }
 
@@ -959,6 +962,38 @@ async function reviewCatalogCandidate(candidateId, action, state) {
       body: JSON.stringify({ action }),
     });
     if (status) status.textContent = "Saved";
+    await loadCatalogCandidates(state);
+  } catch (error) {
+    if (status) status.textContent = error.message;
+  }
+}
+
+async function submitManualInput(event, state) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const status = document.querySelector("#manual-input-status");
+  const data = new FormData(form);
+  const body = {
+    input_type: data.get("input_type"),
+    text: data.get("text") || null,
+    url: data.get("url") || null,
+    evidence_note: data.get("evidence_note") || null,
+    auto_extract: data.get("auto_extract") === "on",
+  };
+  try {
+    const payload = await api("/api/catalog/manual-inputs", {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+    form.reset();
+    form.querySelector('input[name="auto_extract"]').checked = true;
+    if (status) {
+      const queued = payload.queued_jobs?.length || 0;
+      const snapshot = payload.classifier_snapshot ? `snapshot v${payload.classifier_snapshot.version}` : "";
+      status.textContent = ["Saved", queued ? `${queued} job queued` : "", snapshot]
+        .filter(Boolean)
+        .join(" / ");
+    }
     await loadCatalogCandidates(state);
   } catch (error) {
     if (status) status.textContent = error.message;

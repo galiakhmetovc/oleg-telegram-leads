@@ -390,6 +390,25 @@ def catalog_page(
                       <option value="negative_phrase">Negative phrases</option>
                     </select>
                   </form>
+                  <form id="manual-input-form" class="manual-input-form">
+                    <h2>Manual input</h2>
+                    <select name="input_type" aria-label="Manual input type">
+                      <option value="catalog_note">Catalog note</option>
+                      <option value="lead_example">Lead example</option>
+                      <option value="non_lead_example">Non-lead example</option>
+                      <option value="telegram_link">Telegram link</option>
+                      <option value="manual_text">Manual text</option>
+                    </select>
+                    <textarea name="text" rows="4" placeholder="Text"></textarea>
+                    <input name="url" type="url" placeholder="https://t.me/...">
+                    <input name="evidence_note" placeholder="Evidence note">
+                    <label class="checkbox-line">
+                      <input name="auto_extract" type="checkbox" checked>
+                      Auto extract
+                    </label>
+                    <button type="submit">Submit</button>
+                    <p id="manual-input-status" class="status-line" role="status"></p>
+                  </form>
                   <div id="catalog-candidate-list" class="queue-list" aria-live="polite"></div>
                 </aside>
                 <section id="catalog-candidate-detail" class="detail-pane" aria-live="polite">

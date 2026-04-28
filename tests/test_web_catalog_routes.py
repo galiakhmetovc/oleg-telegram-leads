@@ -5,7 +5,16 @@ from pur_leads.db.engine import create_sqlite_engine
 from pur_leads.db.migrations import upgrade_database
 from pur_leads.db.session import create_session_factory
 from pur_leads.models.audit import audit_log_table
-from pur_leads.models.catalog import catalog_candidates_table, catalog_items_table
+from pur_leads.models.catalog import (
+    catalog_candidates_table,
+    catalog_items_table,
+    classifier_examples_table,
+    classifier_versions_table,
+    manual_inputs_table,
+    parsed_chunks_table,
+    sources_table,
+)
+from pur_leads.models.scheduler import scheduler_jobs_table
 from pur_leads.services.catalog_candidates import CatalogCandidateService
 from pur_leads.services.catalog_sources import CatalogSourceService
 from pur_leads.services.web_auth import WebAuthService
@@ -128,6 +137,101 @@ def test_catalog_candidate_routes_edit_candidate_before_approval(tmp_path):
     assert item["canonical_name"] == "Камеры и видеонаблюдение"
     assert "catalog_candidate.update" in audit_actions
     assert "catalog_candidate.review" in audit_actions
+
+
+def test_manual_catalog_input_creates_source_chunk_and_extraction_job(tmp_path):
+    fixture = _setup_catalog_app(tmp_path)
+    client = fixture["client"]
+
+    denied_response = client.post(
+        "/api/catalog/manual-inputs",
+        json={"input_type": "catalog_note", "text": "Dahua", "evidence_note": "test"},
+    )
+    _login(client)
+
+    response = client.post(
+        "/api/catalog/manual-inputs",
+        json={
+            "input_type": "catalog_note",
+            "text": "Dahua Hero A1 - поворотная Wi-Fi камера для дома",
+            "evidence_note": "Олег добавил вручную",
+        },
+    )
+
+    assert denied_response.status_code == 401
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["manual_input"]["input_type"] == "catalog_note"
+    assert payload["source"]["source_type"] == "manual_text"
+    assert len(payload["queued_jobs"]) == 1
+    with fixture["session_factory"]() as session:
+        manual_input = session.execute(select(manual_inputs_table)).mappings().one()
+        source = session.execute(select(sources_table)).mappings().one()
+        chunk = session.execute(select(parsed_chunks_table)).mappings().one()
+        job = session.execute(select(scheduler_jobs_table)).mappings().one()
+    assert manual_input["processing_status"] == "processed"
+    assert source["raw_text"] == "Dahua Hero A1 - поворотная Wi-Fi камера для дома"
+    assert chunk["source_id"] == source["id"]
+    assert chunk["text"] == "Dahua Hero A1 - поворотная Wi-Fi камера для дома"
+    assert job["job_type"] == "extract_catalog_facts"
+    assert job["priority"] == "low"
+    assert job["payload_json"]["source_id"] == source["id"]
+    assert job["payload_json"]["chunk_id"] == chunk["id"]
+    assert job["payload_json"]["manual_input_id"] == manual_input["id"]
+
+
+def test_manual_lead_example_creates_classifier_example_and_snapshot(tmp_path):
+    fixture = _setup_catalog_app(tmp_path)
+    client = fixture["client"]
+    _login(client)
+
+    response = client.post(
+        "/api/catalog/manual-inputs",
+        json={
+            "input_type": "lead_example",
+            "text": "Ищу камеру на дачу с просмотром через телефон",
+            "evidence_note": "Пример лида от Олега",
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["classifier_example"]["polarity"] == "positive"
+    assert payload["classifier_snapshot"]["version"] == 1
+    with fixture["session_factory"]() as session:
+        source = session.execute(select(sources_table)).mappings().one()
+        example = session.execute(select(classifier_examples_table)).mappings().one()
+        snapshot = session.execute(select(classifier_versions_table)).mappings().one()
+    assert example["raw_source_id"] == source["id"]
+    assert example["example_type"] == "lead_positive"
+    assert example["example_text"] == "Ищу камеру на дачу с просмотром через телефон"
+    assert example["status"] == "active"
+    assert snapshot["created_by"] == "admin"
+
+
+def test_manual_telegram_link_parses_chat_and_message_identity(tmp_path):
+    fixture = _setup_catalog_app(tmp_path)
+    client = fixture["client"]
+    _login(client)
+
+    response = client.post(
+        "/api/catalog/manual-inputs",
+        json={
+            "input_type": "telegram_link",
+            "url": "https://t.me/purmaster/42",
+            "evidence_note": "Источник от Олега",
+        },
+    )
+
+    assert response.status_code == 200
+    with fixture["session_factory"]() as session:
+        manual_input = session.execute(select(manual_inputs_table)).mappings().one()
+        source = session.execute(select(sources_table)).mappings().one()
+    assert manual_input["chat_ref"] == "purmaster"
+    assert manual_input["message_id"] == 42
+    assert source["source_type"] == "manual_link"
+    assert source["origin"] == "purmaster"
+    assert source["external_id"] == "42"
 
 
 def _create_item_candidate(session_factory) -> str:
