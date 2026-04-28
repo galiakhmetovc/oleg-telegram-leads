@@ -9,12 +9,23 @@ from urllib.parse import urlparse
 from sqlalchemy.orm import Session
 
 from pur_leads.core.time import utc_now
-from pur_leads.repositories.telegram_sources import MonitoredSourceRecord, TelegramSourceRepository
+from pur_leads.repositories.scheduler import SchedulerJobRecord
+from pur_leads.repositories.telegram_sources import (
+    MonitoredSourceRecord,
+    SourceAccessCheckSummary,
+    SourcePreviewMessageRecord,
+    TelegramSourceRepository,
+)
 from pur_leads.services.audit import AuditService
+from pur_leads.services.scheduler import SchedulerService
 
 
 class CheckpointResetRequiresConfirmation(ValueError):
     """Raised when a checkpoint reset is requested without explicit confirmation."""
+
+
+class ActivationRequiresPreview(ValueError):
+    """Raised when web activation is requested before preview is ready."""
 
 
 @dataclass(frozen=True)
@@ -25,11 +36,32 @@ class ParsedSourceInput:
     invite_link_hash: str | None = None
 
 
+@dataclass(frozen=True)
+class SourceDetail:
+    source: MonitoredSourceRecord
+    access_checks: list[SourceAccessCheckSummary]
+    preview_messages: list[SourcePreviewMessageRecord]
+    jobs: list[SchedulerJobRecord]
+
+
 class TelegramSourceService:
     def __init__(self, session: Session) -> None:
         self.session = session
         self.repository = TelegramSourceRepository(session)
         self.audit = AuditService(session)
+        self.scheduler = SchedulerService(session)
+
+    def list_sources(self) -> list[MonitoredSourceRecord]:
+        return self.repository.list()
+
+    def get_source_detail(self, source_id: str) -> SourceDetail:
+        source = self._require(source_id)
+        return SourceDetail(
+            source=source,
+            access_checks=self.repository.list_access_checks(source.id),
+            preview_messages=self.repository.list_preview_messages(source.id),
+            jobs=self.repository.list_jobs(source.id),
+        )
 
     def create_draft(
         self,
@@ -101,6 +133,66 @@ class TelegramSourceService:
             new_value_json={"status": status},
         )
         return updated
+
+    def request_access_check(self, source_id: str, *, actor: str) -> SchedulerJobRecord:
+        source = self.set_status(source_id, "checking_access", actor=actor)
+        return self.scheduler.enqueue(
+            job_type="check_source_access",
+            scope_type="telegram_source",
+            scope_id=source.id,
+            userbot_account_id=source.assigned_userbot_account_id,
+            monitored_source_id=source.id,
+            idempotency_key=f"source:{source.id}:check_access",
+            payload_json={"requested_by": actor, "check_type": "onboarding"},
+        )
+
+    def request_preview(
+        self,
+        source_id: str,
+        *,
+        actor: str,
+        limit: int = 20,
+    ) -> SchedulerJobRecord:
+        source = self._require(source_id)
+        if source.status not in {"preview_ready", "active"}:
+            raise ActivationRequiresPreview("source must be preview_ready before preview fetch")
+        return self.scheduler.enqueue(
+            job_type="fetch_source_preview",
+            scope_type="telegram_source",
+            scope_id=source.id,
+            userbot_account_id=source.assigned_userbot_account_id,
+            monitored_source_id=source.id,
+            idempotency_key=f"source:{source.id}:preview",
+            payload_json={"limit": limit, "requested_by": actor},
+        )
+
+    def activate_from_web(
+        self,
+        source_id: str,
+        *,
+        actor: str,
+    ) -> tuple[MonitoredSourceRecord, SchedulerJobRecord]:
+        source = self._require(source_id)
+        if source.status != "preview_ready":
+            raise ActivationRequiresPreview("source must be preview_ready before activation")
+        activated = self.activate(source.id, actor=actor)
+        now = utc_now()
+        activated = self.repository.update(source.id, next_poll_at=now, updated_at=now)
+        job = self.scheduler.enqueue(
+            job_type="poll_monitored_source",
+            scope_type="telegram_source",
+            scope_id=source.id,
+            userbot_account_id=activated.assigned_userbot_account_id,
+            monitored_source_id=source.id,
+            idempotency_key=f"source:{source.id}:poll",
+            run_after_at=now,
+            checkpoint_before_json={"message_id": activated.checkpoint_message_id},
+            payload_json={"limit": 100, "requested_by": actor},
+        )
+        return activated, job
+
+    def pause(self, source_id: str, *, actor: str) -> MonitoredSourceRecord:
+        return self.set_status(source_id, "paused", actor=actor)
 
     def activate(self, source_id: str, *, actor: str) -> MonitoredSourceRecord:
         before = self._require(source_id)

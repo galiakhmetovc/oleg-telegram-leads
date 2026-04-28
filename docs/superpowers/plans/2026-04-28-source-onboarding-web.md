@@ -17,12 +17,12 @@
 - Modify: `src/pur_leads/services/telegram_sources.py`
 - Test: `tests/test_telegram_source_service.py`
 
-- [ ] Write failing tests for listing sources, reading detail with preview rows, requesting access check jobs, requesting preview jobs, activating only `preview_ready` sources from web, and pausing active sources.
-- [ ] Run `uv run --extra dev pytest tests/test_telegram_source_service.py -q` and verify expected failures.
-- [ ] Add repository list/detail helpers for source rows, recent access checks, preview messages, and source-related scheduler jobs.
-- [ ] Add service methods `list_sources`, `get_source_detail`, `request_access_check`, `request_preview`, `activate_from_web`, and `pause`.
-- [ ] Run `uv run --extra dev pytest tests/test_telegram_source_service.py -q` and verify it passes.
-- [ ] Commit as `feat: add source onboarding service controls`.
+- [x] Write failing tests for listing sources, reading detail with preview rows, requesting access check jobs, requesting preview jobs, activating only `preview_ready` sources from web, and pausing active sources.
+- [x] Run `uv run --extra dev pytest tests/test_telegram_source_service.py -q` and verify expected failures.
+- [x] Add repository list/detail helpers for source rows, recent access checks, preview messages, and source-related scheduler jobs.
+- [x] Add service methods `list_sources`, `get_source_detail`, `request_access_check`, `request_preview`, `activate_from_web`, and `pause`.
+- [x] Run `uv run --extra dev pytest tests/test_telegram_source_service.py -q` and verify it passes.
+- [x] Commit as `feat: add source onboarding service controls`.
 
 ### Task 2: Source Web API
 
