@@ -101,10 +101,12 @@ def _worker_once(args: argparse.Namespace) -> None:
 def _web(args: argparse.Namespace) -> None:
     import uvicorn
 
+    from pur_leads.web.app import create_app
+
     settings = load_settings()
+    app = create_app(database_path=args.database_path)
     uvicorn.run(
-        "pur_leads.web.app:create_app",
-        factory=True,
+        app,
         host=settings.web_host,
         port=settings.web_port,
     )

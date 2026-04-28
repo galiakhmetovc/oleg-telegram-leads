@@ -1,5 +1,6 @@
 from sqlalchemy import inspect
 from sqlalchemy import select
+from fastapi.testclient import TestClient
 
 from pur_leads.cli import main
 from pur_leads.db.engine import create_sqlite_engine
@@ -61,3 +62,30 @@ def test_cli_worker_once_uses_canonical_handler_registry(tmp_path, capsys):
     assert "failed job" in output
     assert stored.last_error == "classify_message_batch adapter is not configured"
     assert event["details_json"]["reason"] == "handler_exception"
+
+
+def test_cli_web_uses_database_path_and_bootstrap_env(tmp_path, monkeypatch):
+    db_path = tmp_path / "cli.db"
+    main(["--database-path", str(db_path), "db", "upgrade"])
+    captured = {}
+
+    def fake_run(app, *, host, port):
+        captured["app"] = app
+        captured["host"] = host
+        captured["port"] = port
+
+    monkeypatch.setenv("PUR_BOOTSTRAP_ADMIN_USERNAME", "operator")
+    monkeypatch.setenv("PUR_BOOTSTRAP_ADMIN_PASSWORD", "initial-secret")
+    monkeypatch.setenv("PUR_TELEGRAM_BOT_TOKEN", "telegram-token")
+    monkeypatch.setattr("uvicorn.run", fake_run)
+
+    main(["--database-path", str(db_path), "web"])
+
+    client = TestClient(captured["app"])
+    login_response = client.post(
+        "/api/auth/local",
+        json={"username": "operator", "password": "initial-secret"},
+    )
+    assert captured["host"] == "127.0.0.1"
+    assert captured["port"] == 8000
+    assert login_response.status_code == 200

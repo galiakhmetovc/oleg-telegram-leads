@@ -164,16 +164,23 @@ context fields.
 
 ## Task 7: CLI/Web Runtime Wiring
 
+- [x] Implement CLI/web runtime wiring.
+
 **Files:**
 - Modify: `src/pur_leads/cli.py`
 - Modify: `src/pur_leads/web/app.py`
 - Test: `tests/test_cli.py`
 - Test: `tests/test_app_health.py`
 
-- [ ] Add bootstrap admin env/config handling for `pur-leads web`.
-- [ ] Ensure app startup can initialize auth tables after migrations are run.
-- [ ] Keep `worker once` on the canonical runtime path; do not create a separate web worker loop.
-- [ ] Verify existing health and CLI tests remain green.
+- [x] Add bootstrap admin env/config handling for `pur-leads web`.
+- [x] Ensure app startup can initialize auth tables after migrations are run.
+- [x] Keep `worker once` on the canonical runtime path; do not create a separate web worker loop.
+- [x] Verify existing health and CLI tests remain green.
+
+Completed: changed `pur-leads web` to pass the CLI database override into the FastAPI app
+instead of using an opaque uvicorn factory string, verified bootstrap admin creation from env in
+the CLI path, exposed bootstrap/Telegram env settings in docker compose, and left `worker once`
+on the existing `WorkerRuntime` handler registry path.
 
 ## Acceptance
 
