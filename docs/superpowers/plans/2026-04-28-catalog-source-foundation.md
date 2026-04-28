@@ -63,6 +63,8 @@ This plan implements catalog/source storage and deterministic catalog mutation s
 
 ## Task 4: Operational Catalog Mutation
 
+- [x] Implement operational catalog promotion and verify seed/promote/version tests.
+
 **Files:**
 - Create: `src/pur_leads/repositories/catalog.py`
 - Create: `src/pur_leads/services/catalog.py`
