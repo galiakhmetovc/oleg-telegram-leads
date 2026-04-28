@@ -52,7 +52,7 @@ class TelegramSourceService:
         self.scheduler = SchedulerService(session)
 
     def list_sources(self) -> list[MonitoredSourceRecord]:
-        return self.repository.list()
+        return self.repository.list_sources()
 
     def get_source_detail(self, source_id: str) -> SourceDetail:
         source = self._require(source_id)

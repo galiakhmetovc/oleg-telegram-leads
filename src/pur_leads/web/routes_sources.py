@@ -44,7 +44,9 @@ def list_sources(
     _validated: SessionValidationResult = Depends(current_admin),
     session: Session = Depends(get_session),
 ) -> dict[str, Any]:
-    return {"items": [_source_payload(row) for row in TelegramSourceService(session).list_sources()]}
+    return {
+        "items": [_source_payload(row) for row in TelegramSourceService(session).list_sources()]
+    }
 
 
 @router.post("/sources")
@@ -61,10 +63,13 @@ def create_source(
             purpose=payload.purpose,
             added_by=actor,
         )
-        access_job = service.request_access_check(source.id, actor=actor) if payload.check_access else None
-        source = service.repository.get(source.id)
-        if source is None:
+        access_job = (
+            service.request_access_check(source.id, actor=actor) if payload.check_access else None
+        )
+        created_source = service.repository.get(source.id)
+        if created_source is None:
             raise KeyError("created source missing")
+        source = created_source
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return {
@@ -93,7 +98,9 @@ def request_access_check(
     session: Session = Depends(get_session),
 ) -> dict[str, Any]:
     try:
-        job = TelegramSourceService(session).request_access_check(source_id, actor=_actor(validated))
+        job = TelegramSourceService(session).request_access_check(
+            source_id, actor=_actor(validated)
+        )
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="Source not found") from exc
     return {"job": _job_payload(job)}

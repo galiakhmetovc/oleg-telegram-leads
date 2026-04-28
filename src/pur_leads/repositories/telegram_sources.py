@@ -111,7 +111,7 @@ class TelegramSourceRepository:
             return None
         return MonitoredSourceRecord(**dict(row))
 
-    def list(self) -> list[MonitoredSourceRecord]:
+    def list_sources(self) -> list[MonitoredSourceRecord]:
         rows = (
             self.session.execute(
                 select(monitored_sources_table).order_by(
