@@ -93,19 +93,27 @@ Covered by `tests/test_web_auth_routes.py`.
 
 ## Task 4: Leads Inbox API
 
+- [x] Implement protected Leads Inbox API.
+
 **Files:**
 - Create: `src/pur_leads/web/routes_leads.py`
 - Modify: `src/pur_leads/web/app.py`
 - Test: `tests/test_web_leads_routes.py`
 
-- [ ] Add `GET /api/leads` backed by `LeadInboxService.list_cluster_queue`.
-- [ ] Add `GET /api/leads/{cluster_id}` backed by `LeadInboxService.get_cluster_detail`.
-- [ ] Add `POST /api/leads/{cluster_id}/actions` backed by `LeadService`/task services, with route-level mapping from UI names like `take_into_work` to internal actions.
-- [ ] Add payload validation for `not_lead` reason codes, snooze date, duplicate target, context-only event id, and correction target ids.
-- [ ] Add narrow feedback endpoints/payloads for cluster, event, match, term, item, category, sender, and message targets.
-- [ ] Support filters for status, source, category, retro, maybe, `auto_pending`, operator issues, and min confidence.
-- [ ] Verify protected access, response shape, task-backed take-into-work, reason-required not-lead, maybe, snooze, duplicate, context-only, wrong category/item/term, term-too-broad, and commercial outcome persistence.
-- [ ] Verify commercial outcomes use `feedback_scope=crm_outcome` and `learning_effect=no_classifier_learning`.
+- [x] Add `GET /api/leads` backed by `LeadInboxService.list_cluster_queue`.
+- [x] Add `GET /api/leads/{cluster_id}` backed by `LeadInboxService.get_cluster_detail`.
+- [x] Add `POST /api/leads/{cluster_id}/actions` backed by `LeadService`/task services, with route-level mapping from UI names like `take_into_work` to internal actions.
+- [x] Add payload validation for `not_lead` reason codes, snooze date, duplicate target, context-only event id, and correction target ids.
+- [x] Add narrow feedback endpoints/payloads for cluster, event, match, term, item, category, sender, and message targets.
+- [x] Support filters for status, source, category, retro, maybe, `auto_pending`, operator issues, and min confidence.
+- [x] Verify protected access, response shape, task-backed take-into-work, reason-required not-lead, maybe, snooze, duplicate, context-only, wrong category/item/term, term-too-broad, and commercial outcome persistence.
+- [x] Verify commercial outcomes use `feedback_scope=crm_outcome` and `learning_effect=no_classifier_learning`.
+
+Completed: added protected Leads Inbox queue/detail routes, task-backed lead actions,
+generic and target-scoped feedback routes, operator-issue filters, action payload validation,
+feedback target existence validation, feedback enum allow-lists, and route tests covering
+queue/detail, take-into-work, not-lead, maybe, snooze, duplicate, context-only, correction
+validation, target-scoped feedback, auth guards, and commercial outcome defaults.
 
 ## Task 5: Admin Settings/User API
 

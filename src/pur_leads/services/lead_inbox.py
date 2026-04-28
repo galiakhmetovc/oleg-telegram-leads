@@ -31,6 +31,8 @@ class LeadInboxFilters:
     category_id: str | None = None
     retro: bool | None = None
     maybe: bool | None = None
+    auto_pending: bool | None = None
+    operator_issues: bool | None = None
     min_confidence: float | None = None
 
 
@@ -87,6 +89,10 @@ class LeadInboxService:
             rows = [row for row in rows if row.is_retro is filters.retro]
         if filters.maybe is not None:
             rows = [row for row in rows if row.is_maybe is filters.maybe]
+        if filters.auto_pending is not None:
+            rows = [row for row in rows if row.has_auto_pending is filters.auto_pending]
+        if filters.operator_issues is not None:
+            rows = [row for row in rows if _has_operator_issue(row) is filters.operator_issues]
         return rows
 
     def get_cluster_detail(self, cluster_id: str) -> LeadClusterDetail:
@@ -465,3 +471,7 @@ def _unique_dicts(values: list[dict[str, Any]], *, key: str) -> list[dict[str, A
         seen.add(dedupe_value)
         unique_values.append(value)
     return unique_values
+
+
+def _has_operator_issue(row: LeadClusterQueueRow) -> bool:
+    return row.has_auto_pending or row.has_auto_merge_pending or row.is_maybe
