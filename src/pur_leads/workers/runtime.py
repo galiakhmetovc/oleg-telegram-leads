@@ -9,7 +9,7 @@ from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Any, Protocol, cast
 
-from sqlalchemy import or_, select, update
+from sqlalchemy import and_, or_, select, update
 from sqlalchemy.orm import Session
 
 from pur_leads.core.time import utc_now
@@ -515,12 +515,14 @@ def build_lead_handler_registry(
     async def reclassify_messages(job: SchedulerJobRecord) -> JobHandlerResult:
         if classifier is None:
             raise ValueError("classify_message_batch adapter is not configured")
+        job_payload = job.payload_json or {}
         return await _run_classification_job(
             job,
             default_statuses=["classified"],
             force_detection_mode="retro_research",
             mark_messages_classified=False,
-            notify_retro=_truthy((job.payload_json or {}).get("notify_retro")),
+            notify_retro=_truthy(job_payload.get("notify_retro")),
+            chain_next_batch=_truthy(job_payload.get("chain_next_batch", True)),
         )
 
     async def _run_classification_job(
@@ -530,6 +532,7 @@ def build_lead_handler_registry(
         force_detection_mode: str | None,
         mark_messages_classified: bool,
         notify_retro: bool,
+        chain_next_batch: bool = False,
     ) -> JobHandlerResult:
         if classifier is None:
             raise ValueError("classify_message_batch adapter is not configured")
@@ -542,13 +545,19 @@ def build_lead_handler_registry(
             if "classification_statuses" in payload
             else default_statuses
         )
-        messages = _load_messages_for_classification(
+        limit = _positive_int(payload.get("limit"), default=50)
+        cursor = _classification_cursor(payload)
+        should_chain_next_batch = chain_next_batch and job.source_message_id is None
+        loaded_messages = _load_messages_for_classification(
             session,
             monitored_source_id=job.monitored_source_id,
             source_message_id=job.source_message_id,
             statuses=statuses,
-            limit=_positive_int(payload.get("limit"), default=50),
+            cursor=cursor,
+            limit=limit + 1 if should_chain_next_batch else limit,
         )
+        messages = loaded_messages[:limit]
+        has_next_batch = should_chain_next_batch and len(loaded_messages) > len(messages)
         if not messages:
             return JobHandlerResult(
                 result_summary={"message_count": 0, "event_count": 0, "cluster_count": 0}
@@ -619,6 +628,18 @@ def build_lead_handler_registry(
                     )
             if mark_messages_classified:
                 _mark_message_classified(session, result.source_message_id)
+
+        if has_next_batch:
+            next_cursor = _message_classification_cursor(messages[-1])
+            next_payload = dict(payload)
+            next_payload["cursor"] = next_cursor
+            next_payload["chain_next_batch"] = True
+            _enqueue_next_reclassification_batch(
+                scheduler,
+                job=job,
+                payload=next_payload,
+                cursor=next_cursor,
+            )
 
         return JobHandlerResult(
             result_summary={
@@ -722,6 +743,36 @@ def _enqueue_context_fetch(
         userbot_account_id=_message_userbot_account_id(session, source_message_id),
         idempotency_key=f"context:{source_message_id}",
         payload_json={"before": 2, "after": 2, "reply_depth": 2},
+    )
+
+
+def _enqueue_next_reclassification_batch(
+    scheduler: SchedulerService,
+    *,
+    job: SchedulerJobRecord,
+    payload: dict[str, Any],
+    cursor: dict[str, Any],
+) -> None:
+    scope_key = job.monitored_source_id or job.scope_id or "global"
+    material = _json_ready(
+        {
+            "scope_key": scope_key,
+            "trigger_reason": payload.get("trigger_reason"),
+            "classification_statuses": payload.get("classification_statuses"),
+            "detection_mode": payload.get("detection_mode"),
+            "cursor": cursor,
+        }
+    )
+    digest = hashlib.sha256(str(material).encode("utf-8")).hexdigest()[:16]
+    scheduler.enqueue(
+        job_type="reclassify_messages",
+        scope_type=job.scope_type,
+        priority=job.priority,
+        scope_id=job.scope_id,
+        userbot_account_id=job.userbot_account_id,
+        monitored_source_id=job.monitored_source_id,
+        idempotency_key=f"retro-reclassify:{scope_key}:{cursor['source_message_id']}:{digest}",
+        payload_json=payload,
     )
 
 
@@ -861,6 +912,7 @@ def _load_messages_for_classification(
     monitored_source_id: str | None,
     source_message_id: str | None,
     statuses: list[str],
+    cursor: dict[str, Any] | None,
     limit: int,
 ) -> list[LeadMessageForClassification]:
     query = select(source_messages_table).where(
@@ -870,11 +922,30 @@ def _load_messages_for_classification(
         query = query.where(source_messages_table.c.id == source_message_id)
     elif monitored_source_id is not None:
         query = query.where(source_messages_table.c.monitored_source_id == monitored_source_id)
+    if source_message_id is None and cursor is not None:
+        cursor_date = _to_db_datetime(_classification_cursor_datetime(cursor["message_date"]))
+        cursor_message_id = _classification_cursor_int(cursor["telegram_message_id"])
+        cursor_source_message_id = cursor["source_message_id"]
+        query = query.where(
+            or_(
+                source_messages_table.c.message_date > cursor_date,
+                and_(
+                    source_messages_table.c.message_date == cursor_date,
+                    source_messages_table.c.telegram_message_id > cursor_message_id,
+                ),
+                and_(
+                    source_messages_table.c.message_date == cursor_date,
+                    source_messages_table.c.telegram_message_id == cursor_message_id,
+                    source_messages_table.c.id > cursor_source_message_id,
+                ),
+            )
+        )
     rows = (
         session.execute(
             query.order_by(
                 source_messages_table.c.message_date,
                 source_messages_table.c.telegram_message_id,
+                source_messages_table.c.id,
             ).limit(limit)
         )
         .mappings()
@@ -892,6 +963,54 @@ def _load_messages_for_classification(
         )
         for row in rows
     ]
+
+
+def _classification_cursor(payload: dict[str, Any]) -> dict[str, Any] | None:
+    configured = payload.get("cursor")
+    if configured is None:
+        return None
+    if not isinstance(configured, dict):
+        raise ValueError("classification cursor must be an object")
+    required_keys = {"message_date", "telegram_message_id", "source_message_id"}
+    missing_keys = required_keys - set(configured)
+    if missing_keys:
+        raise ValueError(f"classification cursor is missing keys: {sorted(missing_keys)}")
+    source_message_id = configured["source_message_id"]
+    if not isinstance(source_message_id, str) or not source_message_id.strip():
+        raise ValueError("classification cursor.source_message_id must be a non-empty string")
+    return {
+        "message_date": _classification_cursor_datetime(configured["message_date"]),
+        "telegram_message_id": _classification_cursor_int(configured["telegram_message_id"]),
+        "source_message_id": source_message_id,
+    }
+
+
+def _classification_cursor_datetime(value: Any) -> datetime:
+    if isinstance(value, datetime):
+        return value
+    if isinstance(value, str):
+        try:
+            return datetime.fromisoformat(value)
+        except ValueError as exc:
+            raise ValueError("classification cursor.message_date must be an ISO datetime") from exc
+    raise ValueError("classification cursor.message_date must be a datetime")
+
+
+def _classification_cursor_int(value: Any) -> int:
+    if isinstance(value, bool):
+        raise ValueError("classification cursor.telegram_message_id must be an integer")
+    try:
+        return int(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("classification cursor.telegram_message_id must be an integer") from exc
+
+
+def _message_classification_cursor(message: LeadMessageForClassification) -> dict[str, Any]:
+    return {
+        "message_date": _json_ready(message.message_date),
+        "telegram_message_id": message.telegram_message_id,
+        "source_message_id": message.source_message_id,
+    }
 
 
 def _classification_statuses(payload: dict[str, Any]) -> list[str]:

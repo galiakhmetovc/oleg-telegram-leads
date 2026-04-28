@@ -119,6 +119,10 @@ class FakeLeadNotifier:
         return {"message_id": 77}
 
 
+async def _noop_job_handler(job):
+    return {"job_id": job.id}
+
+
 @pytest.fixture
 def runtime_session(tmp_path):
     engine = create_sqlite_engine(tmp_path / "test.db")
@@ -465,6 +469,65 @@ async def test_reclassify_messages_creates_retro_clusters_without_telegram_notif
     assert [row["job_type"] for row in jobs].count("fetch_message_context") == 1
     assert [row["job_type"] for row in jobs].count("send_notifications") == 0
     assert notifier.sent == []
+
+
+@pytest.mark.asyncio
+async def test_reclassify_messages_chains_next_batch_with_cursor(runtime_session):
+    session = runtime_session["session"]
+    message_ids = [
+        _insert_source_message(
+            session,
+            runtime_session["source_id"],
+            telegram_message_id=140 + index,
+            sender_id=f"sender-{index}",
+            text=f"нужна камера {index}",
+            status="classified",
+        )
+        for index in range(3)
+    ]
+    classifier = PayloadModeLeadClassifier(
+        classifier_version_id=runtime_session["classifier_version_id"],
+        snapshot_entry_id=runtime_session["snapshot_entry_id"],
+        category_id=runtime_session["category_id"],
+        term_id=runtime_session["term_id"],
+    )
+    SchedulerService(session).enqueue(
+        job_type="reclassify_messages",
+        scope_type="telegram_source",
+        monitored_source_id=runtime_session["source_id"],
+        payload_json={
+            "limit": 2,
+            "trigger_reason": "catalog_change",
+            "chain_next_batch": True,
+        },
+    )
+    handlers = build_lead_handler_registry(session, classifier=classifier)
+    handlers["fetch_message_context"] = _noop_job_handler
+    runtime = WorkerRuntime(session, handlers=handlers)
+
+    first_result = await runtime.run_once()
+    run_results = [first_result]
+    for _ in range(10):
+        result = await runtime.run_once()
+        run_results.append(result)
+        if result.status == "idle":
+            break
+
+    jobs = (
+        session.execute(select(scheduler_jobs_table).order_by(scheduler_jobs_table.c.created_at))
+        .mappings()
+        .all()
+    )
+    reclassify_jobs = [row for row in jobs if row["job_type"] == "reclassify_messages"]
+    events = session.execute(select(lead_events_table)).mappings().all()
+    assert first_result.status == "succeeded"
+    assert {result.status for result in run_results} <= {"succeeded", "idle"}
+    assert len(reclassify_jobs) == 2
+    assert reclassify_jobs[0]["status"] == "succeeded"
+    assert reclassify_jobs[1]["status"] == "succeeded"
+    assert reclassify_jobs[1]["payload_json"]["cursor"]["source_message_id"] == message_ids[1]
+    assert reclassify_jobs[1]["payload_json"]["classification_statuses"] == ["classified"]
+    assert {event["source_message_id"] for event in events} == set(message_ids)
 
 
 def _insert_monitored_source(session) -> str:
