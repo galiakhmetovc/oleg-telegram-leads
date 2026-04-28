@@ -79,6 +79,23 @@ def test_create_draft_from_public_message_link_sets_chat_and_start_message(sourc
     assert source.start_message_id == 716254
 
 
+def test_create_draft_can_start_from_recent_days(source_service):
+    service, _session = source_service
+
+    source = service.create_draft(
+        "https://t.me/dahuarussia_support",
+        purpose="lead_monitoring",
+        added_by="admin",
+        start_recent_days=183,
+    )
+
+    assert source.input_ref == "https://t.me/dahuarussia_support"
+    assert source.username == "dahuarussia_support"
+    assert source.start_mode == "recent_days"
+    assert source.start_recent_days == 183
+    assert source.checkpoint_message_id is None
+
+
 def test_status_transitions_to_active(source_service):
     service, _session = source_service
     source = service.create_draft("@example_chat", added_by="admin")

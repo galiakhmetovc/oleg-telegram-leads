@@ -322,6 +322,10 @@ def sources_page(
                         <option value="both">Both</option>
                       </select>
                     </label>
+                    <label>
+                      Start days back
+                      <input name="start_recent_days" type="number" min="1" placeholder="empty = from now">
+                    </label>
                     <label class="checkbox-line">
                       <input name="check_access" type="checkbox" checked>
                       Check access now

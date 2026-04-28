@@ -21,7 +21,11 @@ def test_source_routes_require_auth_create_and_return_detail(tmp_path):
     _login(client)
     create_response = client.post(
         "/api/sources",
-        json={"input_ref": "https://t.me/example_chat", "purpose": "lead_monitoring"},
+        json={
+            "input_ref": "https://t.me/example_chat",
+            "purpose": "lead_monitoring",
+            "start_recent_days": 183,
+        },
     )
     list_response = client.get("/api/sources")
     source_id = create_response.json()["source"]["id"]
@@ -31,6 +35,8 @@ def test_source_routes_require_auth_create_and_return_detail(tmp_path):
     assert create_response.status_code == 200
     assert create_response.json()["source"]["status"] == "checking_access"
     assert create_response.json()["source"]["username"] == "example_chat"
+    assert create_response.json()["source"]["start_mode"] == "recent_days"
+    assert create_response.json()["source"]["start_recent_days"] == 183
     assert create_response.json()["access_job"]["job_type"] == "check_source_access"
     assert list_response.status_code == 200
     assert [row["id"] for row in list_response.json()["items"]] == [source_id]

@@ -72,11 +72,18 @@ class TelegramSourceService:
         *,
         added_by: str,
         purpose: str = "lead_monitoring",
+        start_recent_days: int | None = None,
     ) -> MonitoredSourceRecord:
+        if start_recent_days is not None and start_recent_days <= 0:
+            raise ValueError("start_recent_days must be positive")
         parsed = parse_source_input(input_ref, purpose)
         now = utc_now()
         lead_enabled, catalog_enabled = _purpose_flags(purpose)
         default_userbot = UserbotAccountService(self.session).select_default_userbot()
+        start_mode = _start_mode(
+            start_recent_days=start_recent_days,
+            start_message_id=parsed.start_message_id,
+        )
         source = self.repository.create(
             source_kind=parsed.source_kind,
             telegram_id=None,
@@ -91,10 +98,10 @@ class TelegramSourceService:
             lead_detection_enabled=lead_enabled,
             catalog_ingestion_enabled=catalog_enabled,
             phase_enabled=True,
-            start_mode="from_message" if parsed.start_message_id is not None else "from_now",
+            start_mode=start_mode,
             start_message_id=parsed.start_message_id,
             start_recent_limit=None,
-            start_recent_days=None,
+            start_recent_days=start_recent_days,
             historical_backfill_policy="retro_web_only",
             checkpoint_message_id=None,
             checkpoint_date=None,
@@ -318,6 +325,14 @@ def parse_source_input(input_ref: str, purpose: str) -> ParsedSourceInput:
         )
 
     return ParsedSourceInput(input_ref=normalized, username=None, source_kind="telegram_supergroup")
+
+
+def _start_mode(*, start_recent_days: int | None, start_message_id: int | None) -> str:
+    if start_recent_days is not None:
+        return "recent_days"
+    if start_message_id is not None:
+        return "from_message"
+    return "from_now"
 
 
 def _public_message_id(path_parts: list[str]) -> int | None:

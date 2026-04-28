@@ -254,6 +254,7 @@ class _UnconfiguredTelegramClient:
         source: ResolvedTelegramSource,
         *,
         after_message_id: int | None,
+        after_date=None,
         limit: int,
     ) -> list[TelegramMessage]:
         raise ValueError("telegram client is not configured")

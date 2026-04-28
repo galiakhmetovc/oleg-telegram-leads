@@ -28,6 +28,7 @@ class SourceCreateRequest(BaseModel):
     input_ref: str
     purpose: str = "lead_monitoring"
     check_access: bool = True
+    start_recent_days: int | None = None
 
 
 class SourcePreviewRequest(BaseModel):
@@ -62,6 +63,7 @@ def create_source(
             payload.input_ref,
             purpose=payload.purpose,
             added_by=actor,
+            start_recent_days=payload.start_recent_days,
         )
         access_job = (
             service.request_access_check(source.id, actor=actor) if payload.check_access else None

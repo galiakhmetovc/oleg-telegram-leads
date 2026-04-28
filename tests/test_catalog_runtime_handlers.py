@@ -311,6 +311,7 @@ class FakeDownloadTelegramClient:
         source: ResolvedTelegramSource,
         *,
         after_message_id: int | None,
+        after_date: object | None = None,
         limit: int,
     ) -> list[TelegramMessage]:
         return []

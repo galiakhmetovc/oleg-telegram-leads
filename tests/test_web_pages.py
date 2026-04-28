@@ -89,6 +89,7 @@ def test_workspace_and_admin_pages_are_protected_and_render_shells(tmp_path):
     assert 'data-page="sources"' in sources_response.text
     assert 'id="source-list"' in sources_response.text
     assert 'id="source-form"' in sources_response.text
+    assert 'name="start_recent_days"' in sources_response.text
     assert 'id="source-detail"' in sources_response.text
     assert catalog_response.status_code == 200
     assert 'data-page="catalog"' in catalog_response.text

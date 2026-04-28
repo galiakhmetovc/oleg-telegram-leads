@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import pytest
 from sqlalchemy import select
@@ -23,7 +23,7 @@ from pur_leads.workers.telegram_polling import TelegramPollingWorker
 class FakeTelegramClient:
     def __init__(self, messages: list[TelegramMessage]) -> None:
         self.messages = messages
-        self.fetch_calls: list[tuple[int | None, int]] = []
+        self.fetch_calls: list[dict] = []
 
     async def resolve_source(self, input_ref: str) -> ResolvedTelegramSource:
         return ResolvedTelegramSource(
@@ -55,9 +55,12 @@ class FakeTelegramClient:
         source: ResolvedTelegramSource,
         *,
         after_message_id: int | None,
+        after_date: datetime | None = None,
         limit: int,
     ) -> list[TelegramMessage]:
-        self.fetch_calls.append((after_message_id, limit))
+        self.fetch_calls.append(
+            {"after_message_id": after_message_id, "after_date": after_date, "limit": limit}
+        )
         return self.messages[:limit]
 
     async def fetch_context(
@@ -110,7 +113,7 @@ async def test_poll_active_source_persists_messages_and_checkpoint(polling_sessi
     assert result.status == "succeeded"
     assert result.fetched_count == 2
     assert result.inserted_count == 2
-    assert client.fetch_calls == [(40, 100)]
+    assert client.fetch_calls == [{"after_message_id": 40, "after_date": None, "limit": 100}]
     assert source_row["checkpoint_message_id"] == 42
     assert [row["telegram_message_id"] for row in message_rows] == [41, 42]
     assert [row["classification_status"] for row in message_rows] == [
@@ -168,6 +171,34 @@ async def test_poll_lead_source_enqueues_classification_and_moves_next_poll(
         "limit": 100,
         "trigger": "poll_monitored_source",
     }
+
+
+@pytest.mark.asyncio
+async def test_poll_recent_days_source_fetches_from_start_date_until_checkpoint_exists(tmp_path):
+    engine = create_sqlite_engine(tmp_path / "test.db")
+    upgrade_database(engine)
+    session_factory = create_session_factory(engine)
+
+    with session_factory() as session:
+        service = TelegramSourceService(session)
+        source = service.create_draft(
+            "@example",
+            purpose="lead_monitoring",
+            added_by="admin",
+            start_recent_days=183,
+        )
+        service.activate(source.id, actor="admin")
+        client = FakeTelegramClient([_message(41)])
+        worker = TelegramPollingWorker(session, client)
+
+        result = await worker.poll_monitored_source(source.id, limit=100)
+
+        assert result.inserted_count == 1
+        assert client.fetch_calls[0]["after_message_id"] is None
+        assert client.fetch_calls[0]["after_date"] is not None
+        assert client.fetch_calls[0]["after_date"].date() == (
+            datetime.now(tz=client.fetch_calls[0]["after_date"].tzinfo).date() - timedelta(days=183)
+        )
 
 
 @pytest.mark.asyncio

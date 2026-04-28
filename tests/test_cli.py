@@ -459,7 +459,9 @@ class FakeConfiguredTelegramClient:
     async def fetch_preview_messages(self, source, *, limit):  # noqa: ANN001, ANN201
         return []
 
-    async def fetch_message_batch(self, source, *, after_message_id, limit):  # noqa: ANN001, ANN201
+    async def fetch_message_batch(  # noqa: ANN001, ANN201
+        self, source, *, after_message_id, after_date=None, limit
+    ):
         return []
 
     async def fetch_context(self, source, *, message_id, before, after, reply_depth):  # noqa: ANN001, ANN201

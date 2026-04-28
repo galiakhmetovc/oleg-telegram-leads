@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from datetime import datetime
 from typing import Protocol
 
 from pur_leads.integrations.telegram.types import (
@@ -34,6 +35,7 @@ class TelegramClientPort(Protocol):
         source: ResolvedTelegramSource,
         *,
         after_message_id: int | None,
+        after_date: datetime | None = None,
         limit: int,
     ) -> list[TelegramMessage]:
         """Fetch a bounded batch for polling."""

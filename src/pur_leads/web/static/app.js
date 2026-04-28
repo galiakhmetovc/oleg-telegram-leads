@@ -667,6 +667,7 @@ async function createSource(event, state) {
   const form = event.currentTarget;
   const status = document.querySelector("#source-status");
   const data = new FormData(form);
+  const startRecentDays = Number.parseInt(data.get("start_recent_days"), 10);
   try {
     const payload = await api("/api/sources", {
       method: "POST",
@@ -674,6 +675,7 @@ async function createSource(event, state) {
         input_ref: data.get("input_ref"),
         purpose: data.get("purpose"),
         check_access: data.get("check_access") === "on",
+        start_recent_days: Number.isNaN(startRecentDays) ? null : startRecentDays,
       }),
     });
     form.reset();

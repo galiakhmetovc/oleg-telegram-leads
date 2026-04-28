@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import inspect
 from collections.abc import Callable
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -95,6 +96,7 @@ class TelethonTelegramClient:
         source: ResolvedTelegramSource,
         *,
         after_message_id: int | None,
+        after_date: datetime | None = None,
         limit: int,
     ) -> list[TelegramMessage]:
         client = await self._get_client()
@@ -106,6 +108,8 @@ class TelethonTelegramClient:
         }
         if after_message_id is not None:
             kwargs["min_id"] = after_message_id
+        elif after_date is not None:
+            kwargs["offset_date"] = after_date
         return [
             _message_from_telethon(source, message)
             async for message in client.iter_messages(entity, **kwargs)

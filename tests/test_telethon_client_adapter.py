@@ -84,6 +84,45 @@ async def test_telethon_client_fetches_preview_and_batches_after_checkpoint():
 
 
 @pytest.mark.asyncio
+async def test_telethon_client_fetches_batch_after_date_for_recent_backfill():
+    after_date = datetime(2025, 10, 28, tzinfo=UTC)
+    fake = FakeTelethonClient(
+        entity=FakeEntity(id=-1002, username="chat", title="Chat", megagroup=True),
+        messages=[_message(41, text="oldest in range"), _message(42, text="next")],
+    )
+    client = TelethonTelegramClient(
+        session_path="/secure/userbot.session",
+        api_id=123,
+        api_hash="hash",
+        get_history_wait_seconds=2,
+        client_factory=lambda *args, **kwargs: fake,
+    )
+    source = ResolvedTelegramSource(
+        input_ref="@chat",
+        source_kind="telegram_supergroup",
+        telegram_id="-1002",
+        username="chat",
+        title="Chat",
+    )
+
+    batch = await client.fetch_message_batch(
+        source,
+        after_message_id=None,
+        after_date=after_date,
+        limit=100,
+    )
+
+    assert [message.telegram_message_id for message in batch] == [41, 42]
+    assert fake.iter_calls[0] == {
+        "entity": fake.entity,
+        "limit": 100,
+        "offset_date": after_date,
+        "reverse": True,
+        "wait_time": 2,
+    }
+
+
+@pytest.mark.asyncio
 async def test_telethon_client_marks_and_downloads_document_media(tmp_path):
     fake = FakeTelethonClient(
         entity=FakeEntity(id=-1002, username="chat", title="Chat", megagroup=True),

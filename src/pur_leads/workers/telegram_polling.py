@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import timedelta
+from datetime import datetime, timedelta
 from typing import Any
 
 from sqlalchemy import insert, select, update
@@ -66,12 +66,13 @@ class TelegramPollingWorker:
             )
 
         resolved = _resolved_source_from_record(source)
+        now = utc_now()
         messages = await self.client.fetch_message_batch(
             resolved,
             after_message_id=checkpoint_before,
+            after_date=_start_after_date(source, now),
             limit=limit,
         )
-        now = utc_now()
         existing_messages = self._existing_messages(source.id)
         seen_message_ids: set[int] = set()
         inserted_count = 0
@@ -274,6 +275,16 @@ def _checkpoint_after(
     if not message_ids:
         return None
     return max(message_ids)
+
+
+def _start_after_date(source: MonitoredSourceRecord, now: datetime) -> datetime | None:
+    if source.checkpoint_message_id is not None:
+        return None
+    if source.start_mode != "recent_days" or source.start_recent_days is None:
+        return None
+    if source.start_recent_days <= 0:
+        return None
+    return now - timedelta(days=source.start_recent_days)
 
 
 def _normalize_text(message: TelegramMessage) -> str | None:
