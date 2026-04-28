@@ -24,6 +24,8 @@ This slice intentionally does not implement full CRM entities, rich catalog edit
 
 ## Task 1: Web Auth And Task Schema
 
+- [x] Implement web auth/task migration and model definitions.
+
 **Files:**
 - Create: `migrations/versions/0005_web_auth_foundation.py`
 - Create: `src/pur_leads/models/web_auth.py`
@@ -35,6 +37,9 @@ This slice intentionally does not implement full CRM entities, rich catalog edit
 - [ ] Add `tasks` with `lead_cluster_id`, `lead_event_id`, client/opportunity/support/contact-reason links, status, priority, due date, owner/assignee, and completion fields.
 - [ ] Add indexes for `local_username`, `telegram_user_id`, and session token lookup.
 - [ ] Verify role/status/auth/task constraints and session token uniqueness.
+
+Completed: added `web_users`, `web_auth_sessions`, and `tasks` schema/model files with
+identity indexes and role/status/session/task constraints. Covered by `tests/test_web_auth_migration.py`.
 
 ## Task 2: Auth Service
 
