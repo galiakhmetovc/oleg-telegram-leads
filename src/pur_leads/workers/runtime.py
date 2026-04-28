@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import asdict, dataclass, is_dataclass
+from datetime import date, datetime
 from typing import Any, Protocol, cast
 
 from sqlalchemy import select, update
@@ -446,7 +447,7 @@ def build_lead_handler_registry(
 
 def _checkpoint_after(handler_result: Any) -> Any:
     if isinstance(handler_result, JobHandlerResult):
-        return handler_result.checkpoint_after
+        return _json_ready(handler_result.checkpoint_after)
     if hasattr(handler_result, "checkpoint_after"):
         return {"message_id": handler_result.checkpoint_after}
     return None
@@ -454,14 +455,26 @@ def _checkpoint_after(handler_result: Any) -> Any:
 
 def _result_summary(handler_result: Any) -> Any:
     if isinstance(handler_result, JobHandlerResult):
-        return handler_result.result_summary
+        return _json_ready(handler_result.result_summary)
     if is_dataclass(handler_result):
-        return asdict(cast(Any, handler_result))
+        return _json_ready(asdict(cast(Any, handler_result)))
     if isinstance(handler_result, dict):
-        return handler_result
+        return _json_ready(handler_result)
     if handler_result is None:
         return None
     return {"result": handler_result}
+
+
+def _json_ready(value: Any) -> Any:
+    if is_dataclass(value):
+        return _json_ready(asdict(cast(Any, value)))
+    if isinstance(value, dict):
+        return {str(key): _json_ready(item) for key, item in value.items()}
+    if isinstance(value, list | tuple):
+        return [_json_ready(item) for item in value]
+    if isinstance(value, datetime | date):
+        return value.isoformat()
+    return value
 
 
 def _load_messages_for_classification(

@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import os
 from collections.abc import Sequence
 from pathlib import Path
 
@@ -12,6 +13,7 @@ from pur_leads.core.config import load_settings
 from pur_leads.db.engine import create_sqlite_engine
 from pur_leads.db.migrations import upgrade_database
 from pur_leads.db.session import create_session_factory
+from pur_leads.integrations.telegram.telethon_client import TelethonTelegramClient
 from pur_leads.integrations.telegram.types import (
     MessageContext,
     ResolvedTelegramSource,
@@ -19,6 +21,7 @@ from pur_leads.integrations.telegram.types import (
     TelegramMessage,
 )
 from pur_leads.services.settings import SettingsService
+from pur_leads.services.userbots import UserbotAccountService
 from pur_leads.workers.runtime import (
     WorkerRuntime,
     build_catalog_handler_registry,
@@ -159,8 +162,44 @@ def _build_worker_handlers(session):
     handlers = {}
     handlers.update(build_catalog_handler_registry(session))
     handlers.update(build_lead_handler_registry(session))
-    handlers.update(build_telegram_handler_registry(session, _UnconfiguredTelegramClient()))
+    handlers.update(build_telegram_handler_registry(session, _build_telegram_client(session)))
     return handlers
+
+
+def _build_telegram_client(session):
+    api_id = _env_int("PUR_TELEGRAM_API_ID", "TELEGRAM_API_ID")
+    api_hash = _env_str("PUR_TELEGRAM_API_HASH", "TELEGRAM_API_HASH")
+    userbot = UserbotAccountService(session).select_default_userbot()
+    if api_id is None or not api_hash or userbot is None:
+        return _UnconfiguredTelegramClient()
+    return TelethonTelegramClient(
+        session_path=userbot.session_path,
+        api_id=api_id,
+        api_hash=api_hash,
+        flood_sleep_threshold_seconds=userbot.flood_sleep_threshold_seconds,
+        get_history_wait_seconds=_history_wait_seconds(session),
+    )
+
+
+def _history_wait_seconds(session) -> int:
+    configured = _env_int("PUR_TELEGRAM_GET_HISTORY_WAIT_SECONDS", "TELEGRAM_GET_HISTORY_WAIT_SECONDS")
+    if configured is not None:
+        return configured
+    value = SettingsService(session).get("telegram_get_history_wait_seconds")
+    return int(value if value is not None else 1)
+
+
+def _env_str(*names: str) -> str | None:
+    for name in names:
+        value = os.getenv(name)
+        if value:
+            return value
+    return None
+
+
+def _env_int(*names: str) -> int | None:
+    value = _env_str(*names)
+    return int(value) if value is not None else None
 
 
 class _UnconfiguredTelegramClient:

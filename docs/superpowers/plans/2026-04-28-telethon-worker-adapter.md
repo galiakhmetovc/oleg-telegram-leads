@@ -30,11 +30,11 @@
 - Modify: `src/pur_leads/cli.py`
 - Test: `tests/test_cli.py`
 
-- [ ] Write failing tests proving CLI uses `TelethonTelegramClient` when env credentials and a default userbot exist, and keeps the explicit fallback otherwise.
-- [ ] Run `uv run --extra dev pytest tests/test_cli.py -q` and verify expected failures.
-- [ ] Implement credential loading from `PUR_TELEGRAM_API_ID`/`PUR_TELEGRAM_API_HASH` and legacy `TELEGRAM_API_ID`/`TELEGRAM_API_HASH`.
-- [ ] Run `uv run --extra dev pytest tests/test_cli.py -q` and verify it passes.
-- [ ] Commit as `feat: select telethon client for worker`.
+- [x] Write failing tests proving CLI uses `TelethonTelegramClient` when env credentials and a default userbot exist, and keeps the explicit fallback otherwise.
+- [x] Run `uv run --extra dev pytest tests/test_cli.py -q` and verify expected failures.
+- [x] Implement credential loading from `PUR_TELEGRAM_API_ID`/`PUR_TELEGRAM_API_HASH` and legacy `TELEGRAM_API_ID`/`TELEGRAM_API_HASH`.
+- [x] Run `uv run --extra dev pytest tests/test_cli.py -q` and verify it passes.
+- [x] Commit as `feat: select telethon client for worker`.
 
 ### Task 3: Docker Worker Service
 

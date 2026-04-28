@@ -6,9 +6,12 @@ from pur_leads.cli import main
 from pur_leads.db.engine import create_sqlite_engine
 from pur_leads.db.migrations import upgrade_database
 from pur_leads.db.session import create_session_factory
+from pur_leads.integrations.telegram.types import ResolvedTelegramSource, SourceAccessResult
 from pur_leads.models.audit import operational_events_table
+from pur_leads.models.telegram_sources import source_access_checks_table
 from pur_leads.services.scheduler import SchedulerService
 from pur_leads.services.telegram_sources import TelegramSourceService
+from pur_leads.services.userbots import UserbotAccountService
 
 
 def test_cli_db_upgrade_creates_database(tmp_path):
@@ -90,6 +93,50 @@ def test_cli_worker_once_routes_telegram_jobs_through_canonical_registry(tmp_pat
     assert event["details_json"]["reason"] == "handler_exception"
 
 
+def test_cli_worker_once_uses_configured_telethon_client(tmp_path, capsys, monkeypatch):
+    db_path = tmp_path / "cli.db"
+    engine = create_sqlite_engine(db_path)
+    upgrade_database(engine)
+    session_factory = create_session_factory(engine)
+    with session_factory() as session:
+        userbot = UserbotAccountService(session).create_account(
+            display_name="Main userbot",
+            session_name="main",
+            session_path="/app/sessions/userbot.session",
+            actor="admin",
+        )
+        source = TelegramSourceService(session).create_draft("@example", added_by="admin")
+        job = SchedulerService(session).enqueue(
+            job_type="check_source_access",
+            scope_type="telegram_source",
+            monitored_source_id=source.id,
+            userbot_account_id=userbot.id,
+        )
+
+    monkeypatch.setenv("TELEGRAM_API_ID", "123")
+    monkeypatch.setenv("TELEGRAM_API_HASH", "hash")
+    monkeypatch.setattr(
+        "pur_leads.cli.TelethonTelegramClient",
+        FakeConfiguredTelegramClient,
+        raising=False,
+    )
+    FakeConfiguredTelegramClient.instances.clear()
+
+    main(["--database-path", str(db_path), "worker", "once"])
+
+    with session_factory() as session:
+        stored = SchedulerService(session).repository.get(job.id)
+        check = session.execute(select(source_access_checks_table)).mappings().one()
+    output = capsys.readouterr().out
+    assert stored is not None
+    assert "succeeded job" in output
+    assert stored.status == "succeeded"
+    assert check["status"] == "succeeded"
+    assert FakeConfiguredTelegramClient.instances[0].session_path == "/app/sessions/userbot.session"
+    assert FakeConfiguredTelegramClient.instances[0].api_id == 123
+    assert FakeConfiguredTelegramClient.instances[0].api_hash == "hash"
+
+
 def test_cli_worker_run_supports_bounded_polling_loop(tmp_path, capsys):
     db_path = tmp_path / "cli.db"
     main(["--database-path", str(db_path), "db", "upgrade"])
@@ -136,3 +183,40 @@ def test_cli_web_uses_database_path_and_bootstrap_env(tmp_path, monkeypatch):
     assert captured["host"] == "127.0.0.1"
     assert captured["port"] == 8000
     assert login_response.status_code == 200
+
+
+class FakeConfiguredTelegramClient:
+    instances = []
+
+    def __init__(self, *, session_path, api_id, api_hash, **_kwargs) -> None:
+        self.session_path = session_path
+        self.api_id = api_id
+        self.api_hash = api_hash
+        self.instances.append(self)
+
+    async def resolve_source(self, input_ref: str) -> ResolvedTelegramSource:
+        return ResolvedTelegramSource(
+            input_ref=input_ref,
+            source_kind="telegram_supergroup",
+            telegram_id="-1001",
+            username="example",
+            title="Example",
+        )
+
+    async def check_access(self, source: ResolvedTelegramSource) -> SourceAccessResult:
+        return SourceAccessResult(
+            status="succeeded",
+            can_read_messages=True,
+            can_read_history=True,
+            resolved_source=source,
+            last_message_id=50,
+        )
+
+    async def fetch_preview_messages(self, source, *, limit):  # noqa: ANN001, ANN201
+        return []
+
+    async def fetch_message_batch(self, source, *, after_message_id, limit):  # noqa: ANN001, ANN201
+        return []
+
+    async def fetch_context(self, source, *, message_id, before, after, reply_depth):  # noqa: ANN001, ANN201
+        raise NotImplementedError
