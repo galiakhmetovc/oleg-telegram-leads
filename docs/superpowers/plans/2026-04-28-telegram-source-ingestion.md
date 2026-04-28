@@ -102,6 +102,8 @@ Behaviors:
 
 ## Task 5: Polling And Message Persistence
 
+- [x] Implement polling persistence and verify active-only/dedup/checkpoint tests.
+
 **Files:**
 - Create: `src/pur_leads/workers/telegram_polling.py`
 - Test: `tests/test_telegram_polling_jobs.py`
@@ -116,6 +118,8 @@ Behaviors:
 - no attachment downloads for monitoring sources.
 
 ## Task 6: Context Fetching
+
+- [x] Implement context fetching and verify reply/neighbor/idempotency tests.
 
 **Files:**
 - Create: `src/pur_leads/workers/message_context.py`
