@@ -27,6 +27,8 @@ The system must continuously read the PUR Telegram channel, parse messages and d
 - A central CRM job is generating reasons to contact existing or previously interested clients when catalog changes create a useful follow-up opportunity.
 - Runtime work is processed by a continuous job loop, not a single monolithic polling cycle.
 - Start with one Telegram userbot session and one Telegram worker. Additional userbot sessions are a future configurable expansion through the web UI.
+- Monitoring chats are added through web onboarding with access check and preview before activation.
+- New live monitoring sources default to `from_now`; historical backfill is explicit and retro/web-only by default.
 - Telegram-read jobs are serialized per userbot session. AI and parse jobs can run in parallel with configurable limits.
 - Logging and audit are first-class requirements for source sync, access issues, AI calls, parser runs, catalog changes, CRM changes, and notifications.
 - AI batching, reclassification, and retro research behavior are configurable because they will need tuning after real traffic is observed.
@@ -274,19 +276,31 @@ Key fields:
 - `username`
 - `title`
 - `invite_link_hash`
+- `input_ref`
+- `source_purpose`: `lead_monitoring`, `catalog_ingestion`, `both`
 - `assigned_userbot_account_id`
 - `priority`: `low`, `normal`, `high`
-- `status`: `active`, `paused`, `needs_join`, `needs_captcha`, `private_or_no_access`, `flood_wait`, `banned`, `read_error`, `disabled`
+- `status`: `draft`, `checking_access`, `preview_ready`, `active`, `paused`, `needs_join`, `needs_captcha`, `private_or_no_access`, `flood_wait`, `banned`, `read_error`, `disabled`
 - `lead_detection_enabled`
 - `catalog_ingestion_enabled`
 - `phase_enabled`
 - `start_mode`: `from_now`, `from_message`, `recent_limit`, `recent_days`
 - `start_message_id`
+- `start_recent_limit`
+- `start_recent_days`
+- `historical_backfill_policy`: `none`, `retro_web_only`, `live_notifications_allowed`
 - `checkpoint_message_id`
 - `checkpoint_date`
+- `last_preview_at`
+- `preview_message_count`
+- `next_poll_at`
+- `poll_interval_seconds`
 - `last_success_at`
 - `last_error_at`
 - `last_error`
+- `added_by`
+- `activated_by`
+- `activated_at`
 - `created_at`
 - `updated_at`
 
@@ -295,6 +309,60 @@ Rules:
 - First implementation enables public groups/supergroups.
 - Other source kinds are represented in the schema but can be hidden or marked "later" in UI.
 - Chats are added from the web interface, not through Telegram commands.
+- New live monitoring sources default to `start_mode = from_now`.
+- Historical backfill defaults to `retro_web_only` so old messages do not create urgent Telegram noise.
+- `active` sources are the only sources polled by the runtime worker.
+
+### `source_access_checks`
+
+Stores explicit access checks performed during source onboarding or recheck.
+
+Key fields:
+
+- `id`
+- `monitored_source_id`
+- `userbot_account_id`
+- `check_type`: `onboarding`, `manual_recheck`, `scheduled_health_check`
+- `status`: `succeeded`, `needs_join`, `needs_captcha`, `private_or_no_access`, `flood_wait`, `banned`, `failed`
+- `resolved_source_kind`
+- `resolved_telegram_id`
+- `resolved_title`
+- `last_message_id`
+- `can_read_messages`
+- `can_read_history`
+- `flood_wait_seconds`
+- `error`
+- `checked_at`
+
+Purpose:
+
+- Show whether the selected userbot can legitimately read the source.
+- Preserve the result that led to `preview_ready`, `active`, or an access issue.
+
+### `source_preview_messages`
+
+Stores a small preview sample shown before activation.
+
+Key fields:
+
+- `id`
+- `monitored_source_id`
+- `access_check_id`
+- `telegram_message_id`
+- `message_date`
+- `sender_display`
+- `text`
+- `caption`
+- `has_media`
+- `media_metadata_json`
+- `sort_order`
+- `created_at`
+
+Rules:
+
+- Preview fetches a small configured number of recent readable text/caption messages.
+- Preview does not download attachments.
+- Preview does not move the live monitoring checkpoint.
 
 ### `source_messages`
 
@@ -1702,6 +1770,21 @@ Key settings:
 - `telegram_access_issue_retry_threshold = 3`
 - `telegram_access_issue_retry_window_minutes = 30`
 - `telegram_access_issue_repeat_notification_cooldown_minutes = 180`
+- `source_add_requires_preview = true`
+- `source_default_purpose = "lead_monitoring"`
+- `source_default_start_mode = "from_now"`
+- `source_preview_message_count = 20`
+- `source_preview_download_attachments = false`
+- `source_backfill_default_policy = "retro_web_only"`
+- `source_backfill_notify_telegram = false`
+- `source_allow_both_purpose = false`
+- `source_reset_checkpoint_requires_confirmation = true`
+- `source_default_poll_interval_seconds = 60`
+- `source_public_groups_enabled = true`
+- `source_private_groups_enabled = false`
+- `source_channels_enabled = false`
+- `source_comments_enabled = false`
+- `source_dms_enabled = false`
 - `ai_max_parallel_calls = 2`
 - `ai_parse_max_parallel_jobs = 2`
 - `ai_default_provider_config_id = null`
@@ -1900,6 +1983,68 @@ Forwarded messages are stored similarly. If the source chat can be resolved, the
 
 Manual text becomes `source_type = manual_text`. It can still create extracted facts, lead examples, CRM notes, client interests, support cases, contact reasons, or feedback.
 
+## Source Onboarding And Monitoring
+
+Monitoring sources are managed in the web interface. Telegram commands are not used for adding chats.
+
+Recommended add-source flow:
+
+1. Oleg opens `Sources -> Add Telegram source`.
+2. Oleg pastes `@username`, `t.me/...`, invite link, or a link to a specific message.
+3. Oleg selects source purpose:
+   - `lead_monitoring`: search for leads;
+   - `catalog_ingestion`: extract catalog knowledge;
+   - `both`: represented in the schema, but can be hidden in the first UI.
+4. Oleg selects start mode:
+   - `from_now` by default;
+   - recent N messages;
+   - recent N days;
+   - from a specific message id.
+5. The system selects an available userbot or asks for manual assignment.
+6. The system runs `source_access_checks`.
+7. If access succeeds, the system fetches a preview of recent text/caption messages.
+8. Oleg reviews title, type, access status, last message id, preview messages, and effective settings.
+9. Oleg clicks `Activate`.
+
+Default startup policy:
+
+- New live lead-monitoring sources start from `from_now`.
+- Historical backfill must be explicit.
+- Historical backfill results are `retro` and web-only by default.
+- Preview/backfill must not move the live monitoring checkpoint unless explicitly activated.
+
+Data collected from monitoring sources:
+
+- message text;
+- caption;
+- message date;
+- chat id, message id, and message URL;
+- sender id, username, and display name when available;
+- reply-to id;
+- nearby context messages according to settings;
+- topic/thread id when available;
+- forward metadata;
+- media metadata;
+- relevant service/system metadata.
+
+Monitoring-source attachments are not downloaded by default. Text/captions and metadata are enough for first-stage lead detection.
+
+Access and anti-bot policy:
+
+- The system does not bypass Telegram protections.
+- If join/captcha/private access is required, the source status changes and an `access_issue` is created.
+- Operator-required access issues can notify Telegram immediately.
+- After the operator fixes access manually, web UI offers `Recheck`.
+
+Polling policy:
+
+- First implementation uses one Telegram worker and one userbot session.
+- Sources are polled in priority order.
+- Each job reads a bounded message batch.
+- Checkpoints are saved after every successful batch.
+- `FLOOD_WAIT` pauses the affected source/account scope and the scheduler moves to other work.
+- Resetting checkpoints requires explicit confirmation and creates an audit event.
+
 ## Storage And Archive Policy
 
 SQLite is the hot operational database. It keeps active catalog, CRM, settings, users, audit log, current jobs, recent messages, and recent evidence immediately queryable.
@@ -1993,19 +2138,57 @@ Actions:
 
 Purpose:
 
-- show sync status for `@purmaster`;
-- show latest message id;
-- show downloaded/skipped artifacts;
-- show parsing errors;
-- open source text and linked evidence.
+- manage Telegram sources for lead monitoring and catalog ingestion;
+- show onboarding, access, polling, sync, parsing, and artifact state;
+- make source errors actionable without using Telegram commands.
+
+Views:
+
+- active monitoring sources;
+- catalog-ingestion sources, including `@purmaster`;
+- draft/checking/preview-ready sources;
+- paused/failed sources;
+- access issues;
+- source logs.
+
+List columns:
+
+- source title;
+- source type;
+- purpose;
+- status;
+- priority;
+- assigned userbot;
+- checkpoint / latest message id;
+- last success/error;
+- next poll;
+- leads found;
+- error/access badge.
 
 Actions:
 
-- resync;
+- add Telegram source;
+- fetch preview;
+- activate;
+- pause/resume;
+- recheck access;
+- change purpose/start mode before activation;
+- resync catalog source;
 - fetch message range;
 - fetch one Telegram link;
 - reparse source;
+- reset checkpoint with confirmation;
+- open logs;
+- open access issue;
 - mark source outdated/wrong.
+
+Add-source UI:
+
+- accepts `@username`, `t.me/...`, invite link, or message link;
+- defaults to purpose `lead_monitoring`;
+- defaults to `from_now`;
+- shows preview before activation;
+- clearly marks historical backfill as retro/web-only unless settings override it.
 
 ### Catalog Review
 
@@ -2442,6 +2625,11 @@ Required controls:
 - Telegram worker count and per-session serialization;
 - Telegram flood-wait thresholds and observed cooldowns;
 - source priority and polling policy;
+- source onboarding preview requirement;
+- default source purpose and start mode;
+- enabled source kinds for first-phase UI;
+- source backfill policy and retro/web-only behavior;
+- checkpoint reset confirmation policy;
 - AI provider credentials/config references;
 - AI model selection and model-limit table;
 - AI/parse parallel job limits;
@@ -2730,6 +2918,9 @@ Migration path:
 Unit tests:
 
 - source identity and duplicate detection;
+- source onboarding status transitions;
+- source access check result mapping;
+- source preview does not move checkpoint;
 - artifact download policy;
 - document parsing into chunks;
 - extracted fact normalization;
@@ -2753,6 +2944,10 @@ Unit tests:
 Integration tests:
 
 - process archived `@purmaster` corpus into catalog candidates;
+- add public Telegram group through web onboarding: draft -> checking_access -> preview_ready -> active;
+- inaccessible/private/captcha source creates `access_issue` and operator notification policy;
+- new source defaults to `from_now`;
+- historical backfill creates retro/web-only lead events by default;
 - manual Telegram link creates source and example;
 - `auto_pending` term triggers lead and stores `lead_matches`;
 - feedback `term_too_broad` changes future classifier behavior;
@@ -2773,6 +2968,7 @@ Integration tests:
 Live/smoke tests:
 
 - userbot can read configured channel;
+- source preview can read recent text messages without downloading attachments;
 - document downloads skip videos and fetch PDFs;
 - bot can send notifications;
 - web settings persist;
