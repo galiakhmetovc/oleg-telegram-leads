@@ -147,3 +147,75 @@ async def test_heuristic_extractor_splits_joined_technical_marker(extractor_sess
 
     assert [fact.canonical_name for fact in facts] == ["Уведомления безопасности"]
     assert facts[0].value_json["category_slug"] == "security_alarm"
+
+
+@pytest.mark.asyncio
+async def test_heuristic_extractor_handles_pdf_joined_benefit_phrases(extractor_session):
+    source = CatalogSourceService(extractor_session).upsert_source(
+        source_type="telegram_message",
+        origin="telegram:purmaster",
+        external_id="18",
+        raw_text="catalog",
+    )
+    chunk = CatalogSourceService(extractor_session).replace_parsed_chunks(
+        source.id,
+        chunks=[
+            """
+            6.5 Удобный доступ ко внутренним
+            помещениям Управляемых замок на двери1. Удобный доступ к помещениям
+            6.7 Умное хранине - простой поискУмные метки для вещей Простое нахождение вещей
+            """
+        ],
+        parser_name="test",
+        parser_version="1",
+    )[0]
+
+    facts = await HeuristicCatalogExtractor(extractor_session).extract_catalog_facts(
+        source_id=source.id,
+        chunk_id=chunk.id,
+        payload={},
+    )
+
+    assert [fact.canonical_name for fact in facts] == [
+        "Удобный доступ ко внутренним помещениям",
+        "Умное хранение - простой поиск",
+    ]
+    assert facts[0].value_json["category_slug"] == "access_control"
+
+
+@pytest.mark.asyncio
+async def test_heuristic_extractor_keeps_short_title_continuation_after_conjunction(
+    extractor_session,
+):
+    source = CatalogSourceService(extractor_session).upsert_source(
+        source_type="telegram_message",
+        origin="telegram:purmaster",
+        external_id="19",
+        raw_text="catalog",
+    )
+    chunk = CatalogSourceService(extractor_session).replace_parsed_chunks(
+        source.id,
+        chunks=[
+            """
+            7.2 Гарантийное обслуживание и
+            поддержка
+            Устранение выявленных недостатков в течение 1 года
+            7.3 Послегарантийное
+            обслуживание
+            Поддержка работоспособности и развитие существующих систем
+            """
+        ],
+        parser_name="test",
+        parser_version="1",
+    )[0]
+
+    facts = await HeuristicCatalogExtractor(extractor_session).extract_catalog_facts(
+        source_id=source.id,
+        chunk_id=chunk.id,
+        payload={},
+    )
+
+    assert [fact.canonical_name for fact in facts] == [
+        "Гарантийное обслуживание и поддержка",
+        "Послегарантийное обслуживание",
+    ]

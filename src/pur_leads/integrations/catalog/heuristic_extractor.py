@@ -30,7 +30,7 @@ TECHNICAL_START_RE = re.compile(
 )
 INLINE_TECHNICAL_RE = re.compile(
     r"(Установка|Настройка|Доступ|Поддержка|Контроль|Устранение|Достаточно|"
-    r"Модернизация|Круглосуточный)"
+    r"Модернизация|Круглосуточный|Управляем|Умные\s+метки)"
 )
 
 CATEGORY_BY_SECTION = {
@@ -199,12 +199,16 @@ def _service_title(body: str) -> str | None:
             if prefix:
                 title_parts.append(prefix)
             break
-        if title_parts and TECHNICAL_START_RE.search(line):
+        if (
+            title_parts
+            and TECHNICAL_START_RE.search(line)
+            and not _is_title_continuation(title_parts[-1], line)
+        ):
             break
         title_parts.append(line)
         if len(" ".join(title_parts)) > 120:
             break
-    title = _normalize_space(" ".join(title_parts))
+    title = _clean_title(_normalize_space(" ".join(title_parts)))
     if not title or len(title) < 4:
         return None
     if title.casefold().startswith(("#", "что делаем")):
@@ -266,6 +270,14 @@ def _normalize_price_amount(value: str) -> str:
         groups.append(digits[-3:])
         digits = digits[:-3]
     return " ".join(reversed(groups))
+
+
+def _is_title_continuation(previous: str, current: str) -> bool:
+    return previous.casefold().endswith((" и", " или")) and len(current.split()) <= 3
+
+
+def _clean_title(value: str) -> str:
+    return value.replace("хранине", "хранение").replace("Хранине", "Хранение")
 
 
 def _dedupe_strings(values: list[str]) -> list[str]:
