@@ -182,7 +182,9 @@ def _build_telegram_client(session):
 
 
 def _history_wait_seconds(session) -> int:
-    configured = _env_int("PUR_TELEGRAM_GET_HISTORY_WAIT_SECONDS", "TELEGRAM_GET_HISTORY_WAIT_SECONDS")
+    configured = _env_int(
+        "PUR_TELEGRAM_GET_HISTORY_WAIT_SECONDS", "TELEGRAM_GET_HISTORY_WAIT_SECONDS"
+    )
     if configured is not None:
         return configured
     value = SettingsService(session).get("telegram_get_history_wait_seconds")

@@ -7,7 +7,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from telethon import TelegramClient, errors
+from telethon import TelegramClient, errors  # type: ignore[import-untyped]
 
 from pur_leads.integrations.telegram.types import (
     MessageContext,
@@ -50,9 +50,7 @@ class TelethonTelegramClient:
         try:
             entity = await client.get_entity(_entity_ref(source))
             resolved = _source_from_entity(source.input_ref, entity)
-            latest_messages = [
-                message async for message in client.iter_messages(entity, limit=1)
-            ]
+            latest_messages = [message async for message in client.iter_messages(entity, limit=1)]
         except errors.FloodWaitError as exc:
             return SourceAccessResult(
                 status="flood_wait",
