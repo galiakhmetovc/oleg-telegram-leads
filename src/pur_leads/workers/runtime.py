@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import hashlib
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import asdict, dataclass, is_dataclass
 from datetime import date, datetime
+from pathlib import Path
 from typing import Any, Protocol, cast
 
 from sqlalchemy import select, update
@@ -12,7 +14,9 @@ from sqlalchemy.orm import Session
 
 from pur_leads.core.time import utc_now
 from pur_leads.integrations.telegram.client import TelegramClientPort
+from pur_leads.integrations.telegram.types import ResolvedTelegramSource
 from pur_leads.repositories.scheduler import SchedulerJobRecord
+from pur_leads.repositories.telegram_sources import MonitoredSourceRecord, TelegramSourceRepository
 from pur_leads.models.telegram_sources import source_messages_table
 from pur_leads.services.audit import AuditService
 from pur_leads.services.catalog_candidates import CatalogCandidateService
@@ -216,10 +220,15 @@ class WorkerRuntime:
 def build_telegram_handler_registry(
     session: Session,
     client: TelegramClientPort,
+    *,
+    artifact_storage_path: str | Path | None = None,
 ) -> dict[str, JobHandler]:
     access_worker = TelegramAccessWorker(session, client)
     polling_worker = TelegramPollingWorker(session, client)
     context_worker = MessageContextWorker(session, client)
+    telegram_sources = TelegramSourceRepository(session)
+    catalog_sources = CatalogSourceService(session)
+    artifact_root = Path(artifact_storage_path or "./data/artifacts")
 
     async def check_source_access(job: SchedulerJobRecord) -> JobHandlerResult:
         if job.monitored_source_id is None:
@@ -267,11 +276,58 @@ def build_telegram_handler_registry(
         )
         return JobHandlerResult(result_summary=asdict(result))
 
+    async def download_artifact(job: SchedulerJobRecord) -> JobHandlerResult:
+        if job.monitored_source_id is None:
+            raise ValueError("download_artifact requires monitored_source_id")
+        payload = job.payload_json or {}
+        source_id = payload.get("source_id")
+        telegram_message_id = payload.get("telegram_message_id")
+        if not isinstance(source_id, str):
+            raise ValueError("download_artifact requires payload.source_id")
+        if not isinstance(telegram_message_id, int):
+            raise ValueError("download_artifact requires payload.telegram_message_id")
+
+        monitored_source = telegram_sources.get(job.monitored_source_id)
+        if monitored_source is None:
+            raise KeyError(job.monitored_source_id)
+        downloaded = await client.download_message_document(
+            _resolved_source_from_record(monitored_source),
+            message_id=telegram_message_id,
+            destination_dir=artifact_root
+            / "telegram"
+            / job.monitored_source_id
+            / str(telegram_message_id),
+        )
+        sha256 = (
+            _sha256_file(Path(downloaded.local_path))
+            if downloaded.status == "downloaded" and downloaded.local_path is not None
+            else None
+        )
+        artifact = catalog_sources.record_artifact(
+            source_id,
+            artifact_type="document",
+            file_name=downloaded.file_name,
+            mime_type=downloaded.mime_type,
+            file_size=downloaded.file_size,
+            sha256=sha256,
+            local_path=downloaded.local_path,
+            download_status=downloaded.status,
+            skip_reason=downloaded.skip_reason,
+        )
+        return JobHandlerResult(
+            result_summary={
+                "download_status": artifact.download_status,
+                "artifact_id": artifact.id,
+                "file_name": artifact.file_name,
+            }
+        )
+
     return {
         "check_source_access": check_source_access,
         "fetch_source_preview": fetch_source_preview,
         "poll_monitored_source": poll_monitored_source,
         "fetch_message_context": fetch_message_context,
+        "download_artifact": download_artifact,
     }
 
 
@@ -557,6 +613,24 @@ def _mark_message_classified(session: Session, source_message_id: str) -> None:
         .where(source_messages_table.c.id == source_message_id)
         .values(classification_status="classified", updated_at=utc_now())
     )
+
+
+def _resolved_source_from_record(source: MonitoredSourceRecord) -> ResolvedTelegramSource:
+    return ResolvedTelegramSource(
+        input_ref=source.input_ref,
+        source_kind=source.source_kind,
+        telegram_id=source.telegram_id,
+        username=source.username,
+        title=source.title,
+    )
+
+
+def _sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as file_obj:
+        for chunk in iter(lambda: file_obj.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 def _source_message_text(row: dict[str, Any]) -> str | None:

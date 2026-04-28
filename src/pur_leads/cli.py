@@ -160,10 +160,17 @@ def _engine_from_args(args: argparse.Namespace):
 
 
 def _build_worker_handlers(session):
+    settings = load_settings()
     handlers = {}
     handlers.update(build_catalog_handler_registry(session))
     handlers.update(build_lead_handler_registry(session))
-    handlers.update(build_telegram_handler_registry(session, _build_telegram_client(session)))
+    handlers.update(
+        build_telegram_handler_registry(
+            session,
+            _build_telegram_client(session),
+            artifact_storage_path=settings.artifact_storage_path,
+        )
+    )
     return handlers
 
 

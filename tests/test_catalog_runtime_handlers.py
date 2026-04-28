@@ -1,21 +1,39 @@
+from datetime import UTC, datetime
+import hashlib
+from pathlib import Path
+
 import pytest
+from sqlalchemy import insert
 from sqlalchemy import select
 
+from pur_leads.core.ids import new_id
+from pur_leads.core.time import utc_now
 from pur_leads.db.engine import create_sqlite_engine
 from pur_leads.db.migrations import upgrade_database
 from pur_leads.db.session import create_session_factory
+from pur_leads.integrations.telegram.types import (
+    MessageContext,
+    ResolvedTelegramSource,
+    SourceAccessResult,
+    TelegramDocumentDownload,
+    TelegramMessage,
+)
 from pur_leads.models.audit import operational_events_table
 from pur_leads.models.catalog import (
+    artifacts_table,
     catalog_candidates_table,
     parsed_chunks_table,
 )
+from pur_leads.models.telegram_sources import source_messages_table
 from pur_leads.services.catalog_sources import CatalogSourceService
 from pur_leads.services.scheduler import SchedulerService
+from pur_leads.services.telegram_sources import TelegramSourceService
 from pur_leads.workers.runtime import (
     CatalogExtractedFact,
     ParsedArtifact,
     WorkerRuntime,
     build_catalog_handler_registry,
+    build_telegram_handler_registry,
 )
 
 
@@ -146,3 +164,228 @@ async def test_catalog_handler_without_adapter_fails_visibly(runtime_session):
     assert stored.last_error == "parse_artifact adapter is not configured"
     assert event["event_type"] == "scheduler"
     assert event["details_json"]["reason"] == "handler_exception"
+
+
+@pytest.mark.asyncio
+async def test_download_artifact_handler_records_downloaded_document(runtime_session, tmp_path):
+    telegram_source, raw_source, source_message_id = _create_download_scope(runtime_session)
+    job = SchedulerService(runtime_session).enqueue(
+        job_type="download_artifact",
+        scope_type="telegram_source",
+        monitored_source_id=telegram_source.id,
+        source_message_id=source_message_id,
+        payload_json={
+            "source_id": raw_source.id,
+            "telegram_message_id": 42,
+        },
+    )
+    client = FakeDownloadTelegramClient(download_bytes=b"catalog")
+    runtime = WorkerRuntime(
+        runtime_session,
+        handlers=build_telegram_handler_registry(
+            runtime_session,
+            client,
+            artifact_storage_path=tmp_path / "artifacts",
+        ),
+    )
+
+    result = await runtime.run_once()
+
+    stored = SchedulerService(runtime_session).repository.get(job.id)
+    artifact = runtime_session.execute(select(artifacts_table)).mappings().one()
+    assert stored is not None
+    assert result.status == "succeeded"
+    assert stored.result_summary_json == {
+        "download_status": "downloaded",
+        "artifact_id": artifact["id"],
+        "file_name": "catalog.pdf",
+    }
+    assert artifact["source_id"] == raw_source.id
+    assert artifact["artifact_type"] == "document"
+    assert artifact["file_name"] == "catalog.pdf"
+    assert artifact["mime_type"] == "application/pdf"
+    assert artifact["file_size"] == 7
+    assert artifact["sha256"] == hashlib.sha256(b"catalog").hexdigest()
+    assert Path(artifact["local_path"]).read_bytes() == b"catalog"
+
+
+@pytest.mark.asyncio
+async def test_download_artifact_handler_records_skipped_document(runtime_session, tmp_path):
+    telegram_source, raw_source, source_message_id = _create_download_scope(runtime_session)
+    job = SchedulerService(runtime_session).enqueue(
+        job_type="download_artifact",
+        scope_type="telegram_source",
+        monitored_source_id=telegram_source.id,
+        source_message_id=source_message_id,
+        payload_json={
+            "source_id": raw_source.id,
+            "telegram_message_id": 42,
+        },
+    )
+    client = FakeDownloadTelegramClient(skip_reason="video")
+    runtime = WorkerRuntime(
+        runtime_session,
+        handlers=build_telegram_handler_registry(
+            runtime_session,
+            client,
+            artifact_storage_path=tmp_path / "artifacts",
+        ),
+    )
+
+    result = await runtime.run_once()
+
+    stored = SchedulerService(runtime_session).repository.get(job.id)
+    artifact = runtime_session.execute(select(artifacts_table)).mappings().one()
+    assert stored is not None
+    assert result.status == "succeeded"
+    assert stored.result_summary_json == {
+        "download_status": "skipped",
+        "artifact_id": artifact["id"],
+        "file_name": "catalog.pdf",
+    }
+    assert artifact["download_status"] == "skipped"
+    assert artifact["skip_reason"] == "video"
+    assert artifact["local_path"] is None
+
+
+class FakeDownloadTelegramClient:
+    def __init__(
+        self,
+        *,
+        download_bytes: bytes | None = None,
+        skip_reason: str | None = None,
+    ) -> None:
+        self.download_bytes = download_bytes
+        self.skip_reason = skip_reason
+
+    async def resolve_source(self, input_ref: str) -> ResolvedTelegramSource:
+        return _resolved_source()
+
+    async def check_access(self, source: ResolvedTelegramSource) -> SourceAccessResult:
+        return SourceAccessResult(
+            status="succeeded",
+            can_read_messages=True,
+            can_read_history=True,
+            resolved_source=source,
+        )
+
+    async def fetch_preview_messages(
+        self,
+        source: ResolvedTelegramSource,
+        *,
+        limit: int,
+    ) -> list[TelegramMessage]:
+        return []
+
+    async def fetch_message_batch(
+        self,
+        source: ResolvedTelegramSource,
+        *,
+        after_message_id: int | None,
+        limit: int,
+    ) -> list[TelegramMessage]:
+        return []
+
+    async def fetch_context(
+        self,
+        source: ResolvedTelegramSource,
+        *,
+        message_id: int,
+        before: int,
+        after: int,
+        reply_depth: int,
+    ) -> MessageContext:
+        return MessageContext(message_id, [], [], [])
+
+    async def download_message_document(
+        self,
+        source: ResolvedTelegramSource,
+        *,
+        message_id: int,
+        destination_dir: str | Path,
+    ) -> TelegramDocumentDownload:
+        if self.skip_reason:
+            return TelegramDocumentDownload(
+                status="skipped",
+                file_name="catalog.pdf",
+                mime_type="application/pdf",
+                file_size=7,
+                local_path=None,
+                skip_reason=self.skip_reason,
+            )
+        destination = Path(destination_dir) / "catalog.pdf"
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_bytes(self.download_bytes or b"")
+        return TelegramDocumentDownload(
+            status="downloaded",
+            file_name="catalog.pdf",
+            mime_type="application/pdf",
+            file_size=7,
+            local_path=str(destination),
+        )
+
+
+def _create_download_scope(runtime_session):
+    service = TelegramSourceService(runtime_session)
+    telegram_source = service.create_draft(
+        "https://t.me/purmaster",
+        purpose="catalog_ingestion",
+        added_by="admin",
+    )
+    telegram_source = service.activate(telegram_source.id, actor="admin")
+    raw_source = CatalogSourceService(runtime_session).upsert_source(
+        source_type="telegram_message",
+        origin="telegram:purmaster",
+        external_id="42",
+        raw_text="catalog.pdf",
+    )
+    source_message_id = new_id()
+    now = utc_now()
+    runtime_session.execute(
+        insert(source_messages_table).values(
+            id=source_message_id,
+            monitored_source_id=telegram_source.id,
+            raw_source_id=raw_source.id,
+            telegram_message_id=42,
+            sender_id=None,
+            message_date=datetime(2026, 4, 28, 12, 0, tzinfo=UTC),
+            text=None,
+            caption="catalog.pdf",
+            normalized_text="catalog.pdf",
+            has_media=True,
+            media_metadata_json={
+                "type": "MessageMediaDocument",
+                "document": {
+                    "file_name": "catalog.pdf",
+                    "mime_type": "application/pdf",
+                    "file_size": 7,
+                    "downloadable": True,
+                },
+            },
+            reply_to_message_id=None,
+            thread_id=None,
+            forward_metadata_json=None,
+            raw_metadata_json={},
+            fetched_at=now,
+            classification_status="unclassified",
+            archive_pointer_id=None,
+            is_archived_stub=False,
+            text_archived=False,
+            caption_archived=False,
+            metadata_archived=False,
+            created_at=now,
+            updated_at=now,
+        )
+    )
+    runtime_session.commit()
+    return telegram_source, raw_source, source_message_id
+
+
+def _resolved_source() -> ResolvedTelegramSource:
+    return ResolvedTelegramSource(
+        input_ref="https://t.me/purmaster",
+        source_kind="telegram_channel",
+        telegram_id="-1001",
+        username="purmaster",
+        title="PUR",
+    )
