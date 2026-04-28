@@ -30,6 +30,8 @@ This plan implements backend storage and deterministic services for lead inbox f
 
 ## Task 2: Lead Event Recording And Match Evidence
 
+- [x] Implement lead event/match recording and verify dedupe/evidence tests.
+
 **Files:**
 - Create: `src/pur_leads/repositories/leads.py`
 - Create: `src/pur_leads/services/leads.py`
