@@ -186,6 +186,56 @@ async def test_telethon_client_skips_video_documents(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_telethon_client_skips_audio_documents(tmp_path):
+    fake = FakeTelethonClient(
+        entity=FakeEntity(id=-1002, username="chat", title="Chat", megagroup=True),
+        messages=[
+            _document_message(
+                53,
+                file_name="voice.m4a",
+                mime_type="audio/mp4",
+                size=10,
+                audio=True,
+            )
+        ],
+    )
+    client = TelethonTelegramClient(
+        session_path="/secure/userbot.session",
+        api_id=123,
+        api_hash="hash",
+        client_factory=lambda *args, **kwargs: fake,
+    )
+    source = ResolvedTelegramSource(
+        input_ref="@chat",
+        source_kind="telegram_supergroup",
+        telegram_id="-1002",
+        username="chat",
+        title="Chat",
+    )
+
+    preview = await client.fetch_preview_messages(source, limit=1)
+    downloaded = await client.download_message_document(
+        source,
+        message_id=53,
+        destination_dir=tmp_path,
+    )
+
+    assert preview[0].media_metadata_json == {
+        "type": "object",
+        "document": {
+            "file_name": "voice.m4a",
+            "mime_type": "audio/mp4",
+            "file_size": 10,
+            "downloadable": False,
+            "skip_reason": "audio",
+        },
+    }
+    assert downloaded.status == "skipped"
+    assert downloaded.skip_reason == "audio"
+    assert downloaded.local_path is None
+
+
+@pytest.mark.asyncio
 async def test_telethon_client_requires_authorized_session():
     fake = FakeTelethonClient(
         entity=FakeEntity(id=-1001, username="purmaster", title="PUR", broadcast=True),
@@ -272,10 +322,13 @@ class FakeDocument:
         mime_type: str,
         size: int,
         video: bool,
+        audio: bool,
     ) -> None:
         attributes = [FakeDocumentAttributeFilename(file_name)]
         if video:
             attributes.append(FakeDocumentAttributeVideo())
+        if audio:
+            attributes.append(FakeDocumentAttributeAudio())
         self.attributes = attributes
         self.mime_type = mime_type
         self.size = size
@@ -287,6 +340,10 @@ class FakeDocumentAttributeFilename:
 
 
 class FakeDocumentAttributeVideo:
+    pass
+
+
+class FakeDocumentAttributeAudio:
     pass
 
 
@@ -343,6 +400,7 @@ def _document_message(
     mime_type: str,
     size: int,
     video: bool = False,
+    audio: bool = False,
 ) -> FakeMessage:
     return FakeMessage(
         id=message_id,
@@ -356,5 +414,6 @@ def _document_message(
             mime_type=mime_type,
             size=size,
             video=video,
+            audio=audio,
         ),
     )

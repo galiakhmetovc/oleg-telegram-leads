@@ -324,13 +324,13 @@ def _document_metadata(message: Any) -> dict[str, Any] | None:
     if document is None:
         return None
     mime_type = _blank_to_none(getattr(document, "mime_type", None))
-    is_video = _is_video_document(document, mime_type)
+    skip_reason = _document_media_skip_reason(document, mime_type)
     return {
         "file_name": _document_file_name(document),
         "mime_type": mime_type,
         "file_size": _int_or_none(getattr(document, "size", None)),
-        "downloadable": not is_video,
-        "skip_reason": "video" if is_video else None,
+        "downloadable": skip_reason is None,
+        "skip_reason": skip_reason,
     }
 
 
@@ -342,13 +342,18 @@ def _document_file_name(document: Any) -> str | None:
     return None
 
 
-def _is_video_document(document: Any, mime_type: str | None) -> bool:
+def _document_media_skip_reason(document: Any, mime_type: str | None) -> str | None:
     if mime_type and mime_type.startswith("video/"):
-        return True
-    return any(
-        attribute.__class__.__name__ == "DocumentAttributeVideo"
-        for attribute in getattr(document, "attributes", []) or []
-    )
+        return "video"
+    if mime_type and mime_type.startswith("audio/"):
+        return "audio"
+    for attribute in getattr(document, "attributes", []) or []:
+        attribute_name = attribute.__class__.__name__
+        if attribute_name == "DocumentAttributeVideo":
+            return "video"
+        if attribute_name == "DocumentAttributeAudio":
+            return "audio"
+    return None
 
 
 def _forward_metadata(message: Any) -> dict[str, Any] | None:
