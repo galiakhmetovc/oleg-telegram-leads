@@ -1999,11 +1999,35 @@ Purpose:
 
 - review detected leads as the primary daily workflow.
 - quickly decide whether a message requires action, feedback, CRM follow-up, or no action.
+- work as a triage pipeline, not a heavy CRM form.
+
+Layout:
+
+- compact lead queue on the left;
+- selected lead detail card on the right;
+- filters for status, source, category, confidence, `auto_pending`, `retro`, and operator issues;
+- keyboard-friendly next/previous/decision flow can be added later.
+
+Queue row shows:
+
+- current status and urgency;
+- source chat;
+- message date/time;
+- short AI summary of what the person wants;
+- matched category;
+- confidence;
+- badges: `auto_pending`, `retro`, `maybe`, `needs operator`, `duplicate`;
+- whether the lead already has feedback, task, client, or contact reason.
 
 Each lead shows:
 
+- short AI summary;
 - source chat and message link;
+- author/sender information when available;
+- detection mode: `live`, `retro`, `manual`, `reclassification`;
+- original message date and trigger reason for retro leads;
 - message text;
+- reply-chain and neighboring context;
 - AI reason;
 - matched category/items/terms;
 - whether matches are `approved` or `auto_pending`;
@@ -2012,9 +2036,14 @@ Each lead shows:
 
 Actions:
 
-- lead;
+- take into work;
 - not lead;
 - maybe;
+- snooze;
+- create task;
+- create or link client;
+- create client interest;
+- create contact reason;
 - wrong category;
 - wrong item;
 - term too broad;
@@ -2023,6 +2052,25 @@ Actions:
 - no buying intent;
 - add comment;
 - create catalog item/term from message.
+
+Fast `not lead` reasons:
+
+- no buying intent;
+- expert/advice, not a customer;
+- not our topic;
+- wrong product/category;
+- term too broad;
+- duplicate;
+- spam/noise;
+- outdated historical message.
+
+Rules:
+
+- The first decision should be possible in 5-15 seconds.
+- Catalog and CRM actions are available from the card, but should not block quick lead triage.
+- If a lead is wrong, the UI should encourage narrow feedback: lead reason, matched item, matched term, or category.
+- `auto_pending` matches must be visually clear because feedback on them can immediately improve the classifier.
+- `maybe` stays in the web inbox by default and does not trigger Telegram notifications.
 
 ### Lead Detail
 
