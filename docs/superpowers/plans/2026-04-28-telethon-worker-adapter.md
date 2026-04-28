@@ -42,9 +42,9 @@
 - Modify: `docker-compose.yml`
 - Test: compose config verification
 
-- [ ] Update the `worker` service to run `worker run`, restart unless stopped, pass Telegram API env vars, and mount sessions.
-- [ ] Run `docker compose config >/tmp/oleg-telegram-leads-compose.out && wc -l /tmp/oleg-telegram-leads-compose.out`.
-- [ ] Commit as `chore: run worker service continuously`.
+- [x] Update the `worker` service to run `worker run`, restart unless stopped, pass Telegram API env vars, and mount sessions.
+- [x] Run `docker compose config >/tmp/oleg-telegram-leads-compose.out && wc -l /tmp/oleg-telegram-leads-compose.out`.
+- [x] Commit as `chore: run worker service continuously`.
 
 ### Task 4: Full Verification And Deploy
 
