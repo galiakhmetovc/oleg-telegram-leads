@@ -49,6 +49,8 @@ uv run --extra dev pytest tests/test_telegram_source_migration.py -q
 
 ## Task 2: Source Repository And Service
 
+- [x] Implement source repository/service and verify source lifecycle tests.
+
 **Files:**
 - Create: `src/pur_leads/repositories/telegram_sources.py`
 - Create: `src/pur_leads/services/telegram_sources.py`
