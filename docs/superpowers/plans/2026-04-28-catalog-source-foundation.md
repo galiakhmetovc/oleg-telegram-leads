@@ -79,6 +79,8 @@ This plan implements catalog/source storage and deterministic catalog mutation s
 
 ## Task 5: Classifier Snapshot Builder
 
+- [x] Implement classifier snapshot builder and verify included-status/artifact tests.
+
 **Files:**
 - Create: `src/pur_leads/services/classifier_snapshots.py`
 - Test: `tests/test_classifier_snapshot_service.py`
