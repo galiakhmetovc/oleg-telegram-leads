@@ -71,5 +71,5 @@
 - [x] Run `node --check src/pur_leads/web/static/app.js`.
 - [x] Run `TMPDIR=/home/admin/AI-AGENT/data/tmp/oleg-telegram-leads-pytest uv run --extra dev pytest -q`.
 - [x] Run `docker compose config >/tmp/oleg-telegram-leads-compose.out && wc -l /tmp/oleg-telegram-leads-compose.out`.
-- [ ] Commit and push `main`.
-- [ ] Deploy on `teamd-ams1`, run migrations if needed, restart web/worker, and verify `/health`.
+- [x] Commit and push `main`.
+- [x] Deploy on `teamd-ams1`, run migrations if needed, restart web/worker, and verify `/health`.
