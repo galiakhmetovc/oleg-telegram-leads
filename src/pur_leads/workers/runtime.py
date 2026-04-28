@@ -22,6 +22,7 @@ from pur_leads.models.telegram_sources import monitored_sources_table, source_me
 from pur_leads.services.audit import AuditService
 from pur_leads.services.catalog_candidates import CatalogCandidateService
 from pur_leads.services.catalog_sources import CatalogSourceService
+from pur_leads.services.classifier_snapshots import ClassifierSnapshotService
 from pur_leads.services.leads import LeadDetectionResult, LeadMatchInput, LeadService
 from pur_leads.services.scheduler import SchedulerService
 from pur_leads.services.settings import SettingsService
@@ -425,18 +426,29 @@ def build_catalog_handler_registry(
             raise ValueError("extract_catalog_facts payload.source_id must be a string")
         if chunk_id is not None and not isinstance(chunk_id, str):
             raise ValueError("extract_catalog_facts payload.chunk_id must be a string")
-        facts = await extractor.extract_catalog_facts(
-            source_id=source_id,
-            chunk_id=chunk_id,
-            payload=payload,
-        )
         run = candidate_service.start_extraction_run(
             run_type="catalog_extraction",
-            extractor_version=payload.get("extractor_version", "runtime-adapter"),
-            model=payload.get("model"),
-            prompt_version=payload.get("prompt_version"),
+            extractor_version=_extractor_metadata(
+                extractor, payload, "extractor_version", "runtime-adapter"
+            ),
+            model=_extractor_metadata(extractor, payload, "model", None),
+            prompt_version=_extractor_metadata(extractor, payload, "prompt_version", None),
             source_scope_json={"source_id": source_id, "chunk_id": chunk_id},
         )
+        try:
+            facts = await extractor.extract_catalog_facts(
+                source_id=source_id,
+                chunk_id=chunk_id,
+                payload=payload,
+            )
+        except Exception as exc:
+            candidate_service.finish_extraction_run(
+                run.id,
+                status="failed",
+                error=str(exc) or exc.__class__.__name__,
+                token_usage_json=_extractor_token_usage(extractor),
+            )
+            raise
         candidate_count = 0
         for extracted in facts:
             fact = candidate_service.create_extracted_fact(
@@ -456,10 +468,21 @@ def build_catalog_handler_registry(
                 created_by="system",
             )
             candidate_count += 1
+        if candidate_count:
+            ClassifierSnapshotService(session).build_snapshot(
+                created_by="system",
+                model="builtin-fuzzy",
+                settings_snapshot={
+                    "trigger": "catalog_extraction",
+                    "extraction_run_id": run.id,
+                },
+                notes="Automatically rebuilt after catalog extraction",
+            )
         candidate_service.finish_extraction_run(
             run.id,
             status="succeeded",
             stats_json={"fact_count": len(facts), "candidate_count": candidate_count},
+            token_usage_json=_extractor_token_usage(extractor),
         )
         return JobHandlerResult(
             result_summary={"fact_count": len(facts), "candidate_count": candidate_count}
@@ -748,6 +771,22 @@ def _checkpoint_after(handler_result: Any) -> Any:
     if hasattr(handler_result, "checkpoint_after"):
         return {"message_id": handler_result.checkpoint_after}
     return None
+
+
+def _extractor_metadata(
+    extractor: CatalogExtractorAdapter,
+    payload: dict[str, Any],
+    key: str,
+    default: Any,
+) -> Any:
+    value = getattr(extractor, key, None)
+    if value is not None:
+        return value
+    return payload.get(key, default)
+
+
+def _extractor_token_usage(extractor: CatalogExtractorAdapter) -> Any:
+    return getattr(extractor, "last_token_usage_json", None)
 
 
 def _result_summary(handler_result: Any) -> Any:

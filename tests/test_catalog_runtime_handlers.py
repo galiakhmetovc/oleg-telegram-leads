@@ -22,6 +22,9 @@ from pur_leads.models.audit import operational_events_table
 from pur_leads.models.catalog import (
     artifacts_table,
     catalog_candidates_table,
+    classifier_snapshot_entries_table,
+    classifier_versions_table,
+    extraction_runs_table,
     parsed_chunks_table,
 )
 from pur_leads.models.scheduler import scheduler_jobs_table
@@ -50,6 +53,15 @@ class FakeParser:
 
 
 class FakeExtractor:
+    extractor_version = "fake-extractor-v1"
+    model = "fake-model"
+    prompt_version = "fake-prompt-v1"
+    last_token_usage_json = {
+        "prompt_tokens": 10,
+        "completion_tokens": 5,
+        "total_tokens": 15,
+    }
+
     async def extract_catalog_facts(
         self, *, source_id: str | None, chunk_id: str | None, payload: dict
     ):
@@ -158,6 +170,50 @@ async def test_extract_catalog_facts_handler_creates_candidates(runtime_session)
     assert stored.result_summary_json == {"fact_count": 1, "candidate_count": 1}
     assert candidates[0]["canonical_name"] == "Dahua Hero A1"
     assert candidates[0]["status"] == "auto_pending"
+
+
+@pytest.mark.asyncio
+async def test_extract_catalog_facts_handler_stores_llm_metadata_and_rebuilds_snapshot(
+    runtime_session,
+):
+    source = CatalogSourceService(runtime_session).upsert_source(
+        source_type="manual_text",
+        origin="manual",
+        external_id="llm-extract-source",
+        raw_text="Dahua Hero A1",
+    )
+    chunk = CatalogSourceService(runtime_session).replace_parsed_chunks(
+        source.id,
+        chunks=["Dahua Hero A1"],
+        parser_name="test",
+        parser_version="1",
+    )[0]
+    SchedulerService(runtime_session).enqueue(
+        job_type="extract_catalog_facts",
+        scope_type="parser",
+        payload_json={"source_id": source.id, "chunk_id": chunk.id},
+    )
+    runtime = WorkerRuntime(
+        runtime_session,
+        handlers=build_catalog_handler_registry(runtime_session, extractor=FakeExtractor()),
+    )
+
+    result = await runtime.run_once()
+
+    run = runtime_session.execute(select(extraction_runs_table)).mappings().one()
+    version = runtime_session.execute(select(classifier_versions_table)).mappings().one()
+    entries = runtime_session.execute(select(classifier_snapshot_entries_table)).mappings().all()
+    assert result.status == "succeeded"
+    assert run["extractor_version"] == "fake-extractor-v1"
+    assert run["model"] == "fake-model"
+    assert run["prompt_version"] == "fake-prompt-v1"
+    assert run["token_usage_json"] == {
+        "prompt_tokens": 10,
+        "completion_tokens": 5,
+        "total_tokens": 15,
+    }
+    assert version["model"] == "builtin-fuzzy"
+    assert any(row["normalized_value"] == "dahua hero a1" for row in entries)
 
 
 @pytest.mark.asyncio

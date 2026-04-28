@@ -11,9 +11,14 @@ from pur_leads.core.time import utc_now
 from pur_leads.db.engine import create_sqlite_engine
 from pur_leads.db.migrations import upgrade_database
 from pur_leads.db.session import create_session_factory
+from pur_leads.integrations.ai.chat import AiChatCompletion
 from pur_leads.integrations.telegram.types import ResolvedTelegramSource, SourceAccessResult
 from pur_leads.models.audit import operational_events_table
-from pur_leads.models.catalog import catalog_candidates_table, parsed_chunks_table
+from pur_leads.models.catalog import (
+    catalog_candidates_table,
+    extraction_runs_table,
+    parsed_chunks_table,
+)
 from pur_leads.models.leads import lead_clusters_table, lead_events_table
 from pur_leads.models.telegram_sources import (
     monitored_sources_table,
@@ -242,6 +247,54 @@ def test_cli_worker_once_uses_builtin_heuristic_extractor(tmp_path, capsys):
     assert stored.result_summary_json == {"fact_count": 1, "candidate_count": 1}
     assert candidate["candidate_type"] == "item"
     assert candidate["canonical_name"] == "Управление освещением"
+
+
+def test_cli_worker_once_uses_configured_zai_llm_extractor(tmp_path, capsys, monkeypatch):
+    db_path = tmp_path / "cli.db"
+    engine = create_sqlite_engine(db_path)
+    upgrade_database(engine)
+    session_factory = create_session_factory(engine)
+    with session_factory() as session:
+        raw_source = CatalogSourceService(session).upsert_source(
+            source_type="telegram_message",
+            origin="telegram:purmaster",
+            external_id="18",
+            raw_text="Dahua Hero A1 Wi-Fi camera",
+        )
+        chunk = CatalogSourceService(session).replace_parsed_chunks(
+            raw_source.id,
+            chunks=["Dahua Hero A1 Wi-Fi camera"],
+            parser_name="test",
+            parser_version="1",
+        )[0]
+        job = SchedulerService(session).enqueue(
+            job_type="extract_catalog_facts",
+            scope_type="parser",
+            payload_json={"source_id": raw_source.id, "chunk_id": chunk.id},
+        )
+
+    monkeypatch.setenv("PUR_ZAI_API_KEY", "test-key")
+    monkeypatch.setenv("PUR_CATALOG_LLM_MODEL", "glm-4.7")
+    monkeypatch.setattr("pur_leads.cli.ZaiChatCompletionClient", FakeZaiChatCompletionClient)
+    FakeZaiChatCompletionClient.instances.clear()
+
+    main(["--database-path", str(db_path), "worker", "once"])
+
+    with session_factory() as session:
+        stored = SchedulerService(session).repository.get(job.id)
+        candidate = session.execute(select(catalog_candidates_table)).mappings().one()
+        run = session.execute(select(extraction_runs_table)).mappings().one()
+    output = capsys.readouterr().out
+    assert stored is not None
+    assert "succeeded job" in output
+    assert stored.result_summary_json == {"fact_count": 1, "candidate_count": 1}
+    assert candidate["canonical_name"] == "Dahua Hero A1"
+    assert candidate["normalized_value_json"]["terms"] == ["hero a1", "dahua hero"]
+    assert run["extractor_version"] == "pur-llm-catalog-v1"
+    assert run["model"] == "glm-4.7"
+    assert FakeZaiChatCompletionClient.instances[0].base_url == (
+        "https://api.z.ai/api/coding/paas/v4"
+    )
 
 
 def test_cli_worker_once_uses_configured_telethon_client(tmp_path, capsys, monkeypatch):
@@ -479,4 +532,36 @@ class FakePdfArtifactParser:
             chunks=["parsed pdf"],
             parser_name="fake-pdf",
             parser_version="1",
+        )
+
+
+class FakeZaiChatCompletionClient:
+    instances = []
+
+    def __init__(self, *, api_key, base_url, timeout_seconds=60.0) -> None:
+        self.api_key = api_key
+        self.base_url = base_url
+        self.timeout_seconds = timeout_seconds
+        self.instances.append(self)
+
+    async def complete(self, *, messages, model, temperature, max_tokens):  # noqa: ANN001
+        return AiChatCompletion(
+            content="""
+            {
+              "facts": [
+                {
+                  "fact_type": "product",
+                  "canonical_name": "Dahua Hero A1",
+                  "category": "video_surveillance",
+                  "terms": ["hero a1", "dahua hero"],
+                  "evidence_quote": "Dahua Hero A1 Wi-Fi camera",
+                  "confidence": 0.92
+                }
+              ]
+            }
+            """,
+            model=model,
+            request_id="fake-zai-request",
+            usage={"prompt_tokens": 20, "completion_tokens": 10, "total_tokens": 30},
+            raw_response={},
         )

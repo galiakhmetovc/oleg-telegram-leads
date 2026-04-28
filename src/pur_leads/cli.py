@@ -13,7 +13,9 @@ from pur_leads.core.config import load_settings
 from pur_leads.db.engine import create_sqlite_engine
 from pur_leads.db.migrations import upgrade_database
 from pur_leads.db.session import create_session_factory
+from pur_leads.integrations.ai.zai_client import ZaiChatCompletionClient
 from pur_leads.integrations.catalog.heuristic_extractor import HeuristicCatalogExtractor
+from pur_leads.integrations.catalog.llm_extractor import LlmCatalogExtractor
 from pur_leads.integrations.documents.pdf_parser import PdfArtifactParser
 from pur_leads.integrations.leads.fuzzy_classifier import FuzzyCatalogLeadClassifier
 from pur_leads.integrations.telegram.bot_notifier import TelegramBotLeadNotifier
@@ -170,7 +172,7 @@ def _build_worker_handlers(session):
         build_catalog_handler_registry(
             session,
             parser=PdfArtifactParser(),
-            extractor=HeuristicCatalogExtractor(session),
+            extractor=_build_catalog_extractor(session, settings),
         )
     )
     handlers.update(
@@ -194,6 +196,43 @@ def _build_lead_notifier(settings):
     if not settings.telegram_bot_token:
         return None
     return TelegramBotLeadNotifier(settings.telegram_bot_token)
+
+
+def _build_catalog_extractor(session, settings):
+    settings_service = SettingsService(session)
+    if not bool(settings_service.get("catalog_llm_extraction_enabled")):
+        return HeuristicCatalogExtractor(session)
+    provider = str(settings_service.get("catalog_llm_provider") or "zai")
+    api_key = settings.zai_api_key or _env_str("ZAI_API_KEY")
+    fallback = bool(settings_service.get("catalog_llm_fallback_to_heuristic"))
+    if provider != "zai" or not api_key:
+        if fallback:
+            return HeuristicCatalogExtractor(session)
+        raise ValueError("catalog LLM extractor is enabled but Z.AI is not configured")
+    base_url = str(
+        _setting_or_default(settings_service, "catalog_llm_base_url", settings.catalog_llm_base_url)
+    )
+    model = str(
+        _setting_or_default(settings_service, "catalog_llm_model", settings.catalog_llm_model)
+    )
+    temperature = float(_setting_or_default(settings_service, "catalog_llm_temperature", 0.0))
+    max_tokens = int(_setting_or_default(settings_service, "catalog_llm_max_tokens", 4096))
+    return LlmCatalogExtractor(
+        client=ZaiChatCompletionClient(
+            api_key=api_key,
+            base_url=base_url,
+            timeout_seconds=settings.catalog_llm_timeout_seconds,
+        ),
+        model=model,
+        session=session,
+        temperature=temperature,
+        max_tokens=max_tokens,
+    )
+
+
+def _setting_or_default(settings_service: SettingsService, key: str, default):
+    record = settings_service.repository.get(key)
+    return record.value_json if record is not None else default
 
 
 def _build_telegram_client(session):
