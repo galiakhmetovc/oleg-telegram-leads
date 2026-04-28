@@ -255,6 +255,26 @@ class SchedulerRepository:
         )
         return self.get(job_id)  # type: ignore[return-value]
 
+    def fail_permanently(self, job_id: str, *, error: str, now: datetime) -> SchedulerJobRecord:
+        job = self.get(job_id)
+        if job is None:
+            raise KeyError(job_id)
+        self.session.execute(
+            update(scheduler_jobs_table)
+            .where(scheduler_jobs_table.c.id == job_id)
+            .values(
+                status="failed",
+                attempt_count=job.attempt_count + 1,
+                next_retry_at=None,
+                locked_by=None,
+                locked_at=None,
+                lease_expires_at=None,
+                last_error=error,
+                updated_at=self._to_db_datetime(now),
+            )
+        )
+        return self.get(job_id)  # type: ignore[return-value]
+
     @classmethod
     def _record_from_row(cls, row) -> SchedulerJobRecord:  # type: ignore[no-untyped-def]
         data = dict(row)

@@ -1,0 +1,101 @@
+import pytest
+from sqlalchemy import select
+
+from pur_leads.db.engine import create_sqlite_engine
+from pur_leads.db.migrations import upgrade_database
+from pur_leads.db.session import create_session_factory
+from pur_leads.models.audit import operational_events_table
+from pur_leads.services.scheduler import SchedulerService
+from pur_leads.workers.runtime import JobHandlerResult, WorkerRuntime
+
+
+@pytest.fixture
+def runtime_session(tmp_path):
+    engine = create_sqlite_engine(tmp_path / "test.db")
+    upgrade_database(engine)
+    session_factory = create_session_factory(engine)
+
+    with session_factory() as session:
+        yield session
+
+
+@pytest.mark.asyncio
+async def test_worker_once_reports_idle_without_due_jobs(runtime_session):
+    runtime = WorkerRuntime(runtime_session, handlers={})
+
+    result = await runtime.run_once()
+
+    assert result.status == "idle"
+    assert result.job_id is None
+
+
+@pytest.mark.asyncio
+async def test_worker_once_executes_registered_handler_and_marks_succeeded(runtime_session):
+    scheduler = SchedulerService(runtime_session)
+    job = scheduler.enqueue(
+        job_type="build_ai_batch", scope_type="global", payload_json={"value": 3}
+    )
+    handled: list[str] = []
+
+    async def handler(acquired_job):
+        handled.append(acquired_job.id)
+        return JobHandlerResult(result_summary={"value": acquired_job.payload_json["value"] + 1})
+
+    runtime = WorkerRuntime(runtime_session, handlers={"build_ai_batch": handler})
+
+    result = await runtime.run_once()
+
+    stored = scheduler.repository.get(job.id)
+    assert stored is not None
+    assert result.status == "succeeded"
+    assert handled == [job.id]
+    assert stored.status == "succeeded"
+    assert stored.result_summary_json == {"value": 4}
+
+
+@pytest.mark.asyncio
+async def test_worker_once_fails_unsupported_job_with_operational_event(runtime_session):
+    scheduler = SchedulerService(runtime_session)
+    job = scheduler.enqueue(job_type="parse_artifact", scope_type="parser")
+    runtime = WorkerRuntime(runtime_session, handlers={})
+
+    result = await runtime.run_once()
+
+    stored = scheduler.repository.get(job.id)
+    event = runtime_session.execute(select(operational_events_table)).mappings().one()
+    assert stored is not None
+    assert result.status == "failed"
+    assert stored.status == "failed"
+    assert stored.last_error == "unsupported job type: parse_artifact"
+    assert event["event_type"] == "scheduler"
+    assert event["severity"] == "error"
+    assert event["entity_id"] == job.id
+    assert event["details_json"]["reason"] == "unsupported_job_type"
+
+
+@pytest.mark.asyncio
+async def test_worker_once_respects_userbot_serialization(runtime_session):
+    scheduler = SchedulerService(runtime_session)
+    scheduler.enqueue(
+        job_type="poll_monitored_source",
+        scope_type="telegram_source",
+        userbot_account_id="userbot-1",
+        monitored_source_id="source-1",
+    )
+    scheduler.enqueue(
+        job_type="poll_monitored_source",
+        scope_type="telegram_source",
+        userbot_account_id="userbot-1",
+        monitored_source_id="source-2",
+    )
+    first = scheduler.acquire_next("other-worker")
+    assert first is not None
+
+    async def handler(acquired_job):
+        return JobHandlerResult(result_summary={"handled": acquired_job.id})
+
+    runtime = WorkerRuntime(runtime_session, handlers={"poll_monitored_source": handler})
+
+    result = await runtime.run_once()
+
+    assert result.status == "idle"

@@ -104,3 +104,8 @@ class SchedulerService:
         job = self.repository.fail(job_id, error=error, retry_at=retry_at, now=utc_now())
         self.session.commit()
         return job
+
+    def fail_permanently(self, job_id: str, *, error: str) -> SchedulerJobRecord:
+        job = self.repository.fail_permanently(job_id, error=error, now=utc_now())
+        self.session.commit()
+        return job

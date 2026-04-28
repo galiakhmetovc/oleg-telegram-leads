@@ -134,6 +134,8 @@ Behaviors:
 
 ## Task 7: Runtime Worker Loop
 
+- [x] Implement runtime loop and verify handler/unsupported/serialization tests.
+
 **Files:**
 - Create: `src/pur_leads/workers/runtime.py`
 - Modify: `src/pur_leads/cli.py`

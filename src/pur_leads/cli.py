@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import asyncio
 import json
 from collections.abc import Sequence
 from pathlib import Path
@@ -11,8 +12,8 @@ from pur_leads.core.config import load_settings
 from pur_leads.db.engine import create_sqlite_engine
 from pur_leads.db.migrations import upgrade_database
 from pur_leads.db.session import create_session_factory
-from pur_leads.services.scheduler import SchedulerService
 from pur_leads.services.settings import SettingsService
+from pur_leads.workers.runtime import WorkerRuntime
 
 
 def main(argv: Sequence[str] | None = None) -> None:
@@ -82,12 +83,12 @@ def _settings_set(args: argparse.Namespace) -> None:
 
 def _worker_once(args: argparse.Namespace) -> None:
     with _session_from_args(args) as session:
-        service = SchedulerService(session)
-        job = service.acquire_next("cli-worker")
-        if job is None:
+        runtime = WorkerRuntime(session, handlers={}, worker_name="cli-worker")
+        result = asyncio.run(runtime.run_once())
+        if result.status == "idle":
             print("no queued jobs")
             return
-        print(f"acquired job {job.id} ({job.job_type})")
+        print(f"{result.status} job {result.job_id} ({result.job_type})")
 
 
 def _web(args: argparse.Namespace) -> None:
