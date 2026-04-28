@@ -79,6 +79,12 @@ class FakeLeadClassifier:
         ]
 
 
+class PartialLeadClassifier(FakeLeadClassifier):
+    async def classify_message_batch(self, *, messages: list, payload: dict):
+        results = await super().classify_message_batch(messages=messages, payload=payload)
+        return results[:1]
+
+
 @pytest.fixture
 def runtime_session(tmp_path):
     engine = create_sqlite_engine(tmp_path / "test.db")
@@ -185,6 +191,56 @@ async def test_classify_message_batch_handler_records_events_clusters_and_marks_
         unclassified_message_id,
     ]
     assert classifier.seen_payload == {"limit": 10, "cluster_window_minutes": 45}
+
+
+@pytest.mark.asyncio
+async def test_classify_message_batch_fails_when_adapter_omits_loaded_messages(runtime_session):
+    session = runtime_session["session"]
+    first_message_id = _insert_source_message(
+        session,
+        runtime_session["source_id"],
+        telegram_message_id=105,
+        sender_id="sender-1",
+        text="нужна камера",
+        status="queued",
+    )
+    second_message_id = _insert_source_message(
+        session,
+        runtime_session["source_id"],
+        telegram_message_id=106,
+        sender_id="sender-2",
+        text="подберите камеру на дачу",
+        status="queued",
+    )
+    classifier = PartialLeadClassifier(
+        classifier_version_id=runtime_session["classifier_version_id"],
+        snapshot_entry_id=runtime_session["snapshot_entry_id"],
+        category_id=runtime_session["category_id"],
+        term_id=runtime_session["term_id"],
+    )
+    job = SchedulerService(session).enqueue(
+        job_type="classify_message_batch",
+        scope_type="telegram_source",
+        monitored_source_id=runtime_session["source_id"],
+    )
+    runtime = WorkerRuntime(
+        session,
+        handlers=build_lead_handler_registry(session, classifier=classifier),
+    )
+
+    result = await runtime.run_once()
+
+    stored = SchedulerService(session).repository.get(job.id)
+    messages = {
+        row["id"]: row["classification_status"]
+        for row in session.execute(select(source_messages_table)).mappings().all()
+    }
+    assert stored is not None
+    assert result.status == "failed"
+    assert "missing classifier results" in (stored.last_error or "")
+    assert messages[first_message_id] == "queued"
+    assert messages[second_message_id] == "queued"
+    assert session.execute(select(lead_events_table)).mappings().all() == []
 
 
 @pytest.mark.asyncio

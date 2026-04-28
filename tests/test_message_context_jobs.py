@@ -128,7 +128,7 @@ async def test_fetch_context_stores_reply_ancestors_and_neighbor_links(context_s
         .all()
     )
     assert [row["telegram_message_id"] for row in messages] == [80, 90, 98, 99, 100, 101]
-    assert all(row["classification_status"] == "pending" for row in messages)
+    assert all(row["classification_status"] == "unclassified" for row in messages)
     assert all(row["is_archived_stub"] is False for row in messages)
     assert all(row["text_archived"] is False for row in messages)
     assert all(row["caption_archived"] is False for row in messages)
@@ -199,7 +199,7 @@ def _insert_source_message(session, source_id: str, message_id: int) -> str:
             forward_metadata_json=None,
             raw_metadata_json={"message_id": message_id},
             fetched_at=now,
-            classification_status="pending",
+            classification_status="unclassified",
             archive_pointer_id=None,
             is_archived_stub=False,
             text_archived=False,

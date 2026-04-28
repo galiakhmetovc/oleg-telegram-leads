@@ -61,7 +61,10 @@ def test_record_lead_event_with_match_evidence(lead_session):
     assert event.id == event_row["id"]
     assert event_row["source_message_id"] == message_id
     assert event_row["monitored_source_id"] == source_id
+    assert event_row["chat_id"] == "-100123456"
     assert event_row["telegram_message_id"] == 100
+    assert event_row["message_url"] == "https://t.me/test/100"
+    assert event_row["sender_name"] == "Ivan"
     assert event_row["message_text"] == "нужна камера на дачу"
     assert event_row["decision"] == "lead"
     assert event_row["event_status"] == "active"
@@ -115,6 +118,8 @@ def _insert_monitored_source(session) -> str:
         insert(monitored_sources_table).values(
             id=row_id,
             source_kind="telegram_supergroup",
+            telegram_id="-100123456",
+            username="test",
             input_ref="@test",
             source_purpose="lead_monitoring",
             priority="normal",
@@ -151,7 +156,7 @@ def _insert_source_message(session, source_id: str) -> str:
             reply_to_message_id=None,
             thread_id=None,
             forward_metadata_json=None,
-            raw_metadata_json={},
+            raw_metadata_json={"sender_display": "Ivan"},
             fetched_at=now,
             classification_status="pending",
             archive_pointer_id=None,

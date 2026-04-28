@@ -108,6 +108,10 @@ async def test_poll_active_source_persists_messages_and_checkpoint(polling_sessi
     assert client.fetch_calls == [(40, 100)]
     assert source_row["checkpoint_message_id"] == 42
     assert [row["telegram_message_id"] for row in message_rows] == [41, 42]
+    assert [row["classification_status"] for row in message_rows] == [
+        "unclassified",
+        "unclassified",
+    ]
     assert message_rows[0]["text"] == "text 41"
     assert message_rows[0]["caption"] == "caption 41"
     assert message_rows[0]["sender_id"] == "sender-1"

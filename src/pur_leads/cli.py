@@ -13,7 +13,11 @@ from pur_leads.db.engine import create_sqlite_engine
 from pur_leads.db.migrations import upgrade_database
 from pur_leads.db.session import create_session_factory
 from pur_leads.services.settings import SettingsService
-from pur_leads.workers.runtime import WorkerRuntime
+from pur_leads.workers.runtime import (
+    WorkerRuntime,
+    build_catalog_handler_registry,
+    build_lead_handler_registry,
+)
 
 
 def main(argv: Sequence[str] | None = None) -> None:
@@ -83,7 +87,10 @@ def _settings_set(args: argparse.Namespace) -> None:
 
 def _worker_once(args: argparse.Namespace) -> None:
     with _session_from_args(args) as session:
-        runtime = WorkerRuntime(session, handlers={}, worker_name="cli-worker")
+        handlers = {}
+        handlers.update(build_catalog_handler_registry(session))
+        handlers.update(build_lead_handler_registry(session))
+        runtime = WorkerRuntime(session, handlers=handlers, worker_name="cli-worker")
         result = asyncio.run(runtime.run_once())
         if result.status == "idle":
             print("no queued jobs")

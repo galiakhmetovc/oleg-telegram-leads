@@ -152,7 +152,7 @@ class MessageContextWorker:
                 forward_metadata_json=message.forward_metadata_json,
                 raw_metadata_json=message.raw_metadata_json,
                 fetched_at=now,
-                classification_status="pending",
+                classification_status="unclassified",
                 archive_pointer_id=None,
                 is_archived_stub=False,
                 text_archived=False,

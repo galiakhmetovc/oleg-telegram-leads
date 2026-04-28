@@ -387,6 +387,7 @@ def build_lead_handler_registry(
 
         results = await classifier.classify_message_batch(messages=messages, payload=payload)
         message_ids = {message.source_message_id for message in messages}
+        _validate_classifier_results(message_ids, results)
         cluster_ids: set[str] = set()
         event_count = 0
         window_minutes = _positive_int(payload.get("cluster_window_minutes"), default=60)
@@ -506,7 +507,26 @@ def _classification_statuses(payload: dict[str, Any]) -> list[str]:
     configured = payload.get("classification_statuses")
     if isinstance(configured, list) and all(isinstance(value, str) for value in configured):
         return configured
-    return ["queued", "unclassified", "pending"]
+    return ["queued", "unclassified"]
+
+
+def _validate_classifier_results(
+    message_ids: set[str],
+    results: list[LeadClassifierResult],
+) -> None:
+    result_ids = [result.source_message_id for result in results]
+    unique_result_ids = set(result_ids)
+    unknown_ids = unique_result_ids - message_ids
+    missing_ids = message_ids - unique_result_ids
+    duplicate_ids = sorted(
+        result_id for result_id in unique_result_ids if result_ids.count(result_id) > 1
+    )
+    if unknown_ids:
+        raise ValueError(f"classifier returned unknown source_message_id: {sorted(unknown_ids)}")
+    if missing_ids:
+        raise ValueError(f"missing classifier results for source_message_id: {sorted(missing_ids)}")
+    if duplicate_ids:
+        raise ValueError(f"duplicate classifier results for source_message_id: {duplicate_ids}")
 
 
 def _positive_int(value: Any, *, default: int) -> int:

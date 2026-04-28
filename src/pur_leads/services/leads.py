@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 from pur_leads.core.time import utc_now
 from pur_leads.models.catalog import classifier_snapshot_entries_table
 from pur_leads.models.leads import lead_matches_table
-from pur_leads.models.telegram_sources import source_messages_table
+from pur_leads.models.telegram_sources import monitored_sources_table, source_messages_table
 from pur_leads.repositories.leads import (
     FeedbackEventRecord,
     LeadClusterRecord,
@@ -68,16 +68,17 @@ class LeadService:
             return existing
 
         message = self._message(source_message_id)
+        source = self._source(message["monitored_source_id"])
         now = utc_now()
         event = self.repository.create_event(
             source_message_id=source_message_id,
             monitored_source_id=message["monitored_source_id"],
             raw_source_id=message["raw_source_id"],
-            chat_id=message["monitored_source_id"],
+            chat_id=_chat_id(source),
             telegram_message_id=message["telegram_message_id"],
-            message_url=None,
+            message_url=_message_url(source, message),
             sender_id=message["sender_id"],
-            sender_name=None,
+            sender_name=_sender_name(message),
             message_text=_message_text(message),
             lead_cluster_id=None,
             detected_at=now,
@@ -458,6 +459,20 @@ class LeadService:
             raise KeyError(source_message_id)
         return dict(row)
 
+    def _source(self, monitored_source_id: str) -> dict[str, Any]:
+        row = (
+            self.session.execute(
+                select(monitored_sources_table).where(
+                    monitored_sources_table.c.id == monitored_source_id
+                )
+            )
+            .mappings()
+            .first()
+        )
+        if row is None:
+            raise KeyError(monitored_source_id)
+        return dict(row)
+
     def _snapshot_entry(self, entry_id: str | None) -> dict[str, Any] | None:
         if entry_id is None:
             return None
@@ -527,6 +542,36 @@ class LeadService:
 def _message_text(message: dict[str, Any]) -> str | None:
     parts = [part for part in (message.get("text"), message.get("caption")) if part]
     return "\n".join(parts) if parts else None
+
+
+def _chat_id(source: dict[str, Any]) -> str | None:
+    return source.get("telegram_id") or source.get("input_ref")
+
+
+def _message_url(source: dict[str, Any], message: dict[str, Any]) -> str | None:
+    telegram_message_id = message["telegram_message_id"]
+    username = source.get("username")
+    input_ref = source.get("input_ref") or ""
+    if not username and isinstance(input_ref, str) and input_ref.startswith("@"):
+        username = input_ref[1:]
+    if username:
+        return f"https://t.me/{username.lstrip('@')}/{telegram_message_id}"
+
+    telegram_id = source.get("telegram_id")
+    if isinstance(telegram_id, str) and telegram_id.startswith("-100"):
+        return f"https://t.me/c/{telegram_id[4:]}/{telegram_message_id}"
+    return None
+
+
+def _sender_name(message: dict[str, Any]) -> str | None:
+    metadata = message.get("raw_metadata_json") or {}
+    if not isinstance(metadata, dict):
+        return None
+    for key in ("sender_display", "sender_name", "from_name"):
+        value = metadata.get(key)
+        if isinstance(value, str) and value.strip():
+            return value
+    return None
 
 
 _CLUSTER_FEEDBACK_ACTIONS = {
