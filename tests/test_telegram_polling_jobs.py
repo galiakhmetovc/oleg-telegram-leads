@@ -269,6 +269,62 @@ async def test_poll_catalog_source_creates_raw_source_chunks_and_document_job(tm
 
 
 @pytest.mark.asyncio
+async def test_poll_catalog_source_enqueues_allowed_external_page_job(tmp_path):
+    engine = create_sqlite_engine(tmp_path / "test.db")
+    upgrade_database(engine)
+    session_factory = create_session_factory(engine)
+
+    with session_factory() as session:
+        service = TelegramSourceService(session)
+        source = service.create_draft(
+            "https://t.me/purmaster",
+            purpose="catalog_ingestion",
+            added_by="admin",
+        )
+        service.activate(source.id, actor="admin")
+        service.reset_checkpoint(source.id, message_id=40, actor="admin", confirm=True)
+        client = FakeTelegramClient(
+            [
+                _message_with_values(
+                    41,
+                    text=(
+                        "Подробности: "
+                        "https://telegra.ph/PUR-Umnyj-Dom-glazami-inzhenera-01-31 "
+                        "и неразрешенная https://example.com/vendor"
+                    ),
+                    caption=None,
+                    media_metadata=None,
+                )
+            ]
+        )
+        worker = TelegramPollingWorker(session, client)
+
+        result = await worker.poll_monitored_source(source.id, limit=100)
+
+        message_row = session.execute(select(source_messages_table)).mappings().one()
+        raw_source = session.execute(select(sources_table)).mappings().one()
+        external_jobs = (
+            session.execute(
+                select(scheduler_jobs_table).where(
+                    scheduler_jobs_table.c.job_type == "fetch_external_page"
+                )
+            )
+            .mappings()
+            .all()
+        )
+        assert result.inserted_count == 1
+        assert len(external_jobs) == 1
+        assert external_jobs[0]["source_message_id"] == message_row["id"]
+        assert external_jobs[0]["monitored_source_id"] == source.id
+        assert external_jobs[0]["payload_json"] == {
+            "url": "https://telegra.ph/PUR-Umnyj-Dom-glazami-inzhenera-01-31",
+            "parent_source_id": raw_source["id"],
+            "source_message_id": message_row["id"],
+            "monitored_source_id": source.id,
+        }
+
+
+@pytest.mark.asyncio
 async def test_poll_deduplicates_by_source_and_message_id(polling_session):
     session, source_id = polling_session
     client = FakeTelegramClient([_message(41), _message(41), _message(42)])

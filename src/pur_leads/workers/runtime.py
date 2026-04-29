@@ -8,11 +8,13 @@ from dataclasses import asdict, dataclass, is_dataclass, replace
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Any, Protocol, cast
+from urllib.parse import urlsplit, urlunsplit
 
 from sqlalchemy import and_, or_, select, update
 from sqlalchemy.orm import Session
 
 from pur_leads.core.time import utc_now
+from pur_leads.integrations.catalog.external_page import FetchedExternalPage
 from pur_leads.integrations.telegram.client import TelegramClientPort
 from pur_leads.integrations.telegram.types import ResolvedTelegramSource
 from pur_leads.models.scheduler import scheduler_jobs_table
@@ -131,6 +133,11 @@ class CatalogExtractorAdapter(Protocol):
         payload: dict[str, Any],
     ) -> list[CatalogExtractedFact]:
         """Extract catalog facts from a source/chunk scope."""
+
+
+class ExternalPageFetcherAdapter(Protocol):
+    async def fetch_page(self, *, url: str, payload: dict[str, Any]) -> FetchedExternalPage:
+        """Fetch one external page into readable text."""
 
 
 class LeadClassifierAdapter(Protocol):
@@ -377,6 +384,7 @@ def build_catalog_handler_registry(
     *,
     parser: ArtifactParserAdapter | None = None,
     extractor: CatalogExtractorAdapter | None = None,
+    external_page_fetcher: ExternalPageFetcherAdapter | None = None,
 ) -> dict[str, JobHandler]:
     source_service = CatalogSourceService(session)
     candidate_service = CatalogCandidateService(session)
@@ -493,7 +501,64 @@ def build_catalog_handler_registry(
             result_summary={"fact_count": len(facts), "candidate_count": candidate_count}
         )
 
-    return {"parse_artifact": parse_artifact, "extract_catalog_facts": extract_catalog_facts}
+    async def fetch_external_page(job: SchedulerJobRecord) -> JobHandlerResult:
+        if external_page_fetcher is None:
+            raise ValueError("fetch_external_page adapter is not configured")
+        payload = job.payload_json or {}
+        url = payload.get("url")
+        if not isinstance(url, str) or not url.strip():
+            raise ValueError("fetch_external_page requires payload.url")
+        fetched = await external_page_fetcher.fetch_page(url=url.strip(), payload=payload)
+        normalized_url = _normalize_external_url(fetched.final_url or fetched.url)
+        source = source_service.upsert_source(
+            source_type=_external_page_source_type(normalized_url),
+            origin=_external_page_origin(normalized_url),
+            external_id=normalized_url,
+            url=normalized_url,
+            title=fetched.title,
+            fetched_at=utc_now(),
+            raw_text=fetched.text,
+            metadata_json={
+                "requested_url": fetched.url,
+                "final_url": fetched.final_url,
+                "status_code": fetched.status_code,
+                "content_type": fetched.content_type,
+                "parent_source_id": payload.get("parent_source_id"),
+                "source_message_id": payload.get("source_message_id"),
+                "monitored_source_id": payload.get("monitored_source_id"),
+            },
+        )
+        chunks = source_service.replace_parsed_chunks(
+            source.id,
+            chunks=_chunk_text(fetched.text),
+            parser_name="external-page-text",
+            parser_version="1",
+        )
+        for chunk in chunks:
+            scheduler.enqueue(
+                job_type="extract_catalog_facts",
+                scope_type="parser",
+                scope_id=chunk.id,
+                idempotency_key=f"extract-catalog-facts:{chunk.id}",
+                payload_json={
+                    "source_id": chunk.source_id,
+                    "chunk_id": chunk.id,
+                    "extractor_version": "external-page-runtime",
+                },
+            )
+        return JobHandlerResult(
+            result_summary={
+                "source_id": source.id,
+                "chunk_count": len(chunks),
+                "status_code": fetched.status_code,
+            }
+        )
+
+    return {
+        "parse_artifact": parse_artifact,
+        "extract_catalog_facts": extract_catalog_facts,
+        "fetch_external_page": fetch_external_page,
+    }
 
 
 def build_lead_handler_registry(
@@ -929,6 +994,52 @@ def _extractor_metadata(
 
 def _extractor_token_usage(extractor: CatalogExtractorAdapter) -> Any:
     return getattr(extractor, "last_token_usage_json", None)
+
+
+def _normalize_external_url(url: str) -> str:
+    parsed = urlsplit(url.strip())
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        raise ValueError("external page URL must be absolute http(s)")
+    return urlunsplit(
+        (
+            parsed.scheme.lower(),
+            parsed.netloc.lower(),
+            parsed.path.rstrip("/") or "/",
+            parsed.query,
+            "",
+        )
+    )
+
+
+def _external_page_source_type(url: str) -> str:
+    host = urlsplit(url).netloc.lower()
+    return "telegraph_page" if host == "telegra.ph" else "external_page"
+
+
+def _external_page_origin(url: str) -> str:
+    return urlsplit(url).netloc.lower()
+
+
+def _chunk_text(text: str, *, max_chars: int = 6000) -> list[str]:
+    normalized = text.strip()
+    if not normalized:
+        return []
+    chunks: list[str] = []
+    current: list[str] = []
+    current_size = 0
+    for paragraph in normalized.splitlines() or [normalized]:
+        paragraph = paragraph.strip()
+        if not paragraph:
+            continue
+        if current and current_size + len(paragraph) + 1 > max_chars:
+            chunks.append("\n".join(current))
+            current = []
+            current_size = 0
+        current.append(paragraph)
+        current_size += len(paragraph) + 1
+    if current:
+        chunks.append("\n".join(current))
+    return chunks or [normalized[:max_chars]]
 
 
 def _result_summary(handler_result: Any) -> Any:

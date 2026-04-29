@@ -14,6 +14,7 @@ from pur_leads.db.engine import create_sqlite_engine
 from pur_leads.db.migrations import upgrade_database
 from pur_leads.db.session import create_session_factory
 from pur_leads.integrations.ai.zai_client import ZaiChatCompletionClient
+from pur_leads.integrations.catalog.external_page import HttpExternalPageFetcher
 from pur_leads.integrations.catalog.heuristic_extractor import HeuristicCatalogExtractor
 from pur_leads.integrations.catalog.llm_extractor import LlmCatalogExtractor
 from pur_leads.integrations.documents.pdf_parser import PdfArtifactParser
@@ -173,6 +174,7 @@ def _build_worker_handlers(session):
             session,
             parser=PdfArtifactParser(),
             extractor=_build_catalog_extractor(session, settings),
+            external_page_fetcher=_build_external_page_fetcher(session),
         )
     )
     handlers.update(
@@ -228,6 +230,15 @@ def _build_catalog_extractor(session, settings):
         temperature=temperature,
         max_tokens=max_tokens,
     )
+
+
+def _build_external_page_fetcher(session) -> HttpExternalPageFetcher:
+    settings_service = SettingsService(session)
+    timeout_seconds = float(
+        _setting_or_default(settings_service, "external_page_fetch_timeout_seconds", 20)
+    )
+    max_bytes = int(_setting_or_default(settings_service, "external_page_max_bytes", 1_048_576))
+    return HttpExternalPageFetcher(timeout_seconds=timeout_seconds, max_bytes=max_bytes)
 
 
 def _setting_or_default(settings_service: SettingsService, key: str, default):

@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import hashlib
+import re
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any
+from urllib.parse import urlsplit, urlunsplit
 
 from sqlalchemy import insert, select, update
 from sqlalchemy.orm import Session
@@ -18,6 +21,7 @@ from pur_leads.models.telegram_sources import source_messages_table
 from pur_leads.repositories.telegram_sources import MonitoredSourceRecord, TelegramSourceRepository
 from pur_leads.services.catalog_sources import CatalogSourceService
 from pur_leads.services.scheduler import SchedulerService
+from pur_leads.services.settings import SettingsService
 
 
 @dataclass(frozen=True)
@@ -44,6 +48,7 @@ class TelegramPollingWorker:
         self.sources = TelegramSourceRepository(session)
         self.catalog_sources = CatalogSourceService(session)
         self.scheduler = SchedulerService(session)
+        self.settings = SettingsService(session)
 
     async def poll_monitored_source(
         self,
@@ -224,6 +229,12 @@ class TelegramPollingWorker:
                 parser_name="telegram-message-text",
                 parser_version="1",
             )
+            self._enqueue_external_page_fetches(
+                source=source,
+                source_message_id=source_message_id,
+                raw_source_id=raw_source.id,
+                text=raw_text,
+            )
         if _is_downloadable_document(message.media_metadata_json):
             self.scheduler.enqueue(
                 job_type="download_artifact",
@@ -238,6 +249,36 @@ class TelegramPollingWorker:
                     "source_message_id": source_message_id,
                     "telegram_message_id": message.telegram_message_id,
                     "media_metadata": message.media_metadata_json,
+                },
+            )
+
+    def _enqueue_external_page_fetches(
+        self,
+        *,
+        source: MonitoredSourceRecord,
+        source_message_id: str,
+        raw_source_id: str,
+        text: str,
+    ) -> None:
+        if self.settings.get("external_page_ingestion_enabled") is False:
+            return
+        allowed_domains = _allowed_external_domains(
+            self.settings.get("external_page_allowed_domains")
+        )
+        for url in _external_page_urls(text, allowed_domains=allowed_domains):
+            digest = hashlib.sha256(url.encode("utf-8")).hexdigest()[:16]
+            self.scheduler.enqueue(
+                job_type="fetch_external_page",
+                scope_type="parser",
+                scope_id=raw_source_id,
+                monitored_source_id=source.id,
+                source_message_id=source_message_id,
+                idempotency_key=f"external-page:{digest}",
+                payload_json={
+                    "url": url,
+                    "parent_source_id": raw_source_id,
+                    "source_message_id": source_message_id,
+                    "monitored_source_id": source.id,
                 },
             )
 
@@ -318,6 +359,48 @@ def _is_downloadable_document(media_metadata: Any) -> bool:
         return False
     document = media_metadata.get("document")
     return isinstance(document, dict) and document.get("downloadable") is True
+
+
+_URL_RE = re.compile(r"https?://[^\s<>()\"']+")
+
+
+def _external_page_urls(text: str, *, allowed_domains: set[str]) -> list[str]:
+    urls: list[str] = []
+    seen: set[str] = set()
+    for match in _URL_RE.finditer(text):
+        normalized = _normalize_external_url(match.group(0).rstrip(".,;:!?)]}"))
+        if normalized is None:
+            continue
+        host = urlsplit(normalized).netloc.lower()
+        if host not in allowed_domains:
+            continue
+        if normalized in seen:
+            continue
+        seen.add(normalized)
+        urls.append(normalized)
+    return urls
+
+
+def _normalize_external_url(url: str) -> str | None:
+    parsed = urlsplit(url.strip())
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        return None
+    return urlunsplit(
+        (
+            parsed.scheme.lower(),
+            parsed.netloc.lower(),
+            parsed.path.rstrip("/") or "/",
+            parsed.query,
+            "",
+        )
+    )
+
+
+def _allowed_external_domains(value: Any) -> set[str]:
+    if not isinstance(value, list):
+        return {"telegra.ph"}
+    domains = {item.strip().lower() for item in value if isinstance(item, str) and item.strip()}
+    return domains or {"telegra.ph"}
 
 
 def _resolved_source_from_record(source: MonitoredSourceRecord) -> ResolvedTelegramSource:

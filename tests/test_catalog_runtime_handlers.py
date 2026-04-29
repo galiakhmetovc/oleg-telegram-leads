@@ -34,6 +34,7 @@ from pur_leads.services.scheduler import SchedulerService
 from pur_leads.services.telegram_sources import TelegramSourceService
 from pur_leads.workers.runtime import (
     CatalogExtractedFact,
+    FetchedExternalPage,
     ParsedArtifact,
     WorkerRuntime,
     build_catalog_handler_registry,
@@ -77,6 +78,18 @@ class FakeExtractor:
                 evidence_quote="Dahua Hero A1",
             )
         ]
+
+
+class FakeExternalPageFetcher:
+    async def fetch_page(self, *, url: str, payload: dict):
+        return FetchedExternalPage(
+            url=url,
+            final_url=url,
+            title="PUR smart home",
+            text="Dahua Hero A1 и умные реле для дома",
+            status_code=200,
+            content_type="text/html; charset=utf-8",
+        )
 
 
 @pytest.fixture
@@ -214,6 +227,56 @@ async def test_extract_catalog_facts_handler_stores_llm_metadata_and_rebuilds_sn
     }
     assert version["model"] == "builtin-fuzzy"
     assert any(row["normalized_value"] == "dahua hero a1" for row in entries)
+
+
+@pytest.mark.asyncio
+async def test_fetch_external_page_handler_stores_page_chunk_and_extract_job(runtime_session):
+    parent_source = CatalogSourceService(runtime_session).upsert_source(
+        source_type="telegram_message",
+        origin="telegram:purmaster",
+        external_id="41",
+        raw_text="source link",
+    )
+    job = SchedulerService(runtime_session).enqueue(
+        job_type="fetch_external_page",
+        scope_type="parser",
+        payload_json={
+            "url": "https://telegra.ph/PUR-Umnyj-Dom-glazami-inzhenera-01-31",
+            "parent_source_id": parent_source.id,
+        },
+    )
+    runtime = WorkerRuntime(
+        runtime_session,
+        handlers=build_catalog_handler_registry(
+            runtime_session,
+            external_page_fetcher=FakeExternalPageFetcher(),
+        ),
+    )
+
+    result = await runtime.run_once()
+
+    stored = SchedulerService(runtime_session).repository.get(job.id)
+    chunks = runtime_session.execute(select(parsed_chunks_table)).mappings().all()
+    extract_job = (
+        runtime_session.execute(
+            select(scheduler_jobs_table).where(
+                scheduler_jobs_table.c.job_type == "extract_catalog_facts"
+            )
+        )
+        .mappings()
+        .one()
+    )
+    assert stored is not None
+    assert result.status == "succeeded"
+    assert stored.result_summary_json == {
+        "source_id": chunks[0]["source_id"],
+        "chunk_count": 1,
+        "status_code": 200,
+    }
+    assert chunks[0]["text"] == "Dahua Hero A1 и умные реле для дома"
+    assert chunks[0]["parser_name"] == "external-page-text"
+    assert extract_job["payload_json"]["source_id"] == chunks[0]["source_id"]
+    assert extract_job["payload_json"]["chunk_id"] == chunks[0]["id"]
 
 
 @pytest.mark.asyncio
