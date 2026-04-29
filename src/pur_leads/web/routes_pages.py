@@ -597,6 +597,17 @@ def operations_page(
                       <div id="operations-access-checks" class="table-list" aria-live="polite"></div>
                     </section>
                     <section>
+                      <div class="section-head">
+                        <h2>Backups</h2>
+                        <button id="operations-backup-create" type="button">Backup</button>
+                      </div>
+                      <div id="operations-backups" class="table-list" aria-live="polite"></div>
+                    </section>
+                    <section>
+                      <h2>Restore Checks</h2>
+                      <div id="operations-restores" class="table-list" aria-live="polite"></div>
+                    </section>
+                    <section>
                       <h2>Audit</h2>
                       <div id="operations-audit" class="table-list" aria-live="polite"></div>
                     </section>

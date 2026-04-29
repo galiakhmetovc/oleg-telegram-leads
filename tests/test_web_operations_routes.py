@@ -69,6 +69,14 @@ def test_operations_routes_require_auth_and_expose_runtime_state(tmp_path):
     notifications = client.get("/api/operations/notifications").json()
     extraction_runs = client.get("/api/operations/extraction-runs?status=failed").json()
     access_checks = client.get("/api/operations/access-checks?status=flood_wait").json()
+    backup_denied = fixture["anonymous"].post("/api/operations/backups/sqlite")
+    backup_response = client.post("/api/operations/backups/sqlite")
+    backups = client.get("/api/operations/backups").json()
+    restore_response = client.post(
+        f"/api/operations/backups/{backup_response.json()['backup']['id']}/dry-run-restore"
+    )
+    restores = client.get("/api/operations/restores").json()
+    summary_after_backup = client.get("/api/operations/summary").json()
 
     assert denied.status_code == 401
     assert summary["jobs"]["by_status"]["queued"] == 1
@@ -88,6 +96,15 @@ def test_operations_routes_require_auth_and_expose_runtime_state(tmp_path):
     assert extraction_runs["items"][0]["error"] == "llm timeout"
     assert extraction_runs["items"][0]["token_usage_json"] == {"prompt_tokens": 100}
     assert access_checks["items"][0]["error"] == "wait 60s"
+    assert backup_denied.status_code == 401
+    assert backup_response.status_code == 200
+    assert backup_response.json()["backup"]["status"] == "verified"
+    assert backups["items"][0]["id"] == backup_response.json()["backup"]["id"]
+    assert restore_response.status_code == 200
+    assert restore_response.json()["restore"]["validation_status"] == "passed"
+    assert restores["items"][0]["id"] == restore_response.json()["restore"]["id"]
+    assert summary_after_backup["backups"]["by_status"]["verified"] == 1
+    assert summary_after_backup["restores"]["by_status"]["completed"] == 1
 
 
 def _setup_app(tmp_path):
@@ -101,8 +118,15 @@ def _setup_app(tmp_path):
             password="initial-secret",
         )
     return {
-        "client": TestClient(
+        "anonymous": TestClient(
             create_app(database_path=db_path, telegram_bot_token="telegram-token")
+        ),
+        "client": TestClient(
+            create_app(
+                database_path=db_path,
+                backup_path=tmp_path / "backups",
+                telegram_bot_token="telegram-token",
+            )
         ),
         "session_factory": session_factory,
     }

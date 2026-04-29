@@ -1019,6 +1019,7 @@ function initOperations() {
   document.querySelector("#operations-job-filters")?.addEventListener("input", () =>
     loadOperationsJobs(state)
   );
+  document.querySelector("#operations-backup-create")?.addEventListener("click", createOperationBackup);
   loadOperations(state);
 }
 
@@ -1040,6 +1041,8 @@ async function loadOperationsSummary() {
   const accessIssues = countStatusesExcept(summary.access_checks?.by_status || {}, [
     "succeeded",
   ]);
+  const failedBackups = summary.backups?.by_status?.failed || 0;
+  const verifiedBackups = summary.backups?.by_status?.verified || 0;
   target.innerHTML = `<div class="ops-metric-row">
     ${renderOpsMetric("Jobs", summary.jobs?.total || 0, `${queuedJobs} queued / ${runningJobs} running`)}
     ${renderOpsMetric("Failed jobs", failedJobs, "needs operator check", failedJobs ? "is-danger" : "")}
@@ -1048,6 +1051,7 @@ async function loadOperationsSummary() {
     ${renderOpsMetric("Notifications", summary.notifications?.total || 0, `${suppressedNotifications} suppressed`)}
     ${renderOpsMetric("Extraction", summary.extraction_runs?.total || 0, `${failedExtractions} failed`, failedExtractions ? "is-danger" : "")}
     ${renderOpsMetric("Access", summary.access_checks?.total || 0, `${accessIssues} issues`, accessIssues ? "is-danger" : "")}
+    ${renderOpsMetric("Backups", summary.backups?.total || 0, `${verifiedBackups} verified`, failedBackups ? "is-danger" : "")}
     ${renderOpsMetric("Audit", summary.audit?.total || 0, "recorded changes")}
   </div>`;
 }
@@ -1194,17 +1198,22 @@ function renderOperationRun(run) {
 }
 
 async function loadOperationsSignals() {
-  const [events, notifications, extractionRuns, accessChecks, audit] = await Promise.all([
-    api("/api/operations/events?limit=12"),
-    api("/api/operations/notifications?limit=12"),
-    api("/api/operations/extraction-runs?limit=12"),
-    api("/api/operations/access-checks?limit=12"),
-    api("/api/operations/audit?limit=12"),
-  ]);
+  const [events, notifications, extractionRuns, accessChecks, backups, restores, audit] =
+    await Promise.all([
+      api("/api/operations/events?limit=12"),
+      api("/api/operations/notifications?limit=12"),
+      api("/api/operations/extraction-runs?limit=12"),
+      api("/api/operations/access-checks?limit=12"),
+      api("/api/operations/backups?limit=12"),
+      api("/api/operations/restores?limit=12"),
+      api("/api/operations/audit?limit=12"),
+    ]);
   renderOperationsEvents(events.items || []);
   renderOperationsNotifications(notifications.items || []);
   renderOperationsExtractionRuns(extractionRuns.items || []);
   renderOperationsAccessChecks(accessChecks.items || []);
+  renderOperationsBackups(backups.items || []);
+  renderOperationsRestores(restores.items || []);
   renderOperationsAudit(audit.items || []);
 }
 
@@ -1283,6 +1292,66 @@ function renderOperationAccessCheck(item) {
   </div>`;
 }
 
+function renderOperationsBackups(items) {
+  const target = document.querySelector("#operations-backups");
+  if (!target) return;
+  target.innerHTML =
+    items.map(renderOperationBackup).join("") || '<div class="empty-state">No backups</div>';
+  target.querySelectorAll("[data-backup-restore-check]").forEach((button) => {
+    button.addEventListener("click", () => createOperationRestoreDryRun(button.dataset.backupId));
+  });
+}
+
+function renderOperationBackup(item) {
+  const details = [formatBytes(item.size_bytes), time(item.finished_at || item.started_at)]
+    .filter(Boolean)
+    .join(" / ");
+  return `<div class="table-row">
+    <div>
+      <strong>${escapeHtml(item.backup_type || "backup")}</strong>
+      <p class="muted">${escapeHtml(details || item.storage_uri || "")}</p>
+    </div>
+    <span class="row-actions">
+      ${badge(item.status || "unknown", operationsStatusClass(item.status))}
+      <button type="button" data-backup-id="${escapeHtml(item.id)}" data-backup-restore-check>Check</button>
+    </span>
+  </div>`;
+}
+
+function renderOperationsRestores(items) {
+  const target = document.querySelector("#operations-restores");
+  if (!target) return;
+  target.innerHTML =
+    items.map((item) => `<div class="table-row">
+      <div>
+        <strong>${escapeHtml(item.restore_type || "restore")}</strong>
+        <p class="muted">${escapeHtml(time(item.finished_at || item.started_at))}</p>
+      </div>
+      <span>${badge(item.validation_status || item.status || "unknown", operationsStatusClass(item.status))}</span>
+    </div>`).join("") || '<div class="empty-state">No restore checks</div>';
+}
+
+async function createOperationBackup() {
+  const button = document.querySelector("#operations-backup-create");
+  if (button) button.disabled = true;
+  try {
+    await api("/api/operations/backups/sqlite", { method: "POST", body: "{}" });
+    await loadOperations({ items: [], selectedId: null });
+  } finally {
+    if (button) button.disabled = false;
+  }
+}
+
+async function createOperationRestoreDryRun(backupId) {
+  if (!backupId) return;
+  await api(`/api/operations/backups/${backupId}/dry-run-restore`, {
+    method: "POST",
+    body: "{}",
+  });
+  await loadOperationsSignals();
+  await loadOperationsSummary();
+}
+
 function renderOperationsAudit(items) {
   const target = document.querySelector("#operations-audit");
   if (!target) return;
@@ -1329,6 +1398,15 @@ function tokenUsageSummary(value) {
   if (total) return `tokens ${total}`;
   if (prompt || completion) return `tokens ${prompt || 0}/${completion || 0}`;
   return "";
+}
+
+function formatBytes(value) {
+  if (value === null || value === undefined) return "";
+  const bytes = Number(value);
+  if (!Number.isFinite(bytes)) return "";
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 }
 
 function shortText(value, limit) {

@@ -4,17 +4,19 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.encoders import jsonable_encoder
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from pur_leads.models.audit import audit_log_table, operational_events_table
+from pur_leads.models.backup import backup_runs_table, restore_runs_table
 from pur_leads.models.catalog import extraction_runs_table
 from pur_leads.models.notifications import notification_events_table
 from pur_leads.models.scheduler import job_runs_table, scheduler_jobs_table
 from pur_leads.models.telegram_sources import source_access_checks_table
 from pur_leads.services.audit import mask_secret_values
+from pur_leads.services.backup import BackupService
 from pur_leads.services.web_auth import SessionValidationResult
 from pur_leads.web.dependencies import current_admin, get_session
 
@@ -91,6 +93,21 @@ def operations_summary(
                 session,
                 select(audit_log_table).order_by(audit_log_table.c.created_at.desc()).limit(10),
             ),
+        },
+        "backups": {
+            "total": _table_count(session, backup_runs_table),
+            "by_status": _count_by(session, backup_runs_table, "status"),
+            "recent_failed": _rows(
+                session,
+                select(backup_runs_table)
+                .where(backup_runs_table.c.status == "failed")
+                .order_by(backup_runs_table.c.started_at.desc())
+                .limit(10),
+            ),
+        },
+        "restores": {
+            "total": _table_count(session, restore_runs_table),
+            "by_status": _count_by(session, restore_runs_table, "status"),
         },
     }
 
@@ -246,6 +263,61 @@ def list_notification_events(
     return {"items": _rows(session, query)}
 
 
+@router.get("/backups")
+def list_backups(
+    request: Request,
+    limit: int = 100,
+    _validated: SessionValidationResult = Depends(current_admin),
+    session: Session = Depends(get_session),
+) -> dict[str, Any]:
+    return {
+        "items": jsonable_encoder(
+            mask_secret_values(_backup_service(request, session).list_backups(limit=_limit(limit)))
+        )
+    }
+
+
+@router.post("/backups/sqlite")
+def create_sqlite_backup(
+    request: Request,
+    validated: SessionValidationResult = Depends(current_admin),
+    session: Session = Depends(get_session),
+) -> dict[str, Any]:
+    backup = _backup_service(request, session).create_sqlite_backup(actor=_actor(validated))
+    return {"backup": jsonable_encoder(mask_secret_values(backup))}
+
+
+@router.post("/backups/{backup_id}/dry-run-restore")
+def create_restore_dry_run(
+    backup_id: str,
+    request: Request,
+    validated: SessionValidationResult = Depends(current_admin),
+    session: Session = Depends(get_session),
+) -> dict[str, Any]:
+    try:
+        restore = _backup_service(request, session).create_restore_dry_run(
+            backup_id,
+            actor=_actor(validated),
+        )
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Backup not found") from exc
+    return {"restore": jsonable_encoder(mask_secret_values(restore))}
+
+
+@router.get("/restores")
+def list_restores(
+    request: Request,
+    limit: int = 100,
+    _validated: SessionValidationResult = Depends(current_admin),
+    session: Session = Depends(get_session),
+) -> dict[str, Any]:
+    return {
+        "items": jsonable_encoder(
+            mask_secret_values(_backup_service(request, session).list_restores(limit=_limit(limit)))
+        )
+    }
+
+
 def _table_count(session: Session, table) -> int:  # type: ignore[no-untyped-def]
     return int(session.execute(select(func.count()).select_from(table)).scalar_one())
 
@@ -266,3 +338,15 @@ def _row(row) -> dict[str, Any]:  # type: ignore[no-untyped-def]
 
 def _limit(value: int) -> int:
     return min(max(value, 1), 500)
+
+
+def _backup_service(request: Request, session: Session) -> BackupService:
+    return BackupService(
+        session,
+        database_path=request.app.state.database_path,
+        backup_root=request.app.state.backup_path,
+    )
+
+
+def _actor(validated: SessionValidationResult) -> str:
+    return validated.user.local_username or validated.user.telegram_user_id or validated.user.id

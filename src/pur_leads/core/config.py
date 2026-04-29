@@ -19,6 +19,7 @@ class AppSettings(BaseSettings):
     web_session_cookie_name: str = "pur_session"
     web_cookie_secure: bool = False
     artifact_storage_path: Path = Path("./data/artifacts")
+    backup_path: Path = Path("./artifacts/backups")
     zai_api_key: str | None = None
     catalog_llm_base_url: str = "https://api.z.ai/api/coding/paas/v4"
     catalog_llm_model: str = "glm-5.1"

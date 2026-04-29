@@ -30,6 +30,7 @@ def create_app(
     web_session_duration_hours: int | None = None,
     web_session_cookie_name: str | None = None,
     web_cookie_secure: bool | None = None,
+    backup_path: Path | str | None = None,
 ) -> FastAPI:
     settings = load_settings()
     resolved_database_path = (
@@ -41,6 +42,8 @@ def create_app(
     app = FastAPI(title="PUR Leads")
     app.state.engine = engine
     app.state.session_factory = session_factory
+    app.state.database_path = resolved_database_path
+    app.state.backup_path = Path(backup_path) if backup_path is not None else settings.backup_path
     app.state.telegram_bot_token = telegram_bot_token or settings.telegram_bot_token
     app.state.web_session_duration_hours = (
         web_session_duration_hours or settings.web_session_duration_hours

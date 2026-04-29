@@ -130,6 +130,9 @@ def test_workspace_and_admin_pages_are_protected_and_render_shells(tmp_path):
     assert 'id="operations-notifications"' in operations_response.text
     assert 'id="operations-extraction-runs"' in operations_response.text
     assert 'id="operations-access-checks"' in operations_response.text
+    assert 'id="operations-backups"' in operations_response.text
+    assert 'id="operations-restores"' in operations_response.text
+    assert 'id="operations-backup-create"' in operations_response.text
     assert 'id="operations-audit"' in operations_response.text
     assert "/api/crm/clients" in js_response.text
     assert "/crm/convert" in js_response.text
@@ -137,6 +140,7 @@ def test_workspace_and_admin_pages_are_protected_and_render_shells(tmp_path):
     assert "/api/catalog/candidates" in js_response.text
     assert "/api/operations/summary" in js_response.text
     assert "/api/operations/extraction-runs" in js_response.text
+    assert "/api/operations/backups" in js_response.text
     assert "/api/today" in js_response.text
     assert "loadCatalogCandidateDetail" in js_response.text
     assert "initOperations" in js_response.text
