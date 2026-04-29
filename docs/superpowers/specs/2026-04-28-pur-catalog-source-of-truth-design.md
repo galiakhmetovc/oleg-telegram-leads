@@ -196,11 +196,50 @@ Sources:
 
 Design implication:
 
-- The provider config must distinguish Coding Plan from regular API platform / enterprise usage.
+- The AI provider layer must distinguish Coding Plan from regular API platform / enterprise usage.
 - The UI should surface the policy warning when using Coding Plan credentials for this application.
-- AI scheduler must track model usage, token usage, errors, and provider throttling.
+- AI scheduler must track model usage, token usage, errors, provider throttling, and per-model concurrency leases.
 - PromptBuilder must record prompt token estimates and actual response usage.
-- Parallel AI job limits are configurable and should be conservative by default until real usage is measured.
+- Parallel AI job limits are configured per `provider:model`, not per model name globally.
+- Configured provider limits are raw limits. Runtime effective limits use a configurable safety ratio, default `0.8`, as with Telegram safety margins.
+- Effective concurrency formula: `max(1, floor(raw_limit * utilization_ratio))`. This preserves one active slot when the provider limit is `1`.
+- One task may route to multiple models through agent routes: primary, fallback, shadow, ensemble, split, and manual-test routes.
+- OCR is a first-class AI task because catalog files may contain scanned PDFs, images, or price sheets.
+
+Initial z.ai model concurrency seed, from the operator-provided limit table:
+
+| Provider | Model | Type | Raw concurrency |
+| --- | --- | --- | --- |
+| `zai` | `GLM-4.6` | language | 3 |
+| `zai` | `GLM-4.6V-FlashX` | language | 3 |
+| `zai` | `GLM-4.7` | language | 2 |
+| `zai` | `GLM-Image` | image_generation | 1 |
+| `zai` | `GLM-5-Turbo` | language | 1 |
+| `zai` | `GLM-5V-Turbo` | language | 1 |
+| `zai` | `GLM-5.1` | language | 1 |
+| `zai` | `GLM-4.5` | language | 10 |
+| `zai` | `GLM-4.6V` | language | 10 |
+| `zai` | `GLM-4.7-Flash` | language | 1 |
+| `zai` | `GLM-4.7-FlashX` | language | 3 |
+| `zai` | `GLM-OCR` | ocr | 2 |
+| `zai` | `GLM-5` | language | 2 |
+| `zai` | `GLM-4-Plus` | language | 20 |
+| `zai` | `GLM-4.5V` | language | 10 |
+| `zai` | `GLM-4.6V-Flash` | language | 1 |
+| `zai` | `AutoGLM-Phone-Multilingual` | language | 5 |
+| `zai` | `GLM-4.5-Air` | language | 5 |
+| `zai` | `GLM-4.5-AirX` | language | 5 |
+| `zai` | `GLM-4.5-Flash` | language | 2 |
+| `zai` | `GLM-4-32B-0414-128K` | language | 15 |
+| `zai` | `CogView-4-250304` | image_generation | 5 |
+| `zai` | `GLM-ASR-2512` | realtime_audio_video | 5 |
+| `zai` | `ViduQ1-text` | video_generation | 5 |
+| `zai` | `Viduq1-Image` | video_generation | 5 |
+| `zai` | `Viduq1-Start-End` | video_generation | 5 |
+| `zai` | `Vidu2-Image` | video_generation | 5 |
+| `zai` | `Vidu2-Start-End` | video_generation | 5 |
+| `zai` | `Vidu2-Reference` | video_generation | 5 |
+| `zai` | `CogVideoX-3` | video_generation | 1 |
 
 ## Data Flow
 
@@ -625,8 +664,15 @@ Stores AI usage and quota observations.
 Key fields:
 
 - `id`
-- `provider_config_id`
+- `ai_provider_account_id`
+- `ai_model_id`
+- `provider`
 - `model`
+- `model_type`
+- `ai_agent_id`
+- `ai_agent_route_id`
+- `ai_run_id`
+- `ai_run_output_id`
 - `scheduler_job_id`
 - `classifier_version_id`
 - `request_started_at`
@@ -860,21 +906,46 @@ Purpose:
 - Do not hard-code Telegram limits.
 - Record observed `FLOOD_WAIT`/quota responses and let the scheduler route around paused scopes.
 
-### `ai_provider_configs`
+### `ai_providers`
 
-Stores model provider settings.
+Stores logical AI provider definitions.
 
 Key fields:
 
 - `id`
-- `provider`: `zai`, `openai_compatible`, `other`
+- `provider_key`: `zai`, `openai_compatible`, `openai`, `local`, `other`
+- `display_name`
+- `provider_type`: `openai_compatible_chat`, `zai_platform`, `local_runtime`, `custom`
+- `default_base_url`
+- `documentation_url`
+- `status`: `active`, `disabled`, `deprecated`
+- `metadata_json`
+- `created_at`
+- `updated_at`
+
+Rules:
+
+- Provider identity is separate from account/API key identity.
+- The same provider can have multiple accounts or base URLs later.
+
+### `ai_provider_accounts`
+
+Stores credentials and account-level runtime policy for a provider.
+
+Key fields:
+
+- `id`
+- `ai_provider_id`
+- `display_name`
 - `base_url`
 - `auth_secret_ref`
 - `plan_type`: `coding_lite`, `coding_pro`, `coding_max`, `api_platform`, `enterprise`, `unknown`
-- `default_model`
 - `enabled`
-- `max_parallel_calls`
+- `priority`
 - `request_timeout_seconds`
+- `policy_warning_required`
+- `policy_warning_acknowledged_at`
+- `metadata_json`
 - `notes`
 - `created_at`
 - `updated_at`
@@ -883,31 +954,255 @@ Rules:
 
 - Secret values are referenced, not stored in plaintext.
 - For z.ai Coding Plan, the UI must show a usage-policy warning if the plan is used outside officially supported coding tools.
+- Account status can disable all routes that depend on that account without deleting model history.
 
-### `ai_model_limits`
+### `ai_models`
 
-Stores known and configured model limits.
+Stores concrete models under a concrete provider.
 
 Key fields:
 
 - `id`
-- `provider_config_id`
-- `model`
+- `ai_provider_id`
+- `provider_model_name`
+- `normalized_model_name`
+- `display_name`
+- `model_type`: `language`, `vision_language`, `ocr`, `embedding`, `image_generation`, `video_generation`, `realtime_audio_video`, `audio`, `other`
 - `context_window_tokens`
 - `max_output_tokens`
 - `supports_structured_output`
+- `supports_json_mode`
 - `supports_thinking`
 - `supports_tools`
+- `supports_streaming`
+- `supports_image_input`
+- `supports_document_input`
+- `supports_audio_input`
+- `supports_video_input`
 - `default_temperature`
+- `status`: `active`, `disabled`, `deprecated`
+- `source_url`
+- `verified_at`
+- `metadata_json`
+- `created_at`
+- `updated_at`
+
+Rules:
+
+- Model names are scoped by provider. `provider:model` is the concurrency and routing identity.
+- The UI should allow enabling/disabling a model without deleting historical runs.
+
+### `ai_model_limits`
+
+Stores known and configured per-provider-model limits.
+
+Key fields:
+
+- `id`
+- `ai_provider_id`
+- `ai_model_id`
+- `limit_scope`: `concurrency`, `requests_per_window`, `tokens_per_window`, `cost_budget`, `observed_backoff`
+- `raw_limit`
+- `utilization_ratio`
+- `effective_limit`
+- `window_seconds`
+- `source`: `operator_configured`, `provider_docs`, `observed_runtime`, `system_default`
 - `quota_multiplier_json`
 - `source_url`
 - `verified_at`
 - `notes`
+- `created_at`
+- `updated_at`
+
+Rules:
+
+- Make model limits visible and editable in the web UI.
+- Use `effective_limit = max(1, floor(raw_limit * utilization_ratio))` for concurrency.
+- Default `utilization_ratio` is `0.8`; this is a safety margin, not a provider guarantee.
+- Provider limits for raw `1` stay effective `1`.
+- Allow prompt builder to estimate token budget and choose fallback strategies.
+
+### `ai_agents`
+
+Stores logical AI workers that perform a task, independent of model choice.
+
+Key fields:
+
+- `id`
+- `agent_key`: `catalog_extractor`, `lead_detector`, `lead_shadow_detector`, `ocr_extractor`, `crm_summarizer`, `research_matcher`, `manual_test`
+- `display_name`
+- `task_type`: `catalog_extraction`, `lead_detection`, `ocr`, `crm`, `research`, `evaluation`, `generation`
+- `input_schema_json`
+- `output_schema_json`
+- `default_strategy`: `primary_fallback`, `shadow`, `ensemble`, `split`, `manual`
+- `enabled`
+- `metadata_json`
+- `created_at`
+- `updated_at`
+
+Rules:
+
+- An agent is the stable application contract. Models can change without changing the rest of the pipeline.
+- Agents must request structured output whenever the provider/model supports it.
+- Agent output must be validated before it can mutate catalog, leads, CRM, or notification state.
+
+### `ai_agent_routes`
+
+Maps one agent to one or more provider/model/account routes.
+
+Key fields:
+
+- `id`
+- `ai_agent_id`
+- `ai_provider_account_id`
+- `ai_model_id`
+- `route_role`: `primary`, `fallback`, `shadow`, `ensemble_member`, `split_bucket`, `manual_test`
+- `priority`
+- `weight`
+- `enabled`
+- `max_input_tokens`
+- `max_output_tokens`
+- `temperature`
+- `thinking_enabled`
+- `structured_output_required`
+- `fallback_on_error`
+- `fallback_on_rate_limit`
+- `fallback_on_invalid_output`
+- `route_conditions_json`
+- `metadata_json`
+- `created_at`
+- `updated_at`
+
+Rules:
+
+- A task can use several models. Examples:
+  - catalog extraction: `GLM-5.1` primary, `GLM-4.5-Air` fallback, `GLM-4.5-Flash` shadow.
+  - lead detection: fuzzy primary, LLM shadow, later LLM fallback or ensemble.
+  - OCR: `GLM-OCR` primary, vision-language fallback if configured.
+- The router chooses routes by role, priority, weight, model availability, limits, and route conditions.
+- Fallback can be triggered by provider error, rate limit, timeout, invalid JSON, schema validation failure, or operator-disabled route.
+- Shadow routes write traces/evaluation records but do not create operational side effects unless explicitly promoted.
+
+### `ai_runs`
+
+Stores one logical AI agent run.
+
+Key fields:
+
+- `id`
+- `ai_agent_id`
+- `agent_key`
+- `task_type`
+- `scheduler_job_id`
+- `source_id`
+- `source_message_id`
+- `artifact_id`
+- `lead_event_id`
+- `lead_cluster_id`
+- `catalog_version_id`
+- `input_hash`
+- `settings_hash`
+- `status`: `queued`, `running`, `succeeded`, `failed`, `cancelled`, `superseded`
+- `strategy`
+- `started_at`
+- `finished_at`
+- `error`
+- `metadata_json`
+- `created_at`
 
 Purpose:
 
-- Make model limits visible and editable in the web UI.
-- Allow prompt builder to estimate token budget and choose fallback strategies.
+- Make every agent decision auditable even when the final application behavior is produced by another route.
+- Tie catalog extraction, OCR extraction, lead detection, and future generation tasks to a common trace model.
+
+### `ai_run_outputs`
+
+Stores each provider/model attempt inside an AI agent run.
+
+Key fields:
+
+- `id`
+- `ai_run_id`
+- `ai_agent_route_id`
+- `ai_provider_account_id`
+- `ai_model_id`
+- `provider`
+- `model`
+- `model_type`
+- `route_role`
+- `request_started_at`
+- `request_finished_at`
+- `status`
+- `prompt_tokens`
+- `completion_tokens`
+- `total_tokens`
+- `cached_tokens`
+- `estimated_tokens`
+- `temperature`
+- `max_tokens`
+- `thinking_enabled`
+- `raw_request_json`
+- `raw_response_json`
+- `parsed_output_json`
+- `schema_validation_json`
+- `error`
+- `created_at`
+
+Rules:
+
+- Raw request/response may be archived according to retention policy if too large for hot SQLite.
+- Parsed output is the only value downstream services consume.
+- Token usage and provider errors also feed `ai_usage_events` and quality dashboards.
+
+### `ai_model_concurrency_leases`
+
+Stores active per-provider-model execution slots.
+
+Key fields:
+
+- `id`
+- `provider`
+- `ai_model_id`
+- `model`
+- `normalized_model`
+- `worker_name`
+- `ai_run_id`
+- `ai_run_output_id`
+- `raw_limit`
+- `utilization_ratio`
+- `effective_limit`
+- `acquired_at`
+- `lease_expires_at`
+- `metadata_json`
+
+Rules:
+
+- Leases are scoped by `provider:model`.
+- Expired leases are reclaimed automatically.
+- The lease table coordinates multiple worker loops and multiple containers.
+
+### OCR Agent
+
+OCR is a required AI agent, not a one-off parser.
+
+Flow:
+
+```text
+artifact/document/image
+  -> parser detects missing or low-quality text
+  -> ocr_extractor agent route
+  -> ai_runs / ai_run_outputs
+  -> parsed_chunks with parser_name = "ai-ocr"
+  -> catalog extraction agent
+  -> catalog candidates
+```
+
+Rules:
+
+- OCR should be used for scanned PDFs, image-only PDFs, photos of catalogs/price sheets, and document pages where text extraction is below a configurable confidence threshold.
+- OCR output stores page/region evidence when available.
+- OCR is not allowed to silently overwrite deterministic parser text; it creates additional chunks or alternative chunks with evidence.
+- OCR failures are operational issues when repeated, not "empty text".
 
 ### `sources`
 
@@ -971,14 +1266,24 @@ Key fields:
 - `artifact_id`
 - `chunk_index`
 - `text`
+- `text_source`: `deterministic_parser`, `ai_ocr`, `manual`, `external_page`
+- `confidence`
+- `page_number`
+- `region_json`
 - `token_estimate`
 - `parser_name`
 - `parser_version`
+- `ai_run_output_id`
 - `created_at`
 
 FTS:
 
 - Create FTS5 index over `text`.
+
+Rules:
+
+- Deterministic parser chunks and OCR chunks can coexist for the same artifact/page.
+- Downstream extractors receive chunk provenance so OCR-derived facts can be reviewed with appropriate confidence.
 
 ### `extraction_runs`
 
@@ -989,6 +1294,9 @@ Key fields:
 - `id`
 - `run_type`: `channel_sync`, `document_parse`, `catalog_extraction`, `manual_example_parse`
 - `model`
+- `ai_agent_id`
+- `ai_run_id`
+- `ai_run_output_id`
 - `prompt_version`
 - `catalog_version_id`
 - `started_at`
@@ -2602,11 +2910,26 @@ Purpose:
 - `catalog_ingestion_channels_enabled = true`
 - `catalog_ingestion_pur_channel_enabled = true`
 - `catalog_ingestion_external_pages_enabled = true`
-- `ai_max_parallel_calls = 2`
 - `ai_parse_max_parallel_jobs = 2`
-- `ai_default_provider_config_id = null`
-- `ai_default_model = "glm-4.5-air"`
 - `ai_provider_policy_warning_enabled = true`
+- `ai_default_provider_key = "zai"`
+- `ai_default_provider_account_id = null`
+- `ai_model_concurrency_utilization_ratio = 0.8`
+- `ai_model_concurrency_default_limit = 1`
+- `ai_model_concurrency_lease_seconds = 180`
+- `ai_model_registry_seed_enabled = true`
+- `ai_agent_catalog_extractor_enabled = true`
+- `ai_agent_catalog_extractor_strategy = "primary_fallback"`
+- `ai_agent_catalog_extractor_routes = [{"model":"GLM-5.1","role":"primary"},{"model":"GLM-4.5-Air","role":"fallback"}]`
+- `ai_agent_lead_detector_enabled = true`
+- `ai_agent_lead_detector_strategy = "fuzzy_primary_llm_shadow"`
+- `ai_agent_lead_detector_routes = [{"model":"builtin-fuzzy","role":"primary"},{"model":"GLM-4.5-Flash","role":"shadow"}]`
+- `ai_agent_ocr_extractor_enabled = true`
+- `ai_agent_ocr_extractor_strategy = "primary_fallback"`
+- `ai_agent_ocr_extractor_routes = [{"model":"GLM-OCR","role":"primary"}]`
+- `ai_agent_route_fallback_on_rate_limit = true`
+- `ai_agent_route_fallback_on_invalid_output = true`
+- `ai_agent_shadow_writes_side_effects = false`
 - `ai_batching_strategy = "source_time_window"`
 - `ai_batch_max_messages = 20`
 - `ai_batch_max_prompt_tokens = 60000`
@@ -2664,7 +2987,7 @@ Purpose:
 - `embed_new_messages = false`
 - `embed_parsed_chunks = false`
 - `embed_catalog_items = false`
-- `embedding_default_provider_config_id = null`
+- `embedding_default_provider_account_id = null`
 - `embedding_default_model = null`
 - `embedding_max_parallel_jobs = 1`
 - `retention_enabled = true`
@@ -3942,8 +4265,9 @@ Required controls:
 - enabled source kinds split by lead monitoring and catalog ingestion;
 - source backfill policy and retro/web-only behavior;
 - checkpoint reset confirmation policy;
-- AI provider credentials/config references;
-- AI model selection and model-limit table;
+- AI providers, provider accounts, model registry, model capabilities, and credentials references;
+- AI agent definitions and per-agent multi-model route policy;
+- AI per-provider-model limit table and safety utilization ratio;
 - AI/parse parallel job limits;
 - AI batching strategy and limits;
 - reclassification triggers, windows, scopes, and notification rules;
