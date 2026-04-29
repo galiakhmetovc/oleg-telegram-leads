@@ -95,6 +95,7 @@ def upgrade() -> None:
             ["validator_model", "validator_profile", "status"],
         )
     if not _scheduler_jobs_allow_quality_validation(bind):
+        op.execute(sa.text("DROP TABLE IF EXISTS _alembic_tmp_scheduler_jobs"))
         with op.batch_alter_table("scheduler_jobs") as batch_op:
             batch_op.drop_constraint("ck_scheduler_jobs_job_type", type_="check")
             batch_op.create_check_constraint("ck_scheduler_jobs_job_type", _UPGRADED_JOB_TYPES)

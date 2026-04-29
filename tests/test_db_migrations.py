@@ -59,6 +59,7 @@ def test_catalog_quality_review_migration_handles_partial_table_from_concurrent_
     upgrade_database(engine, revision="0021_ai_model_profiles")
     with engine.begin() as connection:
         catalog_quality_reviews_table.create(connection)
+        connection.execute(text("create table _alembic_tmp_scheduler_jobs (id text)"))
 
     upgrade_database(engine)
 
@@ -70,3 +71,4 @@ def test_catalog_quality_review_migration_handles_partial_table_from_concurrent_
             text("select sql from sqlite_master where type='table' and name='scheduler_jobs'")
         ).scalar_one()
     assert "catalog_candidate_validation" in scheduler_sql
+    assert "_alembic_tmp_scheduler_jobs" not in set(inspect(engine).get_table_names())
