@@ -17,6 +17,7 @@ from pur_leads.integrations.telegram.client import TelegramClientPort
 from pur_leads.integrations.telegram.types import ResolvedTelegramSource
 from pur_leads.models.scheduler import scheduler_jobs_table
 from pur_leads.repositories.scheduler import SchedulerJobRecord
+from pur_leads.repositories.leads import LeadClusterRecord, LeadEventRecord
 from pur_leads.repositories.telegram_sources import MonitoredSourceRecord, TelegramSourceRepository
 from pur_leads.models.telegram_sources import monitored_sources_table, source_messages_table
 from pur_leads.services.audit import AuditService
@@ -24,6 +25,7 @@ from pur_leads.services.catalog_candidates import CatalogCandidateService
 from pur_leads.services.catalog_sources import CatalogSourceService
 from pur_leads.services.classifier_snapshots import ClassifierSnapshotService
 from pur_leads.services.leads import LeadDetectionResult, LeadMatchInput, LeadService
+from pur_leads.services.notifications import NotificationPolicyService
 from pur_leads.services.scheduler import SchedulerService
 from pur_leads.services.settings import SettingsService
 from pur_leads.workers.message_context import MessageContextWorker
@@ -218,6 +220,7 @@ class WorkerRuntime:
     def _fail_job(self, job: SchedulerJobRecord, exc: Exception) -> WorkerRunResult:
         error = _safe_exception_message(exc)
         retry_at = _retry_at_for_exception(exc)
+        _mark_failed_notification_event(self.session, job=job, error=error)
         self.audit.record_event(
             event_type="scheduler",
             severity="error",
@@ -500,6 +503,7 @@ def build_lead_handler_registry(
     notifier: LeadNotifierAdapter | None = None,
 ) -> dict[str, JobHandler]:
     lead_service = LeadService(session)
+    notification_policy = NotificationPolicyService(session)
     scheduler = SchedulerService(session)
     settings = SettingsService(session)
 
@@ -618,16 +622,17 @@ def build_lead_handler_registry(
                     scheduler,
                     source_message_id=result.source_message_id,
                 )
-                if result.detection_mode != "retro_research" or notify_retro:
-                    _enqueue_lead_notification(
-                        scheduler,
-                        settings,
-                        cluster_id=cluster.id,
-                        event=event,
-                        decision=result.decision,
-                        confidence=result.confidence,
-                        notify_reason=result.notify_reason,
-                    )
+                _enqueue_lead_notification(
+                    scheduler,
+                    settings,
+                    notification_policy,
+                    cluster=cluster,
+                    event=event,
+                    decision=result.decision,
+                    confidence=result.confidence,
+                    notify_reason=result.notify_reason,
+                    notify_retro_requested=notify_retro,
+                )
             if mark_messages_classified:
                 _mark_message_classified(session, result.source_message_id)
 
@@ -665,6 +670,9 @@ def build_lead_handler_registry(
         if not isinstance(cluster_id, str) or not cluster_id.strip():
             raise ValueError("send_notifications requires payload.cluster_id")
         provider_result = await notifier.send_lead_notification(chat_id=chat_id, text=text)
+        notification_event_id = payload.get("notification_event_id")
+        if isinstance(notification_event_id, str) and notification_event_id.strip():
+            notification_policy.mark_sent(notification_event_id, provider_result)
         cluster = lead_service.mark_cluster_notified(cluster_id)
         return JobHandlerResult(
             result_summary={
@@ -732,6 +740,20 @@ def _has_active_poll_job(session: Session, source_id: str) -> bool:
     return row is not None
 
 
+def _mark_failed_notification_event(
+    session: Session,
+    *,
+    job: SchedulerJobRecord,
+    error: str,
+) -> None:
+    if job.job_type != "send_notifications":
+        return
+    payload = job.payload_json or {}
+    notification_event_id = payload.get("notification_event_id")
+    if isinstance(notification_event_id, str) and notification_event_id.strip():
+        NotificationPolicyService(session).mark_failed(notification_event_id, error)
+
+
 def _enqueue_context_fetch(
     session: Session,
     scheduler: SchedulerService,
@@ -781,40 +803,65 @@ def _enqueue_next_reclassification_batch(
 def _enqueue_lead_notification(
     scheduler: SchedulerService,
     settings: SettingsService,
+    notification_policy: NotificationPolicyService,
     *,
-    cluster_id: str,
-    event: Any,
+    cluster: LeadClusterRecord,
+    event: LeadEventRecord,
     decision: str,
     confidence: float,
     notify_reason: str | None,
+    notify_retro_requested: bool,
 ) -> None:
-    if settings.get("telegram_lead_notifications_enabled") is False:
-        return
     chat_id = settings.get("telegram_lead_notification_chat_id")
-    if not isinstance(chat_id, str) or not chat_id.strip():
+    stripped_chat_id = chat_id.strip() if isinstance(chat_id, str) else None
+    text = _lead_notification_text(
+        decision=decision,
+        confidence=confidence,
+        message_text=event.message_text,
+        notify_reason=notify_reason,
+        reason=event.reason,
+        message_url=event.message_url,
+    )
+    policy_decision = notification_policy.evaluate_lead_event(
+        settings=settings,
+        cluster=cluster,
+        event=event,
+        notify_retro_requested=notify_retro_requested,
+    )
+    payload_json = {
+        "cluster_id": cluster.id,
+        "lead_event_id": event.id,
+        "decision": decision,
+        "confidence": confidence,
+        "message_url": event.message_url,
+        "text": text if policy_decision.should_enqueue else None,
+    }
+    notification_event_id = notification_policy.record_lead_policy_event(
+        decision=policy_decision,
+        cluster=cluster,
+        event=event,
+        target_ref=stripped_chat_id,
+        payload_json=payload_json,
+    )
+    if not policy_decision.should_enqueue or not stripped_chat_id:
         return
-    scheduler.enqueue(
+    job = scheduler.enqueue(
         job_type="send_notifications",
         scope_type="global",
-        scope_id=cluster_id,
+        scope_id=cluster.id,
         monitored_source_id=event.monitored_source_id,
         source_message_id=event.source_message_id,
-        idempotency_key=f"lead-notify:{cluster_id}:{event.id}",
+        idempotency_key=policy_decision.dedupe_key,
         priority="high",
         payload_json={
-            "cluster_id": cluster_id,
+            "cluster_id": cluster.id,
             "lead_event_id": event.id,
-            "chat_id": chat_id.strip(),
-            "text": _lead_notification_text(
-                decision=decision,
-                confidence=confidence,
-                message_text=event.message_text,
-                notify_reason=notify_reason,
-                reason=event.reason,
-                message_url=event.message_url,
-            ),
+            "notification_event_id": notification_event_id,
+            "chat_id": stripped_chat_id,
+            "text": text,
         },
     )
+    notification_policy.mark_queued_job(notification_event_id, job.id)
 
 
 def _lead_notification_text(

@@ -16,6 +16,7 @@ from pur_leads.models.catalog import (
     classifier_versions_table,
 )
 from pur_leads.models.leads import lead_clusters_table, lead_events_table, lead_matches_table
+from pur_leads.models.notifications import notification_events_table
 from pur_leads.models.scheduler import scheduler_jobs_table
 from pur_leads.models.telegram_sources import monitored_sources_table, source_messages_table
 from pur_leads.services.scheduler import SchedulerService
@@ -110,6 +111,60 @@ class PayloadModeLeadClassifier(FakeLeadClassifier):
         ]
 
 
+class ConfigurableLeadClassifier(FakeLeadClassifier):
+    def __init__(
+        self,
+        *,
+        decision: str,
+        confidence: float,
+        commercial_value_score: float | None = None,
+        negative_score: float | None = None,
+        detection_mode: str = "live",
+        classifier_version_id: str,
+        snapshot_entry_id: str,
+        category_id: str,
+        term_id: str,
+    ) -> None:
+        super().__init__(
+            classifier_version_id=classifier_version_id,
+            snapshot_entry_id=snapshot_entry_id,
+            category_id=category_id,
+            term_id=term_id,
+        )
+        self.decision = decision
+        self.confidence = confidence
+        self.commercial_value_score = commercial_value_score
+        self.negative_score = negative_score
+        self.detection_mode = detection_mode
+
+    async def classify_message_batch(self, *, messages: list, payload: dict):
+        await super().classify_message_batch(messages=messages, payload=payload)
+        return [
+            LeadClassifierResult(
+                source_message_id=message.source_message_id,
+                classifier_version_id=self.classifier_version_id,
+                decision=self.decision,
+                detection_mode=self.detection_mode,
+                confidence=self.confidence,
+                commercial_value_score=self.commercial_value_score,
+                negative_score=self.negative_score,
+                notify_reason="camera request",
+                reason="User asks for a camera",
+                matches=[
+                    LeadClassifierMatch(
+                        classifier_snapshot_entry_id=self.snapshot_entry_id,
+                        catalog_term_id=self.term_id,
+                        category_id=self.category_id,
+                        match_type="term",
+                        matched_text="камера",
+                        score=0.91,
+                    )
+                ],
+            )
+            for message in messages
+        ]
+
+
 class FakeLeadNotifier:
     def __init__(self) -> None:
         self.sent: list[dict] = []
@@ -117,6 +172,11 @@ class FakeLeadNotifier:
     async def send_lead_notification(self, *, chat_id: str, text: str) -> dict:
         self.sent.append({"chat_id": chat_id, "text": text})
         return {"message_id": 77}
+
+
+class FailingLeadNotifier:
+    async def send_lead_notification(self, *, chat_id: str, text: str) -> dict:
+        raise RuntimeError("telegram unavailable")
 
 
 async def _noop_job_handler(job):
@@ -281,6 +341,7 @@ async def test_classify_lead_queues_context_and_sends_configured_notification(ru
     context_jobs = [row for row in jobs if row["job_type"] == "fetch_message_context"]
     notify_jobs = [row for row in jobs if row["job_type"] == "send_notifications"]
     cluster = session.execute(select(lead_clusters_table)).mappings().one()
+    notification_event = session.execute(select(notification_events_table)).mappings().one()
     assert classify_result.status == "succeeded"
     assert notify_result.status == "succeeded"
     assert len(context_jobs) == 1
@@ -289,6 +350,15 @@ async def test_classify_lead_queues_context_and_sends_configured_notification(ru
     assert len(notify_jobs) == 1
     assert notify_jobs[0]["status"] == "succeeded"
     assert notify_jobs[0]["scope_id"] == cluster["id"]
+    assert notify_jobs[0]["idempotency_key"] == f"lead-notify:{cluster['id']}"
+    assert notify_jobs[0]["payload_json"]["notification_event_id"] == notification_event["id"]
+    assert notification_event["status"] == "sent"
+    assert notification_event["notification_policy"] == "immediate"
+    assert notification_event["notification_type"] == "lead"
+    assert notification_event["lead_cluster_id"] == cluster["id"]
+    assert notification_event["lead_event_id"] is not None
+    assert notification_event["scheduler_job_id"] == notify_jobs[0]["id"]
+    assert notification_event["sent_at"] is not None
     assert notifier.sent == [
         {
             "chat_id": "operator-chat",
@@ -302,6 +372,307 @@ async def test_classify_lead_queues_context_and_sends_configured_notification(ru
     ]
     assert cluster["last_notified_at"] is not None
     assert cluster["notify_update_count"] == 1
+
+
+@pytest.mark.asyncio
+async def test_classify_maybe_records_web_only_notification_policy_by_default(runtime_session):
+    session = runtime_session["session"]
+    _insert_source_message(
+        session,
+        runtime_session["source_id"],
+        telegram_message_id=121,
+        sender_id="sender-1",
+        text="возможно нужна камера",
+        status="queued",
+    )
+    SettingsService(session).set(
+        "telegram_lead_notification_chat_id",
+        "operator-chat",
+        value_type="string",
+        updated_by="admin",
+    )
+    classifier = ConfigurableLeadClassifier(
+        classifier_version_id=runtime_session["classifier_version_id"],
+        snapshot_entry_id=runtime_session["snapshot_entry_id"],
+        category_id=runtime_session["category_id"],
+        term_id=runtime_session["term_id"],
+        decision="maybe",
+        confidence=0.61,
+        commercial_value_score=0.3,
+    )
+    notifier = FakeLeadNotifier()
+    SchedulerService(session).enqueue(
+        job_type="classify_message_batch",
+        scope_type="telegram_source",
+        monitored_source_id=runtime_session["source_id"],
+        payload_json={"limit": 10},
+    )
+    runtime = WorkerRuntime(
+        session,
+        handlers=build_lead_handler_registry(
+            session,
+            classifier=classifier,
+            notifier=notifier,
+        ),
+    )
+
+    result = await runtime.run_once()
+
+    notify_jobs = (
+        session.execute(
+            select(scheduler_jobs_table).where(
+                scheduler_jobs_table.c.job_type == "send_notifications"
+            )
+        )
+        .mappings()
+        .all()
+    )
+    notification_event = session.execute(select(notification_events_table)).mappings().one()
+    assert result.status == "succeeded"
+    assert notify_jobs == []
+    assert notifier.sent == []
+    assert notification_event["status"] == "suppressed"
+    assert notification_event["notification_type"] == "maybe"
+    assert notification_event["notification_policy"] == "suppressed"
+    assert notification_event["suppressed_reason"] == "maybe_web_only"
+
+
+@pytest.mark.asyncio
+async def test_classify_low_confidence_live_lead_records_suppressed_notification(
+    runtime_session,
+):
+    session = runtime_session["session"]
+    _insert_source_message(
+        session,
+        runtime_session["source_id"],
+        telegram_message_id=122,
+        sender_id="sender-1",
+        text="может камеру когда-нибудь",
+        status="queued",
+    )
+    SettingsService(session).set(
+        "telegram_lead_notification_chat_id",
+        "operator-chat",
+        value_type="string",
+        updated_by="admin",
+    )
+    classifier = ConfigurableLeadClassifier(
+        classifier_version_id=runtime_session["classifier_version_id"],
+        snapshot_entry_id=runtime_session["snapshot_entry_id"],
+        category_id=runtime_session["category_id"],
+        term_id=runtime_session["term_id"],
+        decision="lead",
+        confidence=0.52,
+        commercial_value_score=0.2,
+        negative_score=0.1,
+    )
+    SchedulerService(session).enqueue(
+        job_type="classify_message_batch",
+        scope_type="telegram_source",
+        monitored_source_id=runtime_session["source_id"],
+        payload_json={"limit": 10},
+    )
+    runtime = WorkerRuntime(
+        session,
+        handlers=build_lead_handler_registry(session, classifier=classifier),
+    )
+
+    result = await runtime.run_once()
+
+    notify_jobs = (
+        session.execute(
+            select(scheduler_jobs_table).where(
+                scheduler_jobs_table.c.job_type == "send_notifications"
+            )
+        )
+        .mappings()
+        .all()
+    )
+    notification_event = session.execute(select(notification_events_table)).mappings().one()
+    assert result.status == "succeeded"
+    assert notify_jobs == []
+    assert notification_event["status"] == "suppressed"
+    assert notification_event["notification_type"] == "lead"
+    assert notification_event["suppressed_reason"] == "confidence_below_threshold"
+
+
+@pytest.mark.asyncio
+async def test_high_value_low_confidence_maybe_can_notify(runtime_session):
+    session = runtime_session["session"]
+    _insert_source_message(
+        session,
+        runtime_session["source_id"],
+        telegram_message_id=124,
+        sender_id="sender-1",
+        text="ищу дорогую систему камер",
+        status="queued",
+    )
+    SettingsService(session).set(
+        "telegram_lead_notification_chat_id",
+        "operator-chat",
+        value_type="string",
+        updated_by="admin",
+    )
+    classifier = ConfigurableLeadClassifier(
+        classifier_version_id=runtime_session["classifier_version_id"],
+        snapshot_entry_id=runtime_session["snapshot_entry_id"],
+        category_id=runtime_session["category_id"],
+        term_id=runtime_session["term_id"],
+        decision="maybe",
+        confidence=0.5,
+        commercial_value_score=0.82,
+        negative_score=0.1,
+    )
+    notifier = FakeLeadNotifier()
+    SchedulerService(session).enqueue(
+        job_type="classify_message_batch",
+        scope_type="telegram_source",
+        monitored_source_id=runtime_session["source_id"],
+        payload_json={"limit": 10},
+    )
+    runtime = WorkerRuntime(
+        session,
+        handlers=build_lead_handler_registry(
+            session,
+            classifier=classifier,
+            notifier=notifier,
+        ),
+    )
+
+    classify_result = await runtime.run_once()
+    notify_result = await runtime.run_once()
+
+    notification_event = session.execute(select(notification_events_table)).mappings().one()
+    assert classify_result.status == "succeeded"
+    assert notify_result.status == "succeeded"
+    assert notification_event["status"] == "sent"
+    assert notification_event["notification_type"] == "maybe"
+    assert notifier.sent[0]["chat_id"] == "operator-chat"
+
+
+@pytest.mark.asyncio
+async def test_multiple_events_in_same_cluster_queue_one_telegram_notification(runtime_session):
+    session = runtime_session["session"]
+    _insert_source_message(
+        session,
+        runtime_session["source_id"],
+        telegram_message_id=125,
+        sender_id="sender-1",
+        text="нужна камера",
+        status="queued",
+    )
+    _insert_source_message(
+        session,
+        runtime_session["source_id"],
+        telegram_message_id=126,
+        sender_id="sender-1",
+        text="и еще регистратор",
+        status="queued",
+    )
+    SettingsService(session).set(
+        "telegram_lead_notification_chat_id",
+        "operator-chat",
+        value_type="string",
+        updated_by="admin",
+    )
+    classifier = FakeLeadClassifier(
+        classifier_version_id=runtime_session["classifier_version_id"],
+        snapshot_entry_id=runtime_session["snapshot_entry_id"],
+        category_id=runtime_session["category_id"],
+        term_id=runtime_session["term_id"],
+    )
+    SchedulerService(session).enqueue(
+        job_type="classify_message_batch",
+        scope_type="telegram_source",
+        monitored_source_id=runtime_session["source_id"],
+        payload_json={"limit": 10},
+    )
+    runtime = WorkerRuntime(
+        session,
+        handlers=build_lead_handler_registry(session, classifier=classifier),
+    )
+
+    result = await runtime.run_once()
+
+    notify_jobs = (
+        session.execute(
+            select(scheduler_jobs_table).where(
+                scheduler_jobs_table.c.job_type == "send_notifications"
+            )
+        )
+        .mappings()
+        .all()
+    )
+    notification_events = (
+        session.execute(
+            select(notification_events_table).order_by(notification_events_table.c.created_at)
+        )
+        .mappings()
+        .all()
+    )
+    assert result.status == "succeeded"
+    assert len(notify_jobs) == 1
+    assert [event["status"] for event in notification_events] == ["queued", "suppressed"]
+    assert notification_events[1]["suppressed_reason"] == "cluster_already_has_notification"
+
+
+@pytest.mark.asyncio
+async def test_failed_notification_marks_notification_event_failed(runtime_session):
+    session = runtime_session["session"]
+    _insert_source_message(
+        session,
+        runtime_session["source_id"],
+        telegram_message_id=123,
+        sender_id="sender-1",
+        text="срочно нужна камера",
+        status="queued",
+    )
+    SettingsService(session).set(
+        "telegram_lead_notification_chat_id",
+        "operator-chat",
+        value_type="string",
+        updated_by="admin",
+    )
+    classifier = FakeLeadClassifier(
+        classifier_version_id=runtime_session["classifier_version_id"],
+        snapshot_entry_id=runtime_session["snapshot_entry_id"],
+        category_id=runtime_session["category_id"],
+        term_id=runtime_session["term_id"],
+    )
+    SchedulerService(session).enqueue(
+        job_type="classify_message_batch",
+        scope_type="telegram_source",
+        monitored_source_id=runtime_session["source_id"],
+        payload_json={"limit": 10},
+    )
+    runtime = WorkerRuntime(
+        session,
+        handlers=build_lead_handler_registry(
+            session,
+            classifier=classifier,
+            notifier=FailingLeadNotifier(),
+        ),
+    )
+
+    classify_result = await runtime.run_once()
+    notify_result = await runtime.run_once()
+
+    notify_job = (
+        session.execute(
+            select(scheduler_jobs_table).where(
+                scheduler_jobs_table.c.job_type == "send_notifications"
+            )
+        )
+        .mappings()
+        .one()
+    )
+    notification_event = session.execute(select(notification_events_table)).mappings().one()
+    assert classify_result.status == "succeeded"
+    assert notify_result.status == "failed"
+    assert notify_job["status"] == "queued"
+    assert "telegram unavailable" in (notify_job["last_error"] or "")
+    assert notification_event["status"] == "failed"
+    assert notification_event["error"] == "telegram unavailable"
 
 
 @pytest.mark.asyncio

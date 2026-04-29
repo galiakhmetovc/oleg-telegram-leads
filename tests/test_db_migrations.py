@@ -27,4 +27,5 @@ def test_foundation_migration_creates_core_tables(tmp_path):
         "operational_events",
         "scheduler_jobs",
         "job_runs",
+        "notification_events",
     }.issubset(tables)
