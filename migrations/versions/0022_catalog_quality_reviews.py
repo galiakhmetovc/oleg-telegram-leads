@@ -6,6 +6,7 @@ Create Date: 2026-04-29
 """
 
 from collections.abc import Sequence
+import re
 
 from alembic import op
 import sqlalchemy as sa
@@ -44,9 +45,7 @@ def upgrade() -> None:
             op.drop_table("catalog_quality_reviews")
             inspector = sa.inspect(bind)
         op.execute(sa.text("DROP TABLE IF EXISTS _alembic_tmp_scheduler_jobs"))
-        with op.batch_alter_table("scheduler_jobs") as batch_op:
-            batch_op.drop_constraint("ck_scheduler_jobs_job_type", type_="check")
-            batch_op.create_check_constraint("ck_scheduler_jobs_job_type", _UPGRADED_JOB_TYPES)
+        _allow_scheduler_quality_validation(bind)
         inspector = sa.inspect(bind)
 
     if "catalog_quality_reviews" not in set(inspector.get_table_names()):
@@ -107,9 +106,13 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    with op.batch_alter_table("scheduler_jobs") as batch_op:
-        batch_op.drop_constraint("ck_scheduler_jobs_job_type", type_="check")
-        batch_op.create_check_constraint("ck_scheduler_jobs_job_type", _PREVIOUS_JOB_TYPES)
+    bind = op.get_bind()
+    if bind.dialect.name == "sqlite":
+        _replace_sqlite_scheduler_job_type_constraint(bind, _PREVIOUS_JOB_TYPES)
+    else:
+        with op.batch_alter_table("scheduler_jobs") as batch_op:
+            batch_op.drop_constraint("ck_scheduler_jobs_job_type", type_="check")
+            batch_op.create_check_constraint("ck_scheduler_jobs_job_type", _PREVIOUS_JOB_TYPES)
     op.drop_index("ix_catalog_quality_reviews_validator", table_name="catalog_quality_reviews")
     op.drop_index(
         "ix_catalog_quality_reviews_candidate_created",
@@ -123,3 +126,33 @@ def _scheduler_jobs_allow_quality_validation(bind) -> bool:  # noqa: ANN001
         sa.text("select sql from sqlite_master where type='table' and name='scheduler_jobs'")
     ).scalar_one()
     return "catalog_candidate_validation" in str(sql)
+
+
+def _allow_scheduler_quality_validation(bind) -> None:  # noqa: ANN001
+    if bind.dialect.name == "sqlite":
+        _replace_sqlite_scheduler_job_type_constraint(bind, _UPGRADED_JOB_TYPES)
+        return
+    with op.batch_alter_table("scheduler_jobs") as batch_op:
+        batch_op.drop_constraint("ck_scheduler_jobs_job_type", type_="check")
+        batch_op.create_check_constraint("ck_scheduler_jobs_job_type", _UPGRADED_JOB_TYPES)
+
+
+def _replace_sqlite_scheduler_job_type_constraint(bind, replacement: str) -> None:  # noqa: ANN001
+    sql = str(
+        bind.execute(
+            sa.text("select sql from sqlite_master where type='table' and name='scheduler_jobs'")
+        ).scalar_one()
+    )
+    updated = re.sub(r"job_type\s+IN\s*\([^)]*\)", replacement, sql, count=1)
+    if updated == sql and replacement not in sql:
+        raise RuntimeError("Could not locate scheduler job_type check constraint")
+    bind.execute(sa.text("PRAGMA writable_schema=ON"))
+    bind.execute(
+        sa.text(
+            "update sqlite_master set sql = :sql where type = 'table' and name = 'scheduler_jobs'"
+        ),
+        {"sql": updated},
+    )
+    schema_version = int(bind.execute(sa.text("PRAGMA schema_version")).scalar_one())
+    bind.execute(sa.text(f"PRAGMA schema_version = {schema_version + 1}"))
+    bind.execute(sa.text("PRAGMA writable_schema=OFF"))
