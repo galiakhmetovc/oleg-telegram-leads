@@ -37,6 +37,7 @@ def test_login_page_and_static_assets_are_served(tmp_path):
     assert "Noto+Sans" in login_response.text
     assert "Roboto" not in login_response.text
     assert "Material+Symbols+Outlined" in login_response.text
+    assert "icon_names=add,check_circle,close,forum,model_training" in login_response.text
     assert 'type="module" src="/static/vendor/material-web.js"' in login_response.text
     assert css_response.status_code == 200
     assert "grid-template-columns" in css_response.text

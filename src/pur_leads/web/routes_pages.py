@@ -1027,7 +1027,7 @@ def _page(*, page: str, title: str, main: str) -> str:
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans:wght@400;500;600;700&amp;display=swap">
-  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined&amp;icon_names=check_circle,forum,person_add,radio_button_unchecked,refresh,send,smart_toy,upload_file&amp;display=block">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined&amp;icon_names=add,check_circle,close,forum,model_training,open_in_new,person,person_add,radio_button_unchecked,refresh,send,settings,smart_toy,upload_file,vpn_key&amp;display=block">
   <link rel="stylesheet" href="/static/app.css">
 </head>
 <body data-page="{page}">
