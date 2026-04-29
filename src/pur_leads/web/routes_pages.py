@@ -66,6 +66,7 @@ def inbox_page(
                   <a href="/sources">Sources</a>
                   <a href="/catalog">Catalog</a>
                   <a href="/crm">CRM</a>
+                  <a href="/operations">Operations</a>
                   <a href="/admin">Admin</a>
                   <button id="logout-button" type="button">Logout</button>
                 </nav>
@@ -129,6 +130,7 @@ def admin_page(
                   <a href="/sources">Sources</a>
                   <a href="/catalog">Catalog</a>
                   <a href="/crm">CRM</a>
+                  <a href="/operations">Operations</a>
                   <a href="/admin">Admin</a>
                   <button id="logout-button" type="button">Logout</button>
                 </nav>
@@ -210,6 +212,7 @@ def crm_page(
                   <a href="/sources">Sources</a>
                   <a href="/catalog">Catalog</a>
                   <a href="/crm">CRM</a>
+                  <a href="/operations">Operations</a>
                   <a href="/admin">Admin</a>
                   <button id="logout-button" type="button">Logout</button>
                 </nav>
@@ -293,6 +296,7 @@ def sources_page(
                   <a href="/sources">Sources</a>
                   <a href="/catalog">Catalog</a>
                   <a href="/crm">CRM</a>
+                  <a href="/operations">Operations</a>
                   <a href="/admin">Admin</a>
                   <button id="logout-button" type="button">Logout</button>
                 </nav>
@@ -364,6 +368,7 @@ def catalog_page(
                   <a href="/sources">Sources</a>
                   <a href="/catalog">Catalog</a>
                   <a href="/crm">CRM</a>
+                  <a href="/operations">Operations</a>
                   <a href="/admin">Admin</a>
                   <button id="logout-button" type="button">Logout</button>
                 </nav>
@@ -417,6 +422,82 @@ def catalog_page(
                     <label>Name<input id="catalog-name-input" name="canonical_name"></label>
                     <label>Payload JSON<textarea id="catalog-value-json" name="normalized_value"></textarea></label>
                   </form>
+                </section>
+              </section>
+            </main>
+            """,
+        )
+    )
+
+
+@router.get("/operations", response_class=HTMLResponse)
+def operations_page(
+    request: Request,
+    auth_service: WebAuthService = Depends(get_auth_service),
+) -> Response:
+    if not _has_page_session(request, auth_service):
+        return RedirectResponse("/login", status_code=303)
+    return HTMLResponse(
+        _page(
+            page="operations",
+            title="Operations",
+            main="""
+            <main class="workspace operations-workspace">
+              <header class="topbar">
+                <div>
+                  <span class="eyebrow">PUR Leads</span>
+                  <h1>Operations</h1>
+                </div>
+                <nav>
+                  <a href="/">Inbox</a>
+                  <a href="/sources">Sources</a>
+                  <a href="/catalog">Catalog</a>
+                  <a href="/crm">CRM</a>
+                  <a href="/operations">Operations</a>
+                  <a href="/admin">Admin</a>
+                  <button id="logout-button" type="button">Logout</button>
+                </nav>
+              </header>
+              <section class="operations-shell">
+                <section id="operations-summary" class="operations-summary" aria-live="polite">
+                  <div class="empty-state">Loading operational state</div>
+                </section>
+                <section class="operations-layout">
+                  <aside class="queue-pane" aria-label="Scheduler jobs">
+                    <div class="section-head">
+                      <h2>Jobs</h2>
+                      <button id="operations-refresh" type="button">Refresh</button>
+                    </div>
+                    <form id="operations-job-filters" class="filter-grid">
+                      <select name="status" aria-label="Job status">
+                        <option value="">All jobs</option>
+                        <option value="queued">Queued</option>
+                        <option value="running">Running</option>
+                        <option value="failed">Failed</option>
+                        <option value="succeeded">Succeeded</option>
+                      </select>
+                      <input name="job_type" placeholder="Job type" aria-label="Job type">
+                      <input name="monitored_source_id" placeholder="Source ID" aria-label="Source ID">
+                    </form>
+                    <div id="operations-jobs" class="queue-list" aria-live="polite"></div>
+                  </aside>
+                  <section id="operations-detail" class="detail-pane" aria-live="polite">
+                    <div class="empty-state">Select a job</div>
+                  </section>
+                  <aside class="side-pane operations-signals" aria-label="Operational signals">
+                    <section>
+                      <h2>Events</h2>
+                      <div id="operations-events" class="table-list" aria-live="polite"></div>
+                    </section>
+                    <section>
+                      <h2>Notifications</h2>
+                      <div id="operations-notifications" class="table-list" aria-live="polite"></div>
+                    </section>
+                    <section>
+                      <h2>Audit</h2>
+                      <div id="operations-audit" class="table-list" aria-live="polite"></div>
+                    </section>
+                  </aside>
                 </section>
               </section>
             </main>

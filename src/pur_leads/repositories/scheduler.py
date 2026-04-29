@@ -10,7 +10,7 @@ from sqlalchemy import insert, select, update
 from sqlalchemy.orm import Session
 
 from pur_leads.core.ids import new_id
-from pur_leads.models.scheduler import scheduler_jobs_table
+from pur_leads.models.scheduler import job_runs_table, scheduler_jobs_table
 
 ACTIVE_IDEMPOTENT_STATUSES = {"queued", "running"}
 PRIORITY_ORDER = {"high": 0, "normal": 1, "low": 2}
@@ -42,6 +42,20 @@ class SchedulerJobRecord:
     last_error: str | None
     created_at: datetime
     updated_at: datetime
+
+
+@dataclass(frozen=True)
+class JobRunRecord:
+    id: str
+    scheduler_job_id: str
+    worker_name: str
+    started_at: datetime
+    finished_at: datetime | None
+    status: str
+    duration_ms: int | None
+    result_json: Any
+    error: str | None
+    log_correlation_id: str | None
 
 
 class SchedulerRepository:
@@ -123,6 +137,70 @@ class SchedulerRepository:
             )
         )
         return self.get(job_id)  # type: ignore[return-value]
+
+    def start_run(
+        self,
+        *,
+        scheduler_job_id: str,
+        worker_name: str,
+        started_at: datetime,
+        log_correlation_id: str,
+    ) -> JobRunRecord:
+        run_id = new_id()
+        self.session.execute(
+            insert(job_runs_table).values(
+                id=run_id,
+                scheduler_job_id=scheduler_job_id,
+                worker_name=worker_name,
+                started_at=self._to_db_datetime(started_at),
+                finished_at=None,
+                status="running",
+                duration_ms=None,
+                result_json=None,
+                error=None,
+                log_correlation_id=log_correlation_id,
+            )
+        )
+        return self.get_run(run_id)  # type: ignore[return-value]
+
+    def finish_run(
+        self,
+        run_id: str,
+        *,
+        status: str,
+        finished_at: datetime,
+        result_json: Any = None,
+        error: str | None = None,
+    ) -> JobRunRecord:
+        run = self.get_run(run_id)
+        if run is None:
+            raise KeyError(run_id)
+        duration_ms = int((self._to_aware_utc(finished_at) - run.started_at).total_seconds() * 1000)
+        self.session.execute(
+            update(job_runs_table)
+            .where(job_runs_table.c.id == run_id)
+            .values(
+                finished_at=self._to_db_datetime(finished_at),
+                status=status,
+                duration_ms=max(duration_ms, 0),
+                result_json=result_json,
+                error=error,
+            )
+        )
+        return self.get_run(run_id)  # type: ignore[return-value]
+
+    def get_run(self, run_id: str) -> JobRunRecord | None:
+        row = (
+            self.session.execute(select(job_runs_table).where(job_runs_table.c.id == run_id))
+            .mappings()
+            .first()
+        )
+        if row is None:
+            return None
+        data = dict(row)
+        for key in ("started_at", "finished_at"):
+            data[key] = self._to_aware_utc(data[key]) if data[key] is not None else None
+        return JobRunRecord(**data)
 
     def due_queued_jobs(self, now: datetime) -> list[SchedulerJobRecord]:
         rows = (

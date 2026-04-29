@@ -55,6 +55,33 @@ class SchedulerService:
         self.session.commit()
         return job
 
+    def start_run(self, job_id: str, *, worker_name: str) -> str:
+        run = self.repository.start_run(
+            scheduler_job_id=job_id,
+            worker_name=worker_name,
+            started_at=utc_now(),
+            log_correlation_id=f"job:{job_id}",
+        )
+        self.session.commit()
+        return run.id
+
+    def finish_run(
+        self,
+        run_id: str,
+        *,
+        status: str,
+        result_json: Any = None,
+        error: str | None = None,
+    ) -> None:
+        self.repository.finish_run(
+            run_id,
+            status=status,
+            finished_at=utc_now(),
+            result_json=result_json,
+            error=error,
+        )
+        self.session.commit()
+
     def acquire_next(
         self,
         worker_name: str,

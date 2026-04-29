@@ -45,6 +45,7 @@ document.addEventListener("DOMContentLoaded", () => {
   if (page === "sources") initSources();
   if (page === "catalog") initCatalog();
   if (page === "crm") initCrm();
+  if (page === "operations") initOperations();
   if (page === "admin") initAdmin();
 });
 
@@ -1003,6 +1004,256 @@ async function submitManualInput(event, state) {
 function catalogStatusClass(status) {
   if (status === "auto_pending" || status === "needs_review") return "is-warn";
   if (status === "rejected" || status === "muted") return "is-danger";
+  return "";
+}
+
+function initOperations() {
+  const state = { items: [], selectedId: null };
+  document.querySelector("#operations-refresh")?.addEventListener("click", () =>
+    loadOperations(state)
+  );
+  document.querySelector("#operations-job-filters")?.addEventListener("change", () =>
+    loadOperationsJobs(state)
+  );
+  document.querySelector("#operations-job-filters")?.addEventListener("input", () =>
+    loadOperationsJobs(state)
+  );
+  loadOperations(state);
+}
+
+async function loadOperations(state) {
+  await Promise.all([loadOperationsSummary(), loadOperationsJobs(state), loadOperationsSignals()]);
+}
+
+async function loadOperationsSummary() {
+  const summary = await api("/api/operations/summary");
+  const target = document.querySelector("#operations-summary");
+  if (!target) return;
+  const failedJobs = summary.jobs?.by_status?.failed || 0;
+  const runningJobs = summary.jobs?.by_status?.running || 0;
+  const queuedJobs = summary.jobs?.by_status?.queued || 0;
+  const errorEvents =
+    (summary.events?.by_severity?.error || 0) + (summary.events?.by_severity?.critical || 0);
+  const suppressedNotifications = summary.notifications?.by_status?.suppressed || 0;
+  target.innerHTML = `<div class="ops-metric-row">
+    ${renderOpsMetric("Jobs", summary.jobs?.total || 0, `${queuedJobs} queued / ${runningJobs} running`)}
+    ${renderOpsMetric("Failed jobs", failedJobs, "needs operator check", failedJobs ? "is-danger" : "")}
+    ${renderOpsMetric("Runs", summary.runs?.total || 0, "worker attempts")}
+    ${renderOpsMetric("Errors", errorEvents, "operational events", errorEvents ? "is-danger" : "")}
+    ${renderOpsMetric("Notifications", summary.notifications?.total || 0, `${suppressedNotifications} suppressed`)}
+    ${renderOpsMetric("Audit", summary.audit?.total || 0, "recorded changes")}
+  </div>`;
+}
+
+function renderOpsMetric(label, value, hint, className = "") {
+  return `<article class="ops-metric ${className}">
+    <span>${escapeHtml(label)}</span>
+    <strong>${escapeHtml(value)}</strong>
+    <small>${escapeHtml(hint)}</small>
+  </article>`;
+}
+
+async function loadOperationsJobs(state) {
+  const params = new URLSearchParams();
+  const form = document.querySelector("#operations-job-filters");
+  if (form) {
+    const data = new FormData(form);
+    for (const [key, value] of data.entries()) {
+      if (value) params.set(key, value);
+    }
+  }
+  const query = params.toString();
+  const payload = await api(`/api/operations/jobs${query ? `?${query}` : ""}`);
+  state.items = payload.items || [];
+  const selectedStillVisible = state.items.some((item) => item.id === state.selectedId);
+  state.selectedId = selectedStillVisible ? state.selectedId : state.items[0]?.id || null;
+  renderOperationsJobs(state);
+  if (state.selectedId) {
+    await loadOperationsJobDetail(state.selectedId);
+  } else {
+    const detail = document.querySelector("#operations-detail");
+    if (detail) detail.innerHTML = `<div class="empty-state">No jobs</div>`;
+  }
+}
+
+function renderOperationsJobs(state) {
+  const target = document.querySelector("#operations-jobs");
+  if (!target) return;
+  if (!state.items.length) {
+    target.innerHTML = `<div class="empty-state">No jobs</div>`;
+    return;
+  }
+  target.innerHTML = state.items
+    .map((job) => {
+      const active = job.id === state.selectedId ? "is-active" : "";
+      const subtitle = [job.scope_type, job.scope_id, job.monitored_source_id]
+        .filter(Boolean)
+        .join(" / ");
+      return `<button class="queue-item ${active}" type="button" data-id="${job.id}">
+        <strong>${escapeHtml(job.job_type)}</strong>
+        <span class="muted">${escapeHtml(subtitle || job.idempotency_key || job.id)}</span>
+        <span class="queue-meta">
+          ${badge(job.status, operationsStatusClass(job.status))}
+          ${badge(`attempts ${job.attempt_count || 0}/${job.max_attempts || 0}`)}
+          ${job.last_error ? badge("error", "is-danger") : ""}
+        </span>
+      </button>`;
+    })
+    .join("");
+  target.querySelectorAll(".queue-item").forEach((button) => {
+    button.addEventListener("click", async () => {
+      state.selectedId = button.dataset.id;
+      renderOperationsJobs(state);
+      await loadOperationsJobDetail(state.selectedId);
+    });
+  });
+}
+
+async function loadOperationsJobDetail(jobId) {
+  const detail = await api(`/api/operations/jobs/${jobId}`);
+  renderOperationsJobDetail(detail);
+}
+
+function renderOperationsJobDetail(detail) {
+  const target = document.querySelector("#operations-detail");
+  if (!target) return;
+  const job = detail.job || {};
+  const runs = detail.runs || [];
+  const events = detail.events || [];
+  target.innerHTML = `<div class="detail-grid">
+    <header class="detail-header">
+      <div>
+        <h2>${escapeHtml(job.job_type || "Job")}</h2>
+        <p class="muted">${escapeHtml(job.id || "")}</p>
+      </div>
+      <div class="badges">
+        ${badge(job.status || "unknown", operationsStatusClass(job.status))}
+        ${badge(job.priority || "normal")}
+        ${job.locked_by ? badge(`locked ${job.locked_by}`, "is-warn") : ""}
+      </div>
+    </header>
+    <section class="detail-section">
+      <h3>Execution</h3>
+      <div class="detail-meta">
+        ${badge(`scope ${job.scope_type || "n/a"}`)}
+        ${badge(`source ${job.monitored_source_id || "n/a"}`)}
+        ${badge(`message ${job.source_message_id || "n/a"}`)}
+        ${badge(`attempts ${job.attempt_count || 0}/${job.max_attempts || 0}`)}
+        ${badge(`run after ${time(job.run_after_at) || "n/a"}`)}
+        ${badge(`retry ${time(job.next_retry_at) || "none"}`)}
+      </div>
+      ${
+        job.last_error
+          ? `<p class="muted">last error ${escapeHtml(job.last_error)}</p>`
+          : ""
+      }
+    </section>
+    ${operationsJsonSection("Payload", job.payload_json)}
+    ${operationsJsonSection("Checkpoint before", job.checkpoint_before_json)}
+    ${operationsJsonSection("Checkpoint after", job.checkpoint_after_json)}
+    ${operationsJsonSection("Result", job.result_summary_json)}
+    <section class="detail-section">
+      <h3>Runs</h3>
+      <div class="table-list">
+        ${runs.map(renderOperationRun).join("") || '<div class="empty-state">No runs</div>'}
+      </div>
+    </section>
+    <section class="detail-section">
+      <h3>Events</h3>
+      <div class="table-list">
+        ${events.map(renderOperationEvent).join("") || '<div class="empty-state">No events</div>'}
+      </div>
+    </section>
+  </div>`;
+}
+
+function operationsJsonSection(title, value) {
+  if (value === null || value === undefined) return "";
+  return `<section class="detail-section">
+    <h3>${escapeHtml(title)}</h3>
+    <pre class="json-block">${escapeHtml(JSON.stringify(value, null, 2))}</pre>
+  </section>`;
+}
+
+function renderOperationRun(run) {
+  const duration = run.duration_ms === null || run.duration_ms === undefined ? "running" : `${run.duration_ms}ms`;
+  return `<div class="table-row">
+    <div>
+      <strong>${escapeHtml(run.worker_name || "worker")}</strong>
+      <p class="muted">${escapeHtml(time(run.started_at))} / ${escapeHtml(duration)}</p>
+    </div>
+    <span>${badge(run.status, operationsStatusClass(run.status))}</span>
+  </div>`;
+}
+
+async function loadOperationsSignals() {
+  const [events, notifications, audit] = await Promise.all([
+    api("/api/operations/events?limit=12"),
+    api("/api/operations/notifications?limit=12"),
+    api("/api/operations/audit?limit=12"),
+  ]);
+  renderOperationsEvents(events.items || []);
+  renderOperationsNotifications(notifications.items || []);
+  renderOperationsAudit(audit.items || []);
+}
+
+function renderOperationsEvents(items) {
+  const target = document.querySelector("#operations-events");
+  if (!target) return;
+  target.innerHTML =
+    items.map(renderOperationEvent).join("") || '<div class="empty-state">No events</div>';
+}
+
+function renderOperationEvent(event) {
+  return `<div class="table-row">
+    <div>
+      <strong>${escapeHtml(event.event_type || "event")}</strong>
+      <p class="muted">${escapeHtml(shortText(event.message || "", 120))}</p>
+    </div>
+    <span>${badge(event.severity || "info", operationsStatusClass(event.severity))}</span>
+  </div>`;
+}
+
+function renderOperationsNotifications(items) {
+  const target = document.querySelector("#operations-notifications");
+  if (!target) return;
+  target.innerHTML =
+    items.map(renderOperationNotification).join("") ||
+    '<div class="empty-state">No notifications</div>';
+}
+
+function renderOperationNotification(item) {
+  const label = [item.notification_type, item.notification_policy].filter(Boolean).join(" / ");
+  return `<div class="table-row">
+    <div>
+      <strong>${escapeHtml(label || "notification")}</strong>
+      <p class="muted">${escapeHtml(item.suppressed_reason || item.error || time(item.created_at))}</p>
+    </div>
+    <span>${badge(item.status || "unknown", operationsStatusClass(item.status))}</span>
+  </div>`;
+}
+
+function renderOperationsAudit(items) {
+  const target = document.querySelector("#operations-audit");
+  if (!target) return;
+  target.innerHTML =
+    items.map(renderOperationAudit).join("") || '<div class="empty-state">No audit records</div>';
+}
+
+function renderOperationAudit(item) {
+  const entity = [item.entity_type, item.entity_id].filter(Boolean).join(" / ");
+  return `<div class="table-row">
+    <div>
+      <strong>${escapeHtml(item.action || "change")}</strong>
+      <p class="muted">${escapeHtml(entity || item.actor || "")}</p>
+    </div>
+    <span>${escapeHtml(time(item.created_at))}</span>
+  </div>`;
+}
+
+function operationsStatusClass(status) {
+  if (status === "failed" || status === "error" || status === "critical") return "is-danger";
+  if (status === "queued" || status === "running" || status === "warning") return "is-warn";
   return "";
 }
 

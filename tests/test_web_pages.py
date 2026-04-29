@@ -42,12 +42,14 @@ def test_workspace_and_admin_pages_are_protected_and_render_shells(tmp_path):
     crm_denied = client.get("/crm", follow_redirects=False)
     sources_denied = client.get("/sources", follow_redirects=False)
     catalog_denied = client.get("/catalog", follow_redirects=False)
+    operations_denied = client.get("/operations", follow_redirects=False)
     _login(client)
     workspace_response = client.get("/")
     admin_response = client.get("/admin")
     crm_response = client.get("/crm")
     sources_response = client.get("/sources")
     catalog_response = client.get("/catalog")
+    operations_response = client.get("/operations")
     js_response = client.get("/static/app.js")
 
     assert workspace_denied.status_code == 303
@@ -60,11 +62,14 @@ def test_workspace_and_admin_pages_are_protected_and_render_shells(tmp_path):
     assert sources_denied.headers["location"] == "/login"
     assert catalog_denied.status_code == 303
     assert catalog_denied.headers["location"] == "/login"
+    assert operations_denied.status_code == 303
+    assert operations_denied.headers["location"] == "/login"
     assert workspace_response.status_code == 200
     assert 'data-page="leads-inbox"' in workspace_response.text
     assert '<a href="/sources">Sources</a>' in workspace_response.text
     assert '<a href="/catalog">Catalog</a>' in workspace_response.text
     assert '<a href="/crm">CRM</a>' in workspace_response.text
+    assert '<a href="/operations">Operations</a>' in workspace_response.text
     assert 'id="lead-queue"' in workspace_response.text
     assert 'id="lead-detail"' in workspace_response.text
     assert 'data-field="auto_pending"' in workspace_response.text
@@ -99,11 +104,21 @@ def test_workspace_and_admin_pages_are_protected_and_render_shells(tmp_path):
     assert 'id="catalog-edit-form"' in catalog_response.text
     assert 'id="catalog-name-input"' in catalog_response.text
     assert 'id="catalog-value-json"' in catalog_response.text
+    assert operations_response.status_code == 200
+    assert 'data-page="operations"' in operations_response.text
+    assert 'id="operations-summary"' in operations_response.text
+    assert 'id="operations-jobs"' in operations_response.text
+    assert 'id="operations-detail"' in operations_response.text
+    assert 'id="operations-events"' in operations_response.text
+    assert 'id="operations-notifications"' in operations_response.text
+    assert 'id="operations-audit"' in operations_response.text
     assert "/api/crm/clients" in js_response.text
     assert "/crm/convert" in js_response.text
     assert "/api/sources" in js_response.text
     assert "/api/catalog/candidates" in js_response.text
+    assert "/api/operations/summary" in js_response.text
     assert "loadCatalogCandidateDetail" in js_response.text
+    assert "initOperations" in js_response.text
     assert 'method: "PATCH"' in js_response.text
     assert "/api/admin/userbots" in js_response.text
 

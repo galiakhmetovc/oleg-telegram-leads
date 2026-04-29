@@ -185,20 +185,28 @@ class WorkerRuntime:
         if job is None:
             return WorkerRunResult(status="idle")
 
+        run_id = self.scheduler.start_run(job.id, worker_name=self.worker_name)
         handler = self.handlers.get(job.job_type)
         if handler is None:
-            return self._fail_unsupported_job(job)
+            result = self._fail_unsupported_job(job)
+            self.scheduler.finish_run(run_id, status="failed", error=result.message)
+            return result
 
         try:
             handler_result = await handler(job)
         except Exception as exc:
-            return self._fail_job(job, exc)
+            result = self._fail_job(job, exc)
+            self.scheduler.finish_run(run_id, status="failed", error=result.message)
+            return result
 
+        checkpoint_after = _checkpoint_after(handler_result)
+        result_summary = _result_summary(handler_result)
         self.scheduler.succeed(
             job.id,
-            checkpoint_after=_checkpoint_after(handler_result),
-            result_summary=_result_summary(handler_result),
+            checkpoint_after=checkpoint_after,
+            result_summary=result_summary,
         )
+        self.scheduler.finish_run(run_id, status="succeeded", result_json=result_summary)
         return WorkerRunResult(status="succeeded", job_id=job.id, job_type=job.job_type)
 
     def _fail_unsupported_job(self, job: SchedulerJobRecord) -> WorkerRunResult:

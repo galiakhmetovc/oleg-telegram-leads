@@ -8,7 +8,7 @@ from pur_leads.db.engine import create_sqlite_engine
 from pur_leads.db.migrations import upgrade_database
 from pur_leads.db.session import create_session_factory
 from pur_leads.models.audit import operational_events_table
-from pur_leads.models.scheduler import scheduler_jobs_table
+from pur_leads.models.scheduler import job_runs_table, scheduler_jobs_table
 from pur_leads.models.telegram_sources import monitored_sources_table
 from pur_leads.services.scheduler import SchedulerService
 from pur_leads.services.telegram_sources import TelegramSourceService
@@ -98,6 +98,15 @@ async def test_worker_once_executes_registered_handler_and_marks_succeeded(runti
     assert handled == [job.id]
     assert stored.status == "succeeded"
     assert stored.result_summary_json == {"value": 4}
+    run = runtime_session.execute(select(job_runs_table)).mappings().one()
+    assert run["scheduler_job_id"] == job.id
+    assert run["worker_name"] == "worker"
+    assert run["status"] == "succeeded"
+    assert run["finished_at"] is not None
+    assert run["duration_ms"] is not None
+    assert run["result_json"] == {"value": 4}
+    assert run["error"] is None
+    assert run["log_correlation_id"]
 
 
 @pytest.mark.asyncio
@@ -128,6 +137,12 @@ async def test_worker_once_delays_retry_when_handler_exposes_retry_after(runtime
     assert stored.next_retry_at >= before + timedelta(seconds=37)
     assert stored_peer.status == "queued"
     assert stored_peer.run_after_at >= stored.next_retry_at
+    run = runtime_session.execute(select(job_runs_table)).mappings().one()
+    assert run["scheduler_job_id"] == job.id
+    assert run["status"] == "failed"
+    assert run["finished_at"] is not None
+    assert run["duration_ms"] is not None
+    assert run["error"] == "Telegram rate limit"
 
 
 @pytest.mark.asyncio
