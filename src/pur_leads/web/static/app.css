@@ -26,11 +26,10 @@
   --md-sys-shape-corner-extra-small: 6px;
   --md-sys-shape-corner-small: 8px;
   --md-sys-shape-corner-medium: 8px;
-  --md-ref-typeface-brand: Roboto;
-  --md-ref-typeface-plain: Roboto;
-  font-family:
-    Roboto, Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
-    sans-serif;
+  --ui-font: "Noto Sans", "Segoe UI", Arial, sans-serif;
+  --md-ref-typeface-brand: var(--ui-font);
+  --md-ref-typeface-plain: var(--ui-font);
+  font-family: var(--ui-font);
 }
 
 * {
@@ -427,7 +426,9 @@ md-text-button {
 
 .onboarding-main {
   display: grid;
+  grid-template-columns: minmax(360px, 0.9fr) minmax(480px, 1.1fr);
   align-content: start;
+  align-items: start;
   gap: 14px;
   min-width: 0;
   padding: 18px;
@@ -460,6 +461,7 @@ md-text-button {
 }
 
 .onboarding-panel {
+  min-width: 0;
   display: grid;
   gap: 14px;
   padding: 18px;
@@ -502,6 +504,21 @@ md-text-button {
 .material-form md-outlined-button,
 .material-form .material-checkbox-line {
   align-self: end;
+}
+
+.onboarding-panel-compact .material-form {
+  grid-template-columns: 1fr;
+}
+
+.onboarding-panel-compact .material-form md-filled-button,
+.onboarding-panel-compact .material-action-row md-filled-button {
+  width: auto;
+  justify-self: start;
+}
+
+.onboarding-panel-session .material-form,
+.onboarding-panel-interactive .material-form {
+  grid-template-columns: repeat(2, minmax(190px, 1fr));
 }
 
 .material-action-row {
@@ -870,6 +887,10 @@ md-text-button {
 
   .inline-form,
   .material-form {
+    grid-template-columns: 1fr;
+  }
+
+  .onboarding-main {
     grid-template-columns: 1fr;
   }
 

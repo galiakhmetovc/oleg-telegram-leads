@@ -2289,6 +2289,17 @@ function initOnboarding() {
   loadOnboardingStatus();
 }
 
+function setOnboardingGroupDiscoverEnabled(enabled) {
+  const button = document.querySelector("#onboarding-group-discover");
+  const hint = document.querySelector("#onboarding-group-hint");
+  if (button) button.disabled = !enabled;
+  if (hint) {
+    hint.textContent = enabled
+      ? "Бот подключен. Теперь можно найти группу уведомлений."
+      : "Сначала сохраните и проверьте токен бота.";
+  }
+}
+
 async function loadOnboardingStatus() {
   const target = document.querySelector("#onboarding-status");
   const progress = document.querySelector("#onboarding-progress");
@@ -2298,6 +2309,7 @@ async function loadOnboardingStatus() {
     const steps = Object.entries(payload.steps || {});
     const doneCount = steps.filter(([, step]) => step.done).length;
     if (progress) progress.value = steps.length ? doneCount / steps.length : 0;
+    setOnboardingGroupDiscoverEnabled(Boolean(payload.steps?.bot_token?.done));
     target.innerHTML = steps
       .map(([key, step]) => {
         const icon = step.done ? "check_circle" : "radio_button_unchecked";
@@ -2309,6 +2321,7 @@ async function loadOnboardingStatus() {
       })
       .join("");
   } catch (error) {
+    setOnboardingGroupDiscoverEnabled(false);
     target.innerHTML = `<div class="empty-state">${escapeHtml(error.message)}</div>`;
   }
 }
@@ -2334,9 +2347,14 @@ async function saveOnboardingBot(event) {
 }
 
 async function discoverOnboardingGroups() {
+  const button = document.querySelector("#onboarding-group-discover");
   const target = document.querySelector("#onboarding-group-candidates");
   const status = document.querySelector("#onboarding-group-status");
   if (status) status.textContent = "";
+  if (button?.disabled) {
+    if (status) status.textContent = "Сначала сохраните и проверьте токен бота.";
+    return;
+  }
   try {
     const payload = await api("/api/onboarding/notification-groups/discover");
     const candidates = payload.candidates || [];

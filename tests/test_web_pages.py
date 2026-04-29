@@ -34,9 +34,14 @@ def test_login_page_and_static_assets_are_served(tmp_path):
     assert "/static/app.css" in login_response.text
     assert "/static/app.js" in login_response.text
     assert '<link rel="icon" href="data:,">' in login_response.text
+    assert "Noto+Sans" in login_response.text
+    assert "Roboto" not in login_response.text
+    assert "Material+Symbols+Outlined" in login_response.text
     assert 'type="module" src="/static/vendor/material-web.js"' in login_response.text
     assert css_response.status_code == 200
     assert "grid-template-columns" in css_response.text
+    assert "--md-ref-typeface-brand: var(--ui-font);" in css_response.text
+    assert "grid-template-columns: minmax(360px, 0.9fr) minmax(480px, 1.1fr);" in css_response.text
     assert js_response.status_code == 200
     assert material_response.status_code == 200
     assert "customElements" in material_response.text
@@ -149,7 +154,13 @@ def test_workspace_and_admin_pages_are_protected_and_render_shells(tmp_path):
     assert "onboarding-material-shell" in onboarding_response.text
     assert "<md-linear-progress" in onboarding_response.text
     assert '<md-outlined-text-field name="token"' in onboarding_response.text
-    assert '<md-filled-button id="onboarding-group-discover"' in onboarding_response.text
+    assert (
+        '<md-filled-button id="onboarding-group-discover" type="button" disabled>'
+        in onboarding_response.text
+    )
+    assert 'id="onboarding-group-hint"' in onboarding_response.text
+    assert "onboarding-panel-compact" in onboarding_response.text
+    assert "onboarding-panel-session" in onboarding_response.text
     assert '<md-checkbox name="make_default" checked' in onboarding_response.text
     assert 'id="onboarding-bot-form"' in onboarding_response.text
     assert 'id="onboarding-group-discover"' in onboarding_response.text
@@ -197,6 +208,8 @@ def test_workspace_and_admin_pages_are_protected_and_render_shells(tmp_path):
     assert "/crm/convert" in js_response.text
     assert "/api/sources" in js_response.text
     assert "/api/onboarding/status" in js_response.text
+    assert "setOnboardingGroupDiscoverEnabled" in js_response.text
+    assert "payload.steps?.bot_token?.done" in js_response.text
     assert "/api/onboarding/bot-token" in js_response.text
     assert "/api/onboarding/userbots/session-file" in js_response.text
     assert "/api/onboarding/userbots/interactive/start" in js_response.text

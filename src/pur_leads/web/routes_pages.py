@@ -302,7 +302,7 @@ def onboarding_page(
                   </div>
                 </aside>
                 <section class="onboarding-main">
-                  <section class="onboarding-panel">
+                  <section class="onboarding-panel onboarding-panel-compact">
                     <div class="onboarding-panel-head">
                       <md-icon aria-hidden="true">smart_toy</md-icon>
                       <div>
@@ -323,7 +323,7 @@ def onboarding_page(
                     </form>
                     <p id="onboarding-bot-status" class="status-line" role="status"></p>
                   </section>
-                  <section class="onboarding-panel">
+                  <section class="onboarding-panel onboarding-panel-compact">
                     <div class="onboarding-panel-head">
                       <md-icon aria-hidden="true">forum</md-icon>
                       <div>
@@ -332,15 +332,18 @@ def onboarding_page(
                       </div>
                     </div>
                     <div class="material-action-row">
-                      <md-filled-button id="onboarding-group-discover" type="button">
+                      <md-filled-button id="onboarding-group-discover" type="button" disabled>
                         <md-icon slot="icon">refresh</md-icon>
                         Найти доступные группы
                       </md-filled-button>
                     </div>
+                    <p id="onboarding-group-hint" class="status-line">
+                      Сначала сохраните и проверьте токен бота.
+                    </p>
                     <div id="onboarding-group-candidates" class="table-list"></div>
                     <p id="onboarding-group-status" class="status-line" role="status"></p>
                   </section>
-                  <section class="onboarding-panel">
+                  <section class="onboarding-panel onboarding-panel-session">
                     <div class="onboarding-panel-head">
                       <md-icon aria-hidden="true">upload_file</md-icon>
                       <div>
@@ -376,7 +379,7 @@ def onboarding_page(
                     </form>
                     <p id="onboarding-session-status" class="status-line" role="status"></p>
                   </section>
-                  <section class="onboarding-panel">
+                  <section class="onboarding-panel onboarding-panel-interactive">
                     <div class="onboarding-panel-head">
                       <md-icon aria-hidden="true">person_add</md-icon>
                       <div>
@@ -964,7 +967,8 @@ def _page(*, page: str, title: str, main: str) -> str:
   <link rel="icon" href="data:,">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&amp;family=Material+Symbols+Outlined&amp;icon_names=check_circle,forum,person_add,radio_button_unchecked,refresh,send,smart_toy,upload_file&amp;display=block">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans:wght@400;500;600;700&amp;display=swap">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined&amp;icon_names=check_circle,forum,person_add,radio_button_unchecked,refresh,send,smart_toy,upload_file&amp;display=block">
   <link rel="stylesheet" href="/static/app.css">
 </head>
 <body data-page="{page}">
