@@ -287,6 +287,18 @@ def onboarding_page(
               </header>
               <section class="onboarding-layout">
                 <aside class="onboarding-rail" aria-label="Шаги подключения">
+                  <div class="onboarding-product">
+                    <h2>PUR Leads</h2>
+                    <p>
+                      Система читает выбранные Telegram-чаты, находит запросы на оборудование
+                      и услуги, сверяет их с каталогом ПУР и отправляет срочные уведомления
+                      оператору.
+                    </p>
+                    <p>
+                      Онбординг подключает каналы ввода и вывода: бота для уведомлений,
+                      юзербота для чтения чатов и LLM-провайдера для разбора каталога и лидов.
+                    </p>
+                  </div>
                   <div class="section-head">
                     <h2>Статус</h2>
                     <md-icon-button id="onboarding-refresh" type="button" title="Обновить">
