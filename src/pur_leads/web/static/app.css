@@ -517,6 +517,57 @@ h3 {
   gap: 8px;
 }
 
+.today-shell {
+  min-height: 0;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+}
+
+.today-summary {
+  padding: 14px 20px;
+  border-bottom: 1px solid var(--line);
+  background: #fbfcfd;
+}
+
+.today-layout {
+  display: grid;
+  grid-template-columns: minmax(520px, 1fr) minmax(300px, 380px);
+  min-height: 0;
+}
+
+.today-main,
+.today-side {
+  display: grid;
+  align-content: start;
+  gap: 18px;
+}
+
+.today-main {
+  border-right: 1px solid var(--line);
+}
+
+.today-section {
+  display: grid;
+  gap: 10px;
+}
+
+.today-row {
+  grid-template-columns: minmax(0, 1fr) minmax(140px, auto);
+}
+
+.row-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: start;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.row-actions button {
+  min-height: 32px;
+  padding: 0 10px;
+}
+
 .source-action-bar {
   display: flex;
   flex-wrap: wrap;
@@ -553,8 +604,13 @@ h3 {
   .crm-layout,
   .sources-layout,
   .operations-layout,
+  .today-layout,
   .admin-layout {
     grid-template-columns: 1fr;
+  }
+
+  .today-main {
+    border-right: 0;
   }
 
   .ops-metric-row {
@@ -574,6 +630,14 @@ h3 {
 
   .checkpoint-form {
     grid-template-columns: 1fr;
+  }
+
+  .today-row {
+    grid-template-columns: 1fr;
+  }
+
+  .row-actions {
+    justify-content: flex-start;
   }
 }
 

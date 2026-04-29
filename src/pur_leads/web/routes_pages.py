@@ -63,6 +63,7 @@ def inbox_page(
                 </div>
                 <nav>
                   <a href="/">Inbox</a>
+                  <a href="/today">Today</a>
                   <a href="/sources">Sources</a>
                   <a href="/catalog">Catalog</a>
                   <a href="/crm">CRM</a>
@@ -127,6 +128,7 @@ def admin_page(
                 </div>
                 <nav>
                   <a href="/">Inbox</a>
+                  <a href="/today">Today</a>
                   <a href="/sources">Sources</a>
                   <a href="/catalog">Catalog</a>
                   <a href="/crm">CRM</a>
@@ -209,6 +211,7 @@ def crm_page(
                 </div>
                 <nav>
                   <a href="/">Inbox</a>
+                  <a href="/today">Today</a>
                   <a href="/sources">Sources</a>
                   <a href="/catalog">Catalog</a>
                   <a href="/crm">CRM</a>
@@ -293,6 +296,7 @@ def sources_page(
                 </div>
                 <nav>
                   <a href="/">Inbox</a>
+                  <a href="/today">Today</a>
                   <a href="/sources">Sources</a>
                   <a href="/catalog">Catalog</a>
                   <a href="/crm">CRM</a>
@@ -365,6 +369,7 @@ def catalog_page(
                 </div>
                 <nav>
                   <a href="/">Inbox</a>
+                  <a href="/today">Today</a>
                   <a href="/sources">Sources</a>
                   <a href="/catalog">Catalog</a>
                   <a href="/crm">CRM</a>
@@ -430,6 +435,95 @@ def catalog_page(
     )
 
 
+@router.get("/today", response_class=HTMLResponse)
+def today_page(
+    request: Request,
+    auth_service: WebAuthService = Depends(get_auth_service),
+) -> Response:
+    if not _has_page_session(request, auth_service):
+        return RedirectResponse("/login", status_code=303)
+    return HTMLResponse(
+        _page(
+            page="today",
+            title="Today",
+            main="""
+            <main class="workspace today-workspace">
+              <header class="topbar">
+                <div>
+                  <span class="eyebrow">PUR Leads</span>
+                  <h1>Today</h1>
+                </div>
+                <nav>
+                  <a href="/">Inbox</a>
+                  <a href="/today">Today</a>
+                  <a href="/sources">Sources</a>
+                  <a href="/catalog">Catalog</a>
+                  <a href="/crm">CRM</a>
+                  <a href="/operations">Operations</a>
+                  <a href="/admin">Admin</a>
+                  <button id="logout-button" type="button">Logout</button>
+                </nav>
+              </header>
+              <section class="today-shell">
+                <section id="today-summary" class="today-summary" aria-live="polite">
+                  <div class="empty-state">Loading daily work</div>
+                </section>
+                <section class="today-layout">
+                  <section class="detail-pane today-main" aria-label="Daily work queues">
+                    <section class="today-section">
+                      <div class="section-head">
+                        <h2>Leads</h2>
+                        <button id="today-refresh" type="button">Refresh</button>
+                      </div>
+                      <div id="today-leads" class="table-list" aria-live="polite"></div>
+                    </section>
+                    <section class="today-section">
+                      <div class="section-head">
+                        <h2>Tasks</h2>
+                      </div>
+                      <form id="today-task-form" class="inline-form">
+                        <input name="title" placeholder="Task title" required>
+                        <input name="description" placeholder="Description">
+                        <select name="priority" aria-label="Priority">
+                          <option value="normal">Normal</option>
+                          <option value="high">High</option>
+                          <option value="low">Low</option>
+                        </select>
+                        <input name="due_at" type="datetime-local" aria-label="Due at">
+                        <button type="submit">Create</button>
+                      </form>
+                      <p id="today-status" class="status-line" role="status"></p>
+                      <div id="today-tasks" class="table-list" aria-live="polite"></div>
+                    </section>
+                    <section class="today-section">
+                      <div class="section-head">
+                        <h2>Contact Reasons</h2>
+                      </div>
+                      <div id="today-contact-reasons" class="table-list" aria-live="polite"></div>
+                    </section>
+                  </section>
+                  <aside class="side-pane today-side" aria-label="Context">
+                    <section class="today-section">
+                      <h2>Support</h2>
+                      <div id="today-support-cases" class="table-list" aria-live="polite"></div>
+                    </section>
+                    <section class="today-section">
+                      <h2>Catalog Review</h2>
+                      <div id="today-catalog-candidates" class="table-list" aria-live="polite"></div>
+                    </section>
+                    <section class="today-section">
+                      <h2>Operational Issues</h2>
+                      <div id="today-operational-issues" class="table-list" aria-live="polite"></div>
+                    </section>
+                  </aside>
+                </section>
+              </section>
+            </main>
+            """,
+        )
+    )
+
+
 @router.get("/operations", response_class=HTMLResponse)
 def operations_page(
     request: Request,
@@ -450,6 +544,7 @@ def operations_page(
                 </div>
                 <nav>
                   <a href="/">Inbox</a>
+                  <a href="/today">Today</a>
                   <a href="/sources">Sources</a>
                   <a href="/catalog">Catalog</a>
                   <a href="/crm">CRM</a>

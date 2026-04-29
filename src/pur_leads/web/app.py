@@ -18,6 +18,7 @@ from pur_leads.web.routes_leads import router as leads_router
 from pur_leads.web.routes_operations import router as operations_router
 from pur_leads.web.routes_pages import router as pages_router
 from pur_leads.web.routes_sources import router as sources_router
+from pur_leads.web.routes_today import router as today_router
 
 
 def create_app(
@@ -67,6 +68,7 @@ def create_app(
     app.include_router(crm_router)
     app.include_router(catalog_router)
     app.include_router(sources_router)
+    app.include_router(today_router)
     app.include_router(operations_router)
     app.include_router(admin_router)
     app.include_router(pages_router)

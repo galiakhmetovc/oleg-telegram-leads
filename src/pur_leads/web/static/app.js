@@ -45,6 +45,7 @@ document.addEventListener("DOMContentLoaded", () => {
   if (page === "sources") initSources();
   if (page === "catalog") initCatalog();
   if (page === "crm") initCrm();
+  if (page === "today") initToday();
   if (page === "operations") initOperations();
   if (page === "admin") initAdmin();
 });
@@ -1334,6 +1335,277 @@ function shortText(value, limit) {
   const normalized = text(value).trim();
   if (normalized.length <= limit) return normalized;
   return `${normalized.slice(0, limit - 1).trim()}…`;
+}
+
+function initToday() {
+  document.querySelector("#today-refresh")?.addEventListener("click", loadToday);
+  document.querySelector("#today-task-form")?.addEventListener("submit", createTodayTask);
+  loadToday();
+}
+
+async function loadToday() {
+  const status = document.querySelector("#today-status");
+  try {
+    const payload = await api("/api/today");
+    renderTodaySummary(payload);
+    renderTodayLeads(payload.leads || []);
+    renderTodayTasks(payload.tasks || []);
+    renderTodayContactReasons(payload.contact_reasons || []);
+    renderTodaySupportCases(payload.support_cases || []);
+    renderTodayCatalogCandidates(payload.catalog_candidates || []);
+    renderTodayOperationalIssues(payload.operational_issues || []);
+    if (status) status.textContent = `Updated ${time(payload.generated_at)}`;
+  } catch (error) {
+    if (status) status.textContent = error.message;
+  }
+}
+
+function renderTodaySummary(payload) {
+  const target = document.querySelector("#today-summary");
+  if (!target) return;
+  const counts = payload.counts || {};
+  target.innerHTML = `<div class="ops-metric-row today-metric-row">
+    ${renderOpsMetric("New leads", counts.new_leads || 0, `${counts.maybe_leads || 0} maybe`)}
+    ${renderOpsMetric("Due tasks", counts.due_tasks || 0, `${counts.overdue_tasks || 0} overdue`, counts.overdue_tasks ? "is-danger" : "")}
+    ${renderOpsMetric("Contact reasons", counts.contact_reasons || 0, "clients to contact")}
+    ${renderOpsMetric("Support", counts.support_cases || 0, "open cases", counts.support_cases ? "is-warn" : "")}
+    ${renderOpsMetric("Catalog", counts.catalog_candidates || 0, "pending facts")}
+    ${renderOpsMetric("Issues", counts.operational_issues || 0, "errors", counts.operational_issues ? "is-danger" : "")}
+  </div>`;
+}
+
+function renderTodayLeads(items) {
+  const target = document.querySelector("#today-leads");
+  if (!target) return;
+  target.innerHTML =
+    items.map(renderTodayLead).join("") || '<div class="empty-state">No new leads</div>';
+}
+
+function renderTodayLead(item) {
+  const confidence = Math.round((item.confidence_max || 0) * 100);
+  return `<div class="table-row today-row">
+    <div>
+      <strong>${escapeHtml(shortText(item.message_text || item.summary || "Lead", 180))}</strong>
+      <p class="muted">${escapeHtml(item.primary_sender_name || "unknown sender")}</p>
+      <div class="queue-meta">
+        ${badge(item.status || "new", todayStatusClass(item.status))}
+        ${badge(`${confidence}%`)}
+        ${item.telegram_message_id ? badge(`message ${item.telegram_message_id}`) : ""}
+      </div>
+    </div>
+    <a href="/" aria-label="Open lead inbox">Open</a>
+  </div>`;
+}
+
+function renderTodayTasks(items) {
+  const target = document.querySelector("#today-tasks");
+  if (!target) return;
+  target.innerHTML =
+    items.map(renderTodayTask).join("") || '<div class="empty-state">No due tasks</div>';
+  target.querySelectorAll("[data-today-task-action]").forEach((button) => {
+    button.addEventListener("click", () =>
+      todayTaskAction(button.dataset.taskId, button.dataset.todayTaskAction)
+    );
+  });
+}
+
+function renderTodayTask(task) {
+  return `<div class="table-row today-row">
+    <div>
+      <strong>${escapeHtml(task.title || "Task")}</strong>
+      <p class="muted">${escapeHtml(task.description || time(task.due_at) || "")}</p>
+      <div class="queue-meta">
+        ${badge(task.status || "open", todayStatusClass(task.status))}
+        ${badge(task.priority || "normal", todayPriorityClass(task.priority))}
+        ${task.due_at ? badge(time(task.due_at), todayDueClass(task.due_at)) : ""}
+      </div>
+    </div>
+    <div class="row-actions">
+      <button type="button" data-task-id="${escapeHtml(task.id)}" data-today-task-action="complete">Done</button>
+      <button type="button" data-task-id="${escapeHtml(task.id)}" data-today-task-action="snooze">Snooze</button>
+    </div>
+  </div>`;
+}
+
+function renderTodayContactReasons(items) {
+  const target = document.querySelector("#today-contact-reasons");
+  if (!target) return;
+  target.innerHTML =
+    items.map(renderTodayContactReason).join("") ||
+    '<div class="empty-state">No contact reasons</div>';
+  target.querySelectorAll("[data-today-contact-action]").forEach((button) => {
+    button.addEventListener("click", () =>
+      todayContactReasonAction(button.dataset.reasonId, button.dataset.todayContactAction)
+    );
+  });
+}
+
+function renderTodayContactReason(item) {
+  const client = item.client || {};
+  return `<div class="table-row today-row">
+    <div>
+      <strong>${escapeHtml(item.title || "Contact reason")}</strong>
+      <p class="muted">${escapeHtml(client.display_name || item.reason_text || "")}</p>
+      <div class="queue-meta">
+        ${badge(item.status || "new", todayStatusClass(item.status))}
+        ${badge(item.priority || "normal", todayPriorityClass(item.priority))}
+        ${item.due_at ? badge(time(item.due_at), todayDueClass(item.due_at)) : ""}
+      </div>
+    </div>
+    <div class="row-actions">
+      <button type="button" data-reason-id="${escapeHtml(item.id)}" data-today-contact-action="accept">Accept</button>
+      <button type="button" data-reason-id="${escapeHtml(item.id)}" data-today-contact-action="done">Done</button>
+      <button type="button" data-reason-id="${escapeHtml(item.id)}" data-today-contact-action="snooze">Snooze</button>
+      <button type="button" data-reason-id="${escapeHtml(item.id)}" data-today-contact-action="dismiss">Dismiss</button>
+    </div>
+  </div>`;
+}
+
+function renderTodaySupportCases(items) {
+  const target = document.querySelector("#today-support-cases");
+  if (!target) return;
+  target.innerHTML =
+    items.map((item) => {
+      const client = item.client || {};
+      return `<div class="table-row">
+        <div>
+          <strong>${escapeHtml(item.title || "Support case")}</strong>
+          <p class="muted">${escapeHtml(client.display_name || item.issue_text || "")}</p>
+        </div>
+        <span>${badge(item.priority || item.status || "open", todayPriorityClass(item.priority))}</span>
+      </div>`;
+    }).join("") || '<div class="empty-state">No support cases</div>';
+}
+
+function renderTodayCatalogCandidates(items) {
+  const target = document.querySelector("#today-catalog-candidates");
+  if (!target) return;
+  target.innerHTML =
+    items.map((item) => {
+      const value = item.normalized_value_json || item.normalized_value || {};
+      const subtitle = [item.candidate_type, value.category_slug, value.item_type]
+        .filter(Boolean)
+        .join(" / ");
+      return `<div class="table-row">
+        <div>
+          <strong>${escapeHtml(item.canonical_name || "Catalog candidate")}</strong>
+          <p class="muted">${escapeHtml(subtitle || item.proposed_action || "")}</p>
+        </div>
+        <span>${badge(item.status || "pending", catalogStatusClass(item.status))}</span>
+      </div>`;
+    }).join("") || '<div class="empty-state">No catalog candidates</div>';
+}
+
+function renderTodayOperationalIssues(items) {
+  const target = document.querySelector("#today-operational-issues");
+  if (!target) return;
+  target.innerHTML =
+    items.map((item) => `<div class="table-row">
+      <div>
+        <strong>${escapeHtml(item.event_type || "event")}</strong>
+        <p class="muted">${escapeHtml(shortText(item.message || "", 120))}</p>
+      </div>
+      <span>${badge(item.severity || "error", operationsStatusClass(item.severity))}</span>
+    </div>`).join("") || '<div class="empty-state">No operational issues</div>';
+}
+
+async function createTodayTask(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const status = document.querySelector("#today-status");
+  const data = new FormData(form);
+  try {
+    await api("/api/today/tasks", {
+      method: "POST",
+      body: JSON.stringify({
+        title: data.get("title"),
+        description: data.get("description") || null,
+        priority: data.get("priority") || "normal",
+        due_at: toIsoOrNull(data.get("due_at")),
+      }),
+    });
+    form.reset();
+    if (status) status.textContent = "Task created";
+    await loadToday();
+  } catch (error) {
+    if (status) status.textContent = error.message;
+  }
+}
+
+async function todayTaskAction(taskId, action) {
+  if (!taskId || !action) return;
+  const status = document.querySelector("#today-status");
+  const endpoints = {
+    complete: { path: `/api/today/tasks/${taskId}/complete`, body: {} },
+    snooze: { path: `/api/today/tasks/${taskId}/snooze`, body: { due_at: nextMorningIso() } },
+  };
+  const endpoint = endpoints[action];
+  if (!endpoint) return;
+  try {
+    await api(endpoint.path, {
+      method: "POST",
+      body: JSON.stringify(endpoint.body),
+    });
+    await loadToday();
+  } catch (error) {
+    if (status) status.textContent = error.message;
+  }
+}
+
+async function todayContactReasonAction(reasonId, action) {
+  if (!reasonId || !action) return;
+  const status = document.querySelector("#today-status");
+  const endpoints = {
+    accept: { path: `/api/today/contact-reasons/${reasonId}/accept`, body: {} },
+    done: { path: `/api/today/contact-reasons/${reasonId}/done`, body: {} },
+    dismiss: { path: `/api/today/contact-reasons/${reasonId}/dismiss`, body: {} },
+    snooze: {
+      path: `/api/today/contact-reasons/${reasonId}/snooze`,
+      body: { snoozed_until: nextMorningIso() },
+    },
+  };
+  const endpoint = endpoints[action];
+  if (!endpoint) return;
+  try {
+    await api(endpoint.path, {
+      method: "POST",
+      body: JSON.stringify(endpoint.body),
+    });
+    await loadToday();
+  } catch (error) {
+    if (status) status.textContent = error.message;
+  }
+}
+
+function todayStatusClass(status) {
+  if (status === "maybe" || status === "snoozed" || status === "auto_pending") return "is-warn";
+  if (status === "failed" || status === "rejected" || status === "critical") return "is-danger";
+  return "";
+}
+
+function todayPriorityClass(priority) {
+  if (priority === "urgent") return "is-danger";
+  if (priority === "high") return "is-warn";
+  return "";
+}
+
+function todayDueClass(value) {
+  const due = new Date(value);
+  if (Number.isNaN(due.valueOf())) return "";
+  return due < new Date() ? "is-danger" : "";
+}
+
+function toIsoOrNull(value) {
+  if (!value) return null;
+  const date = new Date(value);
+  return Number.isNaN(date.valueOf()) ? null : date.toISOString();
+}
+
+function nextMorningIso() {
+  const date = new Date();
+  date.setDate(date.getDate() + 1);
+  date.setHours(9, 0, 0, 0);
+  return date.toISOString();
 }
 
 async function initAdmin() {

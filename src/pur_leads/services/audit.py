@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import date, datetime
 from typing import Any
 
 from sqlalchemy.orm import Session
@@ -73,6 +74,8 @@ class AuditService:
 
 
 def mask_secret_values(value: Any) -> Any:
+    if isinstance(value, datetime | date):
+        return value.isoformat()
     if isinstance(value, dict):
         return {
             key: MASK if _is_secret_key(key) else mask_secret_values(item)
