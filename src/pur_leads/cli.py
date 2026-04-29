@@ -113,6 +113,7 @@ def _settings_set(args: argparse.Namespace) -> None:
 
 
 def _worker_once(args: argparse.Namespace) -> None:
+    _ensure_database_upgraded(args)
     with _session_from_args(args) as session:
         handlers = _build_worker_handlers(session)
         runtime = WorkerRuntime(session, handlers=handlers, worker_name="cli-worker")
@@ -124,6 +125,7 @@ def _worker_once(args: argparse.Namespace) -> None:
 
 
 def _worker_run(args: argparse.Namespace) -> None:
+    _ensure_database_upgraded(args)
     iterations = asyncio.run(_worker_run_loop(args))
     print(f"worker stopped after {iterations} iterations")
 
@@ -198,6 +200,10 @@ def _session_from_args(args: argparse.Namespace):
 def _engine_from_args(args: argparse.Namespace):
     path = args.database_path or load_settings().database_path
     return create_sqlite_engine(path)
+
+
+def _ensure_database_upgraded(args: argparse.Namespace) -> None:
+    upgrade_database(_engine_from_args(args))
 
 
 def _build_worker_handlers(session, *, worker_name: str = "cli-worker"):

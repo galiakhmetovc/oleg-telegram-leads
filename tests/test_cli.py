@@ -110,6 +110,17 @@ def test_cli_worker_once_reports_noop(tmp_path, capsys):
     assert "no queued jobs" in output
 
 
+def test_cli_worker_once_upgrades_database_before_running(tmp_path, capsys):
+    db_path = tmp_path / "cli.db"
+
+    main(["--database-path", str(db_path), "worker", "once"])
+
+    tables = set(inspect(create_sqlite_engine(db_path)).get_table_names())
+    output = capsys.readouterr().out
+    assert "settings" in tables
+    assert "no queued jobs" in output
+
+
 def test_cli_worker_once_does_not_seed_ai_registry_on_empty_database(tmp_path, capsys):
     db_path = tmp_path / "cli.db"
     engine = create_sqlite_engine(db_path)
