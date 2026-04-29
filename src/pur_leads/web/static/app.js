@@ -730,6 +730,7 @@ function renderSourceDetail(detail, state) {
   const target = document.querySelector("#source-detail");
   if (!target) return;
   const source = detail.source || {};
+  const access = detail.access_summary || {};
   const labelText = source.title || source.username || source.input_ref || "Источник";
   target.innerHTML = `<div class="detail-grid">
     <header class="detail-header">
@@ -741,8 +742,10 @@ function renderSourceDetail(detail, state) {
         ${badge(label(source.status || "draft"), sourceStatusClass(source.status))}
         ${badge(label(source.source_kind || "telegram"))}
         ${badge(label(source.priority || "normal"))}
+        ${access.label ? badge(access.label, accessSeverityClass(access.severity)) : ""}
       </div>
     </header>
+    ${renderAccessSummary(access)}
     <section class="detail-section">
       <h3>Конфигурация</h3>
       <div class="detail-meta">
@@ -796,6 +799,32 @@ function sourceSection(title, rows, renderer) {
   </section>`;
 }
 
+function renderAccessSummary(access) {
+  if (!access || !access.mode) {
+    return "";
+  }
+  const severityClass = accessSeverityClass(access.severity);
+  const joinText =
+    access.requires_join === true
+      ? "вступление требуется"
+      : access.requires_join === false
+        ? "вступление не требуется"
+        : "участие не определено";
+  return `<section class="detail-section access-summary ${severityClass}">
+    <div>
+      <h3>Режим доступа</h3>
+      <strong>${escapeHtml(access.label || "Доступ не проверен")}</strong>
+      <p class="muted">${escapeHtml(access.description || "")}</p>
+    </div>
+    <div class="detail-meta">
+      ${badge(joinText, severityClass)}
+      ${badge(access.can_read_messages ? "сообщения читаются" : "сообщения не читаются", severityClass)}
+      ${badge(access.can_read_history ? "история читается" : "история не читается", severityClass)}
+      ${access.checked_at ? badge(`проверено ${time(access.checked_at)}`) : ""}
+    </div>
+  </section>`;
+}
+
 function renderPreviewMessage(message) {
   const body = message.text || message.caption || "";
   return `<div class="table-row">
@@ -811,10 +840,22 @@ function renderAccessCheck(check) {
   return `<div class="table-row">
     <div>
       <strong>${escapeHtml(label(check.status))}</strong>
-      <p class="muted">${escapeHtml(check.resolved_title || check.error || check.check_type)}</p>
+      <p class="muted">${escapeHtml(check.access_label || check.resolved_title || check.error || check.check_type)}</p>
+      ${
+        check.access_description
+          ? `<p class="muted">${escapeHtml(check.access_description)}</p>`
+          : ""
+      }
     </div>
     <span>${escapeHtml(time(check.checked_at))}</span>
   </div>`;
+}
+
+function accessSeverityClass(severity) {
+  if (severity === "ok") return "";
+  if (severity === "warning") return "is-warn";
+  if (severity === "error") return "is-danger";
+  return "";
 }
 
 function renderSourceJob(job) {

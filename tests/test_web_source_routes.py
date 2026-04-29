@@ -7,7 +7,11 @@ from pur_leads.db.engine import create_sqlite_engine
 from pur_leads.db.migrations import upgrade_database
 from pur_leads.db.session import create_session_factory
 from pur_leads.models.scheduler import scheduler_jobs_table
-from pur_leads.models.telegram_sources import monitored_sources_table, source_preview_messages_table
+from pur_leads.models.telegram_sources import (
+    monitored_sources_table,
+    source_access_checks_table,
+    source_preview_messages_table,
+)
 from pur_leads.services.telegram_sources import TelegramSourceService
 from pur_leads.services.web_auth import WebAuthService
 from pur_leads.web.app import create_app
@@ -43,6 +47,47 @@ def test_source_routes_require_auth_create_and_return_detail(tmp_path):
     assert detail_response.status_code == 200
     assert detail_response.json()["source"]["id"] == source_id
     assert [job["job_type"] for job in detail_response.json()["jobs"]] == ["check_source_access"]
+
+
+def test_source_detail_explains_public_read_without_join(tmp_path):
+    fixture = _setup_app(tmp_path)
+    client = fixture["client"]
+    _login(client)
+    with fixture["session_factory"]() as session:
+        source = TelegramSourceService(session).create_draft(
+            "https://t.me/purmaster",
+            purpose="catalog_ingestion",
+            added_by="admin",
+        )
+        session.execute(
+            insert(source_access_checks_table).values(
+                id="access-1",
+                monitored_source_id=source.id,
+                userbot_account_id=None,
+                check_type="onboarding",
+                status="succeeded",
+                resolved_source_kind="telegram_channel",
+                resolved_telegram_id="2384235784",
+                resolved_title="ПУР: всё по уму",
+                last_message_id=168,
+                can_read_messages=True,
+                can_read_history=True,
+                flood_wait_seconds=None,
+                error=None,
+                checked_at=datetime(2026, 4, 28, 12, 0, 0),
+            )
+        )
+        session.commit()
+
+    detail_response = client.get(f"/api/sources/{source.id}")
+    payload = detail_response.json()
+
+    assert detail_response.status_code == 200
+    assert payload["access_summary"]["mode"] == "public_read_without_join"
+    assert payload["access_summary"]["label"] == "Публичное чтение без вступления"
+    assert payload["access_summary"]["requires_join"] is False
+    assert payload["access_checks"][0]["access_mode"] == "public_read_without_join"
+    assert payload["access_checks"][0]["access_label"] == "Публичное чтение без вступления"
 
 
 def test_source_action_routes_preview_activate_pause_and_reset_checkpoint(tmp_path):

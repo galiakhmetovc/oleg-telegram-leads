@@ -193,11 +193,126 @@ def _job_payload(job: SchedulerJobRecord) -> dict[str, Any]:
 
 
 def _detail_payload(detail: SourceDetail) -> dict[str, Any]:
+    access_checks = [_access_check_payload(detail.source, row) for row in detail.access_checks]
     return jsonable_encoder(
         {
             "source": asdict(detail.source),
-            "access_checks": [asdict(row) for row in detail.access_checks],
+            "access_summary": _access_summary(
+                detail.source,
+                detail.access_checks[0] if detail.access_checks else None,
+            ),
+            "access_checks": access_checks,
             "preview_messages": [asdict(row) for row in detail.preview_messages],
             "jobs": [asdict(row) for row in detail.jobs],
         }
+    )
+
+
+def _access_check_payload(source: MonitoredSourceRecord, check: Any) -> dict[str, Any]:
+    summary = _access_summary(source, check)
+    return {
+        **asdict(check),
+        "access_mode": summary["mode"],
+        "access_label": summary["label"],
+        "access_description": summary["description"],
+        "access_requires_join": summary["requires_join"],
+        "access_severity": summary["severity"],
+    }
+
+
+def _access_summary(source: MonitoredSourceRecord, check: Any | None) -> dict[str, Any]:
+    if check is None:
+        return {
+            "mode": "not_checked",
+            "label": "Доступ не проверен",
+            "description": "Запустите проверку доступа, чтобы понять, может ли юзербот читать источник.",
+            "requires_join": None,
+            "severity": "warning",
+            "can_read_messages": False,
+            "can_read_history": False,
+            "latest_status": None,
+            "checked_at": None,
+        }
+    if check.status == "succeeded" and check.can_read_messages and check.can_read_history:
+        if _is_public_read_source(source):
+            mode = "public_read_without_join"
+            label = "Публичное чтение без вступления"
+            description = (
+                "Telegram дает читать историю публичного канала или группы по username/link; "
+                "подписка юзербота не обязательна для чтения."
+            )
+            requires_join: bool | None = False
+        elif source.invite_link_hash:
+            mode = "invite_or_member_access"
+            label = "Доступ через invite или участие"
+            description = (
+                "Источник добавлен по invite-ссылке. Для стабильного чтения юзербот должен "
+                "иметь доступ через эту ссылку или оставаться участником."
+            )
+            requires_join = True
+        else:
+            mode = "readable_membership_unknown"
+            label = "Чтение доступно"
+            description = (
+                "Юзербот может читать сообщения, но система не определила, требуется ли участие "
+                "в источнике."
+            )
+            requires_join = None
+        return {
+            "mode": mode,
+            "label": label,
+            "description": description,
+            "requires_join": requires_join,
+            "severity": "ok",
+            "can_read_messages": bool(check.can_read_messages),
+            "can_read_history": bool(check.can_read_history),
+            "latest_status": check.status,
+            "checked_at": check.checked_at,
+        }
+    if check.status == "needs_join":
+        return {
+            "mode": "join_required",
+            "label": "Нужно вступить в источник",
+            "description": "Юзербот не может читать историю, пока не вступит в чат или канал.",
+            "requires_join": True,
+            "severity": "warning",
+            "can_read_messages": bool(check.can_read_messages),
+            "can_read_history": bool(check.can_read_history),
+            "latest_status": check.status,
+            "checked_at": check.checked_at,
+        }
+    if check.status == "flood_wait":
+        label = "Telegram временно ограничил чтение"
+        wait = (
+            f" Подождать примерно {check.flood_wait_seconds} с." if check.flood_wait_seconds else ""
+        )
+        return {
+            "mode": "flood_wait",
+            "label": label,
+            "description": f"Проверка уперлась во flood-wait.{wait}",
+            "requires_join": None,
+            "severity": "warning",
+            "can_read_messages": bool(check.can_read_messages),
+            "can_read_history": bool(check.can_read_history),
+            "latest_status": check.status,
+            "checked_at": check.checked_at,
+        }
+    return {
+        "mode": "operator_action_required",
+        "label": "Требуется действие оператора",
+        "description": check.error or "Юзербот сейчас не может подтвердить чтение источника.",
+        "requires_join": None,
+        "severity": "error",
+        "can_read_messages": bool(check.can_read_messages),
+        "can_read_history": bool(check.can_read_history),
+        "latest_status": check.status,
+        "checked_at": check.checked_at,
+    }
+
+
+def _is_public_read_source(source: MonitoredSourceRecord) -> bool:
+    return (
+        bool(source.username)
+        and not source.invite_link_hash
+        and source.source_kind in {"telegram_channel", "telegram_supergroup"}
     )

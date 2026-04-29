@@ -410,6 +410,18 @@ md-text-button {
   padding: 12px;
 }
 
+.access-summary {
+  border-left: 3px solid var(--accent);
+}
+
+.access-summary.is-warn {
+  border-left-color: var(--warning);
+}
+
+.access-summary.is-danger {
+  border-left-color: var(--danger);
+}
+
 .onboarding-layout {
   display: grid;
   grid-template-columns: minmax(260px, 340px) minmax(0, 1fr);
