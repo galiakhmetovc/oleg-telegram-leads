@@ -1,7 +1,9 @@
 from sqlalchemy import inspect
+from sqlalchemy import text
 
 from pur_leads.db.engine import create_sqlite_engine
 from pur_leads.db.migrations import upgrade_database
+from pur_leads.models.catalog import catalog_quality_reviews_table
 
 
 def test_sqlite_engine_enables_required_pragmas(tmp_path):
@@ -48,3 +50,23 @@ def test_foundation_migration_creates_core_tables(tmp_path):
         "ai_run_outputs",
         "ai_model_concurrency_leases",
     }.issubset(tables)
+
+
+def test_catalog_quality_review_migration_handles_partial_table_from_concurrent_startup(
+    tmp_path,
+):
+    engine = create_sqlite_engine(tmp_path / "test.db")
+    upgrade_database(engine, revision="0021_ai_model_profiles")
+    with engine.begin() as connection:
+        catalog_quality_reviews_table.create(connection)
+
+    upgrade_database(engine)
+
+    with engine.connect() as connection:
+        assert connection.execute(text("select version_num from alembic_version")).scalar_one() == (
+            "0022_catalog_quality_reviews"
+        )
+        scheduler_sql = connection.execute(
+            text("select sql from sqlite_master where type='table' and name='scheduler_jobs'")
+        ).scalar_one()
+    assert "catalog_candidate_validation" in scheduler_sql
