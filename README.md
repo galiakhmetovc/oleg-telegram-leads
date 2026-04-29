@@ -31,3 +31,7 @@ docker compose run --rm web db upgrade
 docker compose up web
 docker compose run --rm worker
 ```
+
+## Bootstrap Admin
+
+On first start the app creates the built-in `admin` account and writes its temporary password to `./data/bootstrap-admin-password.txt` by default. After login the admin must set a new password; the temporary password file is then removed and is not regenerated on later restarts.

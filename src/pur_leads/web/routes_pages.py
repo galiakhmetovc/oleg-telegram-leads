@@ -23,18 +23,30 @@ def login_page() -> str:
               <span class="brand-mark">PUR</span>
               <span class="muted">Leads</span>
             </div>
-            <h1>Operator access</h1>
+            <h1>Вход оператора</h1>
             <form id="local-login-form" class="stack" autocomplete="on">
               <label>
-                Username
+                Логин
                 <input name="username" type="text" autocomplete="username" required>
               </label>
               <label>
-                Password
+                Пароль
                 <input name="password" type="password" autocomplete="current-password" required>
               </label>
-              <button type="submit">Sign in</button>
+              <button type="submit">Войти</button>
               <p id="login-status" class="status-line" role="status"></p>
+            </form>
+            <form id="change-password-form" class="stack is-hidden" autocomplete="off">
+              <div class="stack">
+                <h2>Сменить пароль</h2>
+                <p class="muted">Встроенный администратор должен заменить одноразовый пароль перед работой.</p>
+              </div>
+              <label>
+                Новый пароль
+                <input name="new_password" type="password" autocomplete="new-password" required minlength="8">
+              </label>
+              <button type="submit">Сохранить пароль</button>
+              <p id="change-password-status" class="status-line" role="status"></p>
             </form>
             <div id="telegram-login-hook" class="telegram-hook"></div>
           </section>
@@ -53,56 +65,56 @@ def inbox_page(
     return HTMLResponse(
         _page(
             page="leads-inbox",
-            title="Leads Inbox",
+            title="Входящие лиды",
             main="""
             <main class="workspace">
               <header class="topbar">
                 <div>
                   <span class="eyebrow">PUR Leads</span>
-                  <h1>Leads Inbox</h1>
+                  <h1>Входящие лиды</h1>
                 </div>
                 <nav>
-                  <a href="/">Inbox</a>
-                  <a href="/today">Today</a>
-                  <a href="/sources">Sources</a>
-                  <a href="/catalog">Catalog</a>
+                  <a href="/">Лиды</a>
+                  <a href="/today">Сегодня</a>
+                  <a href="/sources">Источники</a>
+                  <a href="/catalog">Каталог</a>
                   <a href="/crm">CRM</a>
-                  <a href="/quality">Quality</a>
-                  <a href="/operations">Operations</a>
-                  <a href="/admin">Admin</a>
-                  <button id="logout-button" type="button">Logout</button>
+                  <a href="/quality">Качество</a>
+                  <a href="/operations">Операции</a>
+                  <a href="/admin">Админка</a>
+                  <button id="logout-button" type="button">Выйти</button>
                 </nav>
               </header>
               <section class="inbox-layout">
-                <aside class="queue-pane" aria-label="Lead queue">
+                <aside class="queue-pane" aria-label="Очередь лидов">
                   <form id="lead-filters" class="filter-grid">
-                    <select name="status" aria-label="Status">
-                      <option value="">All status</option>
-                      <option value="new">New</option>
-                      <option value="in_work">In work</option>
-                      <option value="maybe">Maybe</option>
-                      <option value="snoozed">Snoozed</option>
+                    <select name="status" aria-label="Статус">
+                      <option value="">Все статусы</option>
+                      <option value="new">Новый</option>
+                      <option value="in_work">В работе</option>
+                      <option value="maybe">Возможно</option>
+                      <option value="snoozed">Отложен</option>
                     </select>
-                    <label><input type="checkbox" name="auto_pending"> Auto pending</label>
-                    <label><input type="checkbox" name="operator_issues"> Operator issues</label>
-                    <label><input type="checkbox" name="retro"> Retro</label>
+                    <label><input type="checkbox" name="auto_pending"> Автодобавлено</label>
+                    <label><input type="checkbox" name="operator_issues"> Нужен оператор</label>
+                    <label><input type="checkbox" name="retro"> Ретро</label>
                     <input name="min_confidence" type="number" min="0" max="1" step="0.05"
-                      placeholder="Min confidence" aria-label="Minimum confidence">
+                      placeholder="Мин. уверенность" aria-label="Минимальная уверенность">
                   </form>
                   <div id="lead-queue" class="queue-list" aria-live="polite"></div>
                   <div class="queue-pagination">
                     <span id="lead-pagination" class="muted">0 / 0</span>
-                    <button id="lead-load-more" type="button" hidden>Load more</button>
+                    <button id="lead-load-more" type="button" hidden>Показать еще</button>
                   </div>
                 </aside>
                 <section id="lead-detail" class="detail-pane" aria-live="polite">
-                  <div class="empty-state">Select a lead</div>
+                  <div class="empty-state">Выберите лид</div>
                 </section>
-                <aside class="side-pane" aria-label="Operational signals">
+                <aside class="side-pane" aria-label="Оперативные сигналы">
                   <dl class="signal-list">
-                    <div><dt data-field="auto_pending">Auto pending</dt><dd id="signal-auto">0</dd></div>
-                    <div><dt data-field="retro">Retro</dt><dd id="signal-retro">0</dd></div>
-                    <div><dt data-field="maybe">Maybe</dt><dd id="signal-maybe">0</dd></div>
+                    <div><dt data-field="auto_pending">Автодобавлено</dt><dd id="signal-auto">0</dd></div>
+                    <div><dt data-field="retro">Ретро</dt><dd id="signal-retro">0</dd></div>
+                    <div><dt data-field="maybe">Возможно</dt><dd id="signal-maybe">0</dd></div>
                   </dl>
                   <div id="action-status" class="status-line"></div>
                 </aside>
@@ -123,62 +135,62 @@ def admin_page(
     return HTMLResponse(
         _page(
             page="admin",
-            title="Admin",
+            title="Администрирование",
             main="""
             <main class="workspace">
               <header class="topbar">
                 <div>
                   <span class="eyebrow">PUR Leads</span>
-                  <h1>Admin</h1>
+                  <h1>Администрирование</h1>
                 </div>
                 <nav>
-                  <a href="/">Inbox</a>
-                  <a href="/today">Today</a>
-                  <a href="/sources">Sources</a>
-                  <a href="/catalog">Catalog</a>
+                  <a href="/">Лиды</a>
+                  <a href="/today">Сегодня</a>
+                  <a href="/sources">Источники</a>
+                  <a href="/catalog">Каталог</a>
                   <a href="/crm">CRM</a>
-                  <a href="/quality">Quality</a>
-                  <a href="/operations">Operations</a>
-                  <a href="/admin">Admin</a>
-                  <button id="logout-button" type="button">Logout</button>
+                  <a href="/quality">Качество</a>
+                  <a href="/operations">Операции</a>
+                  <a href="/admin">Админка</a>
+                  <button id="logout-button" type="button">Выйти</button>
                 </nav>
               </header>
               <section class="admin-layout">
                 <section>
                   <div class="section-head">
-                    <h2>Admin users</h2>
+                    <h2>Администраторы</h2>
                   </div>
                   <form id="telegram-admin-form" class="inline-form">
                     <input name="telegram_user_id" placeholder="Telegram ID" required>
-                    <input name="telegram_username" placeholder="Username">
-                    <input name="display_name" placeholder="Display name">
-                    <button type="submit">Add</button>
+                    <input name="telegram_username" placeholder="Имя пользователя">
+                    <input name="display_name" placeholder="Отображаемое имя">
+                    <button type="submit">Добавить</button>
                   </form>
                   <div id="admin-users" class="table-list"></div>
                 </section>
                 <section>
                   <div class="section-head">
-                    <h2>Userbots</h2>
+                    <h2>Юзерботы</h2>
                   </div>
                   <form id="userbot-form" class="inline-form">
-                    <input name="display_name" placeholder="Userbot name" required>
-                    <input name="session_name" placeholder="Session name" required>
-                    <input name="session_path" placeholder="Session path" required>
+                    <input name="display_name" placeholder="Название юзербота" required>
+                    <input name="session_name" placeholder="Имя сессии" required>
+                    <input name="session_path" placeholder="Путь к сессии" required>
                     <label class="checkbox-line">
                       <input name="make_default" type="checkbox" checked>
-                      Default
+                      По умолчанию
                     </label>
-                    <button type="submit">Add userbot</button>
+                    <button type="submit">Добавить юзербота</button>
                   </form>
                   <div id="userbot-accounts" class="table-list"></div>
                 </section>
                 <section>
                   <div class="section-head">
-                    <h2>Settings</h2>
+                    <h2>Настройки</h2>
                   </div>
                   <form id="setting-form" class="inline-form">
-                    <input name="key" placeholder="Key" required>
-                    <input name="value" placeholder="JSON value" required>
+                    <input name="key" placeholder="Ключ" required>
+                    <input name="value" placeholder="Значение JSON" required>
                     <select name="value_type">
                       <option value="bool">bool</option>
                       <option value="int">int</option>
@@ -186,48 +198,48 @@ def admin_page(
                       <option value="string">string</option>
                       <option value="json">json</option>
                     </select>
-                    <button type="submit">Save</button>
+                    <button type="submit">Сохранить</button>
                   </form>
                   <div id="settings-list" class="table-list"></div>
                 </section>
                 <section class="ai-admin-section">
                   <div class="section-head">
-                    <h2>AI registry</h2>
+                    <h2>AI-реестр</h2>
                     <div class="row-actions">
-                      <button id="ai-registry-bootstrap" type="button">Load defaults</button>
-                      <button id="ai-registry-refresh" type="button">Refresh</button>
+                      <button id="ai-registry-bootstrap" type="button">Загрузить значения по умолчанию</button>
+                      <button id="ai-registry-refresh" type="button">Обновить</button>
                     </div>
                   </div>
                   <div class="ai-admin-grid">
                     <section>
                       <div class="section-head">
-                        <h3>Models</h3>
+                        <h3>Модели</h3>
                       </div>
                       <div id="ai-models" class="table-list"></div>
                     </section>
                     <section>
                       <div class="section-head">
-                        <h3>Routes</h3>
+                        <h3>Маршруты</h3>
                       </div>
                       <form id="ai-route-form" class="inline-form">
                         <select name="agent_key" required></select>
                         <select name="model_id" required></select>
                         <select name="route_role" required>
-                          <option value="primary">primary</option>
-                          <option value="fallback">fallback</option>
-                          <option value="shadow">shadow</option>
-                          <option value="ensemble">ensemble</option>
-                          <option value="split">split</option>
-                          <option value="manual_test">manual_test</option>
+                          <option value="primary">Основной</option>
+                          <option value="fallback">Резерв</option>
+                          <option value="shadow">Теневой</option>
+                          <option value="ensemble">Ансамбль</option>
+                          <option value="split">Разделение</option>
+                          <option value="manual_test">Ручной тест</option>
                         </select>
-                        <input name="priority" type="number" min="0" step="1" value="50" aria-label="Priority">
+                        <input name="priority" type="number" min="0" step="1" value="50" aria-label="Приоритет">
                         <input name="max_output_tokens" type="number" min="1" step="1"
-                          placeholder="Max tokens" aria-label="Max output tokens">
+                          placeholder="Макс. токены" aria-label="Максимум выходных токенов">
                         <label class="checkbox-line">
                           <input name="enabled" type="checkbox" checked>
-                          Enabled
+                          Включен
                         </label>
-                        <button type="submit">Save route</button>
+                        <button type="submit">Сохранить маршрут</button>
                       </form>
                       <div id="ai-routes" class="table-list"></div>
                     </section>
@@ -260,44 +272,44 @@ def crm_page(
                   <h1>CRM</h1>
                 </div>
                 <nav>
-                  <a href="/">Inbox</a>
-                  <a href="/today">Today</a>
-                  <a href="/sources">Sources</a>
-                  <a href="/catalog">Catalog</a>
+                  <a href="/">Лиды</a>
+                  <a href="/today">Сегодня</a>
+                  <a href="/sources">Источники</a>
+                  <a href="/catalog">Каталог</a>
                   <a href="/crm">CRM</a>
-                  <a href="/quality">Quality</a>
-                  <a href="/operations">Operations</a>
-                  <a href="/admin">Admin</a>
-                  <button id="logout-button" type="button">Logout</button>
+                  <a href="/quality">Качество</a>
+                  <a href="/operations">Операции</a>
+                  <a href="/admin">Админка</a>
+                  <button id="logout-button" type="button">Выйти</button>
                 </nav>
               </header>
               <section class="crm-layout">
-                <aside class="queue-pane" aria-label="Clients">
+                <aside class="queue-pane" aria-label="Клиенты">
                   <div class="section-head">
-                    <h2>Clients</h2>
-                    <button id="crm-refresh" type="button">Refresh</button>
+                    <h2>Клиенты</h2>
+                    <button id="crm-refresh" type="button">Обновить</button>
                   </div>
                   <div id="crm-client-list" class="queue-list" aria-live="polite"></div>
                 </aside>
                 <section id="crm-client-detail" class="detail-pane" aria-live="polite">
-                  <div class="empty-state">Select a client</div>
+                  <div class="empty-state">Выберите клиента</div>
                 </section>
-                <aside class="side-pane" aria-label="New client">
+                <aside class="side-pane" aria-label="Новый клиент">
                   <form id="crm-client-form" class="stack">
                     <label>
-                      Name
+                      Имя
                       <input name="display_name" required>
                     </label>
                     <label>
-                      Type
+                      Тип
                       <select name="client_type">
-                        <option value="unknown">Unknown</option>
-                        <option value="person">Person</option>
-                        <option value="family">Family</option>
-                        <option value="company">Company</option>
-                        <option value="cottage_settlement">Cottage settlement</option>
-                        <option value="hoa_tsn">HOA / TSN</option>
-                        <option value="residential_complex">Residential complex</option>
+                        <option value="unknown">Неизвестно</option>
+                        <option value="person">Человек</option>
+                        <option value="family">Семья</option>
+                        <option value="company">Компания</option>
+                        <option value="cottage_settlement">Коттеджный поселок</option>
+                        <option value="hoa_tsn">ТСЖ / ТСН</option>
+                        <option value="residential_complex">Жилой комплекс</option>
                       </select>
                     </label>
                     <label>
@@ -309,14 +321,14 @@ def crm_page(
                       <input name="telegram_username">
                     </label>
                     <label>
-                      Interest
+                      Интерес
                       <textarea name="interest_text" rows="4"></textarea>
                     </label>
                     <label>
-                      Notes
+                      Заметки
                       <textarea name="notes" rows="4"></textarea>
                     </label>
-                    <button type="submit">Create</button>
+                    <button type="submit">Создать</button>
                     <p id="crm-status" class="status-line" role="status"></p>
                   </form>
                 </aside>
@@ -337,60 +349,60 @@ def sources_page(
     return HTMLResponse(
         _page(
             page="sources",
-            title="Sources",
+            title="Источники",
             main="""
             <main class="workspace">
               <header class="topbar">
                 <div>
                   <span class="eyebrow">PUR Leads</span>
-                  <h1>Sources</h1>
+                  <h1>Источники</h1>
                 </div>
                 <nav>
-                  <a href="/">Inbox</a>
-                  <a href="/today">Today</a>
-                  <a href="/sources">Sources</a>
-                  <a href="/catalog">Catalog</a>
+                  <a href="/">Лиды</a>
+                  <a href="/today">Сегодня</a>
+                  <a href="/sources">Источники</a>
+                  <a href="/catalog">Каталог</a>
                   <a href="/crm">CRM</a>
-                  <a href="/quality">Quality</a>
-                  <a href="/operations">Operations</a>
-                  <a href="/admin">Admin</a>
-                  <button id="logout-button" type="button">Logout</button>
+                  <a href="/quality">Качество</a>
+                  <a href="/operations">Операции</a>
+                  <a href="/admin">Админка</a>
+                  <button id="logout-button" type="button">Выйти</button>
                 </nav>
               </header>
               <section class="sources-layout">
-                <aside class="queue-pane" aria-label="Telegram sources">
+                <aside class="queue-pane" aria-label="Telegram-источники">
                   <div class="section-head">
-                    <h2>Sources</h2>
-                    <button id="source-refresh" type="button">Refresh</button>
+                    <h2>Источники</h2>
+                    <button id="source-refresh" type="button">Обновить</button>
                   </div>
                   <div id="source-list" class="queue-list" aria-live="polite"></div>
                 </aside>
                 <section id="source-detail" class="detail-pane" aria-live="polite">
-                  <div class="empty-state">Select a source</div>
+                  <div class="empty-state">Выберите источник</div>
                 </section>
-                <aside class="side-pane" aria-label="New source">
+                <aside class="side-pane" aria-label="Новый источник">
                   <form id="source-form" class="stack">
                     <label>
-                      Telegram chat or channel
-                      <input name="input_ref" placeholder="@chat or https://t.me/..." required>
+                      Telegram-чат или канал
+                      <input name="input_ref" placeholder="@chat или https://t.me/..." required>
                     </label>
                     <label>
-                      Purpose
+                      Назначение
                       <select name="purpose">
-                        <option value="lead_monitoring">Lead monitoring</option>
-                        <option value="catalog_ingestion">Catalog ingestion</option>
-                        <option value="both">Both</option>
+                        <option value="lead_monitoring">Поиск лидов</option>
+                        <option value="catalog_ingestion">Наполнение каталога</option>
+                        <option value="both">Оба сценария</option>
                       </select>
                     </label>
                     <label>
-                      Start days back
-                      <input name="start_recent_days" type="number" min="1" placeholder="empty = from now">
+                      Дней назад
+                      <input name="start_recent_days" type="number" min="1" placeholder="пусто = с текущего момента">
                     </label>
                     <label class="checkbox-line">
                       <input name="check_access" type="checkbox" checked>
-                      Check access now
+                      Проверить доступ сейчас
                     </label>
-                    <button type="submit">Create source</button>
+                    <button type="submit">Создать источник</button>
                     <p id="source-status" class="status-line" role="status"></p>
                   </form>
                 </aside>
@@ -411,75 +423,75 @@ def catalog_page(
     return HTMLResponse(
         _page(
             page="catalog",
-            title="Catalog",
+            title="Каталог",
             main="""
             <main class="workspace">
               <header class="topbar">
                 <div>
                   <span class="eyebrow">PUR Leads</span>
-                  <h1>Catalog</h1>
+                  <h1>Каталог</h1>
                 </div>
                 <nav>
-                  <a href="/">Inbox</a>
-                  <a href="/today">Today</a>
-                  <a href="/sources">Sources</a>
-                  <a href="/catalog">Catalog</a>
+                  <a href="/">Лиды</a>
+                  <a href="/today">Сегодня</a>
+                  <a href="/sources">Источники</a>
+                  <a href="/catalog">Каталог</a>
                   <a href="/crm">CRM</a>
-                  <a href="/quality">Quality</a>
-                  <a href="/operations">Operations</a>
-                  <a href="/admin">Admin</a>
-                  <button id="logout-button" type="button">Logout</button>
+                  <a href="/quality">Качество</a>
+                  <a href="/operations">Операции</a>
+                  <a href="/admin">Админка</a>
+                  <button id="logout-button" type="button">Выйти</button>
                 </nav>
               </header>
               <section class="catalog-layout">
-                <aside class="queue-pane" aria-label="Catalog candidates">
+                <aside class="queue-pane" aria-label="Кандидаты каталога">
                   <div class="section-head">
-                    <h2>Candidates</h2>
-                    <button id="catalog-refresh" type="button">Refresh</button>
+                    <h2>Кандидаты</h2>
+                    <button id="catalog-refresh" type="button">Обновить</button>
                   </div>
                   <form id="catalog-filters" class="filter-grid">
-                    <select name="status" aria-label="Status">
-                      <option value="auto_pending">Auto pending</option>
-                      <option value="needs_review">Needs review</option>
-                      <option value="approved">Approved</option>
-                      <option value="rejected">Rejected</option>
-                      <option value="">All status</option>
+                    <select name="status" aria-label="Статус">
+                      <option value="auto_pending">Автодобавлено</option>
+                      <option value="needs_review">На проверке</option>
+                      <option value="approved">Подтверждено</option>
+                      <option value="rejected">Отклонено</option>
+                      <option value="">Все статусы</option>
                     </select>
-                    <select name="candidate_type" aria-label="Type">
-                      <option value="">All types</option>
-                      <option value="item">Items</option>
-                      <option value="offer">Offers</option>
-                      <option value="lead_phrase">Lead phrases</option>
-                      <option value="negative_phrase">Negative phrases</option>
+                    <select name="candidate_type" aria-label="Тип">
+                      <option value="">Все типы</option>
+                      <option value="item">Товары/услуги</option>
+                      <option value="offer">Предложения</option>
+                      <option value="lead_phrase">Лид-фразы</option>
+                      <option value="negative_phrase">Негативные фразы</option>
                     </select>
                   </form>
                   <form id="manual-input-form" class="manual-input-form">
-                    <h2>Manual input</h2>
-                    <select name="input_type" aria-label="Manual input type">
-                      <option value="catalog_note">Catalog note</option>
-                      <option value="lead_example">Lead example</option>
-                      <option value="non_lead_example">Non-lead example</option>
-                      <option value="maybe_example">Maybe example</option>
-                      <option value="telegram_link">Telegram link</option>
-                      <option value="manual_text">Manual text</option>
+                    <h2>Ручной ввод</h2>
+                    <select name="input_type" aria-label="Тип ручного ввода">
+                      <option value="catalog_note">Заметка каталога</option>
+                      <option value="lead_example">Пример лида</option>
+                      <option value="non_lead_example">Пример не-лида</option>
+                      <option value="maybe_example">Пример maybe</option>
+                      <option value="telegram_link">Ссылка Telegram</option>
+                      <option value="manual_text">Ручной текст</option>
                     </select>
-                    <textarea name="text" rows="4" placeholder="Text"></textarea>
+                    <textarea name="text" rows="4" placeholder="Текст"></textarea>
                     <input name="url" type="url" placeholder="https://t.me/...">
-                    <input name="evidence_note" placeholder="Evidence note">
+                    <input name="evidence_note" placeholder="Комментарий к источнику">
                     <label class="checkbox-line">
                       <input name="auto_extract" type="checkbox" checked>
-                      Auto extract
+                      Автоизвлечение
                     </label>
-                    <button type="submit">Submit</button>
+                    <button type="submit">Отправить</button>
                     <p id="manual-input-status" class="status-line" role="status"></p>
                   </form>
                   <div id="catalog-candidate-list" class="queue-list" aria-live="polite"></div>
                 </aside>
                 <section id="catalog-candidate-detail" class="detail-pane" aria-live="polite">
-                  <div class="empty-state">Select a candidate</div>
+                  <div class="empty-state">Выберите кандидата</div>
                   <form id="catalog-edit-form" class="catalog-edit-form" hidden>
-                    <label>Name<input id="catalog-name-input" name="canonical_name"></label>
-                    <label>Payload JSON<textarea id="catalog-value-json" name="normalized_value"></textarea></label>
+                    <label>Название<input id="catalog-name-input" name="canonical_name"></label>
+                    <label>JSON-данные<textarea id="catalog-value-json" name="normalized_value"></textarea></label>
                   </form>
                 </section>
               </section>
@@ -499,75 +511,75 @@ def today_page(
     return HTMLResponse(
         _page(
             page="today",
-            title="Today",
+            title="Сегодня",
             main="""
             <main class="workspace today-workspace">
               <header class="topbar">
                 <div>
                   <span class="eyebrow">PUR Leads</span>
-                  <h1>Today</h1>
+                  <h1>Сегодня</h1>
                 </div>
                 <nav>
-                  <a href="/">Inbox</a>
-                  <a href="/today">Today</a>
-                  <a href="/sources">Sources</a>
-                  <a href="/catalog">Catalog</a>
+                  <a href="/">Лиды</a>
+                  <a href="/today">Сегодня</a>
+                  <a href="/sources">Источники</a>
+                  <a href="/catalog">Каталог</a>
                   <a href="/crm">CRM</a>
-                  <a href="/quality">Quality</a>
-                  <a href="/operations">Operations</a>
-                  <a href="/admin">Admin</a>
-                  <button id="logout-button" type="button">Logout</button>
+                  <a href="/quality">Качество</a>
+                  <a href="/operations">Операции</a>
+                  <a href="/admin">Админка</a>
+                  <button id="logout-button" type="button">Выйти</button>
                 </nav>
               </header>
               <section class="today-shell">
                 <section id="today-summary" class="today-summary" aria-live="polite">
-                  <div class="empty-state">Loading daily work</div>
+                  <div class="empty-state">Загружается работа на день</div>
                 </section>
                 <section class="today-layout">
-                  <section class="detail-pane today-main" aria-label="Daily work queues">
+                  <section class="detail-pane today-main" aria-label="Очереди работы на день">
                     <section class="today-section">
                       <div class="section-head">
-                        <h2>Leads</h2>
-                        <button id="today-refresh" type="button">Refresh</button>
+                        <h2>Лиды</h2>
+                        <button id="today-refresh" type="button">Обновить</button>
                       </div>
                       <div id="today-leads" class="table-list" aria-live="polite"></div>
                     </section>
                     <section class="today-section">
                       <div class="section-head">
-                        <h2>Tasks</h2>
+                        <h2>Задачи</h2>
                       </div>
                       <form id="today-task-form" class="inline-form">
-                        <input name="title" placeholder="Task title" required>
-                        <input name="description" placeholder="Description">
-                        <select name="priority" aria-label="Priority">
-                          <option value="normal">Normal</option>
-                          <option value="high">High</option>
-                          <option value="low">Low</option>
+                        <input name="title" placeholder="Название задачи" required>
+                        <input name="description" placeholder="Описание">
+                        <select name="priority" aria-label="Приоритет">
+                          <option value="normal">Обычный</option>
+                          <option value="high">Высокий</option>
+                          <option value="low">Низкий</option>
                         </select>
-                        <input name="due_at" type="datetime-local" aria-label="Due at">
-                        <button type="submit">Create</button>
+                        <input name="due_at" type="datetime-local" aria-label="Срок">
+                        <button type="submit">Создать</button>
                       </form>
                       <p id="today-status" class="status-line" role="status"></p>
                       <div id="today-tasks" class="table-list" aria-live="polite"></div>
                     </section>
                     <section class="today-section">
                       <div class="section-head">
-                        <h2>Contact Reasons</h2>
+                        <h2>Поводы связаться</h2>
                       </div>
                       <div id="today-contact-reasons" class="table-list" aria-live="polite"></div>
                     </section>
                   </section>
-                  <aside class="side-pane today-side" aria-label="Context">
+                  <aside class="side-pane today-side" aria-label="Контекст">
                     <section class="today-section">
-                      <h2>Support</h2>
+                      <h2>Поддержка</h2>
                       <div id="today-support-cases" class="table-list" aria-live="polite"></div>
                     </section>
                     <section class="today-section">
-                      <h2>Catalog Review</h2>
+                      <h2>Проверка каталога</h2>
                       <div id="today-catalog-candidates" class="table-list" aria-live="polite"></div>
                     </section>
                     <section class="today-section">
-                      <h2>Operational Issues</h2>
+                      <h2>Операционные проблемы</h2>
                       <div id="today-operational-issues" class="table-list" aria-live="polite"></div>
                     </section>
                   </aside>
@@ -589,82 +601,82 @@ def operations_page(
     return HTMLResponse(
         _page(
             page="operations",
-            title="Operations",
+            title="Операции",
             main="""
             <main class="workspace operations-workspace">
               <header class="topbar">
                 <div>
                   <span class="eyebrow">PUR Leads</span>
-                  <h1>Operations</h1>
+                  <h1>Операции</h1>
                 </div>
                 <nav>
-                  <a href="/">Inbox</a>
-                  <a href="/today">Today</a>
-                  <a href="/sources">Sources</a>
-                  <a href="/catalog">Catalog</a>
+                  <a href="/">Лиды</a>
+                  <a href="/today">Сегодня</a>
+                  <a href="/sources">Источники</a>
+                  <a href="/catalog">Каталог</a>
                   <a href="/crm">CRM</a>
-                  <a href="/quality">Quality</a>
-                  <a href="/operations">Operations</a>
-                  <a href="/admin">Admin</a>
-                  <button id="logout-button" type="button">Logout</button>
+                  <a href="/quality">Качество</a>
+                  <a href="/operations">Операции</a>
+                  <a href="/admin">Админка</a>
+                  <button id="logout-button" type="button">Выйти</button>
                 </nav>
               </header>
               <section class="operations-shell">
                 <section id="operations-summary" class="operations-summary" aria-live="polite">
-                  <div class="empty-state">Loading operational state</div>
+                  <div class="empty-state">Загружается состояние системы</div>
                 </section>
                 <section class="operations-layout">
-                  <aside class="queue-pane" aria-label="Scheduler jobs">
+                  <aside class="queue-pane" aria-label="Задачи планировщика">
                     <div class="section-head">
-                      <h2>Jobs</h2>
-                      <button id="operations-refresh" type="button">Refresh</button>
+                      <h2>Задачи</h2>
+                      <button id="operations-refresh" type="button">Обновить</button>
                     </div>
                     <form id="operations-job-filters" class="filter-grid">
-                      <select name="status" aria-label="Job status">
-                        <option value="">All jobs</option>
-                        <option value="queued">Queued</option>
-                        <option value="running">Running</option>
-                        <option value="failed">Failed</option>
-                        <option value="succeeded">Succeeded</option>
+                      <select name="status" aria-label="Статус задачи">
+                        <option value="">Все задачи</option>
+                        <option value="queued">В очереди</option>
+                        <option value="running">Выполняется</option>
+                        <option value="failed">Ошибка</option>
+                        <option value="succeeded">Успешно</option>
                       </select>
-                      <input name="job_type" placeholder="Job type" aria-label="Job type">
-                      <input name="monitored_source_id" placeholder="Source ID" aria-label="Source ID">
+                      <input name="job_type" placeholder="Тип задачи" aria-label="Тип задачи">
+                      <input name="monitored_source_id" placeholder="ID источника" aria-label="ID источника">
                     </form>
                     <div id="operations-jobs" class="queue-list" aria-live="polite"></div>
                   </aside>
                   <section id="operations-detail" class="detail-pane" aria-live="polite">
-                    <div class="empty-state">Select a job</div>
+                    <div class="empty-state">Выберите задачу</div>
                   </section>
-                  <aside class="side-pane operations-signals" aria-label="Operational signals">
+                  <aside class="side-pane operations-signals" aria-label="Операционные сигналы">
                     <section>
-                      <h2>Events</h2>
+                      <h2>События</h2>
                       <div id="operations-events" class="table-list" aria-live="polite"></div>
                     </section>
                     <section>
-                      <h2>Notifications</h2>
+                      <h2>Уведомления</h2>
                       <div id="operations-notifications" class="table-list" aria-live="polite"></div>
                     </section>
                     <section>
-                      <h2>Extraction Runs</h2>
+                      <h2>Запуски извлечения</h2>
                       <div id="operations-extraction-runs" class="table-list" aria-live="polite"></div>
                     </section>
                     <section>
-                      <h2>Access Checks</h2>
+                      <h2>Проверки доступа</h2>
                       <div id="operations-access-checks" class="table-list" aria-live="polite"></div>
                     </section>
                     <section>
                       <div class="section-head">
-                        <h2>Backups</h2>
-                        <button id="operations-backup-create" type="button">Backup</button>
+                        <h2>Бэкапы</h2>
+                        <button id="operations-backup-create" type="button">Сделать бэкап</button>
                       </div>
                       <div id="operations-backups" class="table-list" aria-live="polite"></div>
                     </section>
                     <section>
-                      <h2>Restore Checks</h2>
+                      <h2>Проверки восстановления</h2>
                       <div id="operations-restores" class="table-list" aria-live="polite"></div>
                     </section>
                     <section>
-                      <h2>Audit</h2>
+                      <h2>Аудит</h2>
                       <div id="operations-audit" class="table-list" aria-live="polite"></div>
                     </section>
                   </aside>
@@ -686,55 +698,55 @@ def quality_page(
     return HTMLResponse(
         _page(
             page="quality",
-            title="Quality",
+            title="Качество",
             main="""
             <main class="workspace operations-workspace">
               <header class="topbar">
                 <div>
                   <span class="eyebrow">PUR Leads</span>
-                  <h1>Quality</h1>
+                  <h1>Качество</h1>
                 </div>
                 <nav>
-                  <a href="/">Inbox</a>
-                  <a href="/today">Today</a>
-                  <a href="/sources">Sources</a>
-                  <a href="/catalog">Catalog</a>
+                  <a href="/">Лиды</a>
+                  <a href="/today">Сегодня</a>
+                  <a href="/sources">Источники</a>
+                  <a href="/catalog">Каталог</a>
                   <a href="/crm">CRM</a>
-                  <a href="/quality">Quality</a>
-                  <a href="/operations">Operations</a>
-                  <a href="/admin">Admin</a>
-                  <button id="logout-button" type="button">Logout</button>
+                  <a href="/quality">Качество</a>
+                  <a href="/operations">Операции</a>
+                  <a href="/admin">Админка</a>
+                  <button id="logout-button" type="button">Выйти</button>
                 </nav>
               </header>
               <section class="operations-shell">
                 <section id="quality-summary" class="operations-summary" aria-live="polite">
-                  <div class="empty-state">Loading quality state</div>
+                  <div class="empty-state">Загружается состояние качества</div>
                 </section>
                 <section class="operations-layout">
-                  <aside class="queue-pane" aria-label="Evaluation datasets">
+                  <aside class="queue-pane" aria-label="Наборы оценки">
                     <div class="section-head">
-                      <h2>Datasets</h2>
-                      <button id="quality-refresh" type="button">Refresh</button>
+                      <h2>Наборы</h2>
+                      <button id="quality-refresh" type="button">Обновить</button>
                     </div>
                     <div id="quality-datasets" class="queue-list" aria-live="polite"></div>
                   </aside>
                   <section class="detail-pane" aria-live="polite">
                     <div class="section-head">
-                      <h2>Evaluation Runs</h2>
+                      <h2>Запуски оценки</h2>
                     </div>
                     <div id="quality-runs" class="table-list" aria-live="polite"></div>
                     <div class="section-head">
-                      <h2>Failed Cases</h2>
+                      <h2>Проваленные кейсы</h2>
                     </div>
                     <div id="quality-failed-results" class="table-list" aria-live="polite"></div>
                   </section>
-                  <aside class="side-pane operations-signals" aria-label="Quality signals">
+                  <aside class="side-pane operations-signals" aria-label="Сигналы качества">
                     <section>
-                      <h2>Recent Decisions</h2>
+                      <h2>Последние решения</h2>
                       <div id="quality-decisions" class="table-list" aria-live="polite"></div>
                     </section>
                     <section>
-                      <h2>Cases</h2>
+                      <h2>Кейсы</h2>
                       <div id="quality-cases" class="table-list" aria-live="polite"></div>
                     </section>
                   </aside>
@@ -760,7 +772,7 @@ def _has_page_session(request: Request, auth_service: WebAuthService) -> bool:
 
 def _page(*, page: str, title: str, main: str) -> str:
     return f"""<!doctype html>
-<html lang="en">
+<html lang="ru">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">

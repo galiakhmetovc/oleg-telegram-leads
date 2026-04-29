@@ -20,6 +20,7 @@ def test_local_auth_routes_login_me_change_password_and_logout(tmp_path):
         database_path=db_path,
         bootstrap_admin_username="admin",
         bootstrap_admin_password="initial-secret",
+        bootstrap_admin_password_file=tmp_path / "bootstrap-admin-password.txt",
         telegram_bot_token="telegram-token",
     )
     client = TestClient(app)
@@ -56,6 +57,56 @@ def test_local_auth_routes_login_me_change_password_and_logout(tmp_path):
         assert session_row["revoked_at"] is not None
 
 
+def test_bootstrap_admin_password_file_is_removed_after_forced_password_change(tmp_path):
+    db_path = tmp_path / "test.db"
+    password_file = tmp_path / "bootstrap-admin-password.txt"
+    upgrade_database(create_sqlite_engine(db_path))
+    app = create_app(
+        database_path=db_path,
+        bootstrap_admin_password_file=password_file,
+        telegram_bot_token="telegram-token",
+    )
+    client = TestClient(app)
+
+    assert password_file.exists()
+    assert password_file.stat().st_mode & 0o777 == 0o600
+    password_lines = dict(
+        line.split("=", 1) for line in password_file.read_text().splitlines() if "=" in line
+    )
+    assert password_lines["username"] == "admin"
+    assert password_lines["password"]
+
+    login_response = client.post(
+        "/api/auth/local",
+        json={"username": "admin", "password": password_lines["password"]},
+    )
+    assert login_response.status_code == 200
+    assert login_response.json()["user"]["must_change_password"] is True
+
+    change_response = client.post(
+        "/api/auth/change-password",
+        json={"new_password": "changed-secret"},
+    )
+    assert change_response.status_code == 200
+    assert change_response.json()["user"]["must_change_password"] is False
+    assert not password_file.exists()
+
+    restarted_client = TestClient(
+        create_app(
+            database_path=db_path,
+            bootstrap_admin_password_file=password_file,
+            telegram_bot_token="telegram-token",
+        )
+    )
+    assert not password_file.exists()
+    changed_login = restarted_client.post(
+        "/api/auth/local",
+        json={"username": "admin", "password": "changed-secret"},
+    )
+    assert changed_login.status_code == 200
+    assert changed_login.json()["user"]["must_change_password"] is False
+
+
 def test_telegram_auth_route_requires_valid_payload_and_preapproved_user(tmp_path):
     db_path = tmp_path / "test.db"
     engine = create_sqlite_engine(db_path)
@@ -75,6 +126,8 @@ def test_telegram_auth_route_requires_valid_payload_and_preapproved_user(tmp_pat
     client = TestClient(
         create_app(
             database_path=db_path,
+            bootstrap_admin_password="initial-secret",
+            bootstrap_admin_password_file=tmp_path / "bootstrap-admin-password.txt",
             telegram_bot_token="telegram-token",
         )
     )

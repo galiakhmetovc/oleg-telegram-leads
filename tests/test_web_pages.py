@@ -17,6 +17,9 @@ def test_login_page_and_static_assets_are_served(tmp_path):
     assert login_response.status_code == 200
     assert 'data-page="login"' in login_response.text
     assert 'id="local-login-form"' in login_response.text
+    assert 'id="change-password-form"' in login_response.text
+    assert "Вход оператора" in login_response.text
+    assert "Сменить пароль" in login_response.text
     assert "/static/app.css" in login_response.text
     assert "/static/app.js" in login_response.text
     assert css_response.status_code == 200
@@ -33,6 +36,8 @@ def test_login_page_and_static_assets_are_served(tmp_path):
     assert "work_outcome" in js_response.text
     assert "primary_task_id" in js_response.text
     assert "pagination.has_more" in js_response.text
+    assert "must_change_password" in js_response.text
+    assert "/api/auth/change-password" in js_response.text
 
 
 def test_workspace_and_admin_pages_are_protected_and_render_shells(tmp_path):
@@ -75,12 +80,12 @@ def test_workspace_and_admin_pages_are_protected_and_render_shells(tmp_path):
     assert quality_denied.headers["location"] == "/login"
     assert workspace_response.status_code == 200
     assert 'data-page="leads-inbox"' in workspace_response.text
-    assert '<a href="/today">Today</a>' in workspace_response.text
-    assert '<a href="/sources">Sources</a>' in workspace_response.text
-    assert '<a href="/catalog">Catalog</a>' in workspace_response.text
+    assert '<a href="/today">Сегодня</a>' in workspace_response.text
+    assert '<a href="/sources">Источники</a>' in workspace_response.text
+    assert '<a href="/catalog">Каталог</a>' in workspace_response.text
     assert '<a href="/crm">CRM</a>' in workspace_response.text
-    assert '<a href="/quality">Quality</a>' in workspace_response.text
-    assert '<a href="/operations">Operations</a>' in workspace_response.text
+    assert '<a href="/quality">Качество</a>' in workspace_response.text
+    assert '<a href="/operations">Операции</a>' in workspace_response.text
     assert 'id="lead-queue"' in workspace_response.text
     assert 'id="lead-load-more"' in workspace_response.text
     assert 'id="lead-detail"' in workspace_response.text
@@ -89,11 +94,11 @@ def test_workspace_and_admin_pages_are_protected_and_render_shells(tmp_path):
     assert 'data-field="maybe"' in workspace_response.text
     assert admin_response.status_code == 200
     assert 'data-page="admin"' in admin_response.text
-    assert '<a href="/today">Today</a>' in admin_response.text
-    assert '<a href="/sources">Sources</a>' in admin_response.text
-    assert '<a href="/catalog">Catalog</a>' in admin_response.text
+    assert '<a href="/today">Сегодня</a>' in admin_response.text
+    assert '<a href="/sources">Источники</a>' in admin_response.text
+    assert '<a href="/catalog">Каталог</a>' in admin_response.text
     assert '<a href="/crm">CRM</a>' in admin_response.text
-    assert '<a href="/quality">Quality</a>' in admin_response.text
+    assert '<a href="/quality">Качество</a>' in admin_response.text
     assert 'id="admin-users"' in admin_response.text
     assert 'id="userbot-form"' in admin_response.text
     assert 'id="userbot-accounts"' in admin_response.text
@@ -101,10 +106,10 @@ def test_workspace_and_admin_pages_are_protected_and_render_shells(tmp_path):
     assert 'id="ai-registry-bootstrap"' in admin_response.text
     assert crm_response.status_code == 200
     assert 'data-page="crm"' in crm_response.text
-    assert '<a href="/today">Today</a>' in crm_response.text
-    assert '<a href="/sources">Sources</a>' in crm_response.text
-    assert '<a href="/catalog">Catalog</a>' in crm_response.text
-    assert '<a href="/quality">Quality</a>' in crm_response.text
+    assert '<a href="/today">Сегодня</a>' in crm_response.text
+    assert '<a href="/sources">Источники</a>' in crm_response.text
+    assert '<a href="/catalog">Каталог</a>' in crm_response.text
+    assert '<a href="/quality">Качество</a>' in crm_response.text
     assert 'id="crm-client-list"' in crm_response.text
     assert 'id="crm-client-form"' in crm_response.text
     assert sources_response.status_code == 200
@@ -121,7 +126,7 @@ def test_workspace_and_admin_pages_are_protected_and_render_shells(tmp_path):
     assert 'id="catalog-edit-form"' in catalog_response.text
     assert 'id="catalog-name-input"' in catalog_response.text
     assert 'id="catalog-value-json"' in catalog_response.text
-    assert '<option value="maybe_example">Maybe example</option>' in catalog_response.text
+    assert '<option value="maybe_example">Пример maybe</option>' in catalog_response.text
     assert today_response.status_code == 200
     assert 'data-page="today"' in today_response.text
     assert 'id="today-summary"' in today_response.text
@@ -155,7 +160,7 @@ def test_workspace_and_admin_pages_are_protected_and_render_shells(tmp_path):
     assert "/crm/convert" in js_response.text
     assert "/api/sources" in js_response.text
     assert "/api/catalog/candidates" in js_response.text
-    assert "evaluation case" in js_response.text
+    assert "оценочный кейс" in js_response.text
     assert "/api/operations/summary" in js_response.text
     assert "/api/quality/summary" in js_response.text
     assert "/api/operations/extraction-runs" in js_response.text
@@ -182,7 +187,14 @@ def _client(tmp_path) -> TestClient:
             username="admin",
             password="initial-secret",
         )
-    return TestClient(create_app(database_path=db_path, telegram_bot_token="telegram-token"))
+    return TestClient(
+        create_app(
+            database_path=db_path,
+            bootstrap_admin_password="initial-secret",
+            bootstrap_admin_password_file=tmp_path / "bootstrap-admin-password.txt",
+            telegram_bot_token="telegram-token",
+        )
+    )
 
 
 def _login(client: TestClient) -> None:

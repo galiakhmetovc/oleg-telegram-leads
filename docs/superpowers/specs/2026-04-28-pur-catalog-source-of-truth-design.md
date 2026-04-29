@@ -21,6 +21,7 @@ The system must continuously read the PUR Telegram channel, parse messages and d
 - Oleg can manually add examples of leads, non-leads, catalog facts, or source links.
 - The web interface starts with one role: `admin`.
 - A built-in local administrator account exists for bootstrap. Telegram admin accounts are added through that account.
+- On startup, the built-in administrator has a temporary password written to `PUR_BOOTSTRAP_ADMIN_PASSWORD_FILE` when the account still requires a password change. After the first successful local login and password change, the file is deleted and `must_change_password=false` becomes the durable marker that prevents regenerating or rewriting the bootstrap password on later restarts.
 - A clean installation/reset contains only the built-in local administrator and empty system tables. Telegram userbots, notification groups, bot tokens, Telegram API credentials, Z.AI/API credentials, AI provider routes, sources, catalog data, and session files are added explicitly by an administrator through the web/admin onboarding flow or an audited manual upload path.
 - Runtime workers must not silently seed provider accounts, userbots, notification chats, source rows, session files, or secrets from the deployment environment. Defaults may exist in code for form help and explicit "load defaults" actions, but they do not create operational database rows until an administrator confirms them.
 - `auto_pending` notification styling, campaign expiry, and external fetch domains are configurable in the web interface.

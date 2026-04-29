@@ -70,6 +70,7 @@ def login_telegram(
 @router.post("/auth/change-password")
 def change_password(
     payload: ChangePasswordRequest,
+    request: Request,
     validated: SessionValidationResult = Depends(current_admin),
     auth_service: WebAuthService = Depends(get_auth_service),
 ) -> dict[str, Any]:
@@ -78,6 +79,11 @@ def change_password(
         new_password=payload.new_password,
         actor=validated.user.local_username or validated.user.telegram_user_id or validated.user.id,
     )
+    if (
+        validated.user.auth_type == "local"
+        and validated.user.local_username == request.app.state.bootstrap_admin_username
+    ):
+        request.app.state.bootstrap_admin_password_file.unlink(missing_ok=True)
     return {"user": _user_payload(user)}
 
 

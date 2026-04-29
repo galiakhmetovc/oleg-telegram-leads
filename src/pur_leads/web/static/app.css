@@ -150,6 +150,10 @@ h3 {
   gap: 14px;
 }
 
+.is-hidden {
+  display: none !important;
+}
+
 .telegram-hook {
   min-height: 1px;
 }

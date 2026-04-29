@@ -1,12 +1,14 @@
 """FastAPI application factory."""
 
 from pathlib import Path
+import secrets
 
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
 from pur_leads.core.config import load_settings
 from pur_leads.db.engine import create_sqlite_engine
+from pur_leads.db.migrations import upgrade_database
 from pur_leads.db.session import create_session_factory
 from pur_leads.services.web_auth import WebAuthService
 from pur_leads.web.routes_admin import router as admin_router
@@ -32,12 +34,14 @@ def create_app(
     web_session_cookie_name: str | None = None,
     web_cookie_secure: bool | None = None,
     backup_path: Path | str | None = None,
+    bootstrap_admin_password_file: Path | str | None = None,
 ) -> FastAPI:
     settings = load_settings()
     resolved_database_path = (
         Path(database_path) if database_path is not None else settings.database_path
     )
     engine = create_sqlite_engine(resolved_database_path)
+    upgrade_database(engine)
     session_factory = create_session_factory(engine)
 
     app = FastAPI(title="PUR Leads")
@@ -53,16 +57,28 @@ def create_app(
     app.state.web_cookie_secure = (
         settings.web_cookie_secure if web_cookie_secure is None else web_cookie_secure
     )
+    app.state.bootstrap_admin_username = (
+        bootstrap_admin_username or settings.bootstrap_admin_username
+    )
+    app.state.bootstrap_admin_password_file = (
+        Path(bootstrap_admin_password_file)
+        if bootstrap_admin_password_file is not None
+        else settings.bootstrap_admin_password_file
+    )
 
-    username = bootstrap_admin_username or settings.bootstrap_admin_username
-    password = bootstrap_admin_password or settings.bootstrap_admin_password
-    if password:
-        with session_factory() as session:
-            WebAuthService(
-                session,
-                telegram_bot_token=app.state.telegram_bot_token,
-                session_duration_hours=app.state.web_session_duration_hours,
-            ).ensure_bootstrap_admin(username=username, password=password)
+    configured_bootstrap_password = (
+        bootstrap_admin_password
+        if bootstrap_admin_password is not None
+        else settings.bootstrap_admin_password
+    )
+    _ensure_bootstrap_admin(
+        session_factory=session_factory,
+        username=app.state.bootstrap_admin_username,
+        configured_password=_non_empty(configured_bootstrap_password),
+        password_file=app.state.bootstrap_admin_password_file,
+        telegram_bot_token=app.state.telegram_bot_token,
+        session_duration_hours=app.state.web_session_duration_hours,
+    )
 
     static_path = Path(__file__).with_name("static")
     app.mount("/static", StaticFiles(directory=static_path), name="static")
@@ -78,3 +94,73 @@ def create_app(
     app.include_router(admin_router)
     app.include_router(pages_router)
     return app
+
+
+def _ensure_bootstrap_admin(
+    *,
+    session_factory,
+    username: str,
+    configured_password: str | None,
+    password_file: Path,
+    telegram_bot_token: str | None,
+    session_duration_hours: int,
+) -> None:
+    with session_factory() as session:
+        auth_service = WebAuthService(
+            session,
+            telegram_bot_token=telegram_bot_token,
+            session_duration_hours=session_duration_hours,
+        )
+        existing = auth_service.repository.get_user_by_local_username(username)
+        if existing is not None and not existing.must_change_password:
+            password_file.unlink(missing_ok=True)
+            return
+
+        existing_file_password = _read_bootstrap_password_file(password_file)
+        password = configured_password or existing_file_password or _generate_bootstrap_password()
+        needs_file_write = configured_password is not None or not password_file.exists()
+        auth_service.ensure_bootstrap_admin(
+            username=username,
+            password=password,
+            reset_password_if_must_change=existing is not None and needs_file_write,
+        )
+        if needs_file_write:
+            _write_bootstrap_password_file(password_file, username=username, password=password)
+
+
+def _generate_bootstrap_password() -> str:
+    return secrets.token_urlsafe(24)
+
+
+def _non_empty(value: str | None) -> str | None:
+    if value is None:
+        return None
+    stripped = value.strip()
+    return stripped or None
+
+
+def _read_bootstrap_password_file(path: Path) -> str | None:
+    if not path.exists():
+        return None
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if line.startswith("password="):
+            password = line.split("=", 1)[1].strip()
+            return password or None
+    return None
+
+
+def _write_bootstrap_password_file(path: Path, *, username: str, password: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        "\n".join(
+            [
+                "# Temporary bootstrap administrator password.",
+                "# Change the password in the web interface; this file will be removed.",
+                f"username={username}",
+                f"password={password}",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    path.chmod(0o600)

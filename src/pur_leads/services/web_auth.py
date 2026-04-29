@@ -56,9 +56,30 @@ class WebAuthService:
         self.telegram_bot_token = telegram_bot_token
         self.session_duration = timedelta(hours=session_duration_hours)
 
-    def ensure_bootstrap_admin(self, *, username: str, password: str) -> WebUserRecord:
+    def ensure_bootstrap_admin(
+        self,
+        *,
+        username: str,
+        password: str,
+        reset_password_if_must_change: bool = False,
+    ) -> WebUserRecord:
         existing = self.repository.get_user_by_local_username(username)
         if existing is not None:
+            if reset_password_if_must_change and existing.must_change_password:
+                updated = self.repository.update_user(
+                    existing.id,
+                    password_hash=hash_password(password),
+                    updated_at=utc_now(),
+                )
+                self.audit.record_change(
+                    actor="system",
+                    action="web_auth.bootstrap_admin_password_reset",
+                    entity_type="web_user",
+                    entity_id=existing.id,
+                    old_value_json={"must_change_password": existing.must_change_password},
+                    new_value_json={"must_change_password": updated.must_change_password},
+                )
+                return updated
             return existing
         now = utc_now()
         user = self.repository.create_user(

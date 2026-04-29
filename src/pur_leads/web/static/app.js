@@ -11,7 +11,7 @@ const api = async (path, options = {}) => {
       window.location.assign("/login");
     }
     const payload = await response.json().catch(() => ({}));
-    throw new Error(payload.detail || `Request failed: ${response.status}`);
+    throw new Error(payload.detail || `Ошибка запроса: ${response.status}`);
   }
   return response.json();
 };
@@ -25,11 +25,83 @@ const time = (value) => {
   if (!value) return "";
   const date = new Date(value);
   if (Number.isNaN(date.valueOf())) return "";
-  return date.toLocaleString();
+  return date.toLocaleString("ru-RU");
 };
 
 const badge = (label, className = "") =>
   `<span class="badge ${className}">${escapeHtml(label)}</span>`;
+
+const LABELS = {
+  active: "активен",
+  admin: "администратор",
+  access_denied: "доступ запрещен",
+  approved: "подтверждено",
+  auto_pending: "автодобавлено",
+  both: "оба сценария",
+  catalog: "каталог",
+  catalog_ingestion: "наполнение каталога",
+  checking_access: "проверка доступа",
+  completed: "завершено",
+  company: "компания",
+  critical: "критично",
+  disabled: "отключен",
+  draft: "черновик",
+  ensemble: "ансамбль",
+  error: "ошибка",
+  failed: "ошибка",
+  fallback: "резерв",
+  family: "семья",
+  flood_wait: "лимит Telegram",
+  high: "высокий",
+  hoa_tsn: "ТСЖ / ТСН",
+  in_work: "в работе",
+  interested: "интересуется",
+  item: "товар/услуга",
+  lead: "лид",
+  lead_phrase: "лид-фраза",
+  lead_monitoring: "поиск лидов",
+  leads: "лиды",
+  language_model: "языковая модель",
+  low: "низкий",
+  manual: "вручную",
+  manual_test: "ручной тест",
+  maybe: "возможно",
+  muted: "скрыто",
+  negative_phrase: "негативная фраза",
+  new: "новый",
+  needs_review: "на проверке",
+  none: "нет",
+  normal: "обычный",
+  not_lead: "не лид",
+  open: "открыто",
+  offer: "предложение",
+  paused: "пауза",
+  pending: "ожидает",
+  person: "человек",
+  product: "товар",
+  preview_ready: "превью готово",
+  primary: "основной",
+  queued: "в очереди",
+  rejected: "отклонено",
+  residential_complex: "жилой комплекс",
+  running: "выполняется",
+  shadow: "теневой",
+  split: "разделение",
+  snoozed: "отложено",
+  succeeded: "успешно",
+  suppressed: "подавлено",
+  telegram: "Telegram",
+  telegram_group: "Telegram-группа",
+  telegram_supergroup: "Telegram-супергруппа",
+  telegram_channel: "Telegram-канал",
+  text: "текст",
+  unknown: "неизвестно",
+  urgent: "срочно",
+  verified: "проверено",
+  warning: "предупреждение",
+};
+
+const label = (value, fallback = "") => LABELS[value] || text(value, fallback);
 
 const escapeHtml = (value) =>
   text(value)
@@ -54,21 +126,43 @@ document.addEventListener("DOMContentLoaded", () => {
 function bindLogin() {
   const form = document.querySelector("#local-login-form");
   const status = document.querySelector("#login-status");
+  const changeForm = document.querySelector("#change-password-form");
+  const changeStatus = document.querySelector("#change-password-status");
   form?.addEventListener("submit", async (event) => {
     event.preventDefault();
     status.textContent = "";
     const data = new FormData(form);
     try {
-      await api("/api/auth/local", {
+      const payload = await api("/api/auth/local", {
         method: "POST",
         body: JSON.stringify({
           username: data.get("username"),
           password: data.get("password"),
         }),
       });
+      if (payload.user?.must_change_password) {
+        form.classList.add("is-hidden");
+        changeForm?.classList.remove("is-hidden");
+        changeForm?.querySelector('[name="new_password"]')?.focus();
+        return;
+      }
       window.location.assign("/");
     } catch (error) {
       status.textContent = error.message;
+    }
+  });
+  changeForm?.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    changeStatus.textContent = "";
+    const data = new FormData(changeForm);
+    try {
+      await api("/api/auth/change-password", {
+        method: "POST",
+        body: JSON.stringify({ new_password: data.get("new_password") }),
+      });
+      window.location.assign("/");
+    } catch (error) {
+      changeStatus.textContent = error.message;
     }
   });
 }
@@ -133,7 +227,7 @@ async function loadLeads(state, options = {}) {
     await loadDetail(state.selectedId);
   } else {
     const detail = document.querySelector("#lead-detail");
-    if (detail) detail.innerHTML = `<div class="empty-state">Select a lead</div>`;
+    if (detail) detail.innerHTML = `<div class="empty-state">Выберите лид</div>`;
   }
 }
 
@@ -150,21 +244,21 @@ function renderQueue(state) {
   const target = document.querySelector("#lead-queue");
   if (!target) return;
   if (!state.items.length) {
-    target.innerHTML = `<div class="empty-state">No leads</div>`;
+    target.innerHTML = `<div class="empty-state">Лидов нет</div>`;
     return;
   }
   target.innerHTML = state.items
     .map((item) => {
       const active = item.cluster_id === state.selectedId ? "is-active" : "";
       const markers = [
-        item.has_auto_pending ? badge("auto_pending", "is-warn") : "",
-        item.has_auto_merge_pending ? badge("merge", "is-warn") : "",
-        item.is_retro ? badge("retro") : "",
-        item.is_maybe ? badge("maybe") : "",
+        item.has_auto_pending ? badge("автодобавлено", "is-warn") : "",
+        item.has_auto_merge_pending ? badge("объединение", "is-warn") : "",
+        item.is_retro ? badge("ретро") : "",
+        item.is_maybe ? badge("возможно") : "",
       ].join("");
       return `<button class="queue-item ${active}" type="button" data-id="${item.cluster_id}">
-        <strong>${escapeHtml(item.primary_message?.text || item.status)}</strong>
-        <span class="muted">${escapeHtml(item.category?.name || "Uncategorized")}</span>
+        <strong>${escapeHtml(item.primary_message?.text || label(item.status))}</strong>
+        <span class="muted">${escapeHtml(item.category?.name || "Без категории")}</span>
         <span class="queue-meta">${markers}${badge(Math.round((item.confidence || 0) * 100) + "%")}</span>
       </button>`;
     })
@@ -211,66 +305,66 @@ function renderDetail(detail) {
   target.innerHTML = `<div class="detail-grid">
     <header class="detail-header">
       <div>
-        <h2>${escapeHtml(cluster.primary_message?.text || cluster.status || "Lead")}</h2>
+        <h2>${escapeHtml(cluster.primary_message?.text || label(cluster.status, "Лид"))}</h2>
         <p class="muted">${escapeHtml(senderName)}</p>
       </div>
       <div class="badges">
-        ${badge(cluster.status || "new")}
-        ${badge(cluster.work_outcome || "none")}
-        ${cluster.has_auto_pending ? badge("auto_pending", "is-warn") : ""}
-        ${cluster.is_retro ? badge("retro") : ""}
-        ${cluster.is_maybe ? badge("maybe") : ""}
+        ${badge(label(cluster.status || "new"))}
+        ${badge(label(cluster.work_outcome || "none"))}
+        ${cluster.has_auto_pending ? badge("автодобавлено", "is-warn") : ""}
+        ${cluster.is_retro ? badge("ретро") : ""}
+        ${cluster.is_maybe ? badge("возможно") : ""}
       </div>
     </header>
     <section class="detail-section">
-      <h3>Source</h3>
+      <h3>Источник</h3>
       <div class="detail-meta">
-        ${badge(`source ${cluster.source_id || "n/a"}`)}
-        ${badge(`message ${cluster.primary_message?.telegram_message_id || "n/a"}`)}
+        ${badge(`источник ${cluster.source_id || "н/д"}`)}
+        ${badge(`сообщение ${cluster.primary_message?.telegram_message_id || "н/д"}`)}
         ${badge(`classifier_version_id ${classifierVersionId}`)}
         ${badge(`crm_candidate_count ${crmCandidateCount}`)}
-        ${badge(`primary_task_id ${cluster.primary_task_id || "n/a"}`)}
-        ${badge(`merge ${cluster.merge_reason || cluster.merge_strategy || "none"}`)}
+        ${badge(`primary_task_id ${cluster.primary_task_id || "н/д"}`)}
+        ${badge(`объединение ${cluster.merge_reason || cluster.merge_strategy || "нет"}`)}
       </div>
       ${
         messageUrl
-          ? `<a href="${escapeHtml(messageUrl)}" target="_blank" rel="noreferrer">Open message</a>`
+          ? `<a href="${escapeHtml(messageUrl)}" target="_blank" rel="noreferrer">Открыть сообщение</a>`
           : ""
       }
     </section>
     <section class="detail-section">
-      <h3>Matches</h3>
+      <h3>Совпадения</h3>
       <div class="table-list">
-        ${matches.map(renderMatch).join("") || '<div class="empty-state">No matches</div>'}
+        ${matches.map(renderMatch).join("") || '<div class="empty-state">Совпадений нет</div>'}
       </div>
     </section>
     <section class="detail-section">
-      <h3>Timeline</h3>
+      <h3>Хронология</h3>
       <div class="timeline">
-        ${(detail.timeline || []).map(renderTimelineEntry).join("") || '<div class="empty-state">No events</div>'}
+        ${(detail.timeline || []).map(renderTimelineEntry).join("") || '<div class="empty-state">Событий нет</div>'}
       </div>
     </section>
     <section class="detail-section">
-      <h3>Feedback</h3>
+      <h3>Обратная связь</h3>
       <div class="table-list">
-        ${feedback.map(renderFeedback).join("") || '<div class="empty-state">No feedback</div>'}
+        ${feedback.map(renderFeedback).join("") || '<div class="empty-state">Обратной связи нет</div>'}
       </div>
     </section>
     <section class="detail-section">
-      <h3>Actions</h3>
+      <h3>Действия</h3>
       <div class="detail-meta">
-        <button type="button" data-action="take_into_work">Take into work</button>
-        <button type="button" data-action="maybe">Maybe</button>
-        <button type="button" data-action="not_lead">Not lead</button>
+        <button type="button" data-action="take_into_work">Взять в работу</button>
+        <button type="button" data-action="maybe">Возможно</button>
+        <button type="button" data-action="not_lead">Не лид</button>
       </div>
     </section>
     <section class="detail-section">
-      <h3>CRM conversion</h3>
+      <h3>Перенос в CRM</h3>
       <form id="lead-crm-convert-form" class="inline-form">
-        <input name="display_name" value="${escapeHtml(senderName || "New client")}" required>
+        <input name="display_name" value="${escapeHtml(senderName || "Новый клиент")}" required>
         <input name="interest_text" value="${escapeHtml(cluster.primary_message?.text || "")}" required>
-        <input name="task_title" value="Contact client" required>
-        <button type="submit">Convert</button>
+        <input name="task_title" value="Связаться с клиентом" required>
+        <button type="submit">Перенести</button>
       </form>
     </section>
   </div>`;
@@ -336,7 +430,7 @@ async function applyLeadAction(clusterId, action) {
       method: "POST",
       body: JSON.stringify(payload),
     });
-    status.textContent = "Saved";
+    status.textContent = "Сохранено";
     await loadDetail(clusterId);
   } catch (error) {
     status.textContent = error.message;
@@ -350,7 +444,7 @@ async function convertLeadToCrm(clusterId, payload) {
       method: "POST",
       body: JSON.stringify(payload),
     });
-    if (status) status.textContent = "Converted to CRM";
+    if (status) status.textContent = "Перенесено в CRM";
     await loadDetail(clusterId);
   } catch (error) {
     if (status) status.textContent = error.message;
@@ -376,7 +470,7 @@ async function loadCrmClients(state) {
     await loadCrmDetail(state.selectedId);
   } else {
     const detail = document.querySelector("#crm-client-detail");
-    if (detail) detail.innerHTML = `<div class="empty-state">No clients</div>`;
+    if (detail) detail.innerHTML = `<div class="empty-state">Клиентов нет</div>`;
   }
 }
 
@@ -384,7 +478,7 @@ function renderCrmList(state) {
   const target = document.querySelector("#crm-client-list");
   if (!target) return;
   if (!state.items.length) {
-    target.innerHTML = `<div class="empty-state">No clients</div>`;
+    target.innerHTML = `<div class="empty-state">Клиентов нет</div>`;
     return;
   }
   target.innerHTML = state.items
@@ -392,8 +486,8 @@ function renderCrmList(state) {
       const active = client.id === state.selectedId ? "is-active" : "";
       return `<button class="queue-item ${active}" type="button" data-id="${client.id}">
         <strong>${escapeHtml(client.display_name)}</strong>
-        <span class="muted">${escapeHtml(client.client_type)} / ${escapeHtml(client.status)}</span>
-        <span class="queue-meta">${badge(client.source_type)}${badge(time(client.updated_at) || "new")}</span>
+        <span class="muted">${escapeHtml(label(client.client_type))} / ${escapeHtml(label(client.status))}</span>
+        <span class="queue-meta">${badge(label(client.source_type))}${badge(time(client.updated_at) || "новый")}</span>
       </button>`;
     })
     .join("");
@@ -418,20 +512,20 @@ function renderCrmDetail(profile) {
   target.innerHTML = `<div class="detail-grid">
     <header class="detail-header">
       <div>
-        <h2>${escapeHtml(client.display_name || "Client")}</h2>
-        <p class="muted">${escapeHtml(client.client_type || "unknown")}</p>
+        <h2>${escapeHtml(client.display_name || "Клиент")}</h2>
+        <p class="muted">${escapeHtml(label(client.client_type || "unknown"))}</p>
       </div>
       <div class="badges">
-        ${badge(client.status || "active")}
-        ${badge(client.source_type || "manual")}
+        ${badge(label(client.status || "active"))}
+        ${badge(label(client.source_type || "manual"))}
       </div>
     </header>
-    ${crmSection("Contacts", profile.contacts, renderCrmContact)}
-    ${crmSection("Objects", profile.objects, renderCrmObject)}
-    ${crmSection("Interests", profile.interests, renderCrmInterest)}
-    ${crmSection("Assets", profile.assets, renderCrmAsset)}
-    ${crmSection("Contact reasons", profile.contact_reasons, renderCrmReason)}
-    ${crmSection("Touchpoints", profile.touchpoints, renderCrmTouchpoint)}
+    ${crmSection("Контакты", profile.contacts, renderCrmContact)}
+    ${crmSection("Объекты", profile.objects, renderCrmObject)}
+    ${crmSection("Интересы", profile.interests, renderCrmInterest)}
+    ${crmSection("Оборудование", profile.assets, renderCrmAsset)}
+    ${crmSection("Поводы связаться", profile.contact_reasons, renderCrmReason)}
+    ${crmSection("Касания", profile.touchpoints, renderCrmTouchpoint)}
   </div>`;
 }
 
@@ -439,7 +533,7 @@ function crmSection(title, rows, renderer) {
   return `<section class="detail-section">
     <h3>${escapeHtml(title)}</h3>
     <div class="table-list">
-      ${(rows || []).map(renderer).join("") || '<div class="empty-state">None</div>'}
+      ${(rows || []).map(renderer).join("") || '<div class="empty-state">Нет данных</div>'}
     </div>
   </section>`;
 }
@@ -447,10 +541,10 @@ function crmSection(title, rows, renderer) {
 function renderCrmContact(contact) {
   return `<div class="table-row">
     <div>
-      <strong>${escapeHtml(contact.contact_name || contact.telegram_username || contact.telegram_user_id || "Contact")}</strong>
-      <p class="muted">${escapeHtml(contact.preferred_channel || "unknown")}</p>
+      <strong>${escapeHtml(contact.contact_name || contact.telegram_username || contact.telegram_user_id || "Контакт")}</strong>
+      <p class="muted">${escapeHtml(label(contact.preferred_channel || "unknown"))}</p>
     </div>
-    <span>${contact.is_primary ? "primary" : ""}</span>
+    <span>${contact.is_primary ? "основной" : ""}</span>
   </div>`;
 }
 
@@ -534,7 +628,7 @@ async function createCrmClient(event, state) {
       }),
     });
     form.reset();
-    if (status) status.textContent = "Created";
+    if (status) status.textContent = "Создано";
     state.selectedId = profile.client.id;
     await loadCrmClients(state);
   } catch (error) {
@@ -561,7 +655,7 @@ async function loadSources(state) {
     await loadSourceDetail(state.selectedId, state);
   } else {
     const detail = document.querySelector("#source-detail");
-    if (detail) detail.innerHTML = `<div class="empty-state">No sources</div>`;
+    if (detail) detail.innerHTML = `<div class="empty-state">Источников нет</div>`;
   }
 }
 
@@ -569,21 +663,21 @@ function renderSourceList(state) {
   const target = document.querySelector("#source-list");
   if (!target) return;
   if (!state.items.length) {
-    target.innerHTML = `<div class="empty-state">No sources</div>`;
+    target.innerHTML = `<div class="empty-state">Источников нет</div>`;
     return;
   }
   target.innerHTML = state.items
     .map((source) => {
       const active = source.id === state.selectedId ? "is-active" : "";
-      const label = source.title || source.username || source.input_ref;
+      const sourceTitle = source.title || source.username || source.input_ref;
       const statusClass = sourceStatusClass(source.status);
       return `<button class="queue-item ${active}" type="button" data-id="${source.id}">
-        <strong>${escapeHtml(label)}</strong>
-        <span class="muted">${escapeHtml(source.source_kind)} / ${escapeHtml(source.source_purpose)}</span>
+        <strong>${escapeHtml(sourceTitle)}</strong>
+        <span class="muted">${escapeHtml(label(source.source_kind))} / ${escapeHtml(label(source.source_purpose))}</span>
         <span class="queue-meta">
-          ${badge(source.status, statusClass)}
-          ${source.lead_detection_enabled ? badge("leads") : ""}
-          ${source.catalog_ingestion_enabled ? badge("catalog") : ""}
+          ${badge(label(source.status), statusClass)}
+          ${source.lead_detection_enabled ? badge("лиды") : ""}
+          ${source.catalog_ingestion_enabled ? badge("каталог") : ""}
         </span>
       </button>`;
     })
@@ -606,52 +700,52 @@ function renderSourceDetail(detail, state) {
   const target = document.querySelector("#source-detail");
   if (!target) return;
   const source = detail.source || {};
-  const label = source.title || source.username || source.input_ref || "Source";
+  const labelText = source.title || source.username || source.input_ref || "Источник";
   target.innerHTML = `<div class="detail-grid">
     <header class="detail-header">
       <div>
-        <h2>${escapeHtml(label)}</h2>
+        <h2>${escapeHtml(labelText)}</h2>
         <p class="muted">${escapeHtml(source.input_ref || "")}</p>
       </div>
       <div class="badges">
-        ${badge(source.status || "draft", sourceStatusClass(source.status))}
-        ${badge(source.source_kind || "telegram")}
-        ${badge(source.priority || "normal")}
+        ${badge(label(source.status || "draft"), sourceStatusClass(source.status))}
+        ${badge(label(source.source_kind || "telegram"))}
+        ${badge(label(source.priority || "normal"))}
       </div>
     </header>
     <section class="detail-section">
-      <h3>Configuration</h3>
+      <h3>Конфигурация</h3>
       <div class="detail-meta">
-        ${badge(`purpose ${source.source_purpose || "n/a"}`)}
-        ${badge(`poll ${source.poll_interval_seconds || 0}s`)}
-        ${badge(`checkpoint ${source.checkpoint_message_id || "none"}`)}
-        ${badge(`preview ${source.preview_message_count || 0}`)}
-        ${source.lead_detection_enabled ? badge("lead detection") : ""}
-        ${source.catalog_ingestion_enabled ? badge("catalog ingestion") : ""}
+        ${badge(`назначение ${label(source.source_purpose || "н/д")}`)}
+        ${badge(`опрос ${source.poll_interval_seconds || 0}s`)}
+        ${badge(`чекпоинт ${source.checkpoint_message_id || "нет"}`)}
+        ${badge(`превью ${source.preview_message_count || 0}`)}
+        ${source.lead_detection_enabled ? badge("поиск лидов") : ""}
+        ${source.catalog_ingestion_enabled ? badge("каталог") : ""}
       </div>
-      <p class="muted">next poll ${escapeHtml(time(source.next_poll_at) || "not scheduled")}</p>
+      <p class="muted">следующий опрос: ${escapeHtml(time(source.next_poll_at) || "не запланирован")}</p>
       ${
         source.last_error
-          ? `<p class="muted">last error ${escapeHtml(source.last_error)}</p>`
+          ? `<p class="muted">последняя ошибка: ${escapeHtml(source.last_error)}</p>`
           : ""
       }
     </section>
     <section class="detail-section">
-      <h3>Actions</h3>
+      <h3>Действия</h3>
       <div class="source-action-bar">
-        <button type="button" data-source-action="check-access">Check access</button>
-        <button type="button" data-source-action="preview">Fetch preview</button>
-        <button type="button" data-source-action="activate">Activate</button>
-        <button type="button" data-source-action="pause">Pause</button>
+        <button type="button" data-source-action="check-access">Проверить доступ</button>
+        <button type="button" data-source-action="preview">Получить превью</button>
+        <button type="button" data-source-action="activate">Активировать</button>
+        <button type="button" data-source-action="pause">Пауза</button>
       </div>
       <form id="source-checkpoint-form" class="checkpoint-form">
-        <input name="message_id" type="number" min="1" placeholder="Checkpoint message ID" required>
-        <button type="submit">Reset checkpoint</button>
+        <input name="message_id" type="number" min="1" placeholder="ID сообщения чекпоинта" required>
+        <button type="submit">Сбросить чекпоинт</button>
       </form>
     </section>
-    ${sourceSection("Preview messages", detail.preview_messages, renderPreviewMessage)}
-    ${sourceSection("Access checks", detail.access_checks, renderAccessCheck)}
-    ${sourceSection("Jobs", detail.jobs, renderSourceJob)}
+    ${sourceSection("Превью сообщений", detail.preview_messages, renderPreviewMessage)}
+    ${sourceSection("Проверки доступа", detail.access_checks, renderAccessCheck)}
+    ${sourceSection("Задачи", detail.jobs, renderSourceJob)}
   </div>`;
   target.querySelectorAll("[data-source-action]").forEach((button) => {
     button.addEventListener("click", () =>
@@ -667,7 +761,7 @@ function sourceSection(title, rows, renderer) {
   return `<section class="detail-section">
     <h3>${escapeHtml(title)}</h3>
     <div class="table-list">
-      ${(rows || []).map(renderer).join("") || '<div class="empty-state">None</div>'}
+      ${(rows || []).map(renderer).join("") || '<div class="empty-state">Нет данных</div>'}
     </div>
   </section>`;
 }
@@ -676,7 +770,7 @@ function renderPreviewMessage(message) {
   const body = message.text || message.caption || "";
   return `<div class="table-row">
     <div>
-      <strong>${escapeHtml(body || "Media message")}</strong>
+      <strong>${escapeHtml(body || "Медиа-сообщение")}</strong>
       <p class="muted">${escapeHtml(message.sender_display || "")}</p>
     </div>
     <span>${escapeHtml(message.telegram_message_id)}</span>
@@ -686,7 +780,7 @@ function renderPreviewMessage(message) {
 function renderAccessCheck(check) {
   return `<div class="table-row">
     <div>
-      <strong>${escapeHtml(check.status)}</strong>
+      <strong>${escapeHtml(label(check.status))}</strong>
       <p class="muted">${escapeHtml(check.resolved_title || check.error || check.check_type)}</p>
     </div>
     <span>${escapeHtml(time(check.checked_at))}</span>
@@ -699,7 +793,7 @@ function renderSourceJob(job) {
       <strong>${escapeHtml(job.job_type)}</strong>
       <p class="muted">${escapeHtml(job.idempotency_key || job.scope_id || "")}</p>
     </div>
-    <span>${escapeHtml(job.status || time(job.created_at))}</span>
+    <span>${escapeHtml(job.status ? label(job.status) : time(job.created_at))}</span>
   </div>`;
 }
 
@@ -721,7 +815,7 @@ async function createSource(event, state) {
     });
     form.reset();
     form.querySelector('[name="check_access"]').checked = true;
-    if (status) status.textContent = "Created";
+    if (status) status.textContent = "Создано";
     state.selectedId = payload.source?.id || null;
     await loadSources(state);
   } catch (error) {
@@ -744,7 +838,7 @@ async function sourceAction(sourceId, action, state) {
       method: "POST",
       body: JSON.stringify(endpoint.body),
     });
-    if (status) status.textContent = "Saved";
+    if (status) status.textContent = "Сохранено";
     await loadSources(state);
   } catch (error) {
     if (status) status.textContent = error.message;
@@ -764,7 +858,7 @@ async function resetSourceCheckpoint(event, sourceId, state) {
       }),
     });
     event.currentTarget.reset();
-    if (status) status.textContent = "Checkpoint reset";
+    if (status) status.textContent = "Чекпоинт сброшен";
     await loadSources(state);
   } catch (error) {
     if (status) status.textContent = error.message;
@@ -815,7 +909,7 @@ async function loadCatalogCandidates(state) {
 
 async function loadCatalogCandidateDetail(state, candidateId) {
   const target = document.querySelector("#catalog-candidate-detail");
-  if (target) target.innerHTML = `<div class="empty-state">Loading candidate</div>`;
+  if (target) target.innerHTML = `<div class="empty-state">Загружается кандидат</div>`;
   const payload = await api(`/api/catalog/candidates/${candidateId}`);
   if (state.selectedId !== candidateId) return;
   state.detail = payload;
@@ -829,7 +923,7 @@ function renderCatalogCandidateList(state) {
   const target = document.querySelector("#catalog-candidate-list");
   if (!target) return;
   if (!state.items.length) {
-    target.innerHTML = `<div class="empty-state">No candidates</div>`;
+    target.innerHTML = `<div class="empty-state">Кандидатов нет</div>`;
     return;
   }
   target.innerHTML = state.items
@@ -843,9 +937,9 @@ function renderCatalogCandidateList(state) {
         <strong>${escapeHtml(item.canonical_name)}</strong>
         <span class="muted">${escapeHtml(subtitle || item.proposed_action)}</span>
         <span class="queue-meta">
-          ${badge(item.status, catalogStatusClass(item.status))}
+          ${badge(label(item.status), catalogStatusClass(item.status))}
           ${badge(Math.round((item.confidence || 0) * 100) + "%")}
-          ${item.evidence_count ? badge(`evidence ${item.evidence_count}`) : ""}
+          ${item.evidence_count ? badge(`доказательств ${item.evidence_count}`) : ""}
         </span>
       </button>`;
     })
@@ -866,7 +960,7 @@ function renderCatalogCandidateDetail(state) {
   const item =
     state.detail?.candidate || state.items.find((candidate) => candidate.id === state.selectedId);
   if (!item) {
-    target.innerHTML = `<div class="empty-state">Select a candidate</div>`;
+    target.innerHTML = `<div class="empty-state">Выберите кандидата</div>`;
     return;
   }
   const value = item.normalized_value || {};
@@ -879,18 +973,18 @@ function renderCatalogCandidateDetail(state) {
         <p class="muted">${escapeHtml(item.id)}</p>
       </div>
       <div class="badges">
-        ${badge(item.status, catalogStatusClass(item.status))}
-        ${badge(item.candidate_type)}
-        ${badge(item.proposed_action)}
+        ${badge(label(item.status), catalogStatusClass(item.status))}
+        ${badge(label(item.candidate_type))}
+        ${badge(label(item.proposed_action))}
       </div>
     </header>
     <section class="detail-section">
-      <h3>Value</h3>
+      <h3>Значение</h3>
       <div class="detail-meta">
         ${value.category_slug ? badge(value.category_slug) : ""}
         ${value.item_type ? badge(value.item_type) : ""}
         ${value.price_text ? badge(value.price_text, "is-warn") : ""}
-        ${badge(`confidence ${Math.round((item.confidence || 0) * 100)}%`)}
+        ${badge(`уверенность ${Math.round((item.confidence || 0) * 100)}%`)}
       </div>
       ${
         value.description
@@ -899,41 +993,41 @@ function renderCatalogCandidateDetail(state) {
       }
     </section>
     <section class="detail-section">
-      <h3>Terms</h3>
+      <h3>Термины</h3>
       <div class="detail-meta">
-        ${terms.map((term) => badge(term)).join("") || '<span class="muted">No terms</span>'}
+        ${terms.map((term) => badge(term)).join("") || '<span class="muted">Терминов нет</span>'}
       </div>
     </section>
     <section class="detail-section">
-      <h3>Edit</h3>
+      <h3>Редактирование</h3>
       <form id="catalog-edit-form" class="catalog-edit-form">
-        <label>Name
+        <label>Название
           <input id="catalog-name-input" name="canonical_name" value="${escapeHtml(item.canonical_name)}">
         </label>
-        <label>Payload JSON
+        <label>JSON-данные
           <textarea id="catalog-value-json" name="normalized_value" rows="12">${escapeHtml(
             JSON.stringify(value, null, 2)
           )}</textarea>
         </label>
-        <label>Reason
-          <input name="reason" placeholder="Optional note">
+        <label>Причина
+          <input name="reason" placeholder="Необязательная заметка">
         </label>
         <div class="source-action-bar">
-          <button type="submit">Save changes</button>
+          <button type="submit">Сохранить изменения</button>
         </div>
       </form>
     </section>
     <section class="detail-section">
-      <h3>Evidence</h3>
+      <h3>Доказательства</h3>
       ${renderCatalogEvidence(evidence)}
     </section>
     <section class="detail-section">
-      <h3>Review</h3>
+      <h3>Проверка</h3>
       <div class="source-action-bar">
-        <button type="button" data-catalog-action="approve">Approve</button>
-        <button type="button" data-catalog-action="needs_review">Needs review</button>
-        <button type="button" data-catalog-action="reject">Reject</button>
-        <button type="button" data-catalog-action="mute">Mute</button>
+        <button type="button" data-catalog-action="approve">Подтвердить</button>
+        <button type="button" data-catalog-action="needs_review">На проверку</button>
+        <button type="button" data-catalog-action="reject">Отклонить</button>
+        <button type="button" data-catalog-action="mute">Скрыть</button>
       </div>
       <p id="catalog-status" class="status-line" role="status"></p>
     </section>
@@ -949,7 +1043,7 @@ function renderCatalogCandidateDetail(state) {
 }
 
 function renderCatalogEvidence(evidence) {
-  if (!evidence.length) return `<div class="empty-state">No evidence</div>`;
+  if (!evidence.length) return `<div class="empty-state">Доказательств нет</div>`;
   return `<div class="evidence-list">${evidence
     .map((item) => {
       const sourceLabel = [item.source?.origin, item.source?.external_id].filter(Boolean).join(" / ");
@@ -957,9 +1051,9 @@ function renderCatalogEvidence(evidence) {
       const chunkText = item.chunk?.text || item.source?.raw_text_excerpt || "";
       return `<article class="evidence-item">
         <div class="evidence-source">
-          <strong>${escapeHtml(sourceLabel || "Source")}</strong>
+          <strong>${escapeHtml(sourceLabel || "Источник")}</strong>
           ${artifactLabel ? badge(artifactLabel) : ""}
-          ${item.chunk ? badge(`chunk ${item.chunk.chunk_index}`) : ""}
+          ${item.chunk ? badge(`фрагмент ${item.chunk.chunk_index}`) : ""}
           ${item.confidence ? badge(Math.round(item.confidence * 100) + "%") : ""}
         </div>
         ${item.quote ? `<blockquote>${escapeHtml(item.quote)}</blockquote>` : ""}
@@ -989,7 +1083,7 @@ async function saveCatalogCandidateEdit(event, candidateId, state) {
     if (index >= 0) state.items[index] = payload.candidate;
     renderCatalogCandidateList(state);
     renderCatalogCandidateDetail(state);
-    document.querySelector("#catalog-status").textContent = "Saved";
+    document.querySelector("#catalog-status").textContent = "Сохранено";
   } catch (error) {
     if (status) status.textContent = error.message;
   }
@@ -1002,7 +1096,7 @@ async function reviewCatalogCandidate(candidateId, action, state) {
       method: "POST",
       body: JSON.stringify({ action }),
     });
-    if (status) status.textContent = "Saved";
+    if (status) status.textContent = "Сохранено";
     await loadCatalogCandidates(state);
   } catch (error) {
     if (status) status.textContent = error.message;
@@ -1030,9 +1124,9 @@ async function submitManualInput(event, state) {
     form.querySelector('input[name="auto_extract"]').checked = true;
     if (status) {
       const queued = payload.queued_jobs?.length || 0;
-      const snapshot = payload.classifier_snapshot ? `snapshot v${payload.classifier_snapshot.version}` : "";
-      const evaluationCase = payload.evaluation_case ? "evaluation case" : "";
-      status.textContent = ["Saved", queued ? `${queued} job queued` : "", snapshot, evaluationCase]
+      const snapshot = payload.classifier_snapshot ? `снапшот v${payload.classifier_snapshot.version}` : "";
+      const evaluationCase = payload.evaluation_case ? "оценочный кейс" : "";
+      status.textContent = ["Сохранено", queued ? `задач в очереди: ${queued}` : "", snapshot, evaluationCase]
         .filter(Boolean)
         .join(" / ");
     }
@@ -1086,16 +1180,16 @@ async function loadOperationsSummary() {
   const failedQualityRuns = summary.quality?.runs?.by_status?.failed || 0;
   const qualityCases = summary.quality?.cases?.total || 0;
   target.innerHTML = `<div class="ops-metric-row">
-    ${renderOpsMetric("Jobs", summary.jobs?.total || 0, `${queuedJobs} queued / ${runningJobs} running`)}
-    ${renderOpsMetric("Failed jobs", failedJobs, "needs operator check", failedJobs ? "is-danger" : "")}
-    ${renderOpsMetric("Runs", summary.runs?.total || 0, "worker attempts")}
-    ${renderOpsMetric("Errors", errorEvents, "operational events", errorEvents ? "is-danger" : "")}
-    ${renderOpsMetric("Notifications", summary.notifications?.total || 0, `${suppressedNotifications} suppressed`)}
-    ${renderOpsMetric("Extraction", summary.extraction_runs?.total || 0, `${failedExtractions} failed`, failedExtractions ? "is-danger" : "")}
-    ${renderOpsMetric("Access", summary.access_checks?.total || 0, `${accessIssues} issues`, accessIssues ? "is-danger" : "")}
-    ${renderOpsMetric("Quality", qualityCases, `${failedQualityRuns} failed runs`, failedQualityRuns ? "is-danger" : "")}
-    ${renderOpsMetric("Backups", summary.backups?.total || 0, `${verifiedBackups} verified`, failedBackups ? "is-danger" : "")}
-    ${renderOpsMetric("Audit", summary.audit?.total || 0, "recorded changes")}
+    ${renderOpsMetric("Задачи", summary.jobs?.total || 0, `${queuedJobs} в очереди / ${runningJobs} выполняется`)}
+    ${renderOpsMetric("Ошибки задач", failedJobs, "нужна проверка оператора", failedJobs ? "is-danger" : "")}
+    ${renderOpsMetric("Запуски", summary.runs?.total || 0, "попытки воркеров")}
+    ${renderOpsMetric("Ошибки", errorEvents, "операционные события", errorEvents ? "is-danger" : "")}
+    ${renderOpsMetric("Уведомления", summary.notifications?.total || 0, `${suppressedNotifications} подавлено`)}
+    ${renderOpsMetric("Извлечение", summary.extraction_runs?.total || 0, `${failedExtractions} ошибок`, failedExtractions ? "is-danger" : "")}
+    ${renderOpsMetric("Доступ", summary.access_checks?.total || 0, `${accessIssues} проблем`, accessIssues ? "is-danger" : "")}
+    ${renderOpsMetric("Качество", qualityCases, `${failedQualityRuns} запусков с ошибкой`, failedQualityRuns ? "is-danger" : "")}
+    ${renderOpsMetric("Бэкапы", summary.backups?.total || 0, `${verifiedBackups} проверено`, failedBackups ? "is-danger" : "")}
+    ${renderOpsMetric("Аудит", summary.audit?.total || 0, "зафиксированные изменения")}
   </div>`;
 }
 
@@ -1126,7 +1220,7 @@ async function loadOperationsJobs(state) {
     await loadOperationsJobDetail(state.selectedId);
   } else {
     const detail = document.querySelector("#operations-detail");
-    if (detail) detail.innerHTML = `<div class="empty-state">No jobs</div>`;
+    if (detail) detail.innerHTML = `<div class="empty-state">Задач нет</div>`;
   }
 }
 
@@ -1134,7 +1228,7 @@ function renderOperationsJobs(state) {
   const target = document.querySelector("#operations-jobs");
   if (!target) return;
   if (!state.items.length) {
-    target.innerHTML = `<div class="empty-state">No jobs</div>`;
+    target.innerHTML = `<div class="empty-state">Задач нет</div>`;
     return;
   }
   target.innerHTML = state.items
@@ -1147,9 +1241,9 @@ function renderOperationsJobs(state) {
         <strong>${escapeHtml(job.job_type)}</strong>
         <span class="muted">${escapeHtml(subtitle || job.idempotency_key || job.id)}</span>
         <span class="queue-meta">
-          ${badge(job.status, operationsStatusClass(job.status))}
-          ${badge(`attempts ${job.attempt_count || 0}/${job.max_attempts || 0}`)}
-          ${job.last_error ? badge("error", "is-danger") : ""}
+          ${badge(label(job.status), operationsStatusClass(job.status))}
+          ${badge(`попытки ${job.attempt_count || 0}/${job.max_attempts || 0}`)}
+          ${job.last_error ? badge("ошибка", "is-danger") : ""}
         </span>
       </button>`;
     })
@@ -1177,45 +1271,45 @@ function renderOperationsJobDetail(detail) {
   target.innerHTML = `<div class="detail-grid">
     <header class="detail-header">
       <div>
-        <h2>${escapeHtml(job.job_type || "Job")}</h2>
+        <h2>${escapeHtml(job.job_type || "Задача")}</h2>
         <p class="muted">${escapeHtml(job.id || "")}</p>
       </div>
       <div class="badges">
-        ${badge(job.status || "unknown", operationsStatusClass(job.status))}
-        ${badge(job.priority || "normal")}
-        ${job.locked_by ? badge(`locked ${job.locked_by}`, "is-warn") : ""}
+        ${badge(label(job.status || "unknown"), operationsStatusClass(job.status))}
+        ${badge(label(job.priority || "normal"))}
+        ${job.locked_by ? badge(`заблокировано ${job.locked_by}`, "is-warn") : ""}
       </div>
     </header>
     <section class="detail-section">
-      <h3>Execution</h3>
+      <h3>Выполнение</h3>
       <div class="detail-meta">
-        ${badge(`scope ${job.scope_type || "n/a"}`)}
-        ${badge(`source ${job.monitored_source_id || "n/a"}`)}
-        ${badge(`message ${job.source_message_id || "n/a"}`)}
-        ${badge(`attempts ${job.attempt_count || 0}/${job.max_attempts || 0}`)}
-        ${badge(`run after ${time(job.run_after_at) || "n/a"}`)}
-        ${badge(`retry ${time(job.next_retry_at) || "none"}`)}
+        ${badge(`область ${job.scope_type || "н/д"}`)}
+        ${badge(`источник ${job.monitored_source_id || "н/д"}`)}
+        ${badge(`сообщение ${job.source_message_id || "н/д"}`)}
+        ${badge(`попытки ${job.attempt_count || 0}/${job.max_attempts || 0}`)}
+        ${badge(`запуск после ${time(job.run_after_at) || "н/д"}`)}
+        ${badge(`повтор ${time(job.next_retry_at) || "нет"}`)}
       </div>
       ${
         job.last_error
-          ? `<p class="muted">last error ${escapeHtml(job.last_error)}</p>`
+          ? `<p class="muted">последняя ошибка: ${escapeHtml(job.last_error)}</p>`
           : ""
       }
     </section>
     ${operationsJsonSection("Payload", job.payload_json)}
-    ${operationsJsonSection("Checkpoint before", job.checkpoint_before_json)}
-    ${operationsJsonSection("Checkpoint after", job.checkpoint_after_json)}
-    ${operationsJsonSection("Result", job.result_summary_json)}
+    ${operationsJsonSection("Чекпоинт до", job.checkpoint_before_json)}
+    ${operationsJsonSection("Чекпоинт после", job.checkpoint_after_json)}
+    ${operationsJsonSection("Результат", job.result_summary_json)}
     <section class="detail-section">
-      <h3>Runs</h3>
+      <h3>Запуски</h3>
       <div class="table-list">
-        ${runs.map(renderOperationRun).join("") || '<div class="empty-state">No runs</div>'}
+        ${runs.map(renderOperationRun).join("") || '<div class="empty-state">Запусков нет</div>'}
       </div>
     </section>
     <section class="detail-section">
-      <h3>Events</h3>
+      <h3>События</h3>
       <div class="table-list">
-        ${events.map(renderOperationEvent).join("") || '<div class="empty-state">No events</div>'}
+        ${events.map(renderOperationEvent).join("") || '<div class="empty-state">Событий нет</div>'}
       </div>
     </section>
   </div>`;
@@ -1230,13 +1324,13 @@ function operationsJsonSection(title, value) {
 }
 
 function renderOperationRun(run) {
-  const duration = run.duration_ms === null || run.duration_ms === undefined ? "running" : `${run.duration_ms}ms`;
+  const duration = run.duration_ms === null || run.duration_ms === undefined ? "выполняется" : `${run.duration_ms}ms`;
   return `<div class="table-row">
     <div>
-      <strong>${escapeHtml(run.worker_name || "worker")}</strong>
+      <strong>${escapeHtml(run.worker_name || "воркер")}</strong>
       <p class="muted">${escapeHtml(time(run.started_at))} / ${escapeHtml(duration)}</p>
     </div>
-    <span>${badge(run.status, operationsStatusClass(run.status))}</span>
+    <span>${badge(label(run.status), operationsStatusClass(run.status))}</span>
   </div>`;
 }
 
@@ -1264,16 +1358,16 @@ function renderOperationsEvents(items) {
   const target = document.querySelector("#operations-events");
   if (!target) return;
   target.innerHTML =
-    items.map(renderOperationEvent).join("") || '<div class="empty-state">No events</div>';
+    items.map(renderOperationEvent).join("") || '<div class="empty-state">Событий нет</div>';
 }
 
 function renderOperationEvent(event) {
   return `<div class="table-row">
     <div>
-      <strong>${escapeHtml(event.event_type || "event")}</strong>
+      <strong>${escapeHtml(event.event_type || "событие")}</strong>
       <p class="muted">${escapeHtml(shortText(event.message || "", 120))}</p>
     </div>
-    <span>${badge(event.severity || "info", operationsStatusClass(event.severity))}</span>
+    <span>${badge(label(event.severity || "info"), operationsStatusClass(event.severity))}</span>
   </div>`;
 }
 
@@ -1282,17 +1376,17 @@ function renderOperationsNotifications(items) {
   if (!target) return;
   target.innerHTML =
     items.map(renderOperationNotification).join("") ||
-    '<div class="empty-state">No notifications</div>';
+    '<div class="empty-state">Уведомлений нет</div>';
 }
 
 function renderOperationNotification(item) {
-  const label = [item.notification_type, item.notification_policy].filter(Boolean).join(" / ");
+  const notificationLabel = [item.notification_type, item.notification_policy].filter(Boolean).join(" / ");
   return `<div class="table-row">
     <div>
-      <strong>${escapeHtml(label || "notification")}</strong>
+      <strong>${escapeHtml(notificationLabel || "уведомление")}</strong>
       <p class="muted">${escapeHtml(item.suppressed_reason || item.error || time(item.created_at))}</p>
     </div>
-    <span>${badge(item.status || "unknown", operationsStatusClass(item.status))}</span>
+    <span>${badge(label(item.status || "unknown"), operationsStatusClass(item.status))}</span>
   </div>`;
 }
 
@@ -1301,18 +1395,18 @@ function renderOperationsExtractionRuns(items) {
   if (!target) return;
   target.innerHTML =
     items.map(renderOperationExtractionRun).join("") ||
-    '<div class="empty-state">No extraction runs</div>';
+    '<div class="empty-state">Запусков извлечения нет</div>';
 }
 
 function renderOperationExtractionRun(item) {
-  const label = [item.run_type, item.model].filter(Boolean).join(" / ");
+  const runLabel = [item.run_type, item.model].filter(Boolean).join(" / ");
   const usage = tokenUsageSummary(item.token_usage_json);
   return `<div class="table-row">
     <div>
-      <strong>${escapeHtml(label || "extraction")}</strong>
+      <strong>${escapeHtml(runLabel || "извлечение")}</strong>
       <p class="muted">${escapeHtml(item.error || usage || time(item.started_at))}</p>
     </div>
-    <span>${badge(item.status || "unknown", operationsStatusClass(item.status))}</span>
+    <span>${badge(label(item.status || "unknown"), operationsStatusClass(item.status))}</span>
   </div>`;
 }
 
@@ -1321,17 +1415,17 @@ function renderOperationsAccessChecks(items) {
   if (!target) return;
   target.innerHTML =
     items.map(renderOperationAccessCheck).join("") ||
-    '<div class="empty-state">No access checks</div>';
+    '<div class="empty-state">Проверок доступа нет</div>';
 }
 
 function renderOperationAccessCheck(item) {
-  const label = [item.resolved_title, item.monitored_source_id].filter(Boolean).join(" / ");
+  const accessLabel = [item.resolved_title, item.monitored_source_id].filter(Boolean).join(" / ");
   return `<div class="table-row">
     <div>
-      <strong>${escapeHtml(label || "source access")}</strong>
+      <strong>${escapeHtml(accessLabel || "доступ к источнику")}</strong>
       <p class="muted">${escapeHtml(item.error || time(item.checked_at))}</p>
     </div>
-    <span>${badge(item.status || "unknown", operationsStatusClass(item.status))}</span>
+    <span>${badge(label(item.status || "unknown"), operationsStatusClass(item.status))}</span>
   </div>`;
 }
 
@@ -1339,7 +1433,7 @@ function renderOperationsBackups(items) {
   const target = document.querySelector("#operations-backups");
   if (!target) return;
   target.innerHTML =
-    items.map(renderOperationBackup).join("") || '<div class="empty-state">No backups</div>';
+    items.map(renderOperationBackup).join("") || '<div class="empty-state">Бэкапов нет</div>';
   target.querySelectorAll("[data-backup-restore-check]").forEach((button) => {
     button.addEventListener("click", () => createOperationRestoreDryRun(button.dataset.backupId));
   });
@@ -1351,12 +1445,12 @@ function renderOperationBackup(item) {
     .join(" / ");
   return `<div class="table-row">
     <div>
-      <strong>${escapeHtml(item.backup_type || "backup")}</strong>
+      <strong>${escapeHtml(item.backup_type || "бэкап")}</strong>
       <p class="muted">${escapeHtml(details || item.storage_uri || "")}</p>
     </div>
     <span class="row-actions">
-      ${badge(item.status || "unknown", operationsStatusClass(item.status))}
-      <button type="button" data-backup-id="${escapeHtml(item.id)}" data-backup-restore-check>Check</button>
+      ${badge(label(item.status || "unknown"), operationsStatusClass(item.status))}
+      <button type="button" data-backup-id="${escapeHtml(item.id)}" data-backup-restore-check>Проверить</button>
     </span>
   </div>`;
 }
@@ -1367,11 +1461,11 @@ function renderOperationsRestores(items) {
   target.innerHTML =
     items.map((item) => `<div class="table-row">
       <div>
-        <strong>${escapeHtml(item.restore_type || "restore")}</strong>
+        <strong>${escapeHtml(item.restore_type || "проверка восстановления")}</strong>
         <p class="muted">${escapeHtml(time(item.finished_at || item.started_at))}</p>
       </div>
-      <span>${badge(item.validation_status || item.status || "unknown", operationsStatusClass(item.status))}</span>
-    </div>`).join("") || '<div class="empty-state">No restore checks</div>';
+      <span>${badge(label(item.validation_status || item.status || "unknown"), operationsStatusClass(item.status))}</span>
+    </div>`).join("") || '<div class="empty-state">Проверок восстановления нет</div>';
 }
 
 async function createOperationBackup() {
@@ -1399,14 +1493,14 @@ function renderOperationsAudit(items) {
   const target = document.querySelector("#operations-audit");
   if (!target) return;
   target.innerHTML =
-    items.map(renderOperationAudit).join("") || '<div class="empty-state">No audit records</div>';
+    items.map(renderOperationAudit).join("") || '<div class="empty-state">Записей аудита нет</div>';
 }
 
 function renderOperationAudit(item) {
   const entity = [item.entity_type, item.entity_id].filter(Boolean).join(" / ");
   return `<div class="table-row">
     <div>
-      <strong>${escapeHtml(item.action || "change")}</strong>
+      <strong>${escapeHtml(item.action || "изменение")}</strong>
       <p class="muted">${escapeHtml(entity || item.actor || "")}</p>
     </div>
     <span>${escapeHtml(time(item.created_at))}</span>
@@ -1442,11 +1536,11 @@ function renderQualitySummary(summary) {
   const failedRuns = summary.runs?.by_status?.failed || 0;
   const totalRuns = summary.runs?.total || 0;
   target.innerHTML = `<div class="ops-metric-row">
-    ${renderOpsMetric("Decisions", summary.decisions?.total || 0, "recorded traces")}
-    ${renderOpsMetric("Datasets", summary.datasets?.total || 0, "quality sets")}
-    ${renderOpsMetric("Cases", summary.cases?.total || 0, "labeled examples")}
-    ${renderOpsMetric("Runs", totalRuns, `${failedRuns} failed`, failedRuns ? "is-danger" : "")}
-    ${renderOpsMetric("Failed cases", failedResults, "needs review", failedResults ? "is-danger" : "")}
+    ${renderOpsMetric("Решения", summary.decisions?.total || 0, "записанные трассы")}
+    ${renderOpsMetric("Наборы", summary.datasets?.total || 0, "наборы качества")}
+    ${renderOpsMetric("Кейсы", summary.cases?.total || 0, "размеченные примеры")}
+    ${renderOpsMetric("Запуски", totalRuns, `${failedRuns} ошибок`, failedRuns ? "is-danger" : "")}
+    ${renderOpsMetric("Провалы", failedResults, "нужно разобрать", failedResults ? "is-danger" : "")}
   </div>`;
 }
 
@@ -1454,7 +1548,7 @@ function renderQualityDatasets(items) {
   const target = document.querySelector("#quality-datasets");
   if (!target) return;
   if (!items.length) {
-    target.innerHTML = `<div class="empty-state">No datasets</div>`;
+    target.innerHTML = `<div class="empty-state">Наборов нет</div>`;
     return;
   }
   target.innerHTML = items
@@ -1463,8 +1557,8 @@ function renderQualityDatasets(items) {
         <strong>${escapeHtml(item.name || item.dataset_key)}</strong>
         <span class="muted">${escapeHtml(item.dataset_key || item.id)}</span>
         <span class="queue-meta">
-          ${badge(item.dataset_type || "dataset")}
-          ${badge(item.status || "unknown", operationsStatusClass(item.status))}
+          ${badge(label(item.dataset_type || "dataset"))}
+          ${badge(label(item.status || "unknown"), operationsStatusClass(item.status))}
         </span>
       </div>`
     )
@@ -1475,14 +1569,14 @@ function renderQualityRuns(items) {
   const target = document.querySelector("#quality-runs");
   if (!target) return;
   target.innerHTML =
-    items.map(renderQualityRun).join("") || '<div class="empty-state">No runs</div>';
+    items.map(renderQualityRun).join("") || '<div class="empty-state">Запусков нет</div>';
 }
 
 function renderQualityRun(item) {
   const metrics = item.metrics_json || {};
   const detail = [
     item.model,
-    metrics.total !== undefined ? `${metrics.passed || 0}/${metrics.total} passed` : "",
+    metrics.total !== undefined ? `${metrics.passed || 0}/${metrics.total} прошло` : "",
     time(item.finished_at || item.started_at),
   ]
     .filter(Boolean)
@@ -1492,7 +1586,7 @@ function renderQualityRun(item) {
       <strong>${escapeHtml(item.run_type || "evaluation")}</strong>
       <p class="muted">${escapeHtml(item.error || detail)}</p>
     </div>
-    <span>${badge(item.status || "unknown", operationsStatusClass(item.status))}</span>
+    <span>${badge(label(item.status || "unknown"), operationsStatusClass(item.status))}</span>
   </div>`;
 }
 
@@ -1501,7 +1595,7 @@ function renderQualityFailedResults(items) {
   if (!target) return;
   target.innerHTML =
     items.map(renderQualityResult).join("") ||
-    '<div class="empty-state">No failed cases</div>';
+    '<div class="empty-state">Проваленных кейсов нет</div>';
 }
 
 function renderQualityResult(item) {
@@ -1511,7 +1605,7 @@ function renderQualityResult(item) {
       <strong>${escapeHtml(item.failure_type || "failed")}</strong>
       <p class="muted">${escapeHtml(shortText(detail || "", 120))}</p>
     </div>
-    <span>${badge(item.actual_decision || "n/a", "is-danger")}</span>
+    <span>${badge(label(item.actual_decision || "н/д"), "is-danger")}</span>
   </div>`;
 }
 
@@ -1520,7 +1614,7 @@ function renderQualityDecisions(items) {
   if (!target) return;
   target.innerHTML =
     items.map(renderQualityDecision).join("") ||
-    '<div class="empty-state">No decisions</div>';
+    '<div class="empty-state">Решений нет</div>';
 }
 
 function renderQualityDecision(item) {
@@ -1529,7 +1623,7 @@ function renderQualityDecision(item) {
       <strong>${escapeHtml(item.decision_type || "decision")}</strong>
       <p class="muted">${escapeHtml(shortText(item.reason || item.entity_id || "", 120))}</p>
     </div>
-    <span>${badge(item.decision || "n/a")}</span>
+    <span>${badge(label(item.decision || "н/д"))}</span>
   </div>`;
 }
 
@@ -1537,7 +1631,7 @@ function renderQualityCases(items) {
   const target = document.querySelector("#quality-cases");
   if (!target) return;
   target.innerHTML =
-    items.map(renderQualityCase).join("") || '<div class="empty-state">No cases</div>';
+    items.map(renderQualityCase).join("") || '<div class="empty-state">Кейсов нет</div>';
 }
 
 function renderQualityCase(item) {
@@ -1546,7 +1640,7 @@ function renderQualityCase(item) {
       <strong>${escapeHtml(item.expected_decision || "expected")}</strong>
       <p class="muted">${escapeHtml(shortText(item.message_text || item.id, 120))}</p>
     </div>
-    <span>${badge(item.label_source || "manual")}</span>
+    <span>${badge(label(item.label_source || "manual"))}</span>
   </div>`;
 }
 
@@ -1575,8 +1669,8 @@ function tokenUsageSummary(value) {
   const total = value.total_tokens || value.totalTokens;
   const prompt = value.prompt_tokens || value.promptTokens;
   const completion = value.completion_tokens || value.completionTokens;
-  if (total) return `tokens ${total}`;
-  if (prompt || completion) return `tokens ${prompt || 0}/${completion || 0}`;
+  if (total) return `токены ${total}`;
+  if (prompt || completion) return `токены ${prompt || 0}/${completion || 0}`;
   return "";
 }
 
@@ -1612,7 +1706,7 @@ async function loadToday() {
     renderTodaySupportCases(payload.support_cases || []);
     renderTodayCatalogCandidates(payload.catalog_candidates || []);
     renderTodayOperationalIssues(payload.operational_issues || []);
-    if (status) status.textContent = `Updated ${time(payload.generated_at)}`;
+    if (status) status.textContent = `Обновлено ${time(payload.generated_at)}`;
   } catch (error) {
     if (status) status.textContent = error.message;
   }
@@ -1623,12 +1717,12 @@ function renderTodaySummary(payload) {
   if (!target) return;
   const counts = payload.counts || {};
   target.innerHTML = `<div class="ops-metric-row today-metric-row">
-    ${renderOpsMetric("New leads", counts.new_leads || 0, `${counts.maybe_leads || 0} maybe`)}
-    ${renderOpsMetric("Due tasks", counts.due_tasks || 0, `${counts.overdue_tasks || 0} overdue`, counts.overdue_tasks ? "is-danger" : "")}
-    ${renderOpsMetric("Contact reasons", counts.contact_reasons || 0, "clients to contact")}
-    ${renderOpsMetric("Support", counts.support_cases || 0, "open cases", counts.support_cases ? "is-warn" : "")}
-    ${renderOpsMetric("Catalog", counts.catalog_candidates || 0, "pending facts")}
-    ${renderOpsMetric("Issues", counts.operational_issues || 0, "errors", counts.operational_issues ? "is-danger" : "")}
+    ${renderOpsMetric("Новые лиды", counts.new_leads || 0, `${counts.maybe_leads || 0} возможно`)}
+    ${renderOpsMetric("Задачи", counts.due_tasks || 0, `${counts.overdue_tasks || 0} просрочено`, counts.overdue_tasks ? "is-danger" : "")}
+    ${renderOpsMetric("Поводы", counts.contact_reasons || 0, "клиенты для контакта")}
+    ${renderOpsMetric("Поддержка", counts.support_cases || 0, "открытые кейсы", counts.support_cases ? "is-warn" : "")}
+    ${renderOpsMetric("Каталог", counts.catalog_candidates || 0, "факты на проверке")}
+    ${renderOpsMetric("Проблемы", counts.operational_issues || 0, "ошибки", counts.operational_issues ? "is-danger" : "")}
   </div>`;
 }
 
@@ -1636,22 +1730,22 @@ function renderTodayLeads(items) {
   const target = document.querySelector("#today-leads");
   if (!target) return;
   target.innerHTML =
-    items.map(renderTodayLead).join("") || '<div class="empty-state">No new leads</div>';
+    items.map(renderTodayLead).join("") || '<div class="empty-state">Новых лидов нет</div>';
 }
 
 function renderTodayLead(item) {
   const confidence = Math.round((item.confidence_max || 0) * 100);
   return `<div class="table-row today-row">
     <div>
-      <strong>${escapeHtml(shortText(item.message_text || item.summary || "Lead", 180))}</strong>
-      <p class="muted">${escapeHtml(item.primary_sender_name || "unknown sender")}</p>
+      <strong>${escapeHtml(shortText(item.message_text || item.summary || "Лид", 180))}</strong>
+      <p class="muted">${escapeHtml(item.primary_sender_name || "неизвестный отправитель")}</p>
       <div class="queue-meta">
-        ${badge(item.status || "new", todayStatusClass(item.status))}
+        ${badge(label(item.status || "new"), todayStatusClass(item.status))}
         ${badge(`${confidence}%`)}
-        ${item.telegram_message_id ? badge(`message ${item.telegram_message_id}`) : ""}
+        ${item.telegram_message_id ? badge(`сообщение ${item.telegram_message_id}`) : ""}
       </div>
     </div>
-    <a href="/" aria-label="Open lead inbox">Open</a>
+    <a href="/" aria-label="Открыть входящие лиды">Открыть</a>
   </div>`;
 }
 
@@ -1659,7 +1753,7 @@ function renderTodayTasks(items) {
   const target = document.querySelector("#today-tasks");
   if (!target) return;
   target.innerHTML =
-    items.map(renderTodayTask).join("") || '<div class="empty-state">No due tasks</div>';
+    items.map(renderTodayTask).join("") || '<div class="empty-state">Задач на сейчас нет</div>';
   target.querySelectorAll("[data-today-task-action]").forEach((button) => {
     button.addEventListener("click", () =>
       todayTaskAction(button.dataset.taskId, button.dataset.todayTaskAction)
@@ -1670,17 +1764,17 @@ function renderTodayTasks(items) {
 function renderTodayTask(task) {
   return `<div class="table-row today-row">
     <div>
-      <strong>${escapeHtml(task.title || "Task")}</strong>
+      <strong>${escapeHtml(task.title || "Задача")}</strong>
       <p class="muted">${escapeHtml(task.description || time(task.due_at) || "")}</p>
       <div class="queue-meta">
-        ${badge(task.status || "open", todayStatusClass(task.status))}
-        ${badge(task.priority || "normal", todayPriorityClass(task.priority))}
+        ${badge(label(task.status || "open"), todayStatusClass(task.status))}
+        ${badge(label(task.priority || "normal"), todayPriorityClass(task.priority))}
         ${task.due_at ? badge(time(task.due_at), todayDueClass(task.due_at)) : ""}
       </div>
     </div>
     <div class="row-actions">
-      <button type="button" data-task-id="${escapeHtml(task.id)}" data-today-task-action="complete">Done</button>
-      <button type="button" data-task-id="${escapeHtml(task.id)}" data-today-task-action="snooze">Snooze</button>
+      <button type="button" data-task-id="${escapeHtml(task.id)}" data-today-task-action="complete">Готово</button>
+      <button type="button" data-task-id="${escapeHtml(task.id)}" data-today-task-action="snooze">Отложить</button>
     </div>
   </div>`;
 }
@@ -1690,7 +1784,7 @@ function renderTodayContactReasons(items) {
   if (!target) return;
   target.innerHTML =
     items.map(renderTodayContactReason).join("") ||
-    '<div class="empty-state">No contact reasons</div>';
+    '<div class="empty-state">Поводов связаться нет</div>';
   target.querySelectorAll("[data-today-contact-action]").forEach((button) => {
     button.addEventListener("click", () =>
       todayContactReasonAction(button.dataset.reasonId, button.dataset.todayContactAction)
@@ -1702,19 +1796,19 @@ function renderTodayContactReason(item) {
   const client = item.client || {};
   return `<div class="table-row today-row">
     <div>
-      <strong>${escapeHtml(item.title || "Contact reason")}</strong>
+      <strong>${escapeHtml(item.title || "Повод связаться")}</strong>
       <p class="muted">${escapeHtml(client.display_name || item.reason_text || "")}</p>
       <div class="queue-meta">
-        ${badge(item.status || "new", todayStatusClass(item.status))}
-        ${badge(item.priority || "normal", todayPriorityClass(item.priority))}
+        ${badge(label(item.status || "new"), todayStatusClass(item.status))}
+        ${badge(label(item.priority || "normal"), todayPriorityClass(item.priority))}
         ${item.due_at ? badge(time(item.due_at), todayDueClass(item.due_at)) : ""}
       </div>
     </div>
     <div class="row-actions">
-      <button type="button" data-reason-id="${escapeHtml(item.id)}" data-today-contact-action="accept">Accept</button>
-      <button type="button" data-reason-id="${escapeHtml(item.id)}" data-today-contact-action="done">Done</button>
-      <button type="button" data-reason-id="${escapeHtml(item.id)}" data-today-contact-action="snooze">Snooze</button>
-      <button type="button" data-reason-id="${escapeHtml(item.id)}" data-today-contact-action="dismiss">Dismiss</button>
+      <button type="button" data-reason-id="${escapeHtml(item.id)}" data-today-contact-action="accept">Принять</button>
+      <button type="button" data-reason-id="${escapeHtml(item.id)}" data-today-contact-action="done">Готово</button>
+      <button type="button" data-reason-id="${escapeHtml(item.id)}" data-today-contact-action="snooze">Отложить</button>
+      <button type="button" data-reason-id="${escapeHtml(item.id)}" data-today-contact-action="dismiss">Скрыть</button>
     </div>
   </div>`;
 }
@@ -1727,12 +1821,12 @@ function renderTodaySupportCases(items) {
       const client = item.client || {};
       return `<div class="table-row">
         <div>
-          <strong>${escapeHtml(item.title || "Support case")}</strong>
+          <strong>${escapeHtml(item.title || "Кейс поддержки")}</strong>
           <p class="muted">${escapeHtml(client.display_name || item.issue_text || "")}</p>
         </div>
-        <span>${badge(item.priority || item.status || "open", todayPriorityClass(item.priority))}</span>
+        <span>${badge(label(item.priority || item.status || "open"), todayPriorityClass(item.priority))}</span>
       </div>`;
-    }).join("") || '<div class="empty-state">No support cases</div>';
+    }).join("") || '<div class="empty-state">Кейсов поддержки нет</div>';
 }
 
 function renderTodayCatalogCandidates(items) {
@@ -1746,12 +1840,12 @@ function renderTodayCatalogCandidates(items) {
         .join(" / ");
       return `<div class="table-row">
         <div>
-          <strong>${escapeHtml(item.canonical_name || "Catalog candidate")}</strong>
+          <strong>${escapeHtml(item.canonical_name || "Кандидат каталога")}</strong>
           <p class="muted">${escapeHtml(subtitle || item.proposed_action || "")}</p>
         </div>
-        <span>${badge(item.status || "pending", catalogStatusClass(item.status))}</span>
+        <span>${badge(label(item.status || "pending"), catalogStatusClass(item.status))}</span>
       </div>`;
-    }).join("") || '<div class="empty-state">No catalog candidates</div>';
+    }).join("") || '<div class="empty-state">Кандидатов каталога нет</div>';
 }
 
 function renderTodayOperationalIssues(items) {
@@ -1760,11 +1854,11 @@ function renderTodayOperationalIssues(items) {
   target.innerHTML =
     items.map((item) => `<div class="table-row">
       <div>
-        <strong>${escapeHtml(item.event_type || "event")}</strong>
+        <strong>${escapeHtml(item.event_type || "событие")}</strong>
         <p class="muted">${escapeHtml(shortText(item.message || "", 120))}</p>
       </div>
-      <span>${badge(item.severity || "error", operationsStatusClass(item.severity))}</span>
-    </div>`).join("") || '<div class="empty-state">No operational issues</div>';
+      <span>${badge(label(item.severity || "error"), operationsStatusClass(item.severity))}</span>
+    </div>`).join("") || '<div class="empty-state">Операционных проблем нет</div>';
 }
 
 async function createTodayTask(event) {
@@ -1783,7 +1877,7 @@ async function createTodayTask(event) {
       }),
     });
     form.reset();
-    if (status) status.textContent = "Task created";
+    if (status) status.textContent = "Задача создана";
     await loadToday();
   } catch (error) {
     if (status) status.textContent = error.message;
@@ -1884,12 +1978,12 @@ async function loadUsers() {
   if (!target) return;
   target.innerHTML = (payload.items || [])
     .map(
-      (user) => `<div class="table-row">
+        (user) => `<div class="table-row">
         <div>
           <strong>${escapeHtml(user.display_name || user.local_username || user.telegram_username)}</strong>
-          <p class="muted">${escapeHtml(user.auth_type)} / ${escapeHtml(user.status)}</p>
+          <p class="muted">${escapeHtml(label(user.auth_type))} / ${escapeHtml(label(user.status))}</p>
         </div>
-        <span>${escapeHtml(user.role)}</span>
+        <span>${escapeHtml(label(user.role))}</span>
       </div>`
     )
     .join("");
@@ -1916,12 +2010,12 @@ async function loadUserbots() {
         (account) => `<div class="table-row">
         <div>
           <strong>${escapeHtml(account.display_name)}</strong>
-          <p class="muted">${escapeHtml(account.session_name)} / ${escapeHtml(account.status)}</p>
+          <p class="muted">${escapeHtml(account.session_name)} / ${escapeHtml(label(account.status))}</p>
         </div>
         <span>${escapeHtml(account.priority)}</span>
       </div>`
       )
-      .join("") || '<div class="empty-state">No userbots</div>';
+      .join("") || '<div class="empty-state">Юзерботов нет</div>';
 }
 
 async function addUserbot(event) {
@@ -1951,7 +2045,7 @@ async function loadSettings() {
       (setting) => `<div class="table-row">
         <div>
           <strong>${escapeHtml(setting.key)}</strong>
-          <p class="muted">${escapeHtml(setting.value_type)}${setting.is_default ? " / default" : ""}</p>
+          <p class="muted">${escapeHtml(setting.value_type)}${setting.is_default ? " / значение по умолчанию" : ""}</p>
         </div>
         <span>${escapeHtml(JSON.stringify(setting.value))}</span>
       </div>`
@@ -1969,7 +2063,7 @@ async function saveSetting(event) {
     body: JSON.stringify({
       value: parseSettingValue(data.get("value"), valueType),
       value_type: valueType,
-      reason: "web admin update",
+      reason: "обновление из веб-админки",
     }),
   });
   event.currentTarget.reset();
@@ -1989,14 +2083,14 @@ async function loadAiRegistry() {
 
 async function bootstrapAiRegistry() {
   const status = document.querySelector("#ai-registry-status");
-  if (status) status.textContent = "Loading defaults...";
+  if (status) status.textContent = "Загружаются значения по умолчанию...";
   try {
     adminAiRegistry = await api("/api/admin/ai-registry/bootstrap-defaults", {
       method: "POST",
       body: JSON.stringify({}),
     });
     renderAiRegistry(adminAiRegistry);
-    if (status) status.textContent = "Defaults loaded";
+    if (status) status.textContent = "Значения по умолчанию загружены";
   } catch (error) {
     if (status) status.textContent = error.message;
   }
@@ -2040,20 +2134,20 @@ function renderAiModels(models) {
         return `<form class="table-row ai-limit-form" data-limit-id="${escapeHtml(limit.id || "")}">
           <div>
             <strong>${escapeHtml(model.provider_model_name)}</strong>
-            <p class="muted">${escapeHtml(model.model_type)} / ${escapeHtml(model.status)}</p>
+            <p class="muted">${escapeHtml(label(model.model_type))} / ${escapeHtml(label(model.status))}</p>
           </div>
           <div class="row-actions">
             <input class="compact-input" name="raw_limit" type="number" min="1" step="1"
-              value="${escapeHtml(limit.raw_limit || 1)}" aria-label="Raw concurrency">
+              value="${escapeHtml(limit.raw_limit || 1)}" aria-label="Сырой лимит параллельности">
             <input class="compact-input" name="utilization_ratio" type="number" min="0.1" max="1"
               step="0.05" value="${escapeHtml(limit.utilization_ratio || 0.8)}"
-              aria-label="Utilization ratio">
-            <span class="badge">eff ${escapeHtml(limit.effective_limit || 1)}</span>
-            <button type="submit">Save</button>
+              aria-label="Коэффициент использования">
+            <span class="badge">эфф. ${escapeHtml(limit.effective_limit || 1)}</span>
+            <button type="submit">Сохранить</button>
           </div>
         </form>`;
       })
-      .join("") || '<div class="empty-state">No models</div>';
+      .join("") || '<div class="empty-state">Моделей нет</div>';
   target.querySelectorAll(".ai-limit-form").forEach((form) => {
     form.addEventListener("submit", saveAiLimit);
   });
@@ -2067,18 +2161,18 @@ function renderAiRoutes(routes) {
       .map(
         (route) => `<div class="table-row">
         <div>
-          <strong>${escapeHtml(route.agent_key)} / ${escapeHtml(route.route_role)}</strong>
-          <p class="muted">${escapeHtml(route.model)} / priority ${escapeHtml(route.priority)}</p>
+          <strong>${escapeHtml(route.agent_key)} / ${escapeHtml(label(route.route_role))}</strong>
+          <p class="muted">${escapeHtml(route.model)} / приоритет ${escapeHtml(route.priority)}</p>
         </div>
         <div class="row-actions">
-          ${badge(route.enabled ? "enabled" : "disabled", route.enabled ? "" : "is-warn")}
+          ${badge(route.enabled ? "включен" : "отключен", route.enabled ? "" : "is-warn")}
           <button type="button" data-route-id="${escapeHtml(route.id)}" data-enabled="${
             route.enabled ? "false" : "true"
-          }">${route.enabled ? "Disable" : "Enable"}</button>
+          }">${route.enabled ? "Отключить" : "Включить"}</button>
         </div>
       </div>`
       )
-      .join("") || '<div class="empty-state">No routes</div>';
+      .join("") || '<div class="empty-state">Маршрутов нет</div>';
   target.querySelectorAll("[data-route-id]").forEach((button) => {
     button.addEventListener("click", toggleAiRoute);
   });
@@ -2099,7 +2193,7 @@ async function saveAiLimit(event) {
         utilization_ratio: Number.parseFloat(data.get("utilization_ratio")),
       }),
     });
-    if (status) status.textContent = "Model limit saved";
+    if (status) status.textContent = "Лимит модели сохранен";
     await loadAiRegistry();
   } catch (error) {
     if (status) status.textContent = error.message;
@@ -2126,7 +2220,7 @@ async function saveAiRoute(event) {
         structured_output_required: true,
       }),
     });
-    if (status) status.textContent = "Route saved";
+    if (status) status.textContent = "Маршрут сохранен";
     await loadAiRegistry();
   } catch (error) {
     if (status) status.textContent = error.message;
@@ -2141,7 +2235,7 @@ async function toggleAiRoute(event) {
       method: "PATCH",
       body: JSON.stringify({ enabled: button.dataset.enabled === "true" }),
     });
-    if (status) status.textContent = "Route updated";
+    if (status) status.textContent = "Маршрут обновлен";
     await loadAiRegistry();
   } catch (error) {
     if (status) status.textContent = error.message;

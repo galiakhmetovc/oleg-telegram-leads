@@ -333,7 +333,12 @@ def _setup_catalog_app(tmp_path):
             username="admin",
             password="initial-secret",
         )
-    app = create_app(database_path=db_path, telegram_bot_token="telegram-token")
+    app = create_app(
+        database_path=db_path,
+        bootstrap_admin_password="initial-secret",
+        bootstrap_admin_password_file=tmp_path / "bootstrap-admin-password.txt",
+        telegram_bot_token="telegram-token",
+    )
     return {"client": TestClient(app), "session_factory": session_factory}
 
 

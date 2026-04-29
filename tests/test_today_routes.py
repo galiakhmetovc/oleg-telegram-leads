@@ -202,7 +202,12 @@ def _setup_app(tmp_path):
         )
     return {
         "client": TestClient(
-            create_app(database_path=db_path, telegram_bot_token="telegram-token")
+            create_app(
+                database_path=db_path,
+                bootstrap_admin_password="initial-secret",
+                bootstrap_admin_password_file=tmp_path / "bootstrap-admin-password.txt",
+                telegram_bot_token="telegram-token",
+            )
         ),
         "session_factory": session_factory,
     }

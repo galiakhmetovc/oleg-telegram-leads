@@ -16,6 +16,7 @@ class AppSettings(BaseSettings):
     worker_concurrency: int = 1
     bootstrap_admin_username: str = "admin"
     bootstrap_admin_password: str | None = None
+    bootstrap_admin_password_file: Path = Path("./data/bootstrap-admin-password.txt")
     telegram_bot_token: str | None = None
     web_session_cookie_name: str = "pur_session"
     web_cookie_secure: bool = False
