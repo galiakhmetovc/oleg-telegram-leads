@@ -600,6 +600,81 @@ def _setting_help(key: str) -> dict[str, str]:
             "Абсолютный верхний предел таймаута одного LLM-запроса.",
             "Защищает worker от слишком долгого удержания соединений и слотов модели.",
         ),
+        "llm_circuit_breaker_enabled": (
+            "AI",
+            "Заготовка circuit breaker для временного отключения деградировавшей связки provider/account/model/task.",
+            "Когда будет включено, несколько подряд retryable ошибок будут временно уводить трафик на fallback, а не добивать провайдера.",
+        ),
+        "llm_circuit_breaker_failure_threshold": (
+            "AI",
+            "Сколько подряд retryable ошибок открывает circuit breaker.",
+            "Низкое значение быстрее защищает систему, высокое реже переключает маршруты из-за случайных сбоев.",
+        ),
+        "llm_circuit_breaker_recovery_timeout_seconds": (
+            "AI",
+            "Сколько секунд ждать перед пробной half-open попыткой после открытия circuit breaker.",
+            "Определяет, как быстро модель снова попадет в работу после серии ошибок.",
+        ),
+        "llm_circuit_breaker_half_open_probe_count": (
+            "AI",
+            "Сколько пробных запросов разрешать в half-open состоянии.",
+            "Ограничивает риск повторного каскадного сбоя при восстановлении модели.",
+        ),
+        "llm_circuit_breaker_scope": (
+            "AI",
+            "Ключ агрегации circuit breaker: обычно provider_account_model_task.",
+            "Позволяет блокировать конкретную модель для конкретной задачи, не отключая весь провайдер.",
+        ),
+        "llm_circuit_breaker_retryable_errors_only": (
+            "AI",
+            "Учитывать в circuit breaker только retryable ошибки LLM.",
+            "Не дает ошибкам конфигурации и валидации случайно открыть breaker как перегрузку провайдера.",
+        ),
+        "llm_adaptive_timeout_enabled": (
+            "AI",
+            "Заготовка адаптивного таймаута по p95 latency.",
+            "Когда будет включено, timeout можно будет считать из накопленных метрик или задавать вручную.",
+        ),
+        "llm_adaptive_timeout_activation_mode": (
+            "AI",
+            "Когда применять адаптивный timeout: metrics_only, manual_only или metrics_or_manual.",
+            "Позволяет включать расчет только после накопления метрик либо принудительно через ручные override.",
+        ),
+        "llm_adaptive_timeout_min_samples": (
+            "AI",
+            "Минимум успешных/завершенных измерений latency для расчета p95.",
+            "До накопления этого количества система использует статический timeout или ручной override.",
+        ),
+        "llm_adaptive_timeout_manual_overrides": (
+            "AI",
+            "JSON-карта ручных timeout override по task/model/profile.",
+            "Нужна, чтобы оператор мог включить конкретные значения до накопления достаточной статистики.",
+        ),
+        "llm_adaptive_timeout_window_hours": (
+            "AI",
+            "Окно истории latency для расчета p95.",
+            "Короткое окно быстрее реагирует на деградацию, длинное стабильнее при редких задачах.",
+        ),
+        "llm_adaptive_timeout_percentile": (
+            "AI",
+            "Перцентиль latency для расчета адаптивного timeout.",
+            "p95 балансирует между нормальной задержкой и редкими длинными ответами.",
+        ),
+        "llm_adaptive_timeout_buffer_ratio": (
+            "AI",
+            "Множитель запаса поверх p95 latency.",
+            "1.2 означает p95 плюс 20% буфера, но не выше hard cap.",
+        ),
+        "llm_adaptive_timeout_min_seconds_by_task": (
+            "AI",
+            "JSON-карта нижних границ адаптивного timeout по типам задач.",
+            "Не дает расчету p95 сделать timeout слишком коротким для тяжелых фоновых задач.",
+        ),
+        "llm_adaptive_timeout_max_seconds_by_task": (
+            "AI",
+            "JSON-карта верхних границ адаптивного timeout по типам задач.",
+            "Ограничивает рост timeout при хронической деградации модели.",
+        ),
         "telegram_read_jobs_per_userbot": (
             "Telegram",
             "Сколько задач чтения истории можно вести одним юзерботом.",

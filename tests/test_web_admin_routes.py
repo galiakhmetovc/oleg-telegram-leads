@@ -395,8 +395,46 @@ def test_admin_ai_registry_updates_model_context_window_and_lists_task_types(tmp
     worker_setting = next(
         item for item in settings_response.json()["items"] if item["key"] == "worker_concurrency"
     )
+    circuit_breaker_setting = next(
+        item
+        for item in settings_response.json()["items"]
+        if item["key"] == "llm_circuit_breaker_enabled"
+    )
+    adaptive_timeout_setting = next(
+        item
+        for item in settings_response.json()["items"]
+        if item["key"] == "llm_adaptive_timeout_enabled"
+    )
+    circuit_threshold_setting = next(
+        item
+        for item in settings_response.json()["items"]
+        if item["key"] == "llm_circuit_breaker_failure_threshold"
+    )
+    adaptive_buffer_setting = next(
+        item
+        for item in settings_response.json()["items"]
+        if item["key"] == "llm_adaptive_timeout_buffer_ratio"
+    )
+    adaptive_min_samples_setting = next(
+        item
+        for item in settings_response.json()["items"]
+        if item["key"] == "llm_adaptive_timeout_min_samples"
+    )
+    adaptive_mode_setting = next(
+        item
+        for item in settings_response.json()["items"]
+        if item["key"] == "llm_adaptive_timeout_activation_mode"
+    )
     assert worker_setting["description"]
     assert worker_setting["impact"]
+    assert circuit_breaker_setting["value"] is False
+    assert "circuit breaker" in circuit_breaker_setting["description"]
+    assert circuit_threshold_setting["value"] == 5
+    assert adaptive_timeout_setting["value"] is False
+    assert "p95" in adaptive_timeout_setting["description"]
+    assert adaptive_buffer_setting["value"] == 1.2
+    assert adaptive_min_samples_setting["value"] == 100
+    assert adaptive_mode_setting["value"] == "metrics_or_manual"
 
     with fixture["session_factory"]() as session:
         audit_actions = {

@@ -1306,6 +1306,26 @@ LLM retry and timeout policy:
 - Model-specific timeout wins over task timeout. Task timeout wins over the legacy environment default. Hard cap is always applied.
 - Catalog ingestion must use the configured AI task route as source of truth. Legacy `catalog_llm_model` is used only when no AI registry route exists.
 - A catalog fallback route may be attempted inside the same job attempt for rate limit and retryable timeout/network/provider-unavailable failures, before the job is requeued.
+- Circuit breaker is a planned but configurable LLM protection layer. Its settings must exist before behavior is enabled:
+  - `llm_circuit_breaker_enabled`, default `false`;
+  - `llm_circuit_breaker_failure_threshold`, default `5`;
+  - `llm_circuit_breaker_recovery_timeout_seconds`, default `60`;
+  - `llm_circuit_breaker_half_open_probe_count`, default `1`;
+  - `llm_circuit_breaker_scope`, default `provider_account_model_task`;
+  - `llm_circuit_breaker_retryable_errors_only`, default `true`.
+- Circuit breaker counters are scoped to the concrete provider account, model/profile, and task type. Opening the breaker for `catalog_extraction` on one model must not disable the whole provider or unrelated lead/OCR work.
+- Adaptive timeout is also planned behind settings and must be activated only after enough latency observations or by manual operator override:
+  - `llm_adaptive_timeout_enabled`, default `false`;
+  - `llm_adaptive_timeout_activation_mode`, default `metrics_or_manual`; allowed modes are `metrics_only`, `manual_only`, `metrics_or_manual`;
+  - `llm_adaptive_timeout_min_samples`, default `100`;
+  - `llm_adaptive_timeout_manual_overrides`, default `{}`;
+  - `llm_adaptive_timeout_window_hours`, default `24`;
+  - `llm_adaptive_timeout_percentile`, default `95`;
+  - `llm_adaptive_timeout_buffer_ratio`, default `1.2`;
+  - `llm_adaptive_timeout_min_seconds_by_task`, default `catalog_extraction=30`, `lead_detection=15`, `ocr=60`;
+  - `llm_adaptive_timeout_max_seconds_by_task`, default `catalog_extraction=120`, `lead_detection=45`, `ocr=180`.
+- Before at least `llm_adaptive_timeout_min_samples` measurements exist for the concrete task/model/profile window, runtime must keep using static timeout settings unless `llm_adaptive_timeout_manual_overrides` contains a matching operator value.
+- The target formula is `timeout = min(max(p95_latency * buffer_ratio, task_min_timeout), task_max_timeout, hard_cap)`.
 
 ### `ai_runs`
 
