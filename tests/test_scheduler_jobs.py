@@ -116,6 +116,34 @@ def test_failed_job_is_requeued_with_retry_time(scheduler_service):
     assert failed.last_error == "network timeout"
 
 
+def test_successful_retry_clears_previous_error_state(scheduler_service):
+    now = utc_now()
+    job = scheduler_service.enqueue(
+        job_type="download_artifact",
+        scope_type="archive",
+        max_attempts=3,
+        run_after_at=now,
+    )
+    acquired = scheduler_service.acquire_next("worker-a", now=now)
+    assert acquired is not None
+    retry_at = now + timedelta(minutes=5)
+    scheduler_service.fail(acquired.id, error="database is locked", retry_at=retry_at)
+
+    reacquired = scheduler_service.acquire_next("worker-a", now=retry_at + timedelta(seconds=1))
+    assert reacquired is not None
+    scheduler_service.succeed(
+        job.id,
+        checkpoint_after={"ok": True},
+        result_summary={"done": True},
+    )
+
+    stored = scheduler_service.repository.get(job.id)
+    assert stored is not None
+    assert stored.status == "succeeded"
+    assert stored.last_error is None
+    assert stored.next_retry_at is None
+
+
 def test_telegram_jobs_are_serialized_per_userbot(scheduler_service):
     now = utc_now()
     scheduler_service.enqueue(
