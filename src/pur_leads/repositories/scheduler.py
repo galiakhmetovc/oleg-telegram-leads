@@ -368,6 +368,28 @@ class SchedulerRepository:
         )
         return self.get(job_id)  # type: ignore[return-value]
 
+    def defer(
+        self, job_id: str, *, reason: str, retry_at: datetime, now: datetime
+    ) -> SchedulerJobRecord:
+        job = self.get(job_id)
+        if job is None:
+            raise KeyError(job_id)
+        self.session.execute(
+            update(scheduler_jobs_table)
+            .where(scheduler_jobs_table.c.id == job_id)
+            .values(
+                status="queued",
+                next_retry_at=self._to_db_datetime(retry_at),
+                run_after_at=self._to_db_datetime(retry_at),
+                locked_by=None,
+                locked_at=None,
+                lease_expires_at=None,
+                last_error=reason,
+                updated_at=self._to_db_datetime(now),
+            )
+        )
+        return self.get(job_id)  # type: ignore[return-value]
+
     def fail_permanently(self, job_id: str, *, error: str, now: datetime) -> SchedulerJobRecord:
         job = self.get(job_id)
         if job is None:

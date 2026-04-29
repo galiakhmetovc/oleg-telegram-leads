@@ -7,6 +7,7 @@ from pur_leads.core.time import utc_now
 from pur_leads.db.engine import create_sqlite_engine
 from pur_leads.db.migrations import upgrade_database
 from pur_leads.db.session import create_session_factory
+from pur_leads.integrations.ai.chat import AiModelConcurrencyLimitExceeded
 from pur_leads.models.audit import operational_events_table
 from pur_leads.models.scheduler import job_runs_table, scheduler_jobs_table
 from pur_leads.models.telegram_sources import monitored_sources_table
@@ -173,6 +174,47 @@ async def test_worker_retry_delay_grows_exponentially(runtime_session):
     assert stored.status == "queued"
     assert stored.next_retry_at is not None
     assert stored.next_retry_at >= before + timedelta(seconds=74)
+
+
+@pytest.mark.asyncio
+async def test_worker_defers_resource_unavailable_without_consuming_attempt(runtime_session):
+    scheduler = SchedulerService(runtime_session)
+    job = scheduler.enqueue(
+        job_type="catalog_candidate_validation",
+        scope_type="parser",
+        max_attempts=2,
+    )
+    before = utc_now()
+
+    async def handler(acquired_job):
+        raise AiModelConcurrencyLimitExceeded(
+            provider="zai",
+            model="GLM-5.1",
+            retry_after_seconds=23,
+        )
+
+    runtime = WorkerRuntime(runtime_session, handlers={"catalog_candidate_validation": handler})
+
+    result = await runtime.run_once()
+
+    stored = scheduler.repository.get(job.id)
+    run = runtime_session.execute(select(job_runs_table)).mappings().one()
+    event = runtime_session.execute(select(operational_events_table)).mappings().one()
+    assert stored is not None
+    assert result.status == "deferred"
+    assert result.job_id == job.id
+    assert stored.status == "queued"
+    assert stored.attempt_count == 0
+    assert stored.next_retry_at is not None
+    assert stored.next_retry_at >= before + timedelta(seconds=23)
+    assert stored.last_error == "AI model concurrency limit reached for zai:GLM-5.1; retry later"
+    assert run["status"] == "deferred"
+    assert run["error"] == stored.last_error
+    assert event["severity"] == "info"
+    assert event["details_json"]["reason"] == "resource_unavailable"
+    assert event["details_json"]["resource_kind"] == "ai_model_concurrency"
+    assert event["details_json"]["provider"] == "zai"
+    assert event["details_json"]["model"] == "GLM-5.1"
 
 
 @pytest.mark.asyncio

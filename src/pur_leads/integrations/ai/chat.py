@@ -36,6 +36,8 @@ class AiModelConcurrencyLimitExceeded(RuntimeError):
         self.provider = provider
         self.model = model
         self.retry_after_seconds = retry_after_seconds
+        self.resource_unavailable = True
+        self.resource_kind = "ai_model_concurrency"
 
 
 ChatMessageInput = AiChatMessage | Mapping[str, str]

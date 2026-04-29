@@ -116,6 +116,33 @@ def test_failed_job_is_requeued_with_retry_time(scheduler_service):
     assert failed.last_error == "network timeout"
 
 
+def test_deferred_job_is_requeued_without_consuming_attempt(scheduler_service):
+    now = utc_now()
+    scheduler_service.enqueue(
+        job_type="extract_catalog_facts",
+        scope_type="parser",
+        max_attempts=2,
+        run_after_at=now,
+    )
+    acquired = scheduler_service.acquire_next("worker-a", now=now)
+    assert acquired is not None
+
+    retry_at = now + timedelta(seconds=17)
+    scheduler_service.defer(acquired.id, reason="AI model slot unavailable", retry_at=retry_at)
+
+    deferred = scheduler_service.repository.get(acquired.id)
+    assert deferred is not None
+    assert deferred.status == "queued"
+    assert deferred.attempt_count == 0
+    assert deferred.max_attempts == 2
+    assert deferred.next_retry_at == retry_at
+    assert deferred.run_after_at == retry_at
+    assert deferred.locked_by is None
+    assert deferred.locked_at is None
+    assert deferred.lease_expires_at is None
+    assert deferred.last_error == "AI model slot unavailable"
+
+
 def test_successful_retry_clears_previous_error_state(scheduler_service):
     now = utc_now()
     job = scheduler_service.enqueue(

@@ -31,6 +31,7 @@ from pur_leads.services.classifier_snapshots import ClassifierSnapshotService
 from pur_leads.services.evaluation import EvaluationService
 from pur_leads.services.leads import LeadDetectionResult, LeadMatchInput, LeadService
 from pur_leads.services.notifications import NotificationPolicyService
+from pur_leads.services.resource_capacity import ResourceCapacityService
 from pur_leads.services.scheduler import SchedulerService
 from pur_leads.services.settings import SettingsService
 from pur_leads.workers.message_context import MessageContextWorker
@@ -257,7 +258,8 @@ class WorkerRuntime:
             handler_result = await handler(job)
         except Exception as exc:
             result = self._fail_job(job, exc)
-            self.scheduler.finish_run(run_id, status="failed", error=result.message)
+            run_status = "deferred" if result.status == "deferred" else "failed"
+            self.scheduler.finish_run(run_id, status=run_status, error=result.message)
             return result
 
         checkpoint_after = _checkpoint_after(handler_result)
@@ -295,6 +297,30 @@ class WorkerRuntime:
 
     def _fail_job(self, job: SchedulerJobRecord, exc: Exception) -> WorkerRunResult:
         error = _safe_exception_message(exc)
+        if _is_resource_unavailable(exc):
+            retry_at = _retry_at_for_exception(self.session, exc, attempt_number=1)
+            self.audit.record_event(
+                event_type="scheduler",
+                severity="info",
+                message=error,
+                entity_type="scheduler_job",
+                entity_id=job.id,
+                details_json={
+                    "reason": "resource_unavailable",
+                    "job_type": job.job_type,
+                    "resource_kind": getattr(exc, "resource_kind", None),
+                    "provider": getattr(exc, "provider", None),
+                    "model": getattr(exc, "model", None),
+                    "retry_at": retry_at.isoformat(),
+                },
+            )
+            self.scheduler.defer(job.id, reason=error, retry_at=retry_at)
+            return WorkerRunResult(
+                status="deferred",
+                job_id=job.id,
+                job_type=job.job_type,
+                message=error,
+            )
         retryable = getattr(exc, "retryable", None)
         if retryable is False:
             _mark_failed_notification_event(self.session, job=job, error=error)
@@ -1136,7 +1162,11 @@ def _enqueue_idle_quality_validation_if_available(
     batch_size = _positive_int(settings.get("catalog_quality_idle_batch_size"), default=5)
     validator_model = settings.get("catalog_quality_validator_model") or "GLM-5.1"
     validator_profile = settings.get("catalog_quality_validator_profile")
-    max_active = _positive_int(settings.get("catalog_quality_idle_max_active_jobs"), default=1)
+    max_active = _idle_quality_active_job_cap(
+        session,
+        settings=settings,
+        validator_model=str(validator_model),
+    )
     active_count = _active_catalog_quality_validation_count(
         session,
         validator_model=str(validator_model),
@@ -1192,6 +1222,32 @@ def _active_catalog_quality_validation_count(
             continue
         count += 1
     return count
+
+
+def _idle_quality_active_job_cap(
+    session: Session,
+    *,
+    settings: SettingsService,
+    validator_model: str,
+) -> int:
+    configured = _positive_int(settings.get("catalog_quality_idle_max_active_jobs"), default=0)
+    if configured > 0:
+        return configured
+    try:
+        capacity = ResourceCapacityService(session).capacity_report()
+    except Exception:
+        return 1
+    normalized_model = validator_model.casefold()
+    total = 0
+    for route in capacity.get("agent_route_capacities", []):
+        if not isinstance(route, dict):
+            continue
+        if route.get("agent_key") != "catalog_candidate_validator":
+            continue
+        if str(route.get("model") or "").casefold() != normalized_model:
+            continue
+        total += _positive_int(route.get("effective_limit"), default=0)
+    return max(1, total)
 
 
 def _has_active_poll_job(session: Session, source_id: str) -> bool:
@@ -1649,6 +1705,10 @@ def _truthy(value: Any) -> bool:
 
 def _safe_exception_message(exc: Exception) -> str:
     return str(exc) or exc.__class__.__name__
+
+
+def _is_resource_unavailable(exc: Exception) -> bool:
+    return getattr(exc, "resource_unavailable", False) is True
 
 
 def _retry_at_for_exception(
