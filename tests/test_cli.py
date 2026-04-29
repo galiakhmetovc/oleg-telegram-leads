@@ -1,12 +1,14 @@
 from datetime import UTC, datetime
 from typing import Any
 
+import pytest
 from sqlalchemy import func
 from sqlalchemy import insert
 from sqlalchemy import inspect
 from sqlalchemy import select
 from fastapi.testclient import TestClient
 
+import pur_leads.cli as cli
 from pur_leads.cli import _build_ai_model_concurrency_limiter, main
 from pur_leads.core.ids import new_id
 from pur_leads.core.time import utc_now
@@ -119,6 +121,32 @@ def test_cli_worker_once_upgrades_database_before_running(tmp_path, capsys):
     output = capsys.readouterr().out
     assert "settings" in tables
     assert "no queued jobs" in output
+
+
+@pytest.mark.asyncio
+async def test_cli_worker_run_loop_rereads_configured_concurrency_between_batches(monkeypatch):
+    class Args:
+        concurrency = None
+        max_iterations = 2
+        poll_interval_seconds = 0
+
+    calls: list[str] = []
+    concurrency_values = [1, 2]
+
+    def fake_worker_concurrency(_args):
+        return concurrency_values.pop(0) if concurrency_values else 2
+
+    async def fake_worker_run_once(_args, *, worker_name: str):
+        calls.append(worker_name)
+        return cli.WorkerRunResult(status="idle")
+
+    monkeypatch.setattr(cli, "_worker_concurrency", fake_worker_concurrency)
+    monkeypatch.setattr(cli, "_worker_run_once", fake_worker_run_once)
+
+    iterations = await cli._worker_run_loop(Args())
+
+    assert iterations == 3
+    assert calls == ["cli-worker-1", "cli-worker-1", "cli-worker-2"]
 
 
 def test_cli_worker_once_does_not_seed_ai_registry_on_empty_database(tmp_path, capsys):
@@ -395,18 +423,31 @@ def test_cli_worker_once_uses_ai_registry_catalog_route_after_explicit_bootstrap
     upgrade_database(engine)
     session_factory = create_session_factory(engine)
     with session_factory() as session:
-        AiRegistryService(session).bootstrap_defaults(actor="test")
-        secret_id = SecretRefService(session).create_local_secret(
+        registry = AiRegistryService(session)
+        registry.bootstrap_defaults(actor="test")
+        legacy_secret_id = SecretRefService(session).create_local_secret(
             secret_type="ai_api_key",
-            display_name="Z.AI",
-            value="web-configured-key",
+            display_name="Legacy Z.AI",
+            value="legacy-global-key",
+            storage_root=tmp_path / "secrets",
+        )
+        account_secret_id = SecretRefService(session).create_local_secret(
+            secret_type="ai_api_key",
+            display_name="Catalog Z.AI",
+            value="route-account-key",
             storage_root=tmp_path / "secrets",
         )
         SettingsService(session).set(
             "zai_api_key_secret_ref",
-            {"secret_ref_id": secret_id},
+            {"secret_ref_id": legacy_secret_id},
             value_type="secret_ref",
             updated_by="test",
+        )
+        registry.configure_zai_account(
+            actor="test",
+            base_url="https://api.z.ai/api/coding/paas/v4",
+            auth_secret_ref=f"secret_ref:{account_secret_id}",
+            display_name="Catalog Z.AI",
         )
         raw_source = CatalogSourceService(session).upsert_source(
             source_type="telegram_message",
@@ -438,7 +479,7 @@ def test_cli_worker_once_uses_ai_registry_catalog_route_after_explicit_bootstrap
     assert stored is not None
     assert "succeeded job" in output
     assert run["model"] == "GLM-5.1"
-    assert FakeZaiChatCompletionClient.instances[0].api_key == "web-configured-key"
+    assert FakeZaiChatCompletionClient.instances[0].api_key == "route-account-key"
     assert FakeZaiChatCompletionClient.instances[0].calls[0]["model"] == "GLM-5.1"
 
 

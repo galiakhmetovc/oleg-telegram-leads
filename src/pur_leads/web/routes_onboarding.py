@@ -89,10 +89,7 @@ def onboarding_status(
     bot_count = _active_bot_count(session)
     notification_group_count = _active_notification_group_count(session)
     userbot_count = len(UserbotAccountService(session).list_accounts())
-    catalog_routes = AiRegistryService(session).select_routes(
-        agent_key="catalog_extractor",
-        route_role="primary",
-    )
+    llm_provider_count = len(_llm_provider_accounts(AiRegistryService(session).snapshot()))
     source_count = session.execute(
         select(func.count()).select_from(monitored_sources_table)
     ).scalar_one()
@@ -114,7 +111,7 @@ def onboarding_status(
             "label": "Юзербот добавлен",
         },
         "llm_provider": {
-            "done": _is_secret_ref_value(zai_api_key_ref) and bool(catalog_routes),
+            "done": _is_secret_ref_value(zai_api_key_ref) and llm_provider_count > 0,
             "label": "Провайдер LLM подключен",
         },
         "first_source": {
@@ -133,6 +130,16 @@ def onboarding_status(
         "steps": steps,
         "complete": all(steps[key]["done"] for key in required_keys),
     }
+
+
+@router.get("/resources")
+async def list_resources(
+    request: Request,
+    _validated: SessionValidationResult = Depends(current_admin),
+    session: Session = Depends(get_session),
+) -> dict[str, Any]:
+    await _refresh_missing_bot_usernames(request, session)
+    return {"items": _resource_payloads(session)}
 
 
 @router.get("/bots")
@@ -445,6 +452,7 @@ def configure_llm_provider(
         actor=actor,
         base_url=base_url,
         auth_secret_ref=f"secret_ref:{secret_id}",
+        display_name=payload.display_name.strip() or "Z.AI",
     )
     snapshot = registry.snapshot()
     provider = next(
@@ -707,6 +715,123 @@ def _active_notification_group_count(session: Session) -> int:
             .where(telegram_notification_groups_table.c.status == "active")
         ).scalar_one()
     )
+
+
+def _resource_payloads(session: Session) -> list[dict[str, Any]]:
+    settings = SettingsService(session)
+    api_hash_ref = settings.get("telegram_api_hash_secret_ref")
+    credentials = {
+        "telegram_api_id": settings.get("telegram_api_id"),
+        "api_hash_configured": _is_secret_ref_value(api_hash_ref),
+    }
+    resources: list[dict[str, Any]] = []
+    resources.extend(
+        _notification_group_resource_payload(group)
+        for group in _notification_group_payloads(session)
+    )
+    resources.extend(_bot_resource_payload(bot) for bot in _bot_payloads(session))
+    resources.extend(
+        _llm_provider_resource_payload(account)
+        for account in _llm_provider_accounts(AiRegistryService(session).snapshot())
+    )
+    resources.extend(
+        _userbot_resource_payload(
+            UserbotAccountService(session).public_payload(account),
+            credentials=credentials,
+        )
+        for account in UserbotAccountService(session).list_accounts()
+        if account.status == "active"
+    )
+    return resources
+
+
+def _notification_group_resource_payload(group: dict[str, Any]) -> dict[str, Any]:
+    title = str(group.get("title") or group.get("chat_id") or "Группа уведомлений")
+    detail = f"{group.get('bot_name') or 'бот'} / {group.get('chat_id') or ''}".strip()
+    if group.get("message_thread_id"):
+        detail = f"{detail} / topic {group['message_thread_id']}"
+    return {
+        "resource_id": f"telegram_notification_group:{group['id']}",
+        "id": group["id"],
+        "resource_type": "telegram_notification_group",
+        "type_label": "Группа уведомлений",
+        "display_name": title,
+        "status": group["status"],
+        "health": group["status"],
+        "detail": detail,
+        "parent_resource_id": f"telegram_bot:{group['bot_id']}",
+        "delete_path": f"/api/onboarding/notification-groups/{group['id']}",
+        "metadata": {
+            "chat_id": group.get("chat_id"),
+            "chat_type": group.get("chat_type"),
+            "message_thread_id": group.get("message_thread_id"),
+        },
+    }
+
+
+def _bot_resource_payload(bot: dict[str, Any]) -> dict[str, Any]:
+    username = bot.get("telegram_username") or bot.get("username")
+    return {
+        "resource_id": f"telegram_bot:{bot['id']}",
+        "id": bot["id"],
+        "resource_type": "telegram_bot",
+        "type_label": "Telegram-бот",
+        "display_name": bot.get("display_name") or username or "Telegram bot",
+        "status": bot["status"],
+        "health": bot["status"],
+        "detail": f"@{username}" if username else "username не получен",
+        "parent_resource_id": None,
+        "delete_path": f"/api/onboarding/bots/{bot['id']}",
+        "metadata": {"telegram_bot_id": bot.get("telegram_bot_id")},
+    }
+
+
+def _llm_provider_resource_payload(account: dict[str, Any]) -> dict[str, Any]:
+    provider_key = account.get("provider_key") or "unknown"
+    base_url = account.get("base_url") or ""
+    return {
+        "resource_id": f"ai_provider_account:{account['id']}",
+        "id": account["id"],
+        "resource_type": "ai_provider_account",
+        "type_label": "LLM-провайдер",
+        "display_name": account.get("display_name") or "LLM provider",
+        "status": "active" if account.get("enabled") else "disabled",
+        "health": "active" if account.get("enabled") else "disabled",
+        "detail": f"{provider_key} / {base_url}",
+        "parent_resource_id": None,
+        "delete_path": f"/api/onboarding/llm-providers/{account['id']}",
+        "metadata": {"provider_key": provider_key},
+    }
+
+
+def _userbot_resource_payload(
+    userbot: dict[str, Any],
+    *,
+    credentials: dict[str, Any],
+) -> dict[str, Any]:
+    username = userbot.get("telegram_username")
+    api_id = credentials.get("telegram_api_id")
+    api_hash_status = (
+        "API hash сохранен" if credentials.get("api_hash_configured") else "API hash не сохранен"
+    )
+    return {
+        "resource_id": f"telegram_userbot:{userbot['id']}",
+        "id": userbot["id"],
+        "resource_type": "telegram_userbot",
+        "type_label": "Telegram-юзербот",
+        "display_name": userbot.get("display_name") or userbot.get("session_name") or "Юзербот",
+        "status": userbot["status"],
+        "health": userbot["status"],
+        "detail": f"{'@' + username if username else userbot.get('session_name') or ''}; API ID {api_id or 'не указан'}; {api_hash_status}",
+        "parent_resource_id": None,
+        "delete_path": f"/api/onboarding/userbots/{userbot['id']}",
+        "metadata": {
+            "telegram_user_id": userbot.get("telegram_user_id"),
+            "telegram_username": username,
+            "telegram_api_id": api_id,
+            "api_hash_configured": credentials.get("api_hash_configured"),
+        },
+    }
 
 
 def _bot_payloads(session: Session) -> list[dict[str, Any]]:

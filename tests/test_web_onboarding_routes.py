@@ -82,6 +82,7 @@ def test_onboarding_configures_bot_token_and_notification_group(tmp_path):
         },
     )
     final_status = client.get("/api/onboarding/status")
+    resources_response = client.get("/api/onboarding/resources")
 
     assert initial_status.status_code == 200
     assert initial_status.json()["steps"]["bot_token"]["done"] is False
@@ -102,6 +103,16 @@ def test_onboarding_configures_bot_token_and_notification_group(tmp_path):
     assert save_group_response.json()["notification_group"]["chat_id"] == "-100123456"
     assert final_status.json()["steps"]["bot_token"]["done"] is True
     assert final_status.json()["steps"]["notification_group"]["done"] is True
+    resources = resources_response.json()["items"]
+    assert [resource["resource_type"] for resource in resources] == [
+        "telegram_notification_group",
+        "telegram_bot",
+    ]
+    assert resources[0]["display_name"] == "Leads Finder"
+    assert (
+        resources[0]["parent_resource_id"] == f"telegram_bot:{token_response.json()['bot']['id']}"
+    )
+    assert resources[1]["display_name"] == "PUR Leads bot"
     assert any(
         request["path"].endswith("/sendMessage")
         and request["json"]["chat_id"] == "-100123456"
@@ -133,6 +144,8 @@ def test_onboarding_configures_llm_provider_and_default_model(tmp_path):
         },
     )
     provider_payload = provider_response.json()
+    resources_response = client.get("/api/onboarding/resources")
+    provider_status_response = client.get("/api/onboarding/status")
     flash_model = next(
         model
         for model in provider_payload["models"]
@@ -148,6 +161,27 @@ def test_onboarding_configures_llm_provider_and_default_model(tmp_path):
     assert "zai-secret" not in json.dumps(provider_payload)
     assert provider_payload["provider"]["provider_key"] == "zai"
     assert any(model["provider_model_name"] == "GLM-5.1" for model in provider_payload["models"])
+    assert provider_status_response.json()["steps"]["llm_provider"]["done"] is True
+    llm_resources = [
+        resource
+        for resource in resources_response.json()["items"]
+        if resource["resource_type"] == "ai_provider_account"
+    ]
+    assert llm_resources == [
+        {
+            "resource_id": f"ai_provider_account:{provider_payload['account']['id']}",
+            "id": provider_payload["account"]["id"],
+            "resource_type": "ai_provider_account",
+            "type_label": "LLM-провайдер",
+            "display_name": "Z.AI",
+            "status": "active",
+            "health": "active",
+            "detail": "zai / https://api.z.ai/api/coding/paas/v4",
+            "parent_resource_id": None,
+            "delete_path": f"/api/onboarding/llm-providers/{provider_payload['account']['id']}",
+            "metadata": {"provider_key": "zai"},
+        }
+    ]
     assert model_response.status_code == 200
     assert model_response.json()["model"]["provider_model_name"] == "GLM-4.5-Flash"
     assert status_response.json()["steps"]["llm_provider"]["done"] is True
@@ -162,8 +196,46 @@ def test_onboarding_configures_llm_provider_and_default_model(tmp_path):
         assert settings["catalog_llm_base_url"] == "https://api.z.ai/api/coding/paas/v4"
         assert settings["lead_llm_shadow_base_url"] == "https://api.z.ai/api/coding/paas/v4"
         assert settings["catalog_llm_model"] == "GLM-4.5-Flash"
-        assert account["base_url"] == "https://api.z.ai/api/coding/paas/v4"
-        assert account["auth_secret_ref"] == f"secret_ref:{secret_id}"
+    assert account["base_url"] == "https://api.z.ai/api/coding/paas/v4"
+    assert account["auth_secret_ref"] == f"secret_ref:{secret_id}"
+
+
+def test_onboarding_allows_multiple_llm_provider_resources(tmp_path):
+    fixture = _setup_onboarding_app(tmp_path)
+    client = fixture["client"]
+    _login_local(client)
+
+    first_response = client.post(
+        "/api/onboarding/llm-provider",
+        json={
+            "base_url": "https://api.z.ai/api/coding/paas/v4",
+            "api_key": "zai-secret-1",
+            "display_name": "Z.AI основной",
+        },
+    )
+    second_response = client.post(
+        "/api/onboarding/llm-provider",
+        json={
+            "base_url": "https://api.z.ai/api/coding/paas/v4",
+            "api_key": "zai-secret-2",
+            "display_name": "Z.AI резерв",
+        },
+    )
+    resources_response = client.get("/api/onboarding/resources")
+
+    assert first_response.status_code == 200
+    assert second_response.status_code == 200
+    llm_resources = [
+        resource
+        for resource in resources_response.json()["items"]
+        if resource["resource_type"] == "ai_provider_account"
+    ]
+    assert {resource["display_name"] for resource in llm_resources} == {
+        "Z.AI основной",
+        "Z.AI резерв",
+    }
+    assert len({resource["id"] for resource in llm_resources}) == 2
+    assert "zai-secret" not in json.dumps(resources_response.json())
 
 
 def test_onboarding_interactive_userbot_login_start_and_complete(tmp_path):

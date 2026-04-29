@@ -155,6 +155,8 @@ The system exposes three numbers:
 - `resource_limited_worker_capacity`: how many concurrent jobs can be useful given active resource pools.
 - `recommended_worker_concurrency`: `min(worker_global_cap, resource_limited_worker_capacity)`.
 
+Worker concurrency is adjustable at runtime. The worker process rereads `worker_concurrency` between scheduling batches and changes the number of active async job loops without requiring a container restart. Lowering the setting is graceful: existing jobs finish, and the next batch starts fewer loops. Raising the setting allows the next batch to start more loops, bounded by the configured value and later by scheduler resource leases.
+
 The resource-limited capacity is not just AI capacity. It combines active pools that can run independent jobs:
 
 - active AI model slots across provider accounts and selected agent routes;
@@ -205,12 +207,17 @@ After the built-in administrator changes the temporary password, the web UI rout
 The onboarding flow is part of the product UI, not a deployment-only script:
 
 - Auth and onboarding controls use a local pinned Material Web bundle served from the application static assets. External CDN examples are not used in production runtime.
-- The page shows embedded Russian setup guidance and a live checklist for password change, Telegram bot token, notification group, userbot, LLM provider, and first monitored source.
-- The ordinary Telegram bot token is pasted in the web UI, validated through Telegram Bot API `getMe`, and stored as a local file-backed `secret_refs` value. API responses and UI state never return the raw token.
-- Notification group setup is discovered through Bot API `getUpdates`: the admin adds the bot to a group/topic, sends a setup message, and selects the discovered chat in the web UI. Saving the group sends a test `sendMessage` and stores `telegram_lead_notification_chat_id` plus optional `telegram_lead_notification_thread_id`.
-- Userbot setup uses interactive phone/code/2FA login from the web UI. Existing Telethon `.session` file upload is not part of the onboarding flow. The generated session file is stored on disk with owner-only permissions; Telegram API hash is stored as a `secret_refs` value.
+- The page shows embedded Russian setup guidance and a live checklist for password change, required resource types, and first monitored source.
+- The main onboarding workspace is a single resource list with one `Добавить ресурс` action. The admin selects a resource type in a dialog, then fills only the fields for that type.
+- All resource instances have a human-readable name, status, health, type, delete action, and a future edit action. Type-specific secrets and runtime fields remain in their existing tables.
+- Initial resource types are `telegram_bot`, `telegram_notification_group`, `telegram_userbot`, and `ai_provider_account`.
+- The ordinary Telegram bot token is pasted in the resource dialog, validated through Telegram Bot API `getMe`, and stored as a local file-backed `secret_refs` value. API responses and UI state never return the raw token.
+- Notification group setup is discovered through Bot API `getUpdates`: the admin adds the bot to a group/topic, sends a setup message, and selects the discovered chat in the resource dialog. Saving the group sends a test `sendMessage` and stores `telegram_lead_notification_chat_id` plus optional `telegram_lead_notification_thread_id`.
+- Userbot setup uses interactive phone/code/2FA login from the resource dialog. Existing Telethon `.session` file upload is not part of the onboarding flow. The generated session file is stored on disk with owner-only permissions; Telegram API hash is stored as a `secret_refs` value.
 - Userbot setup includes external helper links to Telegram API application management and Telegram Web. These pages are opened as separate tabs because Telegram sets frame restrictions that make iframe embedding unreliable.
-- LLM provider setup is required before adding the first monitored source. The first provider is Z.AI: the admin enters base URL and API key, the system stores the API key as a local `secret_refs` value, bootstraps known model/limit metadata, and lets the admin select the default language model for catalog extraction and lead LLM shadow routing.
+- LLM provider setup is required before adding the first monitored source. The first provider is Z.AI: the admin enters resource name, base URL, and API key. The system stores the API key as a local `secret_refs` value and bootstraps known provider/model/limit metadata.
+- LLM model selection is not part of onboarding. Model capabilities and agent routes live in the AI registry/admin surface, where the operator can manage provider metadata, model capabilities, limits, and task routes.
+- AI routes bind a task to a concrete provider account and model. Runtime clients resolve the selected account's `auth_secret_ref` and `base_url`, so two Z.AI resources with different tokens are separate executable pools rather than aliases for one global key.
 - Runtime web authentication and workers resolve Telegram bot/API credentials from settings-backed secret refs first, with environment fallback only for development or explicitly configured deployments.
 - The onboarding flow does not create monitoring sources implicitly. Source onboarding remains a separate audited web flow with access check and preview before activation.
 

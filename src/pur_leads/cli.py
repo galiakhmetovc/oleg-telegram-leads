@@ -35,6 +35,7 @@ from pur_leads.services.secrets import SecretRefService
 from pur_leads.services.settings import SettingsService
 from pur_leads.services.userbots import UserbotAccountService
 from pur_leads.workers.runtime import (
+    WorkerRunResult,
     WorkerRuntime,
     build_catalog_handler_registry,
     build_lead_handler_registry,
@@ -131,35 +132,49 @@ def _worker_run(args: argparse.Namespace) -> None:
 
 
 async def _worker_run_loop(args: argparse.Namespace) -> int:
-    concurrency = _worker_concurrency(args)
-    if concurrency > 1:
-        counts = await asyncio.gather(
+    iterations = 0
+    batches = 0
+    while args.max_iterations is None or batches < args.max_iterations:
+        concurrency = _worker_concurrency(args)
+        results = await asyncio.gather(
             *(
-                _worker_run_single_loop(args, worker_name=f"cli-worker-{index + 1}")
+                _worker_run_once(args, worker_name=f"cli-worker-{index + 1}")
                 for index in range(concurrency)
             )
         )
-        return sum(counts)
-    return await _worker_run_single_loop(args, worker_name="cli-worker")
+        batches += 1
+        iterations += len(results)
+        if any(result.status != "idle" for result in results):
+            for result in results:
+                if result.status != "idle":
+                    print(f"{result.status} job {result.job_id} ({result.job_type})")
+            continue
+        if args.poll_interval_seconds > 0:
+            await asyncio.sleep(args.poll_interval_seconds)
+    return iterations
 
 
 async def _worker_run_single_loop(args: argparse.Namespace, *, worker_name: str) -> int:
     iterations = 0
+    while args.max_iterations is None or iterations < args.max_iterations:
+        result = await _worker_run_once(args, worker_name=worker_name)
+        iterations += 1
+        if result.status != "idle":
+            print(f"{result.status} job {result.job_id} ({result.job_type})")
+            continue
+        if args.poll_interval_seconds > 0:
+            await asyncio.sleep(args.poll_interval_seconds)
+    return iterations
+
+
+async def _worker_run_once(args: argparse.Namespace, *, worker_name: str) -> WorkerRunResult:
     with _session_from_args(args) as session:
         runtime = WorkerRuntime(
             session,
             handlers=_build_worker_handlers(session, worker_name=worker_name),
             worker_name=worker_name,
         )
-        while args.max_iterations is None or iterations < args.max_iterations:
-            result = await runtime.run_once()
-            iterations += 1
-            if result.status != "idle":
-                print(f"{result.status} job {result.job_id} ({result.job_type})")
-                continue
-            if args.poll_interval_seconds > 0:
-                await asyncio.sleep(args.poll_interval_seconds)
-    return iterations
+        return await runtime.run_once()
 
 
 def _worker_concurrency(args: argparse.Namespace) -> int:
@@ -256,7 +271,7 @@ def _build_catalog_extractor(session, settings, *, worker_name: str):
         return HeuristicCatalogExtractor(session)
     route = _select_ai_route(session, agent_key="catalog_extractor", route_role="primary")
     provider = str(_setting_or_route_provider(settings_service, "catalog_llm_provider", route))
-    api_key = _zai_api_key(session, settings)
+    api_key = _zai_api_key_for_route(session, settings, route)
     fallback = bool(settings_service.get("catalog_llm_fallback_to_heuristic"))
     if provider != "zai" or not api_key:
         if fallback:
@@ -321,7 +336,7 @@ def _build_lead_shadow_classifier(session, settings, *, worker_name: str):
         return None
     route = _select_ai_route(session, agent_key="lead_detector", route_role="shadow")
     provider = str(_setting_or_route_provider(settings_service, "lead_llm_shadow_provider", route))
-    api_key = _zai_api_key(session, settings)
+    api_key = _zai_api_key_for_route(session, settings, route)
     fallback = bool(settings_service.get("lead_llm_shadow_fallback_on_error"))
     if provider != "zai" or not api_key:
         if fallback:
@@ -527,6 +542,35 @@ def _zai_api_key(session, settings) -> str | None:
         "zai_api_key_secret_ref",
         settings.zai_api_key or _env_str("PUR_ZAI_API_KEY", "ZAI_API_KEY"),
     )
+
+
+def _zai_api_key_for_route(
+    session,
+    settings,
+    route: AiAgentRouteSelection | None,
+) -> str | None:
+    if route is None or not route.auth_secret_ref:
+        return _zai_api_key(session, settings)
+    value = _resolve_ai_auth_secret_ref(session, route.auth_secret_ref)
+    if value:
+        return value
+    if route.auth_secret_ref == "env:PUR_ZAI_API_KEY":
+        return _zai_api_key(session, settings)
+    return None
+
+
+def _resolve_ai_auth_secret_ref(session, auth_secret_ref: str) -> str | None:
+    ref = auth_secret_ref.strip()
+    if not ref:
+        return None
+    try:
+        if ref.startswith("secret_ref:"):
+            return SecretRefService(session).resolve_value(ref.split(":", 1)[1])
+        if ref.startswith("env:"):
+            return _env_str(ref.split(":", 1)[1])
+        return SecretRefService(session).resolve_value(ref)
+    except (FileNotFoundError, KeyError, ValueError):
+        return None
 
 
 def _env_str(*names: str) -> str | None:

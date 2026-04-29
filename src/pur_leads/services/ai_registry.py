@@ -168,6 +168,7 @@ class AiAgentRouteSelection:
     agent_id: str
     provider_account_id: str
     model_id: str
+    auth_secret_ref: str | None
     provider: str
     model: str
     model_type: str
@@ -226,6 +227,7 @@ class AiRegistryService:
         actor: str,
         base_url: str,
         auth_secret_ref: str,
+        display_name: str | None = None,
     ) -> dict[str, Any]:
         provider = self._provider_by_key("zai")
         if provider is None:
@@ -233,15 +235,32 @@ class AiRegistryService:
             provider_id = str(bootstrap["provider_id"])
         else:
             provider_id = str(provider["id"])
-        account_id = self._default_account_id(provider_id)
+        account_id = self._claimable_placeholder_account_id(provider_id)
         if account_id is None:
-            account_id = self._upsert_account(provider_id)
+            account_id = self._insert_account(
+                provider_id,
+                display_name=display_name or "Z.AI",
+                base_url=base_url.strip().rstrip("/"),
+                auth_secret_ref=auth_secret_ref,
+            )
+            updated = self._account_by_id(account_id)
+            AuditService(self.session).record_change(
+                actor=actor,
+                action="ai_registry.account_configure",
+                entity_type="ai_provider_account",
+                entity_id=account_id,
+                old_value_json=None,
+                new_value_json=updated,
+            )
+            self.session.commit()
+            return updated or {}
         old_value = self._account_by_id(account_id)
         now = utc_now()
         self.session.execute(
             update(ai_provider_accounts_table)
             .where(ai_provider_accounts_table.c.id == account_id)
             .values(
+                display_name=display_name or "Z.AI",
                 base_url=base_url.strip().rstrip("/"),
                 auth_secret_ref=auth_secret_ref,
                 enabled=True,
@@ -283,6 +302,7 @@ class AiRegistryService:
                     ai_agents_table.c.id.label("agent_id"),
                     ai_provider_accounts_table.c.id.label("provider_account_id"),
                     ai_models_table.c.id.label("model_id"),
+                    ai_provider_accounts_table.c.auth_secret_ref,
                     ai_providers_table.c.provider_key.label("provider"),
                     ai_models_table.c.provider_model_name.label("model"),
                     ai_models_table.c.model_type,
@@ -660,13 +680,47 @@ class AiRegistryService:
         }
         if row is not None:
             return str(row["id"])
+        return self._insert_account(
+            provider_id,
+            display_name="Default Z.AI account",
+            base_url=ZAI_BASE_URL,
+            auth_secret_ref="env:PUR_ZAI_API_KEY",
+            values=values,
+        )
+
+    def _insert_account(
+        self,
+        provider_id: str,
+        *,
+        display_name: str,
+        base_url: str,
+        auth_secret_ref: str,
+        values: dict[str, Any] | None = None,
+    ) -> str:
+        now = utc_now()
         account_id = new_id()
+        insert_values = {
+            "ai_provider_id": provider_id,
+            "display_name": display_name,
+            "base_url": base_url,
+            "auth_secret_ref": auth_secret_ref,
+            "plan_type": "unknown",
+            "enabled": True,
+            "priority": 10,
+            "request_timeout_seconds": 60.0,
+            "policy_warning_required": True,
+            "metadata_json": {},
+            "notes": None,
+            "updated_at": now,
+        }
+        if values is not None:
+            insert_values.update(values)
         self.session.execute(
             insert(ai_provider_accounts_table).values(
                 id=account_id,
                 policy_warning_acknowledged_at=None,
                 created_at=now,
-                **values,
+                **insert_values,
             )
         )
         return account_id
@@ -869,6 +923,22 @@ class AiRegistryService:
                     ai_provider_accounts_table.c.enabled.is_(True),
                 )
                 .order_by(ai_provider_accounts_table.c.priority)
+            )
+            .mappings()
+            .first()
+        )
+        return str(row["id"]) if row is not None else None
+
+    def _claimable_placeholder_account_id(self, provider_id: str) -> str | None:
+        row = (
+            self.session.execute(
+                select(ai_provider_accounts_table.c.id)
+                .where(
+                    ai_provider_accounts_table.c.ai_provider_id == provider_id,
+                    ai_provider_accounts_table.c.enabled.is_(True),
+                    ai_provider_accounts_table.c.auth_secret_ref == "env:PUR_ZAI_API_KEY",
+                )
+                .order_by(ai_provider_accounts_table.c.created_at)
             )
             .mappings()
             .first()

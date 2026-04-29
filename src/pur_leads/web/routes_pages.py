@@ -315,148 +315,176 @@ def onboarding_page(
                   </div>
                 </aside>
                 <section class="onboarding-main">
-                  <section class="onboarding-panel onboarding-panel-compact">
-                    <div class="onboarding-panel-head">
-                      <md-icon aria-hidden="true">smart_toy</md-icon>
+                  <section class="onboarding-resource-surface">
+                    <div class="section-head">
                       <div>
-                        <h2 class="md-typescale-title-large">Обычный Telegram-бот</h2>
-                        <p class="muted">Нужен для входа через Telegram и оперативных уведомлений.</p>
+                        <h2>Ресурсы системы</h2>
+                        <p class="muted">
+                          Подключенные Telegram-аккаунты, боты, группы уведомлений и LLM-аккаунты.
+                        </p>
                       </div>
-                    </div>
-                    <form id="onboarding-bot-form" class="material-form">
-                      <md-outlined-text-field name="token" label="Токен BotFather" type="password"
-                        autocomplete="off" required placeholder="123456:ABC...">
-                      </md-outlined-text-field>
-                      <md-outlined-text-field name="display_name" label="Название" value="PUR Leads bot">
-                      </md-outlined-text-field>
-                      <md-filled-button type="submit">
-                        <md-icon slot="icon">send</md-icon>
-                        Проверить и сохранить
+                      <md-filled-button id="onboarding-add-resource" type="button">
+                        <md-icon slot="icon">add</md-icon>
+                        Добавить ресурс
                       </md-filled-button>
-                    </form>
-                    <div id="onboarding-bot-list" class="table-list onboarding-mini-list"></div>
-                    <p id="onboarding-bot-status" class="status-line" role="status"></p>
+                    </div>
+                    <div id="onboarding-resource-list" class="resource-list" aria-live="polite"></div>
+                    <p id="onboarding-resource-status" class="status-line" role="status"></p>
                   </section>
-                  <section class="onboarding-panel onboarding-panel-compact">
-                    <div class="onboarding-panel-head">
-                      <md-icon aria-hidden="true">forum</md-icon>
-                      <div>
-                        <h2 class="md-typescale-title-large">Группа уведомлений</h2>
-                        <p class="muted">Добавьте бота в группу, отправьте любое сообщение и выберите чат здесь.</p>
-                      </div>
-                    </div>
-                    <label class="material-select-field">
-                      Бот для проверки групп
-                      <select id="onboarding-group-bot-select" name="bot_id">
-                        <option value="">Сначала сохраните бота</option>
-                      </select>
-                    </label>
-                    <div class="material-action-row">
-                      <md-filled-button id="onboarding-group-discover" type="button" disabled>
-                        <md-icon slot="icon">refresh</md-icon>
-                        Найти доступные группы
-                      </md-filled-button>
-                    </div>
-                    <p id="onboarding-group-hint" class="status-line">
-                      Сначала сохраните и проверьте токен бота.
-                    </p>
-                    <div id="onboarding-group-candidates" class="table-list"></div>
-                    <div id="onboarding-group-list" class="table-list onboarding-mini-list"></div>
-                    <p id="onboarding-group-status" class="status-line" role="status"></p>
-                  </section>
-                  <section class="onboarding-panel onboarding-panel-llm">
-                    <div class="onboarding-panel-head">
-                      <md-icon aria-hidden="true">model_training</md-icon>
-                      <div>
-                        <h2 class="md-typescale-title-large">Провайдер LLM</h2>
-                        <p class="muted">Сейчас доступен Z.AI. Он нужен до добавления первого чата.</p>
-                      </div>
-                    </div>
-                    <form id="onboarding-llm-form" class="material-form">
-                      <md-outlined-text-field name="base_url" label="Base URL"
-                        value="https://api.z.ai/api/coding/paas/v4" required>
-                      </md-outlined-text-field>
-                      <md-outlined-text-field name="api_key" label="Z.AI API key" type="password"
-                        autocomplete="off" required>
-                      </md-outlined-text-field>
-                      <md-filled-button type="submit">
-                        <md-icon slot="icon">sync</md-icon>
-                        Сохранить и получить модели
-                      </md-filled-button>
-                    </form>
-                    <form id="onboarding-llm-model-form" class="material-form">
+                  <dialog id="onboarding-resource-dialog" class="resource-dialog">
+                    <div class="resource-dialog-shell">
+                      <header class="resource-dialog-head">
+                        <div>
+                          <h2>Добавить ресурс</h2>
+                          <p class="muted">Выберите тип ресурса и заполните только его настройки.</p>
+                        </div>
+                        <md-icon-button id="onboarding-resource-dialog-close" type="button" title="Закрыть">
+                          <md-icon>close</md-icon>
+                        </md-icon-button>
+                      </header>
                       <label class="material-select-field">
-                        Модель по умолчанию
-                        <select id="onboarding-llm-model" name="model_id" required>
-                          <option value="">Сначала получите модели</option>
+                        Тип ресурса
+                        <select id="onboarding-resource-type">
+                          <option value="telegram_bot">Telegram-бот</option>
+                          <option value="telegram_notification_group">Группа уведомлений</option>
+                          <option value="ai_provider_account">LLM-провайдер</option>
+                          <option value="telegram_userbot">Telegram-юзербот</option>
                         </select>
                       </label>
-                      <md-filled-button id="onboarding-llm-model-save" type="submit" disabled>
-                        <md-icon slot="icon">check_circle</md-icon>
-                        Выбрать модель
-                      </md-filled-button>
-                    </form>
-                    <div id="onboarding-llm-provider-list" class="table-list onboarding-mini-list"></div>
-                    <p id="onboarding-llm-status" class="status-line" role="status"></p>
-                  </section>
-                  <section class="onboarding-panel onboarding-panel-interactive">
-                    <div class="onboarding-panel-head">
-                      <md-icon aria-hidden="true">person_add</md-icon>
-                      <div>
-                        <h2 class="md-typescale-title-large">Юзербот</h2>
-                        <p class="muted">Интерактивный вход создает сессию на сервере.</p>
-                      </div>
+                      <section class="onboarding-panel onboarding-panel-compact resource-form"
+                        data-resource-form="telegram_bot">
+                        <div class="onboarding-panel-head">
+                          <md-icon aria-hidden="true">smart_toy</md-icon>
+                          <div>
+                            <h3 class="md-typescale-title-large">Telegram-бот</h3>
+                            <p class="muted">Нужен для входа через Telegram и оперативных уведомлений.</p>
+                          </div>
+                        </div>
+                        <form id="onboarding-bot-form" class="material-form">
+                          <md-outlined-text-field name="display_name" label="Название" value="PUR Leads bot">
+                          </md-outlined-text-field>
+                          <md-outlined-text-field name="token" label="Токен BotFather" type="password"
+                            autocomplete="off" required placeholder="123456:ABC...">
+                          </md-outlined-text-field>
+                          <md-filled-button type="submit">
+                            <md-icon slot="icon">send</md-icon>
+                            Проверить и сохранить
+                          </md-filled-button>
+                        </form>
+                        <p id="onboarding-bot-status" class="status-line" role="status"></p>
+                      </section>
+                      <section class="onboarding-panel onboarding-panel-compact resource-form is-hidden"
+                        data-resource-form="telegram_notification_group">
+                        <div class="onboarding-panel-head">
+                          <md-icon aria-hidden="true">forum</md-icon>
+                          <div>
+                            <h3 class="md-typescale-title-large">Группа уведомлений</h3>
+                            <p class="muted">Добавьте бота в группу, отправьте любое сообщение и выберите чат.</p>
+                          </div>
+                        </div>
+                        <label class="material-select-field">
+                          Бот для проверки групп
+                          <select id="onboarding-group-bot-select" name="bot_id">
+                            <option value="">Сначала сохраните бота</option>
+                          </select>
+                        </label>
+                        <div class="material-action-row">
+                          <md-filled-button id="onboarding-group-discover" type="button" disabled>
+                            <md-icon slot="icon">refresh</md-icon>
+                            Найти доступные группы
+                          </md-filled-button>
+                        </div>
+                        <p id="onboarding-group-hint" class="status-line">
+                          Сначала сохраните и проверьте токен бота.
+                        </p>
+                        <div id="onboarding-group-candidates" class="table-list"></div>
+                        <p id="onboarding-group-status" class="status-line" role="status"></p>
+                      </section>
+                      <section class="onboarding-panel onboarding-panel-compact resource-form is-hidden"
+                        data-resource-form="ai_provider_account">
+                        <div class="onboarding-panel-head">
+                          <md-icon aria-hidden="true">model_training</md-icon>
+                          <div>
+                            <h3 class="md-typescale-title-large">LLM-провайдер</h3>
+                            <p class="muted">Сейчас доступен Z.AI. Модели и маршруты настраиваются в AI-разделе.</p>
+                          </div>
+                        </div>
+                        <form id="onboarding-llm-form" class="material-form">
+                          <md-outlined-text-field name="display_name" label="Название" value="Z.AI" required>
+                          </md-outlined-text-field>
+                          <md-outlined-text-field name="base_url" label="Base URL"
+                            value="https://api.z.ai/api/coding/paas/v4" required>
+                          </md-outlined-text-field>
+                          <md-outlined-text-field name="api_key" label="Z.AI API key" type="password"
+                            autocomplete="off" required>
+                          </md-outlined-text-field>
+                          <md-filled-button type="submit">
+                            <md-icon slot="icon">sync</md-icon>
+                            Проверить и сохранить
+                          </md-filled-button>
+                        </form>
+                        <p id="onboarding-llm-status" class="status-line" role="status"></p>
+                      </section>
+                      <section class="onboarding-panel onboarding-panel-compact resource-form is-hidden"
+                        data-resource-form="telegram_userbot">
+                        <div class="onboarding-panel-head">
+                          <md-icon aria-hidden="true">person_add</md-icon>
+                          <div>
+                            <h3 class="md-typescale-title-large">Telegram-юзербот</h3>
+                            <p class="muted">Интерактивный вход создает сессию на сервере.</p>
+                          </div>
+                        </div>
+                        <div class="material-action-row onboarding-link-row">
+                          <md-outlined-button href="https://my.telegram.org/auth?to=apps" target="_blank" rel="noopener">
+                            <md-icon slot="icon">vpn_key</md-icon>
+                            Telegram API
+                          </md-outlined-button>
+                          <md-outlined-button href="https://web.telegram.org/k/" target="_blank" rel="noopener">
+                            <md-icon slot="icon">open_in_new</md-icon>
+                            Telegram Web
+                          </md-outlined-button>
+                        </div>
+                        <form id="onboarding-interactive-start-form" class="material-form">
+                          <md-outlined-text-field name="display_name" label="Название" required
+                            placeholder="Основной юзербот">
+                          </md-outlined-text-field>
+                          <md-outlined-text-field name="session_name" label="Имя сессии" required
+                            placeholder="main">
+                          </md-outlined-text-field>
+                          <md-outlined-text-field name="phone" label="Телефон" required
+                            placeholder="+79990000000">
+                          </md-outlined-text-field>
+                          <md-outlined-text-field name="api_id" label="Telegram API ID" type="number"
+                            min="1" step="1" required>
+                          </md-outlined-text-field>
+                          <md-outlined-text-field name="api_hash" label="Telegram API hash" type="password"
+                            autocomplete="off" required>
+                          </md-outlined-text-field>
+                          <label class="material-checkbox-line">
+                            <md-checkbox name="make_default" checked></md-checkbox>
+                            Использовать по умолчанию
+                          </label>
+                          <md-filled-button type="submit">
+                            <md-icon slot="icon">send</md-icon>
+                            Получить код
+                          </md-filled-button>
+                        </form>
+                        <form id="onboarding-interactive-complete-form" class="material-form is-hidden">
+                          <input name="login_id" type="hidden">
+                          <md-outlined-text-field name="code" label="Код Telegram" required inputmode="numeric">
+                          </md-outlined-text-field>
+                          <md-outlined-text-field name="password" label="Пароль 2FA" type="password"
+                            autocomplete="off">
+                          </md-outlined-text-field>
+                          <md-filled-button type="submit">
+                            <md-icon slot="icon">check_circle</md-icon>
+                            Завершить вход
+                          </md-filled-button>
+                        </form>
+                        <p id="onboarding-interactive-status" class="status-line" role="status"></p>
+                      </section>
                     </div>
-                    <div class="material-action-row onboarding-link-row">
-                      <md-outlined-button href="https://my.telegram.org/auth?to=apps" target="_blank" rel="noopener">
-                        <md-icon slot="icon">vpn_key</md-icon>
-                        Telegram API
-                      </md-outlined-button>
-                      <md-outlined-button href="https://web.telegram.org/k/" target="_blank" rel="noopener">
-                        <md-icon slot="icon">open_in_new</md-icon>
-                        Telegram Web
-                      </md-outlined-button>
-                    </div>
-                    <div id="onboarding-userbot-list" class="table-list onboarding-mini-list"></div>
-                    <form id="onboarding-interactive-start-form" class="material-form">
-                      <md-outlined-text-field name="display_name" label="Название" required
-                        placeholder="Основной юзербот">
-                      </md-outlined-text-field>
-                      <md-outlined-text-field name="session_name" label="Имя сессии" required
-                        placeholder="main">
-                      </md-outlined-text-field>
-                      <md-outlined-text-field name="phone" label="Телефон" required
-                        placeholder="+79990000000">
-                      </md-outlined-text-field>
-                      <md-outlined-text-field name="api_id" label="Telegram API ID" type="number"
-                        min="1" step="1" required>
-                      </md-outlined-text-field>
-                      <md-outlined-text-field name="api_hash" label="Telegram API hash" type="password"
-                        autocomplete="off" required>
-                      </md-outlined-text-field>
-                      <label class="material-checkbox-line">
-                        <md-checkbox name="make_default" checked></md-checkbox>
-                        Использовать по умолчанию
-                      </label>
-                      <md-filled-button type="submit">
-                        <md-icon slot="icon">send</md-icon>
-                        Получить код
-                      </md-filled-button>
-                    </form>
-                    <form id="onboarding-interactive-complete-form" class="material-form is-hidden">
-                      <input name="login_id" type="hidden">
-                      <md-outlined-text-field name="code" label="Код Telegram" required inputmode="numeric">
-                      </md-outlined-text-field>
-                      <md-outlined-text-field name="password" label="Пароль 2FA" type="password"
-                        autocomplete="off">
-                      </md-outlined-text-field>
-                      <md-filled-button type="submit">
-                        <md-icon slot="icon">check_circle</md-icon>
-                        Завершить вход
-                      </md-filled-button>
-                    </form>
-                    <p id="onboarding-interactive-status" class="status-line" role="status"></p>
-                  </section>
+                  </dialog>
                 </section>
               </section>
             </main>

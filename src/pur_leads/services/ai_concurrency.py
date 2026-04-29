@@ -218,9 +218,7 @@ class AiModelConcurrencyService:
             if provider_account_id is not None
             else ai_model_concurrency_leases_table.c.ai_provider_account_id.is_(None)
         )
-        self.session.execute(
-            delete(ai_model_concurrency_leases_table).where(*conditions)
-        )
+        self.session.execute(delete(ai_model_concurrency_leases_table).where(*conditions))
 
     def _active_count(  # noqa: ANN001
         self,
@@ -241,9 +239,7 @@ class AiModelConcurrencyService:
             else ai_model_concurrency_leases_table.c.ai_provider_account_id.is_(None)
         )
         value = self.session.execute(
-            select(func.count())
-            .select_from(ai_model_concurrency_leases_table)
-            .where(*conditions)
+            select(func.count()).select_from(ai_model_concurrency_leases_table).where(*conditions)
         ).scalar_one()
         return int(value)
 

@@ -448,13 +448,111 @@ md-text-button {
 
 .onboarding-main {
   display: grid;
-  grid-template-columns: minmax(360px, 0.9fr) minmax(480px, 1.1fr);
+  grid-template-columns: 1fr;
   align-content: start;
   align-items: start;
   gap: 14px;
   min-width: 0;
   padding: 18px;
   overflow: auto;
+}
+
+.onboarding-resource-surface {
+  min-width: 0;
+  display: grid;
+  gap: 12px;
+}
+
+.resource-list {
+  display: grid;
+  gap: 0;
+  border-top: 1px solid var(--line);
+}
+
+.resource-row {
+  display: grid;
+  grid-template-columns: minmax(170px, 0.8fr) minmax(220px, 1.3fr) minmax(120px, 0.6fr) auto;
+  gap: 14px;
+  align-items: center;
+  min-height: 74px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.resource-kind {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.resource-kind md-icon {
+  color: var(--accent-strong);
+}
+
+.resource-primary {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.resource-primary strong,
+.resource-primary p {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.resource-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.resource-dialog {
+  width: min(880px, calc(100vw - 32px));
+  max-height: min(860px, calc(100svh - 32px));
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text);
+}
+
+.resource-dialog::backdrop {
+  background: rgba(11, 19, 32, 0.38);
+}
+
+.resource-dialog-shell {
+  display: grid;
+  gap: 16px;
+  padding: 18px;
+}
+
+.resource-dialog-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+}
+
+.resource-dialog-head h2 {
+  margin: 0;
+}
+
+.resource-form {
+  animation: resource-form-in 140ms ease-out;
+}
+
+@keyframes resource-form-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 .onboarding-steps {
@@ -541,11 +639,6 @@ md-text-button {
 .onboarding-panel-llm .material-form,
 .onboarding-panel-interactive .material-form {
   grid-template-columns: repeat(2, minmax(190px, 1fr));
-}
-
-.onboarding-panel-llm,
-.onboarding-panel-interactive {
-  grid-column: 1 / -1;
 }
 
 .material-action-row {
@@ -949,6 +1042,15 @@ md-text-button {
 
   .onboarding-main {
     grid-template-columns: 1fr;
+  }
+
+  .resource-row {
+    grid-template-columns: 1fr;
+    align-items: start;
+  }
+
+  .resource-actions {
+    justify-content: flex-start;
   }
 
   .checkpoint-form {

@@ -41,7 +41,7 @@ def test_login_page_and_static_assets_are_served(tmp_path):
     assert css_response.status_code == 200
     assert "grid-template-columns" in css_response.text
     assert "--md-ref-typeface-brand: var(--ui-font);" in css_response.text
-    assert "grid-template-columns: minmax(360px, 0.9fr) minmax(480px, 1.1fr);" in css_response.text
+    assert "width: min(440px, 100%);" in css_response.text
     assert js_response.status_code == 200
     assert material_response.status_code == 200
     assert "customElements" in material_response.text
@@ -148,10 +148,10 @@ def test_workspace_and_admin_pages_are_protected_and_render_shells(tmp_path):
     assert onboarding_response.status_code == 200
     assert 'data-page="onboarding"' in onboarding_response.text
     assert "Онбординг" in onboarding_response.text
-    assert "Обычный Telegram-бот" in onboarding_response.text
-    assert "Группа уведомлений" in onboarding_response.text
-    assert "Провайдер LLM" in onboarding_response.text
-    assert "Юзербот" in onboarding_response.text
+    assert "Ресурсы системы" in onboarding_response.text
+    assert 'id="onboarding-add-resource"' in onboarding_response.text
+    assert 'id="onboarding-resource-dialog"' in onboarding_response.text
+    assert 'id="onboarding-resource-list"' in onboarding_response.text
     assert "Юзербот через файл сессии" not in onboarding_response.text
     assert "onboarding-material-shell" in onboarding_response.text
     assert "<md-linear-progress" in onboarding_response.text
@@ -162,13 +162,12 @@ def test_workspace_and_admin_pages_are_protected_and_render_shells(tmp_path):
     )
     assert 'id="onboarding-group-hint"' in onboarding_response.text
     assert "onboarding-panel-compact" in onboarding_response.text
-    assert "onboarding-panel-llm" in onboarding_response.text
     assert '<md-checkbox name="make_default" checked' in onboarding_response.text
     assert 'id="onboarding-bot-form"' in onboarding_response.text
     assert 'id="onboarding-group-discover"' in onboarding_response.text
     assert 'id="onboarding-session-form"' not in onboarding_response.text
     assert 'id="onboarding-llm-form"' in onboarding_response.text
-    assert 'id="onboarding-llm-model-form"' in onboarding_response.text
+    assert 'id="onboarding-llm-model-form"' not in onboarding_response.text
     assert 'id="onboarding-interactive-start-form"' in onboarding_response.text
     assert "https://web.telegram.org/k/" in onboarding_response.text
     assert "https://my.telegram.org/auth?to=apps" in onboarding_response.text
@@ -214,13 +213,14 @@ def test_workspace_and_admin_pages_are_protected_and_render_shells(tmp_path):
     assert "/crm/convert" in js_response.text
     assert "/api/sources" in js_response.text
     assert "/api/onboarding/status" in js_response.text
+    assert "/api/onboarding/resources" in js_response.text
     assert "setOnboardingGroupDiscoverEnabled" in js_response.text
     assert "payload.steps?.bot_token?.done" in js_response.text
     assert "/api/onboarding/bot-token" in js_response.text
     assert "/api/onboarding/userbots/session-file" not in js_response.text
     assert "/api/onboarding/llm-provider" in js_response.text
-    assert "/api/onboarding/llm-default-model" in js_response.text
-    assert "populateOnboardingLlmModels" in js_response.text
+    assert "/api/onboarding/llm-default-model" not in js_response.text
+    assert "populateOnboardingLlmModels" not in js_response.text
     assert "/api/onboarding/userbots/interactive/start" in js_response.text
     assert "/api/onboarding/userbots/interactive/complete" in js_response.text
     assert "/api/catalog/candidates" in js_response.text

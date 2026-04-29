@@ -2298,6 +2298,13 @@ async function toggleAiRoute(event) {
 
 function initOnboarding() {
   document.querySelector("#onboarding-refresh")?.addEventListener("click", loadOnboardingStatus);
+  document.querySelector("#onboarding-add-resource")?.addEventListener("click", openOnboardingResourceDialog);
+  document
+    .querySelector("#onboarding-resource-dialog-close")
+    ?.addEventListener("click", closeOnboardingResourceDialog);
+  document
+    .querySelector("#onboarding-resource-type")
+    ?.addEventListener("change", updateOnboardingResourceForm);
   document.querySelector("#onboarding-bot-form")?.addEventListener("submit", saveOnboardingBot);
   document
     .querySelector("#onboarding-group-bot-select")
@@ -2312,19 +2319,138 @@ function initOnboarding() {
     .querySelector("#onboarding-llm-form")
     ?.addEventListener("submit", saveOnboardingLlmProvider);
   document
-    .querySelector("#onboarding-llm-model-form")
-    ?.addEventListener("submit", saveOnboardingDefaultLlmModel);
-  document
     .querySelector("#onboarding-interactive-start-form")
     ?.addEventListener("submit", startInteractiveUserbotLogin);
   document
     .querySelector("#onboarding-interactive-complete-form")
     ?.addEventListener("submit", completeInteractiveUserbotLogin);
   loadOnboardingStatus();
+  loadOnboardingResources();
   loadOnboardingBots();
-  loadOnboardingGroups();
-  loadOnboardingLlmRegistry();
-  loadOnboardingUserbots();
+  updateOnboardingResourceForm();
+}
+
+function openOnboardingResourceDialog(event) {
+  const dialog = document.querySelector("#onboarding-resource-dialog");
+  if (!dialog) return;
+  const resourceType = event?.currentTarget?.dataset?.resourceType;
+  const select = document.querySelector("#onboarding-resource-type");
+  if (resourceType && select) select.value = resourceType;
+  updateOnboardingResourceForm();
+  if (typeof dialog.showModal === "function") {
+    dialog.showModal();
+  } else {
+    dialog.setAttribute("open", "");
+  }
+}
+
+function closeOnboardingResourceDialog() {
+  const dialog = document.querySelector("#onboarding-resource-dialog");
+  if (!dialog) return;
+  if (typeof dialog.close === "function") {
+    dialog.close();
+  } else {
+    dialog.removeAttribute("open");
+  }
+}
+
+function updateOnboardingResourceForm() {
+  const selectedType = document.querySelector("#onboarding-resource-type")?.value || "telegram_bot";
+  document.querySelectorAll("[data-resource-form]").forEach((section) => {
+    section.classList.toggle("is-hidden", section.dataset.resourceForm !== selectedType);
+  });
+  if (selectedType === "telegram_notification_group") {
+    loadOnboardingBots();
+  }
+}
+
+async function loadOnboardingResources() {
+  const target = document.querySelector("#onboarding-resource-list");
+  if (!target) return;
+  try {
+    const payload = await api("/api/onboarding/resources");
+    renderOnboardingResources(payload.items || []);
+  } catch (error) {
+    target.innerHTML = `<div class="empty-state">${escapeHtml(error.message)}</div>`;
+  }
+}
+
+function renderOnboardingResources(resources) {
+  const target = document.querySelector("#onboarding-resource-list");
+  if (!target) return;
+  if (!resources.length) {
+    target.innerHTML = '<div class="empty-state">Ресурсы еще не добавлены</div>';
+    return;
+  }
+  target.innerHTML = resources
+    .map((resource) => {
+      const icon = onboardingResourceIcon(resource.resource_type);
+      const statusClass = resource.status === "active" ? "" : "is-warn";
+      return `<div class="resource-row">
+        <div class="resource-kind">
+          <md-icon aria-hidden="true">${icon}</md-icon>
+          <span>${escapeHtml(resource.type_label || resource.resource_type)}</span>
+        </div>
+        <div class="resource-primary">
+          <strong>${escapeHtml(resource.display_name || resource.id)}</strong>
+          <p class="muted">${escapeHtml(resource.detail || "")}</p>
+        </div>
+        <div>${badge(label(resource.status, resource.status), statusClass)}</div>
+        <div class="resource-actions">
+          <md-outlined-button type="button" data-edit-resource-type="${escapeHtml(resource.resource_type)}">
+            Редактировать
+          </md-outlined-button>
+          <md-outlined-button type="button"
+            data-delete-resource="${escapeHtml(resource.id)}"
+            data-resource-type="${escapeHtml(resource.resource_type)}">
+            Удалить
+          </md-outlined-button>
+        </div>
+      </div>`;
+    })
+    .join("");
+  target.querySelectorAll("[data-edit-resource-type]").forEach((button) => {
+    button.addEventListener("click", openOnboardingResourceDialog);
+  });
+  target.querySelectorAll("[data-delete-resource]").forEach((button) => {
+    button.addEventListener("click", deleteOnboardingResource);
+  });
+}
+
+function onboardingResourceIcon(resourceType) {
+  const icons = {
+    telegram_bot: "smart_toy",
+    telegram_notification_group: "forum",
+    telegram_userbot: "person",
+    ai_provider_account: "model_training",
+  };
+  return icons[resourceType] || "settings";
+}
+
+async function deleteOnboardingResource(event) {
+  const button = event.currentTarget;
+  const status = document.querySelector("#onboarding-resource-status");
+  const resourceType = button.dataset.resourceType;
+  const resourceId = button.dataset.deleteResource;
+  const paths = {
+    telegram_bot: `/api/onboarding/bots/${encodeURIComponent(resourceId)}`,
+    telegram_notification_group: `/api/onboarding/notification-groups/${encodeURIComponent(resourceId)}`,
+    ai_provider_account: `/api/onboarding/llm-providers/${encodeURIComponent(resourceId)}`,
+    telegram_userbot: `/api/onboarding/userbots/${encodeURIComponent(resourceId)}`,
+  };
+  const path = paths[resourceType];
+  if (!path) return;
+  try {
+    await api(path, { method: "DELETE" });
+    if (status) status.textContent = "Ресурс удален";
+    await refreshOnboardingResourceState();
+  } catch (error) {
+    if (status) status.textContent = error.message;
+  }
+}
+
+async function refreshOnboardingResourceState() {
+  await Promise.all([loadOnboardingResources(), loadOnboardingStatus(), loadOnboardingBots()]);
 }
 
 function setOnboardingGroupDiscoverEnabled(enabled) {
@@ -2384,8 +2510,8 @@ async function saveOnboardingBot(event) {
     });
     if (status) status.textContent = `Бот @${payload.bot?.telegram_username || "telegram"} сохранен`;
     form.reset();
-    await loadOnboardingBots();
-    await loadOnboardingStatus();
+    closeOnboardingResourceDialog();
+    await refreshOnboardingResourceState();
   } catch (error) {
     if (status) status.textContent = error.message;
   }
@@ -2451,7 +2577,7 @@ async function deleteOnboardingBot(event) {
       method: "DELETE",
     });
     if (status) status.textContent = "Бот удален";
-    await Promise.all([loadOnboardingBots(), loadOnboardingGroups(), loadOnboardingStatus()]);
+    await refreshOnboardingResourceState();
   } catch (error) {
     if (status) status.textContent = error.message;
   }
@@ -2517,8 +2643,8 @@ async function saveOnboardingGroup(event) {
       }),
     });
     if (status) status.textContent = "Группа уведомлений сохранена, тестовое сообщение отправлено";
-    await loadOnboardingGroups();
-    await loadOnboardingStatus();
+    closeOnboardingResourceDialog();
+    await refreshOnboardingResourceState();
   } catch (error) {
     if (status) status.textContent = error.message;
   }
@@ -2564,7 +2690,7 @@ async function deleteOnboardingGroup(event) {
       method: "DELETE",
     });
     if (status) status.textContent = "Группа уведомлений удалена";
-    await Promise.all([loadOnboardingGroups(), loadOnboardingStatus()]);
+    await refreshOnboardingResourceState();
   } catch (error) {
     if (status) status.textContent = error.message;
   }
@@ -2581,38 +2707,15 @@ async function saveOnboardingLlmProvider(event) {
       body: JSON.stringify({
         base_url: formValue(form, "base_url"),
         api_key: formValue(form, "api_key"),
-        display_name: "Z.AI",
+        display_name: formValue(form, "display_name") || "Z.AI",
       }),
     });
-    populateOnboardingLlmModels(onboardingAiRegistry.models || []);
-    renderOnboardingLlmProviders(onboardingAiRegistry.accounts || [], onboardingAiRegistry.routes || []);
     const modelCount = (onboardingAiRegistry.models || []).length;
-    if (status) status.textContent = `Модели загружены: ${modelCount}`;
+    if (status) status.textContent = `LLM-провайдер сохранен. Моделей в метакаталоге: ${modelCount}`;
     const apiKeyField = form.querySelector('[name="api_key"]');
     if (apiKeyField && "value" in apiKeyField) apiKeyField.value = "";
-    await loadOnboardingStatus();
-  } catch (error) {
-    if (status) status.textContent = error.message;
-  }
-}
-
-async function saveOnboardingDefaultLlmModel(event) {
-  event.preventDefault();
-  const form = event.currentTarget;
-  const status = document.querySelector("#onboarding-llm-status");
-  try {
-    const modelId = formValue(form, "model_id");
-    if (!modelId) {
-      if (status) status.textContent = "Выберите модель.";
-      return;
-    }
-    const payload = await api("/api/onboarding/llm-default-model", {
-      method: "POST",
-      body: JSON.stringify({ model_id: modelId }),
-    });
-    if (status) status.textContent = `Модель по умолчанию: ${payload.model?.provider_model_name || "выбрана"}`;
-    await loadOnboardingLlmRegistry();
-    await loadOnboardingStatus();
+    closeOnboardingResourceDialog();
+    await refreshOnboardingResourceState();
   } catch (error) {
     if (status) status.textContent = error.message;
   }
@@ -2621,35 +2724,10 @@ async function saveOnboardingDefaultLlmModel(event) {
 async function loadOnboardingLlmRegistry() {
   try {
     onboardingAiRegistry = await api("/api/admin/ai-registry");
-    populateOnboardingLlmModels(onboardingAiRegistry.models || []);
     renderOnboardingLlmProviders(onboardingAiRegistry.accounts || [], onboardingAiRegistry.routes || []);
   } catch {
-    populateOnboardingLlmModels([]);
     renderOnboardingLlmProviders([], []);
   }
-}
-
-function populateOnboardingLlmModels(models) {
-  const select = document.querySelector("#onboarding-llm-model");
-  const saveButton = document.querySelector("#onboarding-llm-model-save");
-  if (!select) return;
-  const languageModels = (models || []).filter((model) => model.model_type === "language");
-  if (!languageModels.length) {
-    select.innerHTML = '<option value="">Языковые модели не найдены</option>';
-    if (saveButton) saveButton.disabled = true;
-    return;
-  }
-  select.innerHTML = languageModels
-    .map(
-      (model) =>
-        `<option value="${escapeHtml(model.id)}">${escapeHtml(model.provider_model_name || model.display_name)}</option>`
-    )
-    .join("");
-  const preferred = languageModels.find((model) => model.normalized_model_name === "glm-4.5-flash")
-    || languageModels.find((model) => model.normalized_model_name === "glm-4.5-air")
-    || languageModels[0];
-  select.value = preferred.id;
-  if (saveButton) saveButton.disabled = false;
 }
 
 function renderOnboardingLlmProviders(accounts, routes) {
@@ -2701,7 +2779,7 @@ async function deleteOnboardingLlmProvider(event) {
       method: "DELETE",
     });
     if (status) status.textContent = "LLM-провайдер отключен";
-    await Promise.all([loadOnboardingLlmRegistry(), loadOnboardingStatus()]);
+    await refreshOnboardingResourceState();
   } catch (error) {
     if (status) status.textContent = error.message;
   }
@@ -2752,7 +2830,7 @@ async function deleteOnboardingUserbot(event) {
       method: "DELETE",
     });
     if (status) status.textContent = "Юзербот удален";
-    await Promise.all([loadOnboardingUserbots(), loadOnboardingStatus()]);
+    await refreshOnboardingResourceState();
   } catch (error) {
     if (status) status.textContent = error.message;
   }
@@ -2800,8 +2878,8 @@ async function completeInteractiveUserbotLogin(event) {
     if (status) status.textContent = "Интерактивный вход завершен";
     form.reset();
     form.classList.add("is-hidden");
-    await loadOnboardingUserbots();
-    await loadOnboardingStatus();
+    closeOnboardingResourceDialog();
+    await refreshOnboardingResourceState();
   } catch (error) {
     if (status) status.textContent = error.message;
   }
