@@ -74,7 +74,10 @@ def test_secret_like_values_are_masked_in_audit_and_events(audit_service):
         event_type="scheduler",
         severity="error",
         message="secret check failed",
-        details_json={"password": "raw-password"},
+        details_json={
+            "password": "raw-password",
+            "token_usage_json": {"prompt_tokens": 100, "completion_tokens": 20},
+        },
     )
 
     audit_row = session.execute(select(audit_log_table)).mappings().one()
@@ -83,4 +86,7 @@ def test_secret_like_values_are_masked_in_audit_and_events(audit_service):
         "api_key": "***",
         "nested": {"token": "***"},
     }
-    assert event_row["details_json"] == {"password": "***"}
+    assert event_row["details_json"] == {
+        "password": "***",
+        "token_usage_json": {"prompt_tokens": 100, "completion_tokens": 20},
+    }

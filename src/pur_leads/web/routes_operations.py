@@ -10,8 +10,10 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from pur_leads.models.audit import audit_log_table, operational_events_table
+from pur_leads.models.catalog import extraction_runs_table
 from pur_leads.models.notifications import notification_events_table
 from pur_leads.models.scheduler import job_runs_table, scheduler_jobs_table
+from pur_leads.models.telegram_sources import source_access_checks_table
 from pur_leads.services.audit import mask_secret_values
 from pur_leads.services.web_auth import SessionValidationResult
 from pur_leads.web.dependencies import current_admin, get_session
@@ -57,6 +59,31 @@ def operations_summary(
             "total": _table_count(session, notification_events_table),
             "by_status": _count_by(session, notification_events_table, "status"),
             "by_policy": _count_by(session, notification_events_table, "notification_policy"),
+        },
+        "extraction_runs": {
+            "total": _table_count(session, extraction_runs_table),
+            "by_status": _count_by(session, extraction_runs_table, "status"),
+            "by_type": _count_by(session, extraction_runs_table, "run_type"),
+            "recent_failed": _rows(
+                session,
+                select(extraction_runs_table)
+                .where(extraction_runs_table.c.status == "failed")
+                .order_by(extraction_runs_table.c.started_at.desc())
+                .limit(10),
+            ),
+        },
+        "access_checks": {
+            "total": _table_count(session, source_access_checks_table),
+            "by_status": _count_by(session, source_access_checks_table, "status"),
+            "recent_issues": _rows(
+                session,
+                select(source_access_checks_table)
+                .where(
+                    source_access_checks_table.c.status != "succeeded",
+                )
+                .order_by(source_access_checks_table.c.checked_at.desc())
+                .limit(10),
+            ),
         },
         "audit": {
             "total": _table_count(session, audit_log_table),
@@ -139,6 +166,43 @@ def list_operational_events(
     if entity_id:
         query = query.where(operational_events_table.c.entity_id == entity_id)
     query = query.order_by(operational_events_table.c.created_at.desc()).limit(_limit(limit))
+    return {"items": _rows(session, query)}
+
+
+@router.get("/extraction-runs")
+def list_extraction_runs(
+    status: str | None = None,
+    run_type: str | None = None,
+    model: str | None = None,
+    limit: int = 100,
+    _validated: SessionValidationResult = Depends(current_admin),
+    session: Session = Depends(get_session),
+) -> dict[str, Any]:
+    query = select(extraction_runs_table)
+    if status:
+        query = query.where(extraction_runs_table.c.status == status)
+    if run_type:
+        query = query.where(extraction_runs_table.c.run_type == run_type)
+    if model:
+        query = query.where(extraction_runs_table.c.model == model)
+    query = query.order_by(extraction_runs_table.c.started_at.desc()).limit(_limit(limit))
+    return {"items": _rows(session, query)}
+
+
+@router.get("/access-checks")
+def list_access_checks(
+    status: str | None = None,
+    monitored_source_id: str | None = None,
+    limit: int = 100,
+    _validated: SessionValidationResult = Depends(current_admin),
+    session: Session = Depends(get_session),
+) -> dict[str, Any]:
+    query = select(source_access_checks_table)
+    if status:
+        query = query.where(source_access_checks_table.c.status == status)
+    if monitored_source_id:
+        query = query.where(source_access_checks_table.c.monitored_source_id == monitored_source_id)
+    query = query.order_by(source_access_checks_table.c.checked_at.desc()).limit(_limit(limit))
     return {"items": _rows(session, query)}
 
 

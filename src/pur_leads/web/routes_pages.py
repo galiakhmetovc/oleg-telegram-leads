@@ -494,6 +494,14 @@ def operations_page(
                       <div id="operations-notifications" class="table-list" aria-live="polite"></div>
                     </section>
                     <section>
+                      <h2>Extraction Runs</h2>
+                      <div id="operations-extraction-runs" class="table-list" aria-live="polite"></div>
+                    </section>
+                    <section>
+                      <h2>Access Checks</h2>
+                      <div id="operations-access-checks" class="table-list" aria-live="polite"></div>
+                    </section>
+                    <section>
                       <h2>Audit</h2>
                       <div id="operations-audit" class="table-list" aria-live="polite"></div>
                     </section>

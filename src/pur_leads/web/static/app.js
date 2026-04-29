@@ -1035,12 +1035,18 @@ async function loadOperationsSummary() {
   const errorEvents =
     (summary.events?.by_severity?.error || 0) + (summary.events?.by_severity?.critical || 0);
   const suppressedNotifications = summary.notifications?.by_status?.suppressed || 0;
+  const failedExtractions = summary.extraction_runs?.by_status?.failed || 0;
+  const accessIssues = countStatusesExcept(summary.access_checks?.by_status || {}, [
+    "succeeded",
+  ]);
   target.innerHTML = `<div class="ops-metric-row">
     ${renderOpsMetric("Jobs", summary.jobs?.total || 0, `${queuedJobs} queued / ${runningJobs} running`)}
     ${renderOpsMetric("Failed jobs", failedJobs, "needs operator check", failedJobs ? "is-danger" : "")}
     ${renderOpsMetric("Runs", summary.runs?.total || 0, "worker attempts")}
     ${renderOpsMetric("Errors", errorEvents, "operational events", errorEvents ? "is-danger" : "")}
     ${renderOpsMetric("Notifications", summary.notifications?.total || 0, `${suppressedNotifications} suppressed`)}
+    ${renderOpsMetric("Extraction", summary.extraction_runs?.total || 0, `${failedExtractions} failed`, failedExtractions ? "is-danger" : "")}
+    ${renderOpsMetric("Access", summary.access_checks?.total || 0, `${accessIssues} issues`, accessIssues ? "is-danger" : "")}
     ${renderOpsMetric("Audit", summary.audit?.total || 0, "recorded changes")}
   </div>`;
 }
@@ -1187,13 +1193,17 @@ function renderOperationRun(run) {
 }
 
 async function loadOperationsSignals() {
-  const [events, notifications, audit] = await Promise.all([
+  const [events, notifications, extractionRuns, accessChecks, audit] = await Promise.all([
     api("/api/operations/events?limit=12"),
     api("/api/operations/notifications?limit=12"),
+    api("/api/operations/extraction-runs?limit=12"),
+    api("/api/operations/access-checks?limit=12"),
     api("/api/operations/audit?limit=12"),
   ]);
   renderOperationsEvents(events.items || []);
   renderOperationsNotifications(notifications.items || []);
+  renderOperationsExtractionRuns(extractionRuns.items || []);
+  renderOperationsAccessChecks(accessChecks.items || []);
   renderOperationsAudit(audit.items || []);
 }
 
@@ -1233,6 +1243,45 @@ function renderOperationNotification(item) {
   </div>`;
 }
 
+function renderOperationsExtractionRuns(items) {
+  const target = document.querySelector("#operations-extraction-runs");
+  if (!target) return;
+  target.innerHTML =
+    items.map(renderOperationExtractionRun).join("") ||
+    '<div class="empty-state">No extraction runs</div>';
+}
+
+function renderOperationExtractionRun(item) {
+  const label = [item.run_type, item.model].filter(Boolean).join(" / ");
+  const usage = tokenUsageSummary(item.token_usage_json);
+  return `<div class="table-row">
+    <div>
+      <strong>${escapeHtml(label || "extraction")}</strong>
+      <p class="muted">${escapeHtml(item.error || usage || time(item.started_at))}</p>
+    </div>
+    <span>${badge(item.status || "unknown", operationsStatusClass(item.status))}</span>
+  </div>`;
+}
+
+function renderOperationsAccessChecks(items) {
+  const target = document.querySelector("#operations-access-checks");
+  if (!target) return;
+  target.innerHTML =
+    items.map(renderOperationAccessCheck).join("") ||
+    '<div class="empty-state">No access checks</div>';
+}
+
+function renderOperationAccessCheck(item) {
+  const label = [item.resolved_title, item.monitored_source_id].filter(Boolean).join(" / ");
+  return `<div class="table-row">
+    <div>
+      <strong>${escapeHtml(label || "source access")}</strong>
+      <p class="muted">${escapeHtml(item.error || time(item.checked_at))}</p>
+    </div>
+    <span>${badge(item.status || "unknown", operationsStatusClass(item.status))}</span>
+  </div>`;
+}
+
 function renderOperationsAudit(items) {
   const target = document.querySelector("#operations-audit");
   if (!target) return;
@@ -1253,7 +1302,31 @@ function renderOperationAudit(item) {
 
 function operationsStatusClass(status) {
   if (status === "failed" || status === "error" || status === "critical") return "is-danger";
-  if (status === "queued" || status === "running" || status === "warning") return "is-warn";
+  if (
+    status === "queued" ||
+    status === "running" ||
+    status === "warning" ||
+    status === "flood_wait"
+  ) {
+    return "is-warn";
+  }
+  return "";
+}
+
+function countStatusesExcept(statuses, ignored) {
+  return Object.entries(statuses).reduce((total, [status, count]) => {
+    if (ignored.includes(status)) return total;
+    return total + count;
+  }, 0);
+}
+
+function tokenUsageSummary(value) {
+  if (!value || typeof value !== "object") return "";
+  const total = value.total_tokens || value.totalTokens;
+  const prompt = value.prompt_tokens || value.promptTokens;
+  const completion = value.completion_tokens || value.completionTokens;
+  if (total) return `tokens ${total}`;
+  if (prompt || completion) return `tokens ${prompt || 0}/${completion || 0}`;
   return "";
 }
 

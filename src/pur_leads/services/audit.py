@@ -9,6 +9,16 @@ from sqlalchemy.orm import Session
 from pur_leads.repositories.audit import AuditRepository
 
 SECRET_KEY_PARTS = ("secret", "token", "api_key", "apikey", "password")
+NON_SECRET_TOKEN_KEYS = {
+    "cached_tokens",
+    "completion_tokens",
+    "prompt_tokens",
+    "reasoning_tokens",
+    "token_estimate",
+    "token_usage",
+    "token_usage_json",
+    "total_tokens",
+}
 MASK = "***"
 
 
@@ -75,4 +85,6 @@ def mask_secret_values(value: Any) -> Any:
 
 def _is_secret_key(key: str) -> bool:
     normalized = key.lower().replace("-", "_")
+    if normalized in NON_SECRET_TOKEN_KEYS or normalized.endswith("_token_count"):
+        return False
     return any(part in normalized for part in SECRET_KEY_PARTS)
