@@ -28,6 +28,7 @@ from pur_leads.repositories.evaluation import (
 )
 
 FEEDBACK_REGRESSION_DATASET_KEY = "feedback_regression:lead_detection"
+MANUAL_EXAMPLES_DATASET_KEY = "manual_examples:lead_detection"
 
 
 @dataclass(frozen=True)
@@ -132,6 +133,61 @@ class EvaluationService:
         )
         self.session.commit()
         return dataset
+
+    def get_or_create_manual_examples_dataset(
+        self,
+        *,
+        created_by: str,
+    ) -> EvaluationDatasetRecord:
+        existing = self.repository.find_dataset_by_key(MANUAL_EXAMPLES_DATASET_KEY)
+        if existing is not None:
+            return existing
+
+        now = utc_now()
+        dataset = self.repository.create_dataset(
+            dataset_key=MANUAL_EXAMPLES_DATASET_KEY,
+            name="Manual examples: lead detection",
+            dataset_type="golden",
+            description="Lead detection cases manually submitted by Oleg or an admin.",
+            status="active",
+            created_by=created_by,
+            created_at=now,
+            updated_at=now,
+        )
+        self.session.commit()
+        return dataset
+
+    def create_manual_lead_case(
+        self,
+        *,
+        expected_decision: str,
+        message_text: str,
+        actor: str,
+        manual_input_id: str,
+        classifier_example_id: str | None = None,
+        source_id: str | None = None,
+        source_message_id: str | None = None,
+        evidence_note: str | None = None,
+        input_type: str | None = None,
+        url: str | None = None,
+    ) -> EvaluationCaseRecord:
+        dataset = self.get_or_create_manual_examples_dataset(created_by=actor)
+        return self.create_case(
+            evaluation_dataset_id=dataset.id,
+            source_message_id=source_message_id,
+            source_id=source_id,
+            message_text=message_text,
+            context_json={
+                "manual_input_id": manual_input_id,
+                "classifier_example_id": classifier_example_id,
+                "evidence_note": evidence_note,
+                "input_type": input_type,
+                "url": url,
+            },
+            expected_decision=expected_decision,
+            label_source="manual",
+            created_by=actor,
+        )
 
     def create_case(
         self,

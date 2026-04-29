@@ -1031,7 +1031,8 @@ async function submitManualInput(event, state) {
     if (status) {
       const queued = payload.queued_jobs?.length || 0;
       const snapshot = payload.classifier_snapshot ? `snapshot v${payload.classifier_snapshot.version}` : "";
-      status.textContent = ["Saved", queued ? `${queued} job queued` : "", snapshot]
+      const evaluationCase = payload.evaluation_case ? "evaluation case" : "";
+      status.textContent = ["Saved", queued ? `${queued} job queued` : "", snapshot, evaluationCase]
         .filter(Boolean)
         .join(" / ");
     }

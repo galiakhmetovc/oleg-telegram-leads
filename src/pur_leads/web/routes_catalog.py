@@ -20,6 +20,7 @@ from pur_leads.repositories.catalog_candidates import CatalogCandidateRecord
 from pur_leads.services.catalog_candidates import CatalogCandidateService
 from pur_leads.services.catalog_sources import CatalogSourceService
 from pur_leads.services.classifier_snapshots import ClassifierSnapshotService
+from pur_leads.services.evaluation import EvaluationService
 from pur_leads.services.scheduler import SchedulerService
 from pur_leads.services.settings import SettingsService
 from pur_leads.services.web_auth import SessionValidationResult
@@ -36,8 +37,9 @@ CATALOG_MANUAL_INPUT_TYPES = {
     "catalog_attribute",
 }
 EXAMPLE_INPUT_TYPES = {
-    "lead_example": ("lead_positive", "positive"),
-    "non_lead_example": ("lead_negative", "negative"),
+    "lead_example": ("lead_positive", "positive", "lead"),
+    "non_lead_example": ("lead_negative", "negative", "not_lead"),
+    "maybe_example": ("maybe", "neutral", "maybe"),
 }
 ALLOWED_MANUAL_INPUT_TYPES = {
     "telegram_link",
@@ -220,6 +222,7 @@ def create_manual_input(
 
     classifier_example = None
     classifier_snapshot = None
+    evaluation_case = None
     if payload.input_type in EXAMPLE_INPUT_TYPES:
         source_message = _find_source_message_by_link(
             session,
@@ -239,6 +242,18 @@ def create_manual_input(
             manual_input_id=result.manual_input.id,
             evidence_note=_clean_str(payload.evidence_note),
         )
+        evaluation_case = EvaluationService(session).create_manual_lead_case(
+            expected_decision=EXAMPLE_INPUT_TYPES[payload.input_type][2],
+            message_text=example_text,
+            actor=actor,
+            manual_input_id=result.manual_input.id,
+            classifier_example_id=classifier_example["id"],
+            source_id=result.source.id if result.source is not None else None,
+            source_message_id=source_message["id"] if source_message is not None else None,
+            evidence_note=_clean_str(payload.evidence_note),
+            input_type=payload.input_type,
+            url=url,
+        )
         classifier_snapshot = ClassifierSnapshotService(session).build_snapshot(
             created_by=actor,
             model="builtin-fuzzy",
@@ -255,6 +270,9 @@ def create_manual_input(
         "source": jsonable_encoder(asdict(result.source)) if result.source is not None else None,
         "queued_jobs": [jsonable_encoder(asdict(job)) for job in queued_jobs],
         "classifier_example": jsonable_encoder(classifier_example),
+        "evaluation_case": jsonable_encoder(asdict(evaluation_case))
+        if evaluation_case is not None
+        else None,
         "classifier_snapshot": jsonable_encoder(asdict(classifier_snapshot))
         if classifier_snapshot is not None
         else None,
@@ -430,7 +448,7 @@ def _create_classifier_example(
     manual_input_id: str,
     evidence_note: str | None,
 ) -> dict[str, Any]:
-    example_type, polarity = EXAMPLE_INPUT_TYPES[input_type]
+    example_type, polarity, _expected_decision = EXAMPLE_INPUT_TYPES[input_type]
     now = utc_now()
     example_id = new_id()
     session.execute(

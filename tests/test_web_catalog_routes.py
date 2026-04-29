@@ -14,6 +14,7 @@ from pur_leads.models.catalog import (
     parsed_chunks_table,
     sources_table,
 )
+from pur_leads.models.evaluation import evaluation_cases_table, evaluation_datasets_table
 from pur_leads.models.scheduler import scheduler_jobs_table
 from pur_leads.services.catalog_candidates import CatalogCandidateService
 from pur_leads.services.catalog_sources import CatalogSourceService
@@ -180,7 +181,7 @@ def test_manual_catalog_input_creates_source_chunk_and_extraction_job(tmp_path):
     assert job["payload_json"]["manual_input_id"] == manual_input["id"]
 
 
-def test_manual_lead_example_creates_classifier_example_and_snapshot(tmp_path):
+def test_manual_lead_example_creates_classifier_example_snapshot_and_evaluation_case(tmp_path):
     fixture = _setup_catalog_app(tmp_path)
     client = fixture["client"]
     _login(client)
@@ -197,16 +198,62 @@ def test_manual_lead_example_creates_classifier_example_and_snapshot(tmp_path):
     assert response.status_code == 200
     payload = response.json()
     assert payload["classifier_example"]["polarity"] == "positive"
+    assert payload["evaluation_case"]["expected_decision"] == "lead"
+    assert payload["evaluation_case"]["label_source"] == "manual"
     assert payload["classifier_snapshot"]["version"] == 1
     with fixture["session_factory"]() as session:
         source = session.execute(select(sources_table)).mappings().one()
         example = session.execute(select(classifier_examples_table)).mappings().one()
         snapshot = session.execute(select(classifier_versions_table)).mappings().one()
+        dataset = session.execute(select(evaluation_datasets_table)).mappings().one()
+        evaluation_case = session.execute(select(evaluation_cases_table)).mappings().one()
     assert example["raw_source_id"] == source["id"]
     assert example["example_type"] == "lead_positive"
     assert example["example_text"] == "Ищу камеру на дачу с просмотром через телефон"
     assert example["status"] == "active"
+    assert dataset["dataset_key"] == "manual_examples:lead_detection"
+    assert dataset["dataset_type"] == "golden"
+    assert evaluation_case["source_id"] == source["id"]
+    assert evaluation_case["message_text"] == "Ищу камеру на дачу с просмотром через телефон"
+    assert evaluation_case["expected_decision"] == "lead"
+    assert evaluation_case["context_json"]["manual_input_id"] == payload["manual_input"]["id"]
+    assert evaluation_case["context_json"]["classifier_example_id"] == example["id"]
     assert snapshot["created_by"] == "admin"
+
+
+def test_manual_non_lead_and_maybe_examples_create_expected_evaluation_cases(tmp_path):
+    fixture = _setup_catalog_app(tmp_path)
+    client = fixture["client"]
+    _login(client)
+
+    non_lead_response = client.post(
+        "/api/catalog/manual-inputs",
+        json={
+            "input_type": "non_lead_example",
+            "text": "Подскажите, какую камеру лучше взять, покупать не планирую",
+            "evidence_note": "Пример не лида от Олега",
+        },
+    )
+    maybe_response = client.post(
+        "/api/catalog/manual-inputs",
+        json={
+            "input_type": "maybe_example",
+            "text": "Думаю поставить видеонаблюдение, пока изучаю варианты",
+            "evidence_note": "Пограничный пример от Олега",
+        },
+    )
+
+    assert non_lead_response.status_code == 200
+    assert maybe_response.status_code == 200
+    assert non_lead_response.json()["classifier_example"]["polarity"] == "negative"
+    assert non_lead_response.json()["evaluation_case"]["expected_decision"] == "not_lead"
+    assert maybe_response.json()["classifier_example"]["polarity"] == "neutral"
+    assert maybe_response.json()["evaluation_case"]["expected_decision"] == "maybe"
+    with fixture["session_factory"]() as session:
+        examples = session.execute(select(classifier_examples_table)).mappings().all()
+        cases = session.execute(select(evaluation_cases_table)).mappings().all()
+    assert [example["example_type"] for example in examples] == ["lead_negative", "maybe"]
+    assert [case["expected_decision"] for case in cases] == ["not_lead", "maybe"]
 
 
 def test_manual_telegram_link_parses_chat_and_message_identity(tmp_path):

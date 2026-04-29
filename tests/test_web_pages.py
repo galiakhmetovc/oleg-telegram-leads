@@ -120,6 +120,7 @@ def test_workspace_and_admin_pages_are_protected_and_render_shells(tmp_path):
     assert 'id="catalog-edit-form"' in catalog_response.text
     assert 'id="catalog-name-input"' in catalog_response.text
     assert 'id="catalog-value-json"' in catalog_response.text
+    assert '<option value="maybe_example">Maybe example</option>' in catalog_response.text
     assert today_response.status_code == 200
     assert 'data-page="today"' in today_response.text
     assert 'id="today-summary"' in today_response.text
@@ -153,6 +154,7 @@ def test_workspace_and_admin_pages_are_protected_and_render_shells(tmp_path):
     assert "/crm/convert" in js_response.text
     assert "/api/sources" in js_response.text
     assert "/api/catalog/candidates" in js_response.text
+    assert "evaluation case" in js_response.text
     assert "/api/operations/summary" in js_response.text
     assert "/api/quality/summary" in js_response.text
     assert "/api/operations/extraction-runs" in js_response.text

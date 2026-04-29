@@ -1299,7 +1299,7 @@ Stores manual additions from Oleg/admin before they are processed.
 Key fields:
 
 - `id`
-- `input_type`: `telegram_link`, `forwarded_message`, `manual_text`, `catalog_note`, `lead_example`, `catalog_item`, `catalog_term`, `catalog_offer`, `catalog_relation`, `catalog_attribute`
+- `input_type`: `telegram_link`, `forwarded_message`, `manual_text`, `catalog_note`, `lead_example`, `non_lead_example`, `maybe_example`, `catalog_item`, `catalog_term`, `catalog_offer`, `catalog_relation`, `catalog_attribute`
 - `submission_channel`: `web`, `telegram_bot`, `import`
 - `text`
 - `url`

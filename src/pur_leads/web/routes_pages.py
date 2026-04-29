@@ -415,6 +415,7 @@ def catalog_page(
                       <option value="catalog_note">Catalog note</option>
                       <option value="lead_example">Lead example</option>
                       <option value="non_lead_example">Non-lead example</option>
+                      <option value="maybe_example">Maybe example</option>
                       <option value="telegram_link">Telegram link</option>
                       <option value="manual_text">Manual text</option>
                     </select>
