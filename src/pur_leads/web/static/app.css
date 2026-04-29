@@ -11,8 +11,26 @@
   --warning: #ad6b00;
   --danger: #ad3131;
   --shadow: 0 18px 50px rgba(24, 32, 39, 0.08);
+  --md-sys-color-primary: #1f7a5a;
+  --md-sys-color-on-primary: #ffffff;
+  --md-sys-color-primary-container: #d5f7e8;
+  --md-sys-color-on-primary-container: #063822;
+  --md-sys-color-secondary: #546179;
+  --md-sys-color-surface: #ffffff;
+  --md-sys-color-surface-container-low: #f3f6f4;
+  --md-sys-color-surface-container: #edf2ef;
+  --md-sys-color-surface-container-high: #e7ece9;
+  --md-sys-color-on-surface: #182027;
+  --md-sys-color-on-surface-variant: #5d6871;
+  --md-sys-color-outline: #c0c8cf;
+  --md-sys-shape-corner-extra-small: 6px;
+  --md-sys-shape-corner-small: 8px;
+  --md-sys-shape-corner-medium: 8px;
+  --md-ref-typeface-brand: Roboto;
+  --md-ref-typeface-plain: Roboto;
   font-family:
-    Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    Roboto, Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+    sans-serif;
 }
 
 * {
@@ -133,21 +151,50 @@ h3 {
   font-weight: 780;
 }
 
-.login-shell {
+.material-auth-shell {
   min-height: 100svh;
   display: grid;
   place-items: center;
-  padding: 24px;
+  padding: 32px 20px;
+  background:
+    linear-gradient(135deg, rgba(31, 122, 90, 0.08), transparent 38%),
+    var(--bg);
 }
 
-.login-panel {
-  width: min(420px, 100%);
+.material-auth-panel {
+  width: min(440px, 100%);
   display: grid;
-  gap: 22px;
-  padding: 34px;
+  gap: 24px;
+  padding: 32px;
   background: var(--surface);
   border: 1px solid var(--line);
   box-shadow: var(--shadow);
+  border-radius: 8px;
+}
+
+.material-brand-lockup {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.material-auth-copy {
+  display: grid;
+  gap: 6px;
+}
+
+.material-auth-form {
+  display: grid;
+  gap: 16px;
+}
+
+.material-auth-form md-outlined-text-field,
+.material-auth-form md-filled-button {
+  width: 100%;
 }
 
 .stack {
@@ -170,6 +217,13 @@ h3 {
     "wght" 400,
     "GRAD" 0,
     "opsz" 24;
+}
+
+md-outlined-text-field,
+md-filled-button,
+md-outlined-button,
+md-text-button {
+  max-width: 100%;
 }
 
 .telegram-hook {
@@ -383,24 +437,18 @@ h3 {
 .onboarding-steps {
   display: grid;
   gap: 8px;
+  padding: 8px 0;
 }
 
 .onboarding-step {
-  display: grid;
-  grid-template-columns: 24px 1fr;
-  align-items: center;
-  gap: 10px;
-  min-height: 38px;
-  padding: 8px 10px;
-  border: 1px solid var(--line);
-  background: #ffffff;
-  color: var(--muted);
+  --md-list-list-item-container-color: transparent;
+  --md-list-list-item-label-text-color: var(--muted);
+  border-radius: 8px;
 }
 
 .onboarding-step.is-done {
-  border-color: rgba(31, 122, 90, 0.28);
-  background: var(--surface-tonal);
-  color: var(--accent-strong);
+  --md-list-list-item-container-color: var(--surface-tonal);
+  --md-list-list-item-label-text-color: var(--accent-strong);
 }
 
 .onboarding-note {
@@ -414,9 +462,10 @@ h3 {
 .onboarding-panel {
   display: grid;
   gap: 14px;
-  padding: 16px;
+  padding: 18px;
   border: 1px solid var(--line);
   background: var(--surface);
+  border-radius: 8px;
 }
 
 .onboarding-panel-head {
@@ -426,7 +475,8 @@ h3 {
   gap: 10px;
 }
 
-.onboarding-panel-head > .material-symbols-outlined {
+.onboarding-panel-head > .material-symbols-outlined,
+.onboarding-panel-head > md-icon {
   display: inline-grid;
   place-items: center;
   width: 30px;
@@ -437,13 +487,51 @@ h3 {
 
 .material-form {
   display: grid;
-  grid-template-columns: repeat(2, minmax(180px, 1fr));
-  gap: 12px;
+  grid-template-columns: repeat(2, minmax(220px, 1fr));
+  gap: 14px;
+  align-items: end;
 }
 
-.material-form button,
-.material-form .checkbox-line {
+.material-form md-outlined-text-field,
+.material-form md-filled-button,
+.material-form md-outlined-button {
+  width: 100%;
+}
+
+.material-form md-filled-button,
+.material-form md-outlined-button,
+.material-form .material-checkbox-line {
   align-self: end;
+}
+
+.material-action-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.material-file-field {
+  min-height: 56px;
+  justify-content: center;
+  padding: 8px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.material-file-field input {
+  min-height: 28px;
+  padding: 0;
+  border: 0;
+}
+
+.material-checkbox-line {
+  display: flex;
+  min-height: 48px;
+  align-items: center;
+  gap: 8px;
+  color: var(--text);
+  font-size: 14px;
 }
 
 .onboarding-group-row {
@@ -813,7 +901,7 @@ h3 {
     grid-template-columns: 1fr;
   }
 
-  .login-panel {
+  .material-auth-panel {
     padding: 22px;
   }
 }

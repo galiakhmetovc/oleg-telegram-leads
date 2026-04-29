@@ -20,6 +20,7 @@ The system must continuously read the PUR Telegram channel, parse messages and d
 - Telegraph and configured external pages are fetched and parsed.
 - Oleg can manually add examples of leads, non-leads, catalog facts, or source links.
 - The web interface starts with one role: `admin`.
+- The web interface uses Material Web as the first design system for operator-facing screens. Bootstrap is not mixed into the same UI layer. Custom CSS is limited to layout, spacing, product composition, and Material token overrides.
 - A built-in local administrator account exists for bootstrap. Telegram admin accounts are added through that account.
 - On startup, the built-in administrator has a temporary password written to `PUR_BOOTSTRAP_ADMIN_PASSWORD_FILE` when the account still requires a password change. After the first successful local login and password change, the file is deleted and `must_change_password=false` becomes the durable marker that prevents regenerating or rewriting the bootstrap password on later restarts.
 - A clean installation/reset contains only the built-in local administrator and empty system tables. Telegram userbots, notification groups, bot tokens, Telegram API credentials, Z.AI/API credentials, AI provider routes, sources, catalog data, and session files are added explicitly by an administrator through the web/admin onboarding flow or an audited manual upload path.
@@ -60,6 +61,7 @@ After the built-in administrator changes the temporary password, the web UI rout
 
 The onboarding flow is part of the product UI, not a deployment-only script:
 
+- Auth and onboarding controls use a local pinned Material Web bundle served from the application static assets. External CDN examples are not used in production runtime.
 - The page shows embedded Russian setup guidance and a live checklist for password change, Telegram bot token, notification group, userbot, and first monitored source.
 - The ordinary Telegram bot token is pasted in the web UI, validated through Telegram Bot API `getMe`, and stored as a local file-backed `secret_refs` value. API responses and UI state never return the raw token.
 - Notification group setup is discovered through Bot API `getUpdates`: the admin adds the bot to a group/topic, sends a setup message, and selects the discovered chat in the web UI. Saving the group sends a test `sendMessage` and stores `telegram_lead_notification_chat_id` plus optional `telegram_lead_notification_thread_id`.

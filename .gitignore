@@ -27,6 +27,9 @@ tg-venv/
 venv/
 .venv/
 
+# Frontend
+node_modules/
+
 # IDE and OS files
 .idea/
 .vscode/

@@ -1,3 +1,6 @@
+import json
+from pathlib import Path
+
 from fastapi.testclient import TestClient
 
 from pur_leads.db.engine import create_sqlite_engine
@@ -13,18 +16,33 @@ def test_login_page_and_static_assets_are_served(tmp_path):
     login_response = client.get("/login")
     css_response = client.get("/static/app.css")
     js_response = client.get("/static/app.js")
+    material_response = client.get("/static/vendor/material-web.js")
 
     assert login_response.status_code == 200
     assert 'data-page="login"' in login_response.text
     assert 'id="local-login-form"' in login_response.text
     assert 'id="change-password-form"' in login_response.text
+    assert 'class="material-auth-shell"' in login_response.text
+    assert '<md-outlined-text-field name="username"' in login_response.text
+    assert '<md-outlined-text-field name="password"' in login_response.text
+    assert '<md-filled-button type="submit">Войти</md-filled-button>' in login_response.text
+    assert (
+        '<md-filled-button type="submit">Сохранить пароль</md-filled-button>' in login_response.text
+    )
     assert "Вход оператора" in login_response.text
     assert "Сменить пароль" in login_response.text
     assert "/static/app.css" in login_response.text
     assert "/static/app.js" in login_response.text
+    assert '<link rel="icon" href="data:,">' in login_response.text
+    assert 'type="module" src="/static/vendor/material-web.js"' in login_response.text
     assert css_response.status_code == 200
     assert "grid-template-columns" in css_response.text
     assert js_response.status_code == 200
+    assert material_response.status_code == 200
+    assert "customElements" in material_response.text
+    package = json.loads(Path("package.json").read_text(encoding="utf-8"))
+    assert package["dependencies"]["@material/web"] == "2.4.1"
+    assert "bootstrap" not in package.get("dependencies", {})
     assert "auto_pending" in js_response.text
     assert "crm_candidate_count" in js_response.text
     assert "classifier_version_id" in js_response.text
@@ -128,6 +146,11 @@ def test_workspace_and_admin_pages_are_protected_and_render_shells(tmp_path):
     assert "Обычный Telegram-бот" in onboarding_response.text
     assert "Группа уведомлений" in onboarding_response.text
     assert "Юзербот" in onboarding_response.text
+    assert "onboarding-material-shell" in onboarding_response.text
+    assert "<md-linear-progress" in onboarding_response.text
+    assert '<md-outlined-text-field name="token"' in onboarding_response.text
+    assert '<md-filled-button id="onboarding-group-discover"' in onboarding_response.text
+    assert '<md-checkbox name="make_default" checked' in onboarding_response.text
     assert 'id="onboarding-bot-form"' in onboarding_response.text
     assert 'id="onboarding-group-discover"' in onboarding_response.text
     assert 'id="onboarding-session-form"' in onboarding_response.text

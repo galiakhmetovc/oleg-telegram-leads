@@ -1,0 +1,16 @@
+{
+  "name": "pur-leads-web-assets",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build:assets": "esbuild src/pur_leads/web/assets/material-web.js --bundle --format=esm --minify --supported:template-literal=false --outfile=src/pur_leads/web/static/vendor/material-web.js",
+    "check:assets": "node --check src/pur_leads/web/assets/material-web.js"
+  },
+  "dependencies": {
+    "@material/web": "2.4.1"
+  },
+  "devDependencies": {
+    "esbuild": "0.28.0"
+  }
+}

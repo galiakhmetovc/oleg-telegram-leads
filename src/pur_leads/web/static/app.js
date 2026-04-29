@@ -110,6 +110,26 @@ const escapeHtml = (value) =>
     .replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;");
 
+const materialFieldSelector = (name) =>
+  [
+    `md-outlined-text-field[name="${name}"]`,
+    `md-filled-text-field[name="${name}"]`,
+    `md-checkbox[name="${name}"]`,
+  ].join(", ");
+
+const formValue = (form, name, fallback = "") => {
+  const field = form?.querySelector(materialFieldSelector(name)) || form?.querySelector(`[name="${name}"]`);
+  if (field && "value" in field) return field.value ?? fallback;
+  const value = new FormData(form).get(name);
+  return value ?? fallback;
+};
+
+const formChecked = (form, name) => {
+  const field = form?.querySelector(`md-checkbox[name="${name}"]`) || form?.querySelector(`[name="${name}"]`);
+  if (field && "checked" in field) return Boolean(field.checked);
+  return new FormData(form).get(name) === "on";
+};
+
 document.addEventListener("DOMContentLoaded", () => {
   bindLogout();
   if (page === "login") bindLogin();
@@ -132,13 +152,13 @@ function bindLogin() {
   form?.addEventListener("submit", async (event) => {
     event.preventDefault();
     status.textContent = "";
-    const data = new FormData(form);
+    const username = formValue(form, "username");
     try {
       const payload = await api("/api/auth/local", {
         method: "POST",
         body: JSON.stringify({
-          username: data.get("username"),
-          password: data.get("password"),
+          username,
+          password: formValue(form, "password"),
         }),
       });
       if (payload.user?.must_change_password) {
@@ -155,11 +175,10 @@ function bindLogin() {
   changeForm?.addEventListener("submit", async (event) => {
     event.preventDefault();
     changeStatus.textContent = "";
-    const data = new FormData(changeForm);
     try {
       await api("/api/auth/change-password", {
         method: "POST",
-        body: JSON.stringify({ new_password: data.get("new_password") }),
+        body: JSON.stringify({ new_password: formValue(changeForm, "new_password") }),
       });
       await redirectAfterAuth();
     } catch (error) {
@@ -2272,17 +2291,21 @@ function initOnboarding() {
 
 async function loadOnboardingStatus() {
   const target = document.querySelector("#onboarding-status");
+  const progress = document.querySelector("#onboarding-progress");
   if (!target) return;
   try {
     const payload = await api("/api/onboarding/status");
-    target.innerHTML = Object.entries(payload.steps || {})
+    const steps = Object.entries(payload.steps || {});
+    const doneCount = steps.filter(([, step]) => step.done).length;
+    if (progress) progress.value = steps.length ? doneCount / steps.length : 0;
+    target.innerHTML = steps
       .map(([key, step]) => {
         const icon = step.done ? "check_circle" : "radio_button_unchecked";
         const state = step.done ? "is-done" : "";
-        return `<div class="onboarding-step ${state}" data-step="${escapeHtml(key)}">
-          <span class="material-symbols-outlined" aria-hidden="true">${icon}</span>
+        return `<md-list-item class="onboarding-step ${state}" data-step="${escapeHtml(key)}">
+          <md-icon slot="start" aria-hidden="true">${icon}</md-icon>
           <span>${escapeHtml(step.label || key)}</span>
-        </div>`;
+        </md-list-item>`;
       })
       .join("");
   } catch (error) {
@@ -2294,13 +2317,12 @@ async function saveOnboardingBot(event) {
   event.preventDefault();
   const form = event.currentTarget;
   const status = document.querySelector("#onboarding-bot-status");
-  const data = new FormData(form);
   try {
     const payload = await api("/api/onboarding/bot-token", {
       method: "POST",
       body: JSON.stringify({
-        token: data.get("token"),
-        display_name: data.get("display_name") || "Telegram bot",
+        token: formValue(form, "token"),
+        display_name: formValue(form, "display_name") || "Telegram bot",
       }),
     });
     if (status) status.textContent = `Бот @${payload.bot?.username || "telegram"} сохранен`;
@@ -2329,12 +2351,12 @@ async function discoverOnboardingGroups() {
             <strong>${escapeHtml(candidate.title)}</strong>
             <p class="muted">${escapeHtml(candidate.chat_type)} ${escapeHtml(candidate.chat_id)}</p>
           </div>
-          <button type="button"
+          <md-filled-button type="button"
             data-chat-id="${escapeHtml(candidate.chat_id)}"
             data-title="${escapeHtml(candidate.title)}"
             data-thread-id="${escapeHtml(candidate.message_thread_id ?? "")}">
             Выбрать
-          </button>
+          </md-filled-button>
         </div>`
       )
       .join("");
@@ -2379,13 +2401,13 @@ async function uploadOnboardingSession(event) {
     await api("/api/onboarding/userbots/session-file", {
       method: "POST",
       body: JSON.stringify({
-        display_name: data.get("display_name"),
-        session_name: data.get("session_name"),
+        display_name: formValue(form, "display_name"),
+        session_name: formValue(form, "session_name"),
         session_file_name: file.name,
         session_file_base64: sessionFileBase64,
-        api_id: Number.parseInt(data.get("api_id"), 10),
-        api_hash: data.get("api_hash"),
-        make_default: data.get("make_default") === "on",
+        api_id: Number.parseInt(formValue(form, "api_id"), 10),
+        api_hash: formValue(form, "api_hash"),
+        make_default: formChecked(form, "make_default"),
       }),
     });
     if (status) status.textContent = "Юзербот сохранен";
@@ -2401,17 +2423,16 @@ async function startInteractiveUserbotLogin(event) {
   const form = event.currentTarget;
   const status = document.querySelector("#onboarding-interactive-status");
   const completeForm = document.querySelector("#onboarding-interactive-complete-form");
-  const data = new FormData(form);
   try {
     const payload = await api("/api/onboarding/userbots/interactive/start", {
       method: "POST",
       body: JSON.stringify({
-        display_name: data.get("display_name"),
-        session_name: data.get("session_name"),
-        phone: data.get("phone"),
-        api_id: Number.parseInt(data.get("api_id"), 10),
-        api_hash: data.get("api_hash"),
-        make_default: data.get("make_default") === "on",
+        display_name: formValue(form, "display_name"),
+        session_name: formValue(form, "session_name"),
+        phone: formValue(form, "phone"),
+        api_id: Number.parseInt(formValue(form, "api_id"), 10),
+        api_hash: formValue(form, "api_hash"),
+        make_default: formChecked(form, "make_default"),
       }),
     });
     completeForm?.classList.remove("is-hidden");
@@ -2427,14 +2448,13 @@ async function completeInteractiveUserbotLogin(event) {
   event.preventDefault();
   const form = event.currentTarget;
   const status = document.querySelector("#onboarding-interactive-status");
-  const data = new FormData(form);
   try {
     await api("/api/onboarding/userbots/interactive/complete", {
       method: "POST",
       body: JSON.stringify({
-        login_id: data.get("login_id"),
-        code: data.get("code"),
-        password: data.get("password") || null,
+        login_id: formValue(form, "login_id"),
+        code: formValue(form, "code"),
+        password: formValue(form, "password") || null,
       }),
     });
     if (status) status.textContent = "Интерактивный вход завершен";

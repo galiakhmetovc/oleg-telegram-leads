@@ -17,35 +17,34 @@ def login_page() -> str:
         page="login",
         title="PUR Leads",
         main="""
-        <main class="login-shell">
-          <section class="login-panel">
-            <div class="brand-line">
+        <main class="material-auth-shell">
+          <section class="material-auth-panel">
+            <div class="material-brand-lockup">
               <span class="brand-mark">PUR</span>
               <span class="muted">Leads</span>
             </div>
-            <h1>Вход оператора</h1>
-            <form id="local-login-form" class="stack" autocomplete="on">
-              <label>
-                Логин
-                <input name="username" type="text" autocomplete="username" required>
-              </label>
-              <label>
-                Пароль
-                <input name="password" type="password" autocomplete="current-password" required>
-              </label>
-              <button type="submit">Войти</button>
+            <div class="material-auth-copy">
+              <h1 class="md-typescale-headline-large">Вход оператора</h1>
+              <p class="muted">Единый рабочий кабинет для лидов, источников и каталога.</p>
+            </div>
+            <form id="local-login-form" class="material-auth-form" autocomplete="on">
+              <md-outlined-text-field name="username" label="Логин" autocomplete="username" required>
+              </md-outlined-text-field>
+              <md-outlined-text-field name="password" label="Пароль" type="password"
+                autocomplete="current-password" required>
+              </md-outlined-text-field>
+              <md-filled-button type="submit">Войти</md-filled-button>
               <p id="login-status" class="status-line" role="status"></p>
             </form>
-            <form id="change-password-form" class="stack is-hidden" autocomplete="off">
-              <div class="stack">
-                <h2>Сменить пароль</h2>
+            <form id="change-password-form" class="material-auth-form is-hidden" autocomplete="off">
+              <div class="material-auth-copy">
+                <h2 class="md-typescale-title-large">Сменить пароль</h2>
                 <p class="muted">Встроенный администратор должен заменить одноразовый пароль перед работой.</p>
               </div>
-              <label>
-                Новый пароль
-                <input name="new_password" type="password" autocomplete="new-password" required minlength="8">
-              </label>
-              <button type="submit">Сохранить пароль</button>
+              <md-outlined-text-field name="new_password" label="Новый пароль" type="password"
+                autocomplete="new-password" required minlength="8">
+              </md-outlined-text-field>
+              <md-filled-button type="submit">Сохранить пароль</md-filled-button>
               <p id="change-password-status" class="status-line" role="status"></p>
             </form>
             <div id="telegram-login-hook" class="telegram-hook"></div>
@@ -267,7 +266,7 @@ def onboarding_page(
             page="onboarding",
             title="Онбординг",
             main="""
-            <main class="workspace onboarding-workspace">
+            <main class="workspace onboarding-workspace onboarding-material-shell">
               <header class="topbar">
                 <div>
                   <span class="eyebrow">PUR Leads</span>
@@ -283,18 +282,19 @@ def onboarding_page(
                   <a href="/operations">Операции</a>
                   <a href="/onboarding">Онбординг</a>
                   <a href="/admin">Админка</a>
-                  <button id="logout-button" type="button">Выйти</button>
+                  <md-outlined-button id="logout-button" type="button">Выйти</md-outlined-button>
                 </nav>
               </header>
               <section class="onboarding-layout">
                 <aside class="onboarding-rail" aria-label="Шаги подключения">
                   <div class="section-head">
                     <h2>Статус</h2>
-                    <button id="onboarding-refresh" class="icon-button" type="button" title="Обновить">
-                      <span class="material-symbols-outlined" aria-hidden="true">refresh</span>
-                    </button>
+                    <md-icon-button id="onboarding-refresh" type="button" title="Обновить">
+                      <md-icon>refresh</md-icon>
+                    </md-icon-button>
                   </div>
-                  <div id="onboarding-status" class="onboarding-steps" aria-live="polite"></div>
+                  <md-linear-progress id="onboarding-progress" value="0"></md-linear-progress>
+                  <md-list id="onboarding-status" class="onboarding-steps" aria-live="polite"></md-list>
                   <div class="onboarding-note">
                     После смены временного пароля настройте бота, группу уведомлений и юзербота.
                     Источники для поиска лидов можно добавить позже в разделе
@@ -304,138 +304,122 @@ def onboarding_page(
                 <section class="onboarding-main">
                   <section class="onboarding-panel">
                     <div class="onboarding-panel-head">
-                      <span class="material-symbols-outlined" aria-hidden="true">smart_toy</span>
+                      <md-icon aria-hidden="true">smart_toy</md-icon>
                       <div>
-                        <h2>Обычный Telegram-бот</h2>
+                        <h2 class="md-typescale-title-large">Обычный Telegram-бот</h2>
                         <p class="muted">Нужен для входа через Telegram и оперативных уведомлений.</p>
                       </div>
                     </div>
                     <form id="onboarding-bot-form" class="material-form">
-                      <label>
-                        Токен BotFather
-                        <input name="token" type="password" autocomplete="off" required
-                          placeholder="123456:ABC...">
-                      </label>
-                      <label>
-                        Название
-                        <input name="display_name" value="PUR Leads bot">
-                      </label>
-                      <button type="submit">
-                        <span class="material-symbols-outlined" aria-hidden="true">send</span>
+                      <md-outlined-text-field name="token" label="Токен BotFather" type="password"
+                        autocomplete="off" required placeholder="123456:ABC...">
+                      </md-outlined-text-field>
+                      <md-outlined-text-field name="display_name" label="Название" value="PUR Leads bot">
+                      </md-outlined-text-field>
+                      <md-filled-button type="submit">
+                        <md-icon slot="icon">send</md-icon>
                         Проверить и сохранить
-                      </button>
+                      </md-filled-button>
                     </form>
                     <p id="onboarding-bot-status" class="status-line" role="status"></p>
                   </section>
                   <section class="onboarding-panel">
                     <div class="onboarding-panel-head">
-                      <span class="material-symbols-outlined" aria-hidden="true">forum</span>
+                      <md-icon aria-hidden="true">forum</md-icon>
                       <div>
-                        <h2>Группа уведомлений</h2>
+                        <h2 class="md-typescale-title-large">Группа уведомлений</h2>
                         <p class="muted">Добавьте бота в группу, отправьте любое сообщение и выберите чат здесь.</p>
                       </div>
                     </div>
-                    <div class="inline-form">
-                      <button id="onboarding-group-discover" type="button">
-                        <span class="material-symbols-outlined" aria-hidden="true">refresh</span>
+                    <div class="material-action-row">
+                      <md-filled-button id="onboarding-group-discover" type="button">
+                        <md-icon slot="icon">refresh</md-icon>
                         Найти доступные группы
-                      </button>
+                      </md-filled-button>
                     </div>
                     <div id="onboarding-group-candidates" class="table-list"></div>
                     <p id="onboarding-group-status" class="status-line" role="status"></p>
                   </section>
                   <section class="onboarding-panel">
                     <div class="onboarding-panel-head">
-                      <span class="material-symbols-outlined" aria-hidden="true">upload_file</span>
+                      <md-icon aria-hidden="true">upload_file</md-icon>
                       <div>
-                        <h2>Юзербот через файл сессии</h2>
+                        <h2 class="md-typescale-title-large">Юзербот через файл сессии</h2>
                         <p class="muted">Подходит, если Telethon-сессия уже создана и проверена.</p>
                       </div>
                     </div>
                     <form id="onboarding-session-form" class="material-form">
-                      <label>
-                        Название
-                        <input name="display_name" required placeholder="Основной юзербот">
-                      </label>
-                      <label>
-                        Имя сессии
-                        <input name="session_name" required placeholder="main">
-                      </label>
-                      <label>
+                      <md-outlined-text-field name="display_name" label="Название" required
+                        placeholder="Основной юзербот">
+                      </md-outlined-text-field>
+                      <md-outlined-text-field name="session_name" label="Имя сессии" required
+                        placeholder="main">
+                      </md-outlined-text-field>
+                      <label class="material-file-field">
                         Файл .session
                         <input name="session_file" type="file" accept=".session" required>
                       </label>
-                      <label>
-                        Telegram API ID
-                        <input name="api_id" type="number" min="1" step="1" required>
-                      </label>
-                      <label>
-                        Telegram API hash
-                        <input name="api_hash" type="password" autocomplete="off" required>
-                      </label>
-                      <label class="checkbox-line">
-                        <input name="make_default" type="checkbox" checked>
+                      <md-outlined-text-field name="api_id" label="Telegram API ID" type="number"
+                        min="1" step="1" required>
+                      </md-outlined-text-field>
+                      <md-outlined-text-field name="api_hash" label="Telegram API hash" type="password"
+                        autocomplete="off" required>
+                      </md-outlined-text-field>
+                      <label class="material-checkbox-line">
+                        <md-checkbox name="make_default" checked></md-checkbox>
                         Использовать по умолчанию
                       </label>
-                      <button type="submit">
-                        <span class="material-symbols-outlined" aria-hidden="true">upload_file</span>
+                      <md-filled-button type="submit">
+                        <md-icon slot="icon">upload_file</md-icon>
                         Загрузить сессию
-                      </button>
+                      </md-filled-button>
                     </form>
                     <p id="onboarding-session-status" class="status-line" role="status"></p>
                   </section>
                   <section class="onboarding-panel">
                     <div class="onboarding-panel-head">
-                      <span class="material-symbols-outlined" aria-hidden="true">person_add</span>
+                      <md-icon aria-hidden="true">person_add</md-icon>
                       <div>
-                        <h2>Интерактивный вход юзербота</h2>
+                        <h2 class="md-typescale-title-large">Интерактивный вход юзербота</h2>
                         <p class="muted">Отправляет код Telegram на номер и создает сессию на сервере.</p>
                       </div>
                     </div>
                     <form id="onboarding-interactive-start-form" class="material-form">
-                      <label>
-                        Название
-                        <input name="display_name" required placeholder="Основной юзербот">
-                      </label>
-                      <label>
-                        Имя сессии
-                        <input name="session_name" required placeholder="main">
-                      </label>
-                      <label>
-                        Телефон
-                        <input name="phone" required placeholder="+79990000000">
-                      </label>
-                      <label>
-                        Telegram API ID
-                        <input name="api_id" type="number" min="1" step="1" required>
-                      </label>
-                      <label>
-                        Telegram API hash
-                        <input name="api_hash" type="password" autocomplete="off" required>
-                      </label>
-                      <label class="checkbox-line">
-                        <input name="make_default" type="checkbox" checked>
+                      <md-outlined-text-field name="display_name" label="Название" required
+                        placeholder="Основной юзербот">
+                      </md-outlined-text-field>
+                      <md-outlined-text-field name="session_name" label="Имя сессии" required
+                        placeholder="main">
+                      </md-outlined-text-field>
+                      <md-outlined-text-field name="phone" label="Телефон" required
+                        placeholder="+79990000000">
+                      </md-outlined-text-field>
+                      <md-outlined-text-field name="api_id" label="Telegram API ID" type="number"
+                        min="1" step="1" required>
+                      </md-outlined-text-field>
+                      <md-outlined-text-field name="api_hash" label="Telegram API hash" type="password"
+                        autocomplete="off" required>
+                      </md-outlined-text-field>
+                      <label class="material-checkbox-line">
+                        <md-checkbox name="make_default" checked></md-checkbox>
                         Использовать по умолчанию
                       </label>
-                      <button type="submit">
-                        <span class="material-symbols-outlined" aria-hidden="true">send</span>
+                      <md-filled-button type="submit">
+                        <md-icon slot="icon">send</md-icon>
                         Получить код
-                      </button>
+                      </md-filled-button>
                     </form>
                     <form id="onboarding-interactive-complete-form" class="material-form is-hidden">
                       <input name="login_id" type="hidden">
-                      <label>
-                        Код Telegram
-                        <input name="code" required inputmode="numeric">
-                      </label>
-                      <label>
-                        Пароль 2FA
-                        <input name="password" type="password" autocomplete="off">
-                      </label>
-                      <button type="submit">
-                        <span class="material-symbols-outlined" aria-hidden="true">check_circle</span>
+                      <md-outlined-text-field name="code" label="Код Telegram" required inputmode="numeric">
+                      </md-outlined-text-field>
+                      <md-outlined-text-field name="password" label="Пароль 2FA" type="password"
+                        autocomplete="off">
+                      </md-outlined-text-field>
+                      <md-filled-button type="submit">
+                        <md-icon slot="icon">check_circle</md-icon>
                         Завершить вход
-                      </button>
+                      </md-filled-button>
                     </form>
                     <p id="onboarding-interactive-status" class="status-line" role="status"></p>
                   </section>
@@ -977,11 +961,15 @@ def _page(*, page: str, title: str, main: str) -> str:
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{title}</title>
-  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined&amp;icon_names=check_circle,forum,person_add,radio_button_unchecked,refresh,send,smart_toy,upload_file&amp;display=block">
+  <link rel="icon" href="data:,">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&amp;family=Material+Symbols+Outlined&amp;icon_names=check_circle,forum,person_add,radio_button_unchecked,refresh,send,smart_toy,upload_file&amp;display=block">
   <link rel="stylesheet" href="/static/app.css">
 </head>
 <body data-page="{page}">
   {main}
+  <script type="module" src="/static/vendor/material-web.js"></script>
   <script src="/static/app.js" defer></script>
 </body>
 </html>"""
