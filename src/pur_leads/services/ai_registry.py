@@ -208,6 +208,9 @@ class AiAgentRouteSelection:
     thinking_enabled: bool
     thinking_mode: str
     structured_output_required: bool
+    fallback_on_error: bool
+    fallback_on_rate_limit: bool
+    fallback_on_invalid_output: bool
     supports_structured_output: bool
     supports_json_mode: bool
     supports_thinking: bool
@@ -368,6 +371,9 @@ class AiRegistryService:
                     ai_agent_routes_table.c.structured_output_required.label(
                         "route_structured_output_required"
                     ),
+                    ai_agent_routes_table.c.fallback_on_error,
+                    ai_agent_routes_table.c.fallback_on_rate_limit,
+                    ai_agent_routes_table.c.fallback_on_invalid_output,
                     ai_model_profiles_table.c.max_input_tokens.label("profile_max_input_tokens"),
                     ai_model_profiles_table.c.max_output_tokens.label("profile_max_output_tokens"),
                     ai_model_profiles_table.c.temperature.label("profile_temperature"),

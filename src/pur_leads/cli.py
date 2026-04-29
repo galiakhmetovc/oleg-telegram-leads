@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import inspect
 import json
 import os
 from collections.abc import Sequence
@@ -115,14 +116,11 @@ def _settings_set(args: argparse.Namespace) -> None:
 
 def _worker_once(args: argparse.Namespace) -> None:
     _ensure_database_upgraded(args)
-    with _session_from_args(args) as session:
-        handlers = _build_worker_handlers(session)
-        runtime = WorkerRuntime(session, handlers=handlers, worker_name="cli-worker")
-        result = asyncio.run(runtime.run_once())
-        if result.status == "idle":
-            print("no queued jobs")
-            return
-        print(f"{result.status} job {result.job_id} ({result.job_type})")
+    result = asyncio.run(_worker_run_once(args, worker_name="cli-worker"))
+    if result.status == "idle":
+        print("no queued jobs")
+        return
+    print(f"{result.status} job {result.job_id} ({result.job_type})")
 
 
 def _worker_run(args: argparse.Namespace) -> None:
@@ -169,12 +167,20 @@ async def _worker_run_single_loop(args: argparse.Namespace, *, worker_name: str)
 
 async def _worker_run_once(args: argparse.Namespace, *, worker_name: str) -> WorkerRunResult:
     with _session_from_args(args) as session:
-        runtime = WorkerRuntime(
-            session,
-            handlers=_build_worker_handlers(session, worker_name=worker_name),
-            worker_name=worker_name,
-        )
-        return await runtime.run_once()
+        telegram_client = _build_telegram_client(session)
+        try:
+            runtime = WorkerRuntime(
+                session,
+                handlers=_build_worker_handlers(
+                    session,
+                    worker_name=worker_name,
+                    telegram_client=telegram_client,
+                ),
+                worker_name=worker_name,
+            )
+            return await runtime.run_once()
+        finally:
+            await _close_async_resource(telegram_client)
 
 
 def _worker_concurrency(args: argparse.Namespace) -> int:
@@ -221,7 +227,12 @@ def _ensure_database_upgraded(args: argparse.Namespace) -> None:
     upgrade_database(_engine_from_args(args))
 
 
-def _build_worker_handlers(session, *, worker_name: str = "cli-worker"):
+def _build_worker_handlers(
+    session,
+    *,
+    worker_name: str = "cli-worker",
+    telegram_client=None,  # noqa: ANN001
+):
     settings = load_settings()
     handlers = {}
     handlers.update(
@@ -247,11 +258,22 @@ def _build_worker_handlers(session, *, worker_name: str = "cli-worker"):
     handlers.update(
         build_telegram_handler_registry(
             session,
-            _build_telegram_client(session),
+            telegram_client if telegram_client is not None else _build_telegram_client(session),
             artifact_storage_path=settings.artifact_storage_path,
         )
     )
     return handlers
+
+
+async def _close_async_resource(resource) -> None:  # type: ignore[no-untyped-def]
+    close = getattr(resource, "aclose", None)
+    if close is None:
+        close = getattr(resource, "close", None)
+    if close is None:
+        return
+    result = close()
+    if inspect.isawaitable(result):
+        await result
 
 
 def _build_lead_notifier(session, settings):
@@ -270,45 +292,122 @@ def _build_catalog_extractor(session, settings, *, worker_name: str):
     if not bool(settings_service.get("catalog_llm_extraction_enabled")):
         return HeuristicCatalogExtractor(session)
     route = _select_ai_route(session, agent_key="catalog_extractor", route_role="primary")
+    heuristic_fallback = bool(settings_service.get("catalog_llm_fallback_to_heuristic"))
     provider = str(_setting_or_route_provider(settings_service, "catalog_llm_provider", route))
     api_key = _zai_api_key_for_route(session, settings, route)
-    fallback = bool(settings_service.get("catalog_llm_fallback_to_heuristic"))
     if provider != "zai" or not api_key:
-        if fallback:
+        if heuristic_fallback:
             return HeuristicCatalogExtractor(session)
         raise ValueError("catalog LLM extractor is enabled but Z.AI is not configured")
-    base_url = str(
-        _setting_or_env_or_default(
-            settings_service,
-            "catalog_llm_base_url",
-            env_names=("PUR_CATALOG_LLM_BASE_URL", "CATALOG_LLM_BASE_URL"),
-            env_value=settings.catalog_llm_base_url,
-            default=route.base_url if route is not None else settings.catalog_llm_base_url,
-        )
+
+    fallback_extractor = _build_catalog_rate_limit_fallback_extractor(
+        session,
+        settings,
+        settings_service,
+        primary_route=route,
+        worker_name=worker_name,
+        heuristic_fallback=heuristic_fallback,
     )
-    model = str(
-        _setting_or_env_or_default(
-            settings_service,
-            "catalog_llm_model",
-            env_names=("PUR_CATALOG_LLM_MODEL", "CATALOG_LLM_MODEL"),
-            env_value=settings.catalog_llm_model,
-            default=route.model if route is not None else settings.catalog_llm_model,
-        )
+    return _build_catalog_llm_extractor_for_route(
+        session,
+        settings,
+        settings_service,
+        route=route,
+        worker_name=worker_name,
+        allow_settings_overrides=True,
+        fallback_extractor=fallback_extractor,
+        fallback_on_rate_limit=fallback_extractor is not None,
     )
-    temperature = float(
-        _setting_or_default(
-            settings_service,
-            "catalog_llm_temperature",
-            route.temperature if route is not None and route.temperature is not None else 0.0,
-        )
+
+
+def _build_catalog_rate_limit_fallback_extractor(
+    session,
+    settings,
+    settings_service: SettingsService,
+    *,
+    primary_route: AiAgentRouteSelection | None,
+    worker_name: str,
+    heuristic_fallback: bool,
+):
+    route_allows_fallback = (
+        primary_route.fallback_on_rate_limit if primary_route is not None else True
     )
-    max_tokens = int(
-        _setting_or_default(
-            settings_service,
-            "catalog_llm_max_tokens",
-            route.max_output_tokens if route is not None and route.max_output_tokens else 4096,
+    if not route_allows_fallback:
+        return None
+    if bool(settings_service.get("catalog_llm_rate_limit_fallback_enabled")):
+        fallback_route = _select_ai_route(
+            session,
+            agent_key="catalog_extractor",
+            route_role="fallback",
         )
-    )
+        if fallback_route is not None:
+            fallback_api_key = _zai_api_key_for_route(session, settings, fallback_route)
+            if fallback_route.provider == "zai" and fallback_api_key:
+                return _build_catalog_llm_extractor_for_route(
+                    session,
+                    settings,
+                    settings_service,
+                    route=fallback_route,
+                    worker_name=worker_name,
+                    allow_settings_overrides=False,
+                )
+    return HeuristicCatalogExtractor(session) if heuristic_fallback else None
+
+
+def _build_catalog_llm_extractor_for_route(
+    session,
+    settings,
+    settings_service: SettingsService,
+    *,
+    route: AiAgentRouteSelection | None,
+    worker_name: str,
+    allow_settings_overrides: bool,
+    fallback_extractor=None,  # noqa: ANN001
+    fallback_on_rate_limit: bool = False,
+):
+    if allow_settings_overrides:
+        base_url = str(
+            _setting_or_env_or_default(
+                settings_service,
+                "catalog_llm_base_url",
+                env_names=("PUR_CATALOG_LLM_BASE_URL", "CATALOG_LLM_BASE_URL"),
+                env_value=settings.catalog_llm_base_url,
+                default=route.base_url if route is not None else settings.catalog_llm_base_url,
+            )
+        )
+        model = str(
+            _setting_or_env_or_default(
+                settings_service,
+                "catalog_llm_model",
+                env_names=("PUR_CATALOG_LLM_MODEL", "CATALOG_LLM_MODEL"),
+                env_value=settings.catalog_llm_model,
+                default=route.model if route is not None else settings.catalog_llm_model,
+            )
+        )
+        temperature = float(
+            _setting_or_default(
+                settings_service,
+                "catalog_llm_temperature",
+                route.temperature if route is not None and route.temperature is not None else 0.0,
+            )
+        )
+        max_tokens = int(
+            _setting_or_default(
+                settings_service,
+                "catalog_llm_max_tokens",
+                route.max_output_tokens if route is not None and route.max_output_tokens else 4096,
+            )
+        )
+    else:
+        if route is None:
+            raise ValueError("catalog fallback route is required")
+        base_url = route.base_url
+        model = route.model
+        temperature = float(route.temperature if route.temperature is not None else 0.0)
+        max_tokens = int(route.max_output_tokens or 4096)
+    api_key = _zai_api_key_for_route(session, settings, route)
+    if not api_key:
+        raise ValueError("catalog LLM extractor is enabled but Z.AI is not configured")
     return LlmCatalogExtractor(
         client=ZaiChatCompletionClient(
             api_key=api_key,
@@ -327,6 +426,8 @@ def _build_catalog_extractor(session, settings, *, worker_name: str):
         session=session,
         temperature=temperature,
         max_tokens=max_tokens,
+        fallback_extractor=fallback_extractor,
+        fallback_on_rate_limit=fallback_on_rate_limit,
     )
 
 

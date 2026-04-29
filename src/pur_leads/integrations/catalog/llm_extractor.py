@@ -36,12 +36,18 @@ class LlmCatalogExtractor:
         session: Session | None = None,
         temperature: float = 0.0,
         max_tokens: int = 4096,
+        fallback_extractor: Any | None = None,
+        fallback_on_rate_limit: bool = False,
+        fallback_on_error: bool = False,
     ) -> None:
         self.client = client
         self.model = model
         self.session = session
         self.temperature = temperature
         self.max_tokens = max_tokens
+        self.fallback_extractor = fallback_extractor
+        self.fallback_on_rate_limit = fallback_on_rate_limit
+        self.fallback_on_error = fallback_on_error
         self.last_token_usage_json: dict[str, Any] | None = None
 
     async def extract_catalog_facts(
@@ -53,12 +59,21 @@ class LlmCatalogExtractor:
     ) -> list[CatalogExtractedFact]:
         self.last_token_usage_json = None
         scope = self._load_scope(source_id=source_id, chunk_id=chunk_id, payload=payload)
-        completion = await self.client.complete(
-            messages=_prompt_messages(scope.text),
-            model=self.model,
-            temperature=self.temperature,
-            max_tokens=self.max_tokens,
-        )
+        try:
+            completion = await self.client.complete(
+                messages=_prompt_messages(scope.text),
+                model=self.model,
+                temperature=self.temperature,
+                max_tokens=self.max_tokens,
+            )
+        except Exception as exc:
+            if self._should_use_fallback(exc):
+                return await self.fallback_extractor.extract_catalog_facts(
+                    source_id=source_id,
+                    chunk_id=chunk_id,
+                    payload=payload,
+                )
+            raise
         self.last_token_usage_json = {
             **completion.usage,
             "request_id": completion.request_id,
@@ -66,6 +81,13 @@ class LlmCatalogExtractor:
         }
         payload_json = _parse_json_object(completion.content)
         return _facts_from_payload(payload_json, source_id=scope.source_id, chunk_id=scope.chunk_id)
+
+    def _should_use_fallback(self, exc: Exception) -> bool:
+        if self.fallback_extractor is None:
+            return False
+        if self.fallback_on_rate_limit and _is_rate_limit_error(exc):
+            return True
+        return self.fallback_on_error
 
     def _load_scope(
         self,
@@ -129,6 +151,15 @@ def _parse_json_object(content: str) -> dict[str, Any]:
     if not isinstance(parsed, dict):
         raise ValueError("LLM catalog extractor expected valid JSON object")
     return parsed
+
+
+def _is_rate_limit_error(exc: Exception) -> bool:
+    retry_after_seconds = getattr(exc, "retry_after_seconds", None)
+    if isinstance(retry_after_seconds, int | float) and retry_after_seconds > 0:
+        return True
+    status_code = getattr(exc, "status_code", None)
+    error_code = str(getattr(exc, "error_code", "") or "")
+    return status_code == 429 or error_code in {"1302", "429"}
 
 
 def _facts_from_payload(

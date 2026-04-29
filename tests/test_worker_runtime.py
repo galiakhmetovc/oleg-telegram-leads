@@ -146,6 +146,36 @@ async def test_worker_once_delays_retry_when_handler_exposes_retry_after(runtime
 
 
 @pytest.mark.asyncio
+async def test_worker_retry_delay_grows_exponentially(runtime_session):
+    class RetryLaterError(Exception):
+        retry_after_seconds = 37
+
+    scheduler = SchedulerService(runtime_session)
+    job = scheduler.enqueue(job_type="send_notifications", scope_type="global")
+    runtime_session.execute(
+        update(scheduler_jobs_table)
+        .where(scheduler_jobs_table.c.id == job.id)
+        .values(attempt_count=1)
+    )
+    runtime_session.commit()
+    before = utc_now()
+
+    async def handler(acquired_job):
+        raise RetryLaterError("Telegram rate limit")
+
+    runtime = WorkerRuntime(runtime_session, handlers={"send_notifications": handler})
+
+    result = await runtime.run_once()
+
+    stored = scheduler.repository.get(job.id)
+    assert stored is not None
+    assert result.status == "failed"
+    assert stored.status == "queued"
+    assert stored.next_retry_at is not None
+    assert stored.next_retry_at >= before + timedelta(seconds=74)
+
+
+@pytest.mark.asyncio
 async def test_worker_once_fails_unsupported_job_with_operational_event(runtime_session):
     scheduler = SchedulerService(runtime_session)
     job = scheduler.enqueue(job_type="parse_artifact", scope_type="parser")

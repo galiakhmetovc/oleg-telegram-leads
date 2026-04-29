@@ -233,6 +233,14 @@ class TelethonTelegramClient:
             self._client = client
         return self._client
 
+    async def aclose(self) -> None:
+        if self._client is None:
+            return
+        client = self._client
+        self._client = None
+        if hasattr(client, "disconnect"):
+            await _maybe_await(client.disconnect())
+
 
 async def _get_message(client: Any, entity: Any, message_id: int) -> Any | None:
     if hasattr(client, "get_messages"):

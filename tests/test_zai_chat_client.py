@@ -199,3 +199,29 @@ async def test_zai_chat_client_raises_masked_provider_error():
     assert exc.value.status_code == 429
     assert exc.value.error_code == "1310"
     assert "secret-key" not in str(exc.value)
+
+
+@pytest.mark.asyncio
+async def test_zai_chat_client_marks_request_rate_limit_as_retryable():
+    def handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            429,
+            json={"error": {"code": "1302", "message": "Rate limit reached for requests"}},
+        )
+
+    client = ZaiChatCompletionClient(
+        api_key="secret-key",
+        base_url="https://api.z.ai/api/coding/paas/v4/",
+        http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
+    )
+
+    with pytest.raises(AiProviderError) as exc:
+        await client.complete(
+            messages=[{"role": "user", "content": "extract catalog"}],
+            model="glm-4.5-flash",
+            temperature=0.0,
+            max_tokens=1024,
+        )
+
+    assert exc.value.error_code == "1302"
+    assert exc.value.retry_after_seconds == 60

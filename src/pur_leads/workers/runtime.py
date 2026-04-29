@@ -257,7 +257,11 @@ class WorkerRuntime:
 
     def _fail_job(self, job: SchedulerJobRecord, exc: Exception) -> WorkerRunResult:
         error = _safe_exception_message(exc)
-        retry_at = _retry_at_for_exception(exc)
+        retry_at = _retry_at_for_exception(
+            self.session,
+            exc,
+            attempt_number=job.attempt_count + 1,
+        )
         _mark_failed_notification_event(self.session, job=job, error=error)
         self.audit.record_event(
             event_type="scheduler",
@@ -1413,11 +1417,33 @@ def _safe_exception_message(exc: Exception) -> str:
     return str(exc) or exc.__class__.__name__
 
 
-def _retry_at_for_exception(exc: Exception) -> datetime:
+def _retry_at_for_exception(
+    session: Session,
+    exc: Exception,
+    *,
+    attempt_number: int,
+) -> datetime:
     retry_after_seconds = getattr(exc, "retry_after_seconds", None)
     if isinstance(retry_after_seconds, int | float) and retry_after_seconds > 0:
-        return utc_now() + timedelta(seconds=int(retry_after_seconds))
-    return utc_now()
+        base_delay = float(retry_after_seconds)
+    else:
+        base_delay = _float_setting(session, "worker_retry_base_delay_seconds", 5.0)
+    multiplier = max(1.0, _float_setting(session, "worker_retry_backoff_multiplier", 2.0))
+    max_delay = max(1.0, _float_setting(session, "worker_retry_max_delay_seconds", 900.0))
+    exponent = max(0, attempt_number - 1)
+    delay_seconds = min(max_delay, base_delay * (multiplier**exponent))
+    return utc_now() + timedelta(seconds=int(delay_seconds))
+
+
+def _float_setting(session: Session, key: str, default: float) -> float:
+    try:
+        value = SettingsService(session).get(key)
+    except Exception:
+        return default
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
 
 
 def _delay_queued_peer_jobs_after_retry(

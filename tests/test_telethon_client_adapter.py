@@ -293,6 +293,26 @@ async def test_telethon_client_requires_authorized_session():
         await client.resolve_source("@purmaster")
 
 
+@pytest.mark.asyncio
+async def test_telethon_client_closes_connected_session():
+    fake = FakeTelethonClient(
+        entity=FakeEntity(id=-1001, username="purmaster", title="PUR", broadcast=True),
+        messages=[_message(42, text="latest")],
+    )
+    client = TelethonTelegramClient(
+        session_path="/secure/userbot.session",
+        api_id=123,
+        api_hash="hash",
+        client_factory=lambda *args, **kwargs: fake,
+    )
+
+    await client.resolve_source("@purmaster")
+    await client.aclose()
+
+    assert fake.connect_count == 1
+    assert fake.disconnect_count == 1
+
+
 class FakeTelethonClient:
     def __init__(
         self,
@@ -305,10 +325,14 @@ class FakeTelethonClient:
         self.messages = messages
         self.authorized = authorized
         self.connect_count = 0
+        self.disconnect_count = 0
         self.iter_calls: list[dict[str, Any]] = []
 
     async def connect(self) -> None:
         self.connect_count += 1
+
+    async def disconnect(self) -> None:
+        self.disconnect_count += 1
 
     async def is_user_authorized(self) -> bool:
         return self.authorized

@@ -25,11 +25,13 @@ class AiProviderError(RuntimeError):
         status_code: int | None,
         error_code: str | None,
         message: str,
+        retry_after_seconds: int | None = None,
     ) -> None:
         super().__init__(f"AI provider error {error_code or 'unknown'}: {message}")
         self.status_code = status_code
         self.error_code = error_code
         self.provider_message = message
+        self.retry_after_seconds = retry_after_seconds
 
 
 class ZaiChatCompletionClient:
@@ -121,6 +123,7 @@ class ZaiChatCompletionClient:
                 status_code=response.status_code,
                 error_code=_optional_string(error.get("code")),
                 message=_optional_string(error.get("message")) or response.reason_phrase,
+                retry_after_seconds=_retry_after_seconds(response, error),
             )
         try:
             content = data["choices"][0]["message"]["content"]
@@ -163,6 +166,20 @@ def _json_response(response: httpx.Response) -> dict[str, Any]:
             message="AI provider returned non-object response",
         )
     return data
+
+
+def _retry_after_seconds(response: httpx.Response, error: dict[str, Any]) -> int | None:
+    header_value = response.headers.get("retry-after")
+    if header_value is not None:
+        try:
+            parsed = int(float(header_value))
+        except ValueError:
+            parsed = 0
+        if parsed > 0:
+            return parsed
+    if _optional_string(error.get("code")) == "1302":
+        return 60
+    return None
 
 
 def _optional_string(value: Any) -> str | None:
