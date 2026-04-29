@@ -4,9 +4,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, cast
 
 from sqlalchemy import insert, select, update
+from sqlalchemy.engine import CursorResult
 from sqlalchemy.orm import Session
 
 from pur_leads.core.ids import new_id
@@ -240,18 +241,26 @@ class SchedulerRepository:
         worker_name: str,
         locked_at: datetime,
         lease_expires_at: datetime,
-    ) -> SchedulerJobRecord:
-        self.session.execute(
-            update(scheduler_jobs_table)
-            .where(scheduler_jobs_table.c.id == job_id)
-            .values(
-                status="running",
-                locked_by=worker_name,
-                locked_at=self._to_db_datetime(locked_at),
-                lease_expires_at=self._to_db_datetime(lease_expires_at),
-                updated_at=self._to_db_datetime(locked_at),
-            )
+    ) -> SchedulerJobRecord | None:
+        result = cast(
+            CursorResult[Any],
+            self.session.execute(
+                update(scheduler_jobs_table)
+                .where(
+                    scheduler_jobs_table.c.id == job_id,
+                    scheduler_jobs_table.c.status == "queued",
+                )
+                .values(
+                    status="running",
+                    locked_by=worker_name,
+                    locked_at=self._to_db_datetime(locked_at),
+                    lease_expires_at=self._to_db_datetime(lease_expires_at),
+                    updated_at=self._to_db_datetime(locked_at),
+                )
+            ),
         )
+        if result.rowcount == 0:
+            return None
         return self.get(job_id)  # type: ignore[return-value]
 
     def recover_expired_leases(self, now: datetime) -> int:

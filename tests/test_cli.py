@@ -439,6 +439,29 @@ def test_cli_worker_run_supports_bounded_polling_loop(tmp_path, capsys):
     assert "worker stopped after 2 iterations" in output
 
 
+def test_cli_worker_run_supports_concurrent_bounded_polling_loop(tmp_path, capsys):
+    db_path = tmp_path / "cli.db"
+    main(["--database-path", str(db_path), "db", "upgrade"])
+
+    main(
+        [
+            "--database-path",
+            str(db_path),
+            "worker",
+            "run",
+            "--poll-interval-seconds",
+            "0",
+            "--max-iterations",
+            "1",
+            "--concurrency",
+            "2",
+        ]
+    )
+
+    output = capsys.readouterr().out
+    assert "worker stopped after 2 iterations" in output
+
+
 def test_cli_web_uses_database_path_and_bootstrap_env(tmp_path, monkeypatch):
     db_path = tmp_path / "cli.db"
     main(["--database-path", str(db_path), "db", "upgrade"])
@@ -615,10 +638,11 @@ class FakePdfArtifactParser:
 class FakeZaiChatCompletionClient:
     instances: list["FakeZaiChatCompletionClient"] = []
 
-    def __init__(self, *, api_key, base_url, timeout_seconds=60.0) -> None:
+    def __init__(self, *, api_key, base_url, timeout_seconds=60.0, **kwargs) -> None:
         self.api_key = api_key
         self.base_url = base_url
         self.timeout_seconds = timeout_seconds
+        self.kwargs = kwargs
         self.calls: list[dict[str, Any]] = []
         self.instances.append(self)
 

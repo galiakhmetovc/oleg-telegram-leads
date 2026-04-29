@@ -28,6 +28,7 @@ services:
     environment:
       PUR_DATABASE_PATH: /app/data/pur-leads.sqlite3
       PUR_LOG_LEVEL: ${PUR_LOG_LEVEL:-INFO}
+      PUR_WORKER_CONCURRENCY: ${PUR_WORKER_CONCURRENCY:-1}
       PUR_WEB_HOST: 0.0.0.0
       PUR_WEB_PORT: 8000
       PUR_TELEGRAM_BOT_TOKEN: ${PUR_TELEGRAM_BOT_TOKEN:-}

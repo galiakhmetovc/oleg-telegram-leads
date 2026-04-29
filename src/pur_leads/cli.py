@@ -29,6 +29,7 @@ from pur_leads.integrations.telegram.types import (
     TelegramDocumentDownload,
     TelegramMessage,
 )
+from pur_leads.services.ai_concurrency import AiModelConcurrencyService
 from pur_leads.services.settings import SettingsService
 from pur_leads.services.userbots import UserbotAccountService
 from pur_leads.workers.runtime import (
@@ -72,6 +73,7 @@ def build_parser() -> argparse.ArgumentParser:
     worker_run = worker_commands.add_parser("run")
     worker_run.add_argument("--poll-interval-seconds", type=float, default=5.0)
     worker_run.add_argument("--max-iterations", type=int, default=None)
+    worker_run.add_argument("--concurrency", type=int, default=None)
     worker_run.set_defaults(handler=_worker_run)
 
     web_parser = subcommands.add_parser("web")
@@ -125,12 +127,25 @@ def _worker_run(args: argparse.Namespace) -> None:
 
 
 async def _worker_run_loop(args: argparse.Namespace) -> int:
+    concurrency = _worker_concurrency(args)
+    if concurrency > 1:
+        counts = await asyncio.gather(
+            *(
+                _worker_run_single_loop(args, worker_name=f"cli-worker-{index + 1}")
+                for index in range(concurrency)
+            )
+        )
+        return sum(counts)
+    return await _worker_run_single_loop(args, worker_name="cli-worker")
+
+
+async def _worker_run_single_loop(args: argparse.Namespace, *, worker_name: str) -> int:
     iterations = 0
     with _session_from_args(args) as session:
         runtime = WorkerRuntime(
             session,
-            handlers=_build_worker_handlers(session),
-            worker_name="cli-worker",
+            handlers=_build_worker_handlers(session, worker_name=worker_name),
+            worker_name=worker_name,
         )
         while args.max_iterations is None or iterations < args.max_iterations:
             result = await runtime.run_once()
@@ -141,6 +156,22 @@ async def _worker_run_loop(args: argparse.Namespace) -> int:
             if args.poll_interval_seconds > 0:
                 await asyncio.sleep(args.poll_interval_seconds)
     return iterations
+
+
+def _worker_concurrency(args: argparse.Namespace) -> int:
+    configured = args.concurrency
+    if configured is None:
+        try:
+            with _session_from_args(args) as session:
+                explicit = SettingsService(session).repository.get("worker_concurrency")
+                configured = (
+                    int(explicit.value_json)
+                    if explicit is not None
+                    else load_settings().worker_concurrency
+                )
+        except Exception:
+            configured = load_settings().worker_concurrency
+    return max(1, int(configured))
 
 
 def _web(args: argparse.Namespace) -> None:
@@ -167,14 +198,14 @@ def _engine_from_args(args: argparse.Namespace):
     return create_sqlite_engine(path)
 
 
-def _build_worker_handlers(session):
+def _build_worker_handlers(session, *, worker_name: str = "cli-worker"):
     settings = load_settings()
     handlers = {}
     handlers.update(
         build_catalog_handler_registry(
             session,
             parser=PdfArtifactParser(),
-            extractor=_build_catalog_extractor(session, settings),
+            extractor=_build_catalog_extractor(session, settings, worker_name=worker_name),
             external_page_fetcher=_build_external_page_fetcher(session),
         )
     )
@@ -182,7 +213,11 @@ def _build_worker_handlers(session):
         build_lead_handler_registry(
             session,
             classifier=FuzzyCatalogLeadClassifier(session),
-            shadow_classifier=_build_lead_shadow_classifier(session, settings),
+            shadow_classifier=_build_lead_shadow_classifier(
+                session,
+                settings,
+                worker_name=worker_name,
+            ),
             notifier=_build_lead_notifier(settings),
         )
     )
@@ -202,7 +237,7 @@ def _build_lead_notifier(settings):
     return TelegramBotLeadNotifier(settings.telegram_bot_token)
 
 
-def _build_catalog_extractor(session, settings):
+def _build_catalog_extractor(session, settings, *, worker_name: str):
     settings_service = SettingsService(session)
     if not bool(settings_service.get("catalog_llm_extraction_enabled")):
         return HeuristicCatalogExtractor(session)
@@ -226,6 +261,11 @@ def _build_catalog_extractor(session, settings):
             api_key=api_key,
             base_url=base_url,
             timeout_seconds=settings.catalog_llm_timeout_seconds,
+            concurrency_limiter=_build_ai_model_concurrency_limiter(
+                session,
+                worker_name=worker_name,
+            ),
+            worker_name=worker_name,
         ),
         model=model,
         session=session,
@@ -234,7 +274,7 @@ def _build_catalog_extractor(session, settings):
     )
 
 
-def _build_lead_shadow_classifier(session, settings):
+def _build_lead_shadow_classifier(session, settings, *, worker_name: str):
     settings_service = SettingsService(session)
     if not bool(settings_service.get("lead_llm_shadow_enabled")):
         return None
@@ -266,10 +306,39 @@ def _build_lead_shadow_classifier(session, settings):
             api_key=api_key,
             base_url=base_url,
             timeout_seconds=settings.lead_llm_shadow_timeout_seconds,
+            concurrency_limiter=_build_ai_model_concurrency_limiter(
+                session,
+                worker_name=worker_name,
+            ),
+            worker_name=worker_name,
         ),
         model=model,
         temperature=temperature,
         max_tokens=max_tokens,
+    )
+
+
+def _build_ai_model_concurrency_limiter(session, *, worker_name: str):
+    settings_service = SettingsService(session)
+    if not bool(settings_service.get("ai_model_concurrency_enabled")):
+        return None
+    limits_value = settings_service.get("ai_model_concurrency_limits")
+    limits = limits_value if isinstance(limits_value, dict) else None
+    return AiModelConcurrencyService(
+        session,
+        limits=limits,
+        utilization_ratio=float(
+            _setting_or_default(settings_service, "ai_model_concurrency_utilization_ratio", 0.8)
+        ),
+        default_limit=int(
+            _setting_or_default(settings_service, "ai_model_concurrency_default_limit", 1)
+        ),
+        lease_seconds=int(
+            _setting_or_default(settings_service, "ai_model_concurrency_lease_seconds", 180)
+        ),
+        retry_after_seconds=int(
+            _setting_or_default(settings_service, "ai_model_concurrency_retry_after_seconds", 5)
+        ),
     )
 
 

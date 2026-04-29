@@ -9,6 +9,9 @@ import httpx
 
 from pur_leads.integrations.ai.chat import (
     AiChatCompletion,
+    AiModelConcurrencyLimitExceeded,
+    AiModelConcurrencyLimiter,
+    AiModelLease,
     ChatMessageInput,
     message_payload,
 )
@@ -36,11 +39,15 @@ class ZaiChatCompletionClient:
         base_url: str,
         timeout_seconds: float = 60.0,
         http_client: httpx.AsyncClient | None = None,
+        concurrency_limiter: AiModelConcurrencyLimiter | None = None,
+        worker_name: str = "worker",
     ) -> None:
         self.api_key = api_key
         self.base_url = base_url.rstrip("/")
         self.timeout_seconds = timeout_seconds
         self.http_client = http_client
+        self.concurrency_limiter = concurrency_limiter
+        self.worker_name = worker_name
 
     async def complete(
         self,
@@ -63,14 +70,33 @@ class ZaiChatCompletionClient:
             "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json",
         }
+        lease: AiModelLease | None = None
+        if self.concurrency_limiter is not None:
+            lease = self.concurrency_limiter.acquire_model_slot(
+                provider="zai",
+                model=model,
+                worker_name=self.worker_name,
+            )
+            if lease is None:
+                raise AiModelConcurrencyLimitExceeded(
+                    provider="zai",
+                    model=model,
+                    retry_after_seconds=int(
+                        getattr(self.concurrency_limiter, "retry_after_seconds", 5)
+                    ),
+                )
         client = self.http_client or httpx.AsyncClient(timeout=self.timeout_seconds)
         close_client = self.http_client is None
         try:
-            response = await client.post(
-                f"{self.base_url}/chat/completions",
-                headers=headers,
-                json=payload,
-            )
+            try:
+                response = await client.post(
+                    f"{self.base_url}/chat/completions",
+                    headers=headers,
+                    json=payload,
+                )
+            finally:
+                if lease is not None and self.concurrency_limiter is not None:
+                    self.concurrency_limiter.release_model_slot(lease)
         finally:
             if close_client:
                 await client.aclose()

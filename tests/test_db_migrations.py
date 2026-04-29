@@ -36,4 +36,5 @@ def test_foundation_migration_creates_core_tables(tmp_path):
         "evaluation_runs",
         "evaluation_results",
         "quality_metric_snapshots",
+        "ai_model_concurrency_leases",
     }.issubset(tables)

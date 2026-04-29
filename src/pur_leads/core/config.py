@@ -13,6 +13,7 @@ class AppSettings(BaseSettings):
     web_host: str = "127.0.0.1"
     web_port: int = 8000
     web_session_duration_hours: int = 24 * 14
+    worker_concurrency: int = 1
     bootstrap_admin_username: str = "admin"
     bootstrap_admin_password: str | None = None
     telegram_bot_token: str | None = None

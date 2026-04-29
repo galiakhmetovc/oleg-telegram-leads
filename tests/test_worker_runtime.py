@@ -191,3 +191,25 @@ async def test_worker_once_respects_userbot_serialization(runtime_session):
     result = await runtime.run_once()
 
     assert result.status == "idle"
+
+
+def test_scheduler_repository_does_not_reacquire_running_job(runtime_session):
+    scheduler = SchedulerService(runtime_session)
+    job = scheduler.enqueue(job_type="build_ai_batch", scope_type="global")
+    now = utc_now()
+
+    first = scheduler.repository.mark_running(
+        job.id,
+        worker_name="worker-1",
+        locked_at=now,
+        lease_expires_at=now + timedelta(seconds=300),
+    )
+    second = scheduler.repository.mark_running(
+        job.id,
+        worker_name="worker-2",
+        locked_at=now,
+        lease_expires_at=now + timedelta(seconds=300),
+    )
+
+    assert first is not None
+    assert second is None

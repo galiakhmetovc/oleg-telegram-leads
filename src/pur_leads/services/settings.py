@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 
 from pur_leads.core.time import utc_now
 from pur_leads.repositories.settings import SettingsRepository
+from pur_leads.services.ai_concurrency import DEFAULT_MODEL_CONCURRENCY_LIMITS
 from pur_leads.services.audit import AuditService
 
 ALLOWED_VALUE_TYPES = {"bool", "int", "float", "string", "json", "secret_ref"}
@@ -28,6 +29,7 @@ class SettingDefault:
 
 DEFAULT_SETTINGS: dict[str, SettingDefault] = {
     "telegram_worker_count": SettingDefault(1, "int"),
+    "worker_concurrency": SettingDefault(1, "int"),
     "telegram_default_userbot_account_id": SettingDefault(None, "string"),
     "telegram_read_jobs_per_userbot": SettingDefault(1, "int"),
     "telegram_flood_sleep_threshold_seconds": SettingDefault(60, "int"),
@@ -61,6 +63,12 @@ DEFAULT_SETTINGS: dict[str, SettingDefault] = {
     "catalog_llm_temperature": SettingDefault(0.0, "float"),
     "catalog_llm_max_tokens": SettingDefault(4096, "int"),
     "catalog_llm_fallback_to_heuristic": SettingDefault(True, "bool"),
+    "ai_model_concurrency_enabled": SettingDefault(True, "bool"),
+    "ai_model_concurrency_limits": SettingDefault(DEFAULT_MODEL_CONCURRENCY_LIMITS, "json"),
+    "ai_model_concurrency_utilization_ratio": SettingDefault(0.8, "float"),
+    "ai_model_concurrency_default_limit": SettingDefault(1, "int"),
+    "ai_model_concurrency_lease_seconds": SettingDefault(180, "int"),
+    "ai_model_concurrency_retry_after_seconds": SettingDefault(5, "int"),
     "lead_llm_shadow_enabled": SettingDefault(False, "bool"),
     "lead_llm_shadow_provider": SettingDefault("zai", "string"),
     "lead_llm_shadow_base_url": SettingDefault("https://api.z.ai/api/coding/paas/v4", "string"),

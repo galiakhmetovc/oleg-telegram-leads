@@ -103,8 +103,10 @@ class SchedulerService:
                 locked_at=current_time,
                 lease_expires_at=current_time + timedelta(seconds=lease_seconds),
             )
-            self.session.commit()
-            return acquired
+            if acquired is not None:
+                self.session.commit()
+                return acquired
+            self.session.rollback()
         return None
 
     def recover_expired_leases(self, now: datetime | None = None) -> int:

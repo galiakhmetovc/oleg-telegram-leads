@@ -22,7 +22,36 @@ class AiChatCompletion:
     raw_response: dict[str, Any]
 
 
+@dataclass(frozen=True)
+class AiModelLease:
+    id: str
+    provider: str
+    model: str
+
+
+class AiModelConcurrencyLimitExceeded(RuntimeError):
+    def __init__(self, *, provider: str, model: str, retry_after_seconds: int = 5) -> None:
+        super().__init__(f"AI model concurrency limit reached for {provider}:{model}; retry later")
+        self.provider = provider
+        self.model = model
+        self.retry_after_seconds = retry_after_seconds
+
+
 ChatMessageInput = AiChatMessage | Mapping[str, str]
+
+
+class AiModelConcurrencyLimiter(Protocol):
+    def acquire_model_slot(
+        self,
+        *,
+        provider: str,
+        model: str,
+        worker_name: str,
+    ) -> AiModelLease | None:
+        """Acquire one model execution slot or return None when the model is saturated."""
+
+    def release_model_slot(self, lease: AiModelLease) -> None:
+        """Release a previously acquired model execution slot."""
 
 
 class AiChatClient(Protocol):
