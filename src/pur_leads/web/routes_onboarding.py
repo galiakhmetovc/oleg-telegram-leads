@@ -27,6 +27,7 @@ from pur_leads.models.telegram_sources import (
     monitored_sources_table,
     telegram_bots_table,
     telegram_notification_groups_table,
+    userbot_accounts_table,
 )
 from pur_leads.services.ai_registry import AiRegistryService
 from pur_leads.services.secrets import SecretRefService
@@ -135,26 +136,77 @@ def onboarding_status(
 
 
 @router.get("/bots")
-def list_bots(
+async def list_bots(
+    request: Request,
     _validated: SessionValidationResult = Depends(current_admin),
     session: Session = Depends(get_session),
 ) -> dict[str, Any]:
+    await _refresh_missing_bot_usernames(request, session)
     return {"items": _bot_payloads(session)}
 
 
-@router.get("/userbot-credentials")
-def userbot_credentials_status(
+@router.get("/userbots")
+def list_userbots(
     _validated: SessionValidationResult = Depends(current_admin),
     session: Session = Depends(get_session),
 ) -> dict[str, Any]:
     settings = SettingsService(session)
     api_hash_ref = settings.get("telegram_api_hash_secret_ref")
     return {
-        "telegram_api_id": settings.get("telegram_api_id"),
-        "api_hash_configured": _is_secret_ref_value(api_hash_ref),
-        "api_hash_secret_ref_id": api_hash_ref.get("secret_ref_id")
-        if _is_secret_ref_value(api_hash_ref)
-        else None,
+        "items": [
+            UserbotAccountService(session).public_payload(account)
+            for account in UserbotAccountService(session).list_accounts()
+            if account.status == "active"
+        ],
+        "credentials": {
+            "telegram_api_id": settings.get("telegram_api_id"),
+            "api_hash_configured": _is_secret_ref_value(api_hash_ref),
+        },
+    }
+
+
+@router.delete("/userbots/{userbot_id}")
+def delete_userbot(
+    userbot_id: str,
+    validated: SessionValidationResult = Depends(current_admin),
+    session: Session = Depends(get_session),
+) -> dict[str, Any]:
+    row = (
+        session.execute(
+            select(userbot_accounts_table).where(
+                userbot_accounts_table.c.id == userbot_id,
+                userbot_accounts_table.c.status == "active",
+            )
+        )
+        .mappings()
+        .first()
+    )
+    if row is None:
+        raise HTTPException(status_code=404, detail="Userbot not found")
+    session_path = Path(str(row["session_path"]))
+    if session_path.exists():
+        session_path.unlink()
+    session.execute(
+        update(userbot_accounts_table)
+        .where(userbot_accounts_table.c.id == userbot_id)
+        .values(status="disabled", updated_at=utc_now())
+    )
+    settings = SettingsService(session)
+    if settings.get("telegram_default_userbot_account_id") == userbot_id:
+        settings.set(
+            "telegram_default_userbot_account_id",
+            "",
+            value_type="string",
+            updated_by=_actor(validated),
+            reason="remove default Telegram userbot during onboarding",
+        )
+    session.commit()
+    return {
+        "items": [
+            UserbotAccountService(session).public_payload(account)
+            for account in UserbotAccountService(session).list_accounts()
+            if account.status == "active"
+        ]
     }
 
 
@@ -695,6 +747,45 @@ def _bot_by_id(session: Session, bot_id: str) -> dict[str, Any] | None:
         .first()
     )
     return dict(row) if row is not None else None
+
+
+async def _refresh_missing_bot_usernames(request: Request, session: Session) -> None:
+    rows = (
+        session.execute(
+            select(telegram_bots_table).where(
+                telegram_bots_table.c.status == "active",
+                telegram_bots_table.c.telegram_username.is_(None),
+            )
+        )
+        .mappings()
+        .all()
+    )
+    if not rows:
+        return
+    client = _bot_setup_client(request)
+    changed = False
+    for row in rows:
+        try:
+            token = SecretRefService(session).resolve_value(str(row["token_secret_ref"]))
+            bot = await client.get_me(token)
+        except (FileNotFoundError, KeyError, ValueError, TelegramBotSetupError):
+            continue
+        if not isinstance(bot, dict):
+            continue
+        values: dict[str, Any] = {"updated_at": utc_now()}
+        if bot.get("username"):
+            values["telegram_username"] = str(bot["username"])
+        if bot.get("id"):
+            values["telegram_bot_id"] = str(bot["id"])
+        if len(values) > 1:
+            session.execute(
+                update(telegram_bots_table)
+                .where(telegram_bots_table.c.id == row["id"])
+                .values(**values)
+            )
+            changed = True
+    if changed:
+        session.commit()
 
 
 def _first_active_bot_id(session: Session) -> str | None:

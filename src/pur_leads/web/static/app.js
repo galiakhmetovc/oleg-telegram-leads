@@ -2300,7 +2300,7 @@ function initOnboarding() {
   loadOnboardingBots();
   loadOnboardingGroups();
   loadOnboardingLlmRegistry();
-  loadOnboardingUserbotCredentials();
+  loadOnboardingUserbots();
 }
 
 function setOnboardingGroupDiscoverEnabled(enabled) {
@@ -2636,16 +2636,14 @@ function renderOnboardingLlmProviders(accounts, routes) {
     target.innerHTML = '<div class="empty-state">Сохраненных LLM-провайдеров пока нет</div>';
     return;
   }
-  const routeLines = (routes || [])
-    .filter((route) => route.enabled !== false)
-    .map((route) => `${route.agent_key} / ${route.route_role} -> ${route.model}`);
+  const routeLines = readableAiRoutes(routes || []);
   target.innerHTML = activeAccounts
     .map(
       (account) => `<div class="onboarding-mini-row">
         <div>
           <strong>${escapeHtml(account.display_name || account.provider_account || "LLM provider")}</strong>
           <p class="muted">${escapeHtml(account.base_url || "")}</p>
-          <p class="muted">${escapeHtml(routeLines.join("; ") || "routes не выбраны")}</p>
+          ${routeLines.map((line) => `<p class="muted">${escapeHtml(line)}</p>`).join("") || '<p class="muted">routes не выбраны</p>'}
         </div>
         <md-outlined-button type="button" data-delete-llm="${escapeHtml(account.id)}">Удалить</md-outlined-button>
       </div>`
@@ -2654,6 +2652,22 @@ function renderOnboardingLlmProviders(accounts, routes) {
   target.querySelectorAll("[data-delete-llm]").forEach((button) => {
     button.addEventListener("click", deleteOnboardingLlmProvider);
   });
+}
+
+function readableAiRoutes(routes) {
+  const labels = {
+    "catalog_extractor.primary": "Основной анализ каталога",
+    "catalog_extractor.fallback": "Резервный анализ каталога",
+    "lead_detector.shadow": "Проверка лидов в фоне",
+    "ocr_extractor.primary": "OCR документов",
+  };
+  return routes
+    .filter((route) => route.enabled !== false)
+    .map((route) => {
+      const routeKey = `${route.agent_key}.${route.route_role}`;
+      const label = labels[routeKey] || routeKey;
+      return `${label}: ${routeKey} = ${route.model || "модель не выбрана"}`;
+    });
 }
 
 async function deleteOnboardingLlmProvider(event) {
@@ -2669,16 +2683,54 @@ async function deleteOnboardingLlmProvider(event) {
   }
 }
 
-async function loadOnboardingUserbotCredentials() {
-  const target = document.querySelector("#onboarding-userbot-credentials");
+async function loadOnboardingUserbots() {
+  const target = document.querySelector("#onboarding-userbot-list");
   if (!target) return;
   try {
-    const payload = await api("/api/onboarding/userbot-credentials");
-    target.textContent = payload.telegram_api_id
-      ? `Сохранено: Telegram API ID ${payload.telegram_api_id}, API hash ${payload.api_hash_configured ? `в secret_refs:${payload.api_hash_secret_ref_id}` : "не сохранен"}. Raw hash в интерфейсе не показываем.`
-      : "Telegram API ID и API hash пока не сохранены.";
+    const payload = await api("/api/onboarding/userbots");
+    renderOnboardingUserbots(payload.items || [], payload.credentials || {});
   } catch (error) {
-    target.textContent = error.message;
+    target.innerHTML = `<div class="empty-state">${escapeHtml(error.message)}</div>`;
+  }
+}
+
+function renderOnboardingUserbots(userbots, credentials) {
+  const target = document.querySelector("#onboarding-userbot-list");
+  if (!target) return;
+  if (!userbots.length) {
+    const credentialText = credentials.telegram_api_id
+      ? `Telegram API ID ${credentials.telegram_api_id} сохранен, API hash ${credentials.api_hash_configured ? "сохранен в секретах" : "не сохранен"}.`
+      : "Сохраненных юзерботов пока нет.";
+    target.innerHTML = `<div class="empty-state">${escapeHtml(credentialText)}</div>`;
+    return;
+  }
+  target.innerHTML = userbots
+    .map(
+      (userbot) => `<div class="onboarding-mini-row">
+        <div>
+          <strong>${escapeHtml(userbot.display_name || userbot.session_name || "Юзербот")}</strong>
+          <p class="muted">${escapeHtml(userbot.telegram_username ? `@${userbot.telegram_username}` : userbot.session_name || "")}</p>
+          <p class="muted">Telegram API ID ${escapeHtml(credentials.telegram_api_id || "не указан")}; API hash ${credentials.api_hash_configured ? "сохранен в секретах" : "не сохранен"}</p>
+        </div>
+        <md-outlined-button type="button" data-delete-userbot="${escapeHtml(userbot.id)}">Удалить</md-outlined-button>
+      </div>`
+    )
+    .join("");
+  target.querySelectorAll("[data-delete-userbot]").forEach((button) => {
+    button.addEventListener("click", deleteOnboardingUserbot);
+  });
+}
+
+async function deleteOnboardingUserbot(event) {
+  const status = document.querySelector("#onboarding-interactive-status");
+  try {
+    await api(`/api/onboarding/userbots/${encodeURIComponent(event.currentTarget.dataset.deleteUserbot)}`, {
+      method: "DELETE",
+    });
+    if (status) status.textContent = "Юзербот удален";
+    await Promise.all([loadOnboardingUserbots(), loadOnboardingStatus()]);
+  } catch (error) {
+    if (status) status.textContent = error.message;
   }
 }
 
@@ -2724,7 +2776,7 @@ async function completeInteractiveUserbotLogin(event) {
     if (status) status.textContent = "Интерактивный вход завершен";
     form.reset();
     form.classList.add("is-hidden");
-    await loadOnboardingUserbotCredentials();
+    await loadOnboardingUserbots();
     await loadOnboardingStatus();
   } catch (error) {
     if (status) status.textContent = error.message;

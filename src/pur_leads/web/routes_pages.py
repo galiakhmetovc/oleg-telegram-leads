@@ -405,7 +405,7 @@ def onboarding_page(
                         Telegram Web
                       </md-outlined-button>
                     </div>
-                    <div id="onboarding-userbot-credentials" class="onboarding-credential-note"></div>
+                    <div id="onboarding-userbot-list" class="table-list onboarding-mini-list"></div>
                     <form id="onboarding-interactive-start-form" class="material-form">
                       <md-outlined-text-field name="display_name" label="Название" required
                         placeholder="Основной юзербот">
