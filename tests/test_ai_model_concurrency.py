@@ -33,6 +33,9 @@ def test_ai_model_concurrency_service_applies_80_percent_safety_ratio_and_releas
         assert service.effective_limit_for_model("glm-4.5-flash") == 1
         assert len(rows) == 1
         assert {row["normalized_model"] for row in rows} == {"glm-4.5-flash"}
+        assert rows[0]["raw_limit"] == 2
+        assert rows[0]["utilization_ratio"] == 0.8
+        assert rows[0]["effective_limit"] == 1
 
         service.release_model_slot(first)
         acquired_after_release = service.acquire_model_slot(

@@ -1866,11 +1866,15 @@ function nextMorningIso() {
   return date.toISOString();
 }
 
+let adminAiRegistry = null;
+
 async function initAdmin() {
-  await Promise.all([loadUsers(), loadUserbots(), loadSettings()]);
+  await Promise.all([loadUsers(), loadUserbots(), loadSettings(), loadAiRegistry()]);
   document.querySelector("#telegram-admin-form")?.addEventListener("submit", addTelegramAdmin);
   document.querySelector("#userbot-form")?.addEventListener("submit", addUserbot);
   document.querySelector("#setting-form")?.addEventListener("submit", saveSetting);
+  document.querySelector("#ai-registry-refresh")?.addEventListener("click", loadAiRegistry);
+  document.querySelector("#ai-route-form")?.addEventListener("submit", saveAiRoute);
 }
 
 async function loadUsers() {
@@ -1969,6 +1973,163 @@ async function saveSetting(event) {
   });
   event.currentTarget.reset();
   await loadSettings();
+}
+
+async function loadAiRegistry() {
+  const status = document.querySelector("#ai-registry-status");
+  if (status) status.textContent = "";
+  try {
+    adminAiRegistry = await api("/api/admin/ai-registry");
+    renderAiRegistry(adminAiRegistry);
+  } catch (error) {
+    if (status) status.textContent = error.message;
+  }
+}
+
+function renderAiRegistry(registry) {
+  renderAiRouteForm(registry);
+  renderAiModels(registry.models || []);
+  renderAiRoutes(registry.routes || []);
+}
+
+function renderAiRouteForm(registry) {
+  const form = document.querySelector("#ai-route-form");
+  if (!form) return;
+  const agentSelect = form.querySelector('[name="agent_key"]');
+  const modelSelect = form.querySelector('[name="model_id"]');
+  if (agentSelect) {
+    agentSelect.innerHTML = (registry.agents || [])
+      .map((agent) => `<option value="${escapeHtml(agent.agent_key)}">${escapeHtml(agent.agent_key)}</option>`)
+      .join("");
+  }
+  if (modelSelect) {
+    modelSelect.innerHTML = (registry.models || [])
+      .map(
+        (model) =>
+          `<option value="${escapeHtml(model.id)}">${escapeHtml(model.model_type)} / ${escapeHtml(
+            model.provider_model_name
+          )}</option>`
+      )
+      .join("");
+  }
+}
+
+function renderAiModels(models) {
+  const target = document.querySelector("#ai-models");
+  if (!target) return;
+  target.innerHTML =
+    models
+      .map((model) => {
+        const limit = model.limit || {};
+        return `<form class="table-row ai-limit-form" data-limit-id="${escapeHtml(limit.id || "")}">
+          <div>
+            <strong>${escapeHtml(model.provider_model_name)}</strong>
+            <p class="muted">${escapeHtml(model.model_type)} / ${escapeHtml(model.status)}</p>
+          </div>
+          <div class="row-actions">
+            <input class="compact-input" name="raw_limit" type="number" min="1" step="1"
+              value="${escapeHtml(limit.raw_limit || 1)}" aria-label="Raw concurrency">
+            <input class="compact-input" name="utilization_ratio" type="number" min="0.1" max="1"
+              step="0.05" value="${escapeHtml(limit.utilization_ratio || 0.8)}"
+              aria-label="Utilization ratio">
+            <span class="badge">eff ${escapeHtml(limit.effective_limit || 1)}</span>
+            <button type="submit">Save</button>
+          </div>
+        </form>`;
+      })
+      .join("") || '<div class="empty-state">No models</div>';
+  target.querySelectorAll(".ai-limit-form").forEach((form) => {
+    form.addEventListener("submit", saveAiLimit);
+  });
+}
+
+function renderAiRoutes(routes) {
+  const target = document.querySelector("#ai-routes");
+  if (!target) return;
+  target.innerHTML =
+    routes
+      .map(
+        (route) => `<div class="table-row">
+        <div>
+          <strong>${escapeHtml(route.agent_key)} / ${escapeHtml(route.route_role)}</strong>
+          <p class="muted">${escapeHtml(route.model)} / priority ${escapeHtml(route.priority)}</p>
+        </div>
+        <div class="row-actions">
+          ${badge(route.enabled ? "enabled" : "disabled", route.enabled ? "" : "is-warn")}
+          <button type="button" data-route-id="${escapeHtml(route.id)}" data-enabled="${
+            route.enabled ? "false" : "true"
+          }">${route.enabled ? "Disable" : "Enable"}</button>
+        </div>
+      </div>`
+      )
+      .join("") || '<div class="empty-state">No routes</div>';
+  target.querySelectorAll("[data-route-id]").forEach((button) => {
+    button.addEventListener("click", toggleAiRoute);
+  });
+}
+
+async function saveAiLimit(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const status = document.querySelector("#ai-registry-status");
+  const limitId = form.dataset.limitId;
+  if (!limitId) return;
+  const data = new FormData(form);
+  try {
+    await api(`/api/admin/ai-model-limits/${encodeURIComponent(limitId)}`, {
+      method: "PATCH",
+      body: JSON.stringify({
+        raw_limit: Number.parseInt(data.get("raw_limit"), 10),
+        utilization_ratio: Number.parseFloat(data.get("utilization_ratio")),
+      }),
+    });
+    if (status) status.textContent = "Model limit saved";
+    await loadAiRegistry();
+  } catch (error) {
+    if (status) status.textContent = error.message;
+  }
+}
+
+async function saveAiRoute(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const status = document.querySelector("#ai-registry-status");
+  const data = new FormData(form);
+  const agentKey = data.get("agent_key");
+  try {
+    await api(`/api/admin/ai-agents/${encodeURIComponent(agentKey)}/routes`, {
+      method: "POST",
+      body: JSON.stringify({
+        model_id: data.get("model_id"),
+        route_role: data.get("route_role"),
+        priority: Number.parseInt(data.get("priority"), 10),
+        max_output_tokens: data.get("max_output_tokens")
+          ? Number.parseInt(data.get("max_output_tokens"), 10)
+          : null,
+        enabled: data.get("enabled") === "on",
+        structured_output_required: true,
+      }),
+    });
+    if (status) status.textContent = "Route saved";
+    await loadAiRegistry();
+  } catch (error) {
+    if (status) status.textContent = error.message;
+  }
+}
+
+async function toggleAiRoute(event) {
+  const button = event.currentTarget;
+  const status = document.querySelector("#ai-registry-status");
+  try {
+    await api(`/api/admin/ai-routes/${encodeURIComponent(button.dataset.routeId)}`, {
+      method: "PATCH",
+      body: JSON.stringify({ enabled: button.dataset.enabled === "true" }),
+    });
+    if (status) status.textContent = "Route updated";
+    await loadAiRegistry();
+  } catch (error) {
+    if (status) status.textContent = error.message;
+  }
 }
 
 function parseSettingValue(value, valueType) {

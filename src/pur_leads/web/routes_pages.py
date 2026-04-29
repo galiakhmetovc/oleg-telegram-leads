@@ -190,6 +190,47 @@ def admin_page(
                   </form>
                   <div id="settings-list" class="table-list"></div>
                 </section>
+                <section class="ai-admin-section">
+                  <div class="section-head">
+                    <h2>AI registry</h2>
+                    <button id="ai-registry-refresh" type="button">Refresh</button>
+                  </div>
+                  <div class="ai-admin-grid">
+                    <section>
+                      <div class="section-head">
+                        <h3>Models</h3>
+                      </div>
+                      <div id="ai-models" class="table-list"></div>
+                    </section>
+                    <section>
+                      <div class="section-head">
+                        <h3>Routes</h3>
+                      </div>
+                      <form id="ai-route-form" class="inline-form">
+                        <select name="agent_key" required></select>
+                        <select name="model_id" required></select>
+                        <select name="route_role" required>
+                          <option value="primary">primary</option>
+                          <option value="fallback">fallback</option>
+                          <option value="shadow">shadow</option>
+                          <option value="ensemble">ensemble</option>
+                          <option value="split">split</option>
+                          <option value="manual_test">manual_test</option>
+                        </select>
+                        <input name="priority" type="number" min="0" step="1" value="50" aria-label="Priority">
+                        <input name="max_output_tokens" type="number" min="1" step="1"
+                          placeholder="Max tokens" aria-label="Max output tokens">
+                        <label class="checkbox-line">
+                          <input name="enabled" type="checkbox" checked>
+                          Enabled
+                        </label>
+                        <button type="submit">Save route</button>
+                      </form>
+                      <div id="ai-routes" class="table-list"></div>
+                    </section>
+                  </div>
+                  <div id="ai-registry-status" class="status-line"></div>
+                </section>
               </section>
             </main>
             """,

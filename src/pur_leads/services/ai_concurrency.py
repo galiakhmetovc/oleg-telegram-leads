@@ -144,6 +144,9 @@ class AiModelConcurrencyService:
                 model=model,
                 normalized_model=normalized_model,
                 worker_name=worker_name,
+                raw_limit=raw_limit,
+                utilization_ratio=utilization_ratio,
+                effective_limit=effective_limit,
                 acquired_at=now,
                 lease_expires_at=expires_at,
                 metadata_json={

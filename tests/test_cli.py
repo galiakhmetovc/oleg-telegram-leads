@@ -6,7 +6,7 @@ from sqlalchemy import inspect
 from sqlalchemy import select
 from fastapi.testclient import TestClient
 
-from pur_leads.cli import main
+from pur_leads.cli import _build_ai_model_concurrency_limiter, main
 from pur_leads.core.ids import new_id
 from pur_leads.core.time import utc_now
 from pur_leads.db.engine import create_sqlite_engine
@@ -20,6 +20,7 @@ from pur_leads.models.catalog import (
     extraction_runs_table,
     parsed_chunks_table,
 )
+from pur_leads.models.ai import ai_model_limits_table, ai_models_table
 from pur_leads.models.evaluation import decision_records_table
 from pur_leads.models.leads import lead_clusters_table, lead_events_table
 from pur_leads.models.telegram_sources import (
@@ -28,6 +29,7 @@ from pur_leads.models.telegram_sources import (
     source_messages_table,
 )
 from pur_leads.services.catalog_sources import CatalogSourceService
+from pur_leads.services.ai_registry import AiRegistryService
 from pur_leads.services.scheduler import SchedulerService
 from pur_leads.services.settings import SettingsService
 from pur_leads.services.telegram_sources import TelegramSourceService
@@ -54,6 +56,39 @@ def test_cli_settings_set_and_list(tmp_path, capsys):
 
     output = capsys.readouterr().out
     assert "telegram_worker_count=2" in output
+
+
+def test_cli_ai_model_concurrency_limiter_uses_registry_limits_without_override(tmp_path):
+    db_path = tmp_path / "cli.db"
+    engine = create_sqlite_engine(db_path)
+    upgrade_database(engine)
+    session_factory = create_session_factory(engine)
+    with session_factory() as session:
+        AiRegistryService(session).bootstrap_defaults(actor="test")
+        flash = (
+            session.execute(
+                select(ai_models_table).where(
+                    ai_models_table.c.normalized_model_name == "glm-4.5-flash"
+                )
+            )
+            .mappings()
+            .one()
+        )
+        session.execute(
+            ai_model_limits_table.update()
+            .where(
+                ai_model_limits_table.c.ai_model_id == flash["id"],
+                ai_model_limits_table.c.limit_scope == "concurrency",
+            )
+            .values(raw_limit=7, effective_limit=5)
+        )
+        session.commit()
+
+        limiter = _build_ai_model_concurrency_limiter(session, worker_name="test-worker")
+
+        assert limiter is not None
+        assert limiter.raw_limit_for_model("GLM-4.5-Flash") == 7
+        assert limiter.effective_limit_for_model("GLM-4.5-Flash") == 5
 
 
 def test_cli_worker_once_reports_noop(tmp_path, capsys):
@@ -298,6 +333,50 @@ def test_cli_worker_once_uses_configured_zai_llm_extractor(tmp_path, capsys, mon
     assert FakeZaiChatCompletionClient.instances[0].base_url == (
         "https://api.z.ai/api/coding/paas/v4"
     )
+
+
+def test_cli_worker_once_uses_ai_registry_catalog_route_when_not_overridden(
+    tmp_path,
+    capsys,
+    monkeypatch,
+):
+    db_path = tmp_path / "cli.db"
+    engine = create_sqlite_engine(db_path)
+    upgrade_database(engine)
+    session_factory = create_session_factory(engine)
+    with session_factory() as session:
+        raw_source = CatalogSourceService(session).upsert_source(
+            source_type="telegram_message",
+            origin="telegram:purmaster",
+            external_id="18",
+            raw_text="Dahua Hero A1 Wi-Fi camera",
+        )
+        chunk = CatalogSourceService(session).replace_parsed_chunks(
+            raw_source.id,
+            chunks=["Dahua Hero A1 Wi-Fi camera"],
+            parser_name="test",
+            parser_version="1",
+        )[0]
+        job = SchedulerService(session).enqueue(
+            job_type="extract_catalog_facts",
+            scope_type="parser",
+            payload_json={"source_id": raw_source.id, "chunk_id": chunk.id},
+        )
+
+    monkeypatch.setenv("PUR_ZAI_API_KEY", "test-key")
+    monkeypatch.setattr("pur_leads.cli.ZaiChatCompletionClient", FakeZaiChatCompletionClient)
+    FakeZaiChatCompletionClient.instances.clear()
+
+    main(["--database-path", str(db_path), "worker", "once"])
+
+    with session_factory() as session:
+        stored = SchedulerService(session).repository.get(job.id)
+        run = session.execute(select(extraction_runs_table)).mappings().one()
+    output = capsys.readouterr().out
+    assert stored is not None
+    assert "succeeded job" in output
+    assert run["model"] == "GLM-5.1"
+    assert FakeZaiChatCompletionClient.instances[0].calls[0]["model"] == "GLM-5.1"
 
 
 def test_cli_worker_once_uses_configured_zai_lead_shadow_classifier(

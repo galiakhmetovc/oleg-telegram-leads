@@ -30,6 +30,7 @@ from pur_leads.integrations.telegram.types import (
     TelegramMessage,
 )
 from pur_leads.services.ai_concurrency import AiModelConcurrencyService
+from pur_leads.services.ai_registry import AiAgentRouteSelection, AiRegistryService
 from pur_leads.services.settings import SettingsService
 from pur_leads.services.userbots import UserbotAccountService
 from pur_leads.workers.runtime import (
@@ -200,6 +201,7 @@ def _engine_from_args(args: argparse.Namespace):
 
 def _build_worker_handlers(session, *, worker_name: str = "cli-worker"):
     settings = load_settings()
+    AiRegistryService(session).bootstrap_defaults(actor="worker")
     handlers = {}
     handlers.update(
         build_catalog_handler_registry(
@@ -241,7 +243,8 @@ def _build_catalog_extractor(session, settings, *, worker_name: str):
     settings_service = SettingsService(session)
     if not bool(settings_service.get("catalog_llm_extraction_enabled")):
         return HeuristicCatalogExtractor(session)
-    provider = str(settings_service.get("catalog_llm_provider") or "zai")
+    route = _select_ai_route(session, agent_key="catalog_extractor", route_role="primary")
+    provider = str(_setting_or_route_provider(settings_service, "catalog_llm_provider", route))
     api_key = settings.zai_api_key or _env_str("ZAI_API_KEY")
     fallback = bool(settings_service.get("catalog_llm_fallback_to_heuristic"))
     if provider != "zai" or not api_key:
@@ -249,13 +252,37 @@ def _build_catalog_extractor(session, settings, *, worker_name: str):
             return HeuristicCatalogExtractor(session)
         raise ValueError("catalog LLM extractor is enabled but Z.AI is not configured")
     base_url = str(
-        _setting_or_default(settings_service, "catalog_llm_base_url", settings.catalog_llm_base_url)
+        _setting_or_env_or_default(
+            settings_service,
+            "catalog_llm_base_url",
+            env_names=("PUR_CATALOG_LLM_BASE_URL", "CATALOG_LLM_BASE_URL"),
+            env_value=settings.catalog_llm_base_url,
+            default=route.base_url if route is not None else settings.catalog_llm_base_url,
+        )
     )
     model = str(
-        _setting_or_default(settings_service, "catalog_llm_model", settings.catalog_llm_model)
+        _setting_or_env_or_default(
+            settings_service,
+            "catalog_llm_model",
+            env_names=("PUR_CATALOG_LLM_MODEL", "CATALOG_LLM_MODEL"),
+            env_value=settings.catalog_llm_model,
+            default=route.model if route is not None else settings.catalog_llm_model,
+        )
     )
-    temperature = float(_setting_or_default(settings_service, "catalog_llm_temperature", 0.0))
-    max_tokens = int(_setting_or_default(settings_service, "catalog_llm_max_tokens", 4096))
+    temperature = float(
+        _setting_or_default(
+            settings_service,
+            "catalog_llm_temperature",
+            route.temperature if route is not None and route.temperature is not None else 0.0,
+        )
+    )
+    max_tokens = int(
+        _setting_or_default(
+            settings_service,
+            "catalog_llm_max_tokens",
+            route.max_output_tokens if route is not None and route.max_output_tokens else 4096,
+        )
+    )
     return LlmCatalogExtractor(
         client=ZaiChatCompletionClient(
             api_key=api_key,
@@ -278,7 +305,8 @@ def _build_lead_shadow_classifier(session, settings, *, worker_name: str):
     settings_service = SettingsService(session)
     if not bool(settings_service.get("lead_llm_shadow_enabled")):
         return None
-    provider = str(settings_service.get("lead_llm_shadow_provider") or "zai")
+    route = _select_ai_route(session, agent_key="lead_detector", route_role="shadow")
+    provider = str(_setting_or_route_provider(settings_service, "lead_llm_shadow_provider", route))
     api_key = settings.zai_api_key or _env_str("ZAI_API_KEY")
     fallback = bool(settings_service.get("lead_llm_shadow_fallback_on_error"))
     if provider != "zai" or not api_key:
@@ -286,21 +314,37 @@ def _build_lead_shadow_classifier(session, settings, *, worker_name: str):
             return None
         raise ValueError("lead LLM shadow classifier is enabled but Z.AI is not configured")
     base_url = str(
-        _setting_or_default(
+        _setting_or_env_or_default(
             settings_service,
             "lead_llm_shadow_base_url",
-            settings.lead_llm_shadow_base_url,
+            env_names=("PUR_LEAD_LLM_SHADOW_BASE_URL", "LEAD_LLM_SHADOW_BASE_URL"),
+            env_value=settings.lead_llm_shadow_base_url,
+            default=route.base_url if route is not None else settings.lead_llm_shadow_base_url,
         )
     )
     model = str(
-        _setting_or_default(
+        _setting_or_env_or_default(
             settings_service,
             "lead_llm_shadow_model",
-            settings.lead_llm_shadow_model,
+            env_names=("PUR_LEAD_LLM_SHADOW_MODEL", "LEAD_LLM_SHADOW_MODEL"),
+            env_value=settings.lead_llm_shadow_model,
+            default=route.model if route is not None else settings.lead_llm_shadow_model,
         )
     )
-    temperature = float(_setting_or_default(settings_service, "lead_llm_shadow_temperature", 0.0))
-    max_tokens = int(_setting_or_default(settings_service, "lead_llm_shadow_max_tokens", 2048))
+    temperature = float(
+        _setting_or_default(
+            settings_service,
+            "lead_llm_shadow_temperature",
+            route.temperature if route is not None and route.temperature is not None else 0.0,
+        )
+    )
+    max_tokens = int(
+        _setting_or_default(
+            settings_service,
+            "lead_llm_shadow_max_tokens",
+            route.max_output_tokens if route is not None and route.max_output_tokens else 2048,
+        )
+    )
     return LlmLeadShadowClassifier(
         client=ZaiChatCompletionClient(
             api_key=api_key,
@@ -322,7 +366,14 @@ def _build_ai_model_concurrency_limiter(session, *, worker_name: str):
     settings_service = SettingsService(session)
     if not bool(settings_service.get("ai_model_concurrency_enabled")):
         return None
-    limits_value = settings_service.get("ai_model_concurrency_limits")
+    registry = AiRegistryService(session)
+    registry.bootstrap_defaults(actor=worker_name)
+    configured_limits = settings_service.repository.get("ai_model_concurrency_limits")
+    limits_value = (
+        configured_limits.value_json
+        if configured_limits is not None
+        else registry.model_concurrency_limits(provider_key="zai")
+    )
     limits = limits_value if isinstance(limits_value, dict) else None
     return AiModelConcurrencyService(
         session,
@@ -354,6 +405,47 @@ def _build_external_page_fetcher(session) -> HttpExternalPageFetcher:
 def _setting_or_default(settings_service: SettingsService, key: str, default):
     record = settings_service.repository.get(key)
     return record.value_json if record is not None else default
+
+
+def _setting_or_env_or_default(
+    settings_service: SettingsService,
+    key: str,
+    *,
+    env_names: Sequence[str],
+    env_value,
+    default,
+):
+    record = settings_service.repository.get(key)
+    if record is not None:
+        return record.value_json
+    if any(os.getenv(name) is not None for name in env_names):
+        return env_value
+    return default
+
+
+def _setting_or_route_provider(
+    settings_service: SettingsService,
+    key: str,
+    route: AiAgentRouteSelection | None,
+) -> str:
+    record = settings_service.repository.get(key)
+    if record is not None:
+        return str(record.value_json)
+    if route is not None:
+        return route.provider
+    return str(settings_service.get(key) or "zai")
+
+
+def _select_ai_route(
+    session,
+    *,
+    agent_key: str,
+    route_role: str,
+) -> AiAgentRouteSelection | None:
+    registry = AiRegistryService(session)
+    registry.bootstrap_defaults(actor="worker")
+    routes = registry.select_routes(agent_key=agent_key, route_role=route_role)
+    return routes[0] if routes else None
 
 
 def _build_telegram_client(session):

@@ -454,6 +454,22 @@ h3 {
   padding: 20px;
 }
 
+.ai-admin-section {
+  grid-column: 1 / -1;
+}
+
+.ai-admin-grid {
+  display: grid;
+  grid-template-columns: minmax(360px, 1fr) minmax(420px, 1.1fr);
+  gap: 16px;
+}
+
+.ai-admin-grid > section {
+  display: grid;
+  align-content: start;
+  gap: 10px;
+}
+
 .crm-layout {
   display: grid;
   grid-template-columns: minmax(280px, 340px) minmax(360px, 1fr) minmax(260px, 320px);
@@ -576,6 +592,11 @@ h3 {
   padding: 0 10px;
 }
 
+.compact-input {
+  width: 86px;
+  min-height: 32px;
+}
+
 .source-action-bar {
   display: flex;
   flex-wrap: wrap;
@@ -613,7 +634,8 @@ h3 {
   .sources-layout,
   .operations-layout,
   .today-layout,
-  .admin-layout {
+  .admin-layout,
+  .ai-admin-grid {
     grid-template-columns: 1fr;
   }
 

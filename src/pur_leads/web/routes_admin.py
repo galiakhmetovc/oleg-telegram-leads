@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 from pur_leads.repositories.settings import SettingRecord
 from pur_leads.repositories.userbots import UserbotAccountRecord
 from pur_leads.repositories.web_auth import WebUserRecord
+from pur_leads.services.ai_registry import AiRegistryService
 from pur_leads.services.settings import DEFAULT_SETTINGS, RawSecretValueError, SettingsService
 from pur_leads.services.userbots import UserbotAccountService
 from pur_leads.services.web_auth import (
@@ -56,6 +57,32 @@ class UserbotCreateRequest(BaseModel):
     max_parallel_telegram_jobs: int = 1
     flood_sleep_threshold_seconds: int = 60
     make_default: bool = False
+
+
+class AiModelLimitUpdateRequest(BaseModel):
+    raw_limit: int | None = None
+    utilization_ratio: float | None = None
+
+
+class AiAgentRouteUpsertRequest(BaseModel):
+    model_id: str
+    route_role: str
+    priority: int = 50
+    enabled: bool = True
+    max_output_tokens: int | None = None
+    temperature: float | None = 0.0
+    thinking_enabled: bool = False
+    structured_output_required: bool = True
+    account_id: str | None = None
+
+
+class AiAgentRouteUpdateRequest(BaseModel):
+    enabled: bool | None = None
+    priority: int | None = None
+    max_output_tokens: int | None = None
+    temperature: float | None = None
+    thinking_enabled: bool | None = None
+    structured_output_required: bool | None = None
 
 
 @router.get("/admin/users")
@@ -153,6 +180,95 @@ def create_userbot_account(
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return {"userbot": _userbot_payload(service, account)}
+
+
+@router.get("/admin/ai-registry")
+def get_ai_registry(
+    validated: SessionValidationResult = Depends(current_admin),
+    session: Session = Depends(get_session),
+) -> dict[str, Any]:
+    service = AiRegistryService(session)
+    service.bootstrap_defaults(actor=_actor(validated))
+    return service.snapshot()
+
+
+@router.patch("/admin/ai-model-limits/{limit_id}")
+def update_ai_model_limit(
+    limit_id: str,
+    payload: AiModelLimitUpdateRequest,
+    validated: SessionValidationResult = Depends(current_admin),
+    session: Session = Depends(get_session),
+) -> dict[str, Any]:
+    service = AiRegistryService(session)
+    try:
+        limit = service.update_model_limit(
+            limit_id,
+            actor=_actor(validated),
+            raw_limit=payload.raw_limit,
+            utilization_ratio=payload.utilization_ratio,
+        )
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="AI model limit not found") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"limit": limit}
+
+
+@router.post("/admin/ai-agents/{agent_key}/routes")
+def upsert_ai_agent_route(
+    agent_key: str,
+    payload: AiAgentRouteUpsertRequest,
+    validated: SessionValidationResult = Depends(current_admin),
+    session: Session = Depends(get_session),
+) -> dict[str, Any]:
+    service = AiRegistryService(session)
+    try:
+        route = service.upsert_agent_route(
+            agent_key=agent_key,
+            model_id=payload.model_id,
+            route_role=payload.route_role,
+            actor=_actor(validated),
+            account_id=payload.account_id,
+            priority=payload.priority,
+            enabled=payload.enabled,
+            max_output_tokens=payload.max_output_tokens,
+            temperature=payload.temperature,
+            thinking_enabled=payload.thinking_enabled,
+            structured_output_required=payload.structured_output_required,
+        )
+    except KeyError as exc:
+        raise HTTPException(
+            status_code=404, detail="AI agent, model, or account not found"
+        ) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"route": route}
+
+
+@router.patch("/admin/ai-routes/{route_id}")
+def update_ai_agent_route(
+    route_id: str,
+    payload: AiAgentRouteUpdateRequest,
+    validated: SessionValidationResult = Depends(current_admin),
+    session: Session = Depends(get_session),
+) -> dict[str, Any]:
+    service = AiRegistryService(session)
+    try:
+        route = service.update_agent_route(
+            route_id,
+            actor=_actor(validated),
+            enabled=payload.enabled,
+            priority=payload.priority,
+            max_output_tokens=payload.max_output_tokens,
+            temperature=payload.temperature,
+            thinking_enabled=payload.thinking_enabled,
+            structured_output_required=payload.structured_output_required,
+        )
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="AI agent route not found") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"route": route}
 
 
 @router.get("/settings")

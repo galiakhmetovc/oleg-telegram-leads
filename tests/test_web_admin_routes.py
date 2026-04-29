@@ -250,6 +250,60 @@ def test_admin_userbot_routes_create_list_and_set_default(tmp_path):
     )
 
 
+def test_admin_ai_registry_routes_list_update_limits_and_add_agent_routes(tmp_path):
+    fixture = _setup_admin_app(tmp_path)
+    client = fixture["client"]
+
+    denied_response = client.get("/api/admin/ai-registry")
+    _login_local(client)
+    registry_response = client.get("/api/admin/ai-registry")
+    registry = registry_response.json()
+    flash = next(
+        model for model in registry["models"] if model["normalized_model_name"] == "glm-4.5-flash"
+    )
+    airx = next(
+        model for model in registry["models"] if model["normalized_model_name"] == "glm-4.5-airx"
+    )
+    limit_response = client.patch(
+        f"/api/admin/ai-model-limits/{flash['limit']['id']}",
+        json={"raw_limit": 7, "utilization_ratio": 0.8},
+    )
+    route_response = client.post(
+        "/api/admin/ai-agents/catalog_extractor/routes",
+        json={
+            "model_id": airx["id"],
+            "route_role": "fallback",
+            "priority": 30,
+            "max_output_tokens": 2048,
+            "temperature": 0.0,
+            "enabled": True,
+            "structured_output_required": True,
+        },
+    )
+    updated_registry = client.get("/api/admin/ai-registry").json()
+
+    assert denied_response.status_code == 401
+    assert registry_response.status_code == 200
+    assert any(model["normalized_model_name"] == "glm-ocr" for model in registry["models"])
+    assert any(agent["agent_key"] == "ocr_extractor" for agent in registry["agents"])
+    assert limit_response.status_code == 200
+    assert limit_response.json()["limit"]["raw_limit"] == 7
+    assert limit_response.json()["limit"]["effective_limit"] == 5
+    assert route_response.status_code == 200
+    assert route_response.json()["route"]["model"] == "GLM-4.5-AirX"
+    assert route_response.json()["route"]["route_role"] == "fallback"
+    assert any(
+        route["model"] == "GLM-4.5-AirX" and route["route_role"] == "fallback"
+        for route in updated_registry["routes"]
+    )
+
+    with fixture["session_factory"]() as session:
+        audit_actions = {
+            row["action"] for row in session.execute(select(audit_log_table)).mappings().all()
+        }
+    assert {"ai_registry.limit_update", "ai_registry.route_upsert"}.issubset(audit_actions)
+
+
 def _setup_admin_app(tmp_path):
     db_path = tmp_path / "test.db"
     engine = create_sqlite_engine(db_path)
