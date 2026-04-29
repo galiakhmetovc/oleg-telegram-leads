@@ -53,6 +53,7 @@ DEFAULT_MODEL_CONCURRENCY_LIMITS: dict[str, int] = {
 class AiModelLeaseRecord:
     id: str
     provider: str
+    provider_account_id: str | None
     model: str
     normalized_model: str
     worker_name: str
@@ -82,34 +83,52 @@ class AiModelConcurrencyService:
         provider: str,
         model: str,
         worker_name: str,
+        provider_account_id: str | None = None,
     ) -> AiModelLease | None:
-        limit = self.effective_limit_for_model(model)
+        limit = self.effective_limit_for_model(model, provider_account_id=provider_account_id)
         record = self.acquire_slot(
             provider=provider,
+            provider_account_id=provider_account_id,
             model=model,
             limit=limit,
             worker_name=worker_name,
             lease_seconds=self.lease_seconds,
-            raw_limit=self.raw_limit_for_model(model),
+            raw_limit=self.raw_limit_for_model(model, provider_account_id=provider_account_id),
             utilization_ratio=self.utilization_ratio,
         )
         if record is None:
             return None
-        return AiModelLease(id=record.id, provider=record.provider, model=record.model)
+        return AiModelLease(
+            id=record.id,
+            provider=record.provider,
+            model=record.model,
+            provider_account_id=record.provider_account_id,
+        )
 
     def release_model_slot(self, lease: AiModelLease) -> None:
         self.release_slot(lease.id)
 
-    def raw_limit_for_model(self, model: str) -> int:
-        return max(1, int(self.limits.get(_normalize_model(model), self.default_limit)))
+    def raw_limit_for_model(self, model: str, *, provider_account_id: str | None = None) -> int:
+        normalized_model = _normalize_model(model)
+        if provider_account_id:
+            account_key = _account_model_key(provider_account_id, normalized_model)
+            if account_key in self.limits:
+                return max(1, int(self.limits[account_key]))
+        return max(1, int(self.limits.get(normalized_model, self.default_limit)))
 
-    def effective_limit_for_model(self, model: str) -> int:
-        return _effective_limit(self.raw_limit_for_model(model), self.utilization_ratio)
+    def effective_limit_for_model(
+        self, model: str, *, provider_account_id: str | None = None
+    ) -> int:
+        return _effective_limit(
+            self.raw_limit_for_model(model, provider_account_id=provider_account_id),
+            self.utilization_ratio,
+        )
 
     def acquire_slot(
         self,
         *,
         provider: str,
+        provider_account_id: str | None = None,
         model: str,
         limit: int,
         worker_name: str,
@@ -126,9 +145,15 @@ class AiModelConcurrencyService:
         # across worker processes while keeping the normal scheduler path unchanged.
         self.session.commit()
         self.session.execute(text("BEGIN IMMEDIATE"))
-        self._delete_expired(provider=provider, normalized_model=normalized_model, now=now)
+        self._delete_expired(
+            provider=provider,
+            provider_account_id=provider_account_id,
+            normalized_model=normalized_model,
+            now=now,
+        )
         active_count = self._active_count(
             provider=provider,
+            provider_account_id=provider_account_id,
             normalized_model=normalized_model,
             now=now,
         )
@@ -141,6 +166,7 @@ class AiModelConcurrencyService:
             insert(ai_model_concurrency_leases_table).values(
                 id=lease_id,
                 provider=provider,
+                ai_provider_account_id=provider_account_id,
                 model=model,
                 normalized_model=normalized_model,
                 worker_name=worker_name,
@@ -160,6 +186,7 @@ class AiModelConcurrencyService:
         return AiModelLeaseRecord(
             id=lease_id,
             provider=provider,
+            provider_account_id=provider_account_id,
             model=model,
             normalized_model=normalized_model,
             worker_name=worker_name,
@@ -173,24 +200,50 @@ class AiModelConcurrencyService:
         )
         self.session.commit()
 
-    def _delete_expired(self, *, provider: str, normalized_model: str, now) -> None:  # noqa: ANN001
+    def _delete_expired(  # noqa: ANN001
+        self,
+        *,
+        provider: str,
+        provider_account_id: str | None,
+        normalized_model: str,
+        now,
+    ) -> None:
+        conditions = [
+            ai_model_concurrency_leases_table.c.provider == provider,
+            ai_model_concurrency_leases_table.c.normalized_model == normalized_model,
+            ai_model_concurrency_leases_table.c.lease_expires_at <= now,
+        ]
+        conditions.append(
+            ai_model_concurrency_leases_table.c.ai_provider_account_id == provider_account_id
+            if provider_account_id is not None
+            else ai_model_concurrency_leases_table.c.ai_provider_account_id.is_(None)
+        )
         self.session.execute(
-            delete(ai_model_concurrency_leases_table).where(
-                ai_model_concurrency_leases_table.c.provider == provider,
-                ai_model_concurrency_leases_table.c.normalized_model == normalized_model,
-                ai_model_concurrency_leases_table.c.lease_expires_at <= now,
-            )
+            delete(ai_model_concurrency_leases_table).where(*conditions)
         )
 
-    def _active_count(self, *, provider: str, normalized_model: str, now) -> int:  # noqa: ANN001
+    def _active_count(  # noqa: ANN001
+        self,
+        *,
+        provider: str,
+        provider_account_id: str | None,
+        normalized_model: str,
+        now,
+    ) -> int:
+        conditions = [
+            ai_model_concurrency_leases_table.c.provider == provider,
+            ai_model_concurrency_leases_table.c.normalized_model == normalized_model,
+            ai_model_concurrency_leases_table.c.lease_expires_at > now,
+        ]
+        conditions.append(
+            ai_model_concurrency_leases_table.c.ai_provider_account_id == provider_account_id
+            if provider_account_id is not None
+            else ai_model_concurrency_leases_table.c.ai_provider_account_id.is_(None)
+        )
         value = self.session.execute(
             select(func.count())
             .select_from(ai_model_concurrency_leases_table)
-            .where(
-                ai_model_concurrency_leases_table.c.provider == provider,
-                ai_model_concurrency_leases_table.c.normalized_model == normalized_model,
-                ai_model_concurrency_leases_table.c.lease_expires_at > now,
-            )
+            .where(*conditions)
         ).scalar_one()
         return int(value)
 
@@ -210,6 +263,10 @@ def _normalized_limits(limits: dict[str, int]) -> dict[str, int]:
 
 def _normalize_model(model: str) -> str:
     return model.strip().casefold().replace("_", "-")
+
+
+def _account_model_key(provider_account_id: str, normalized_model: str) -> str:
+    return f"{provider_account_id}:{normalized_model}"
 
 
 def _int_like(value: Any) -> bool:

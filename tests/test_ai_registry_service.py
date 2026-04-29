@@ -41,6 +41,19 @@ def test_ai_registry_bootstrap_creates_zai_models_agents_and_multi_model_routes(
         assert "glm-4.5-flash" in models
         assert "glm-ocr" in models
         assert models["glm-ocr"]["model_type"] == "ocr"
+        assert models["glm-ocr"]["supports_thinking"] is False
+        assert models["glm-ocr"]["supports_structured_output"] is False
+        assert models["glm-ocr"]["supports_json_mode"] is False
+        assert models["glm-ocr"]["supports_document_input"] is True
+        assert models["glm-ocr"]["metadata_json"]["endpoint_family"] == "layout_parsing"
+        assert models["glm-5.1"]["supports_thinking"] is True
+        assert models["glm-5.1"]["supports_structured_output"] is True
+        assert models["glm-5.1"]["metadata_json"]["thinking_control_values"] == [
+            "enabled",
+            "disabled",
+        ]
+        assert models["glm-4-plus"]["supports_thinking"] is False
+        assert models["glm-4-plus"]["supports_structured_output"] is False
         flash_limit = limits[(models["glm-4.5-flash"]["id"], "concurrency")]
         assert flash_limit["raw_limit"] == 2
         assert flash_limit["effective_limit"] == 1
@@ -73,6 +86,12 @@ def test_ai_registry_selects_enabled_routes_by_agent_and_role(tmp_path):
         assert [route.model for route in ocr] == ["GLM-OCR"]
         assert primary[0].provider == "zai"
         assert primary[0].base_url == "https://api.z.ai/api/coding/paas/v4"
+        assert primary[0].thinking_mode == "off"
+        assert primary[0].supports_thinking is True
+        assert primary[0].supports_structured_output is True
+        assert ocr[0].supports_thinking is False
+        assert ocr[0].supports_structured_output is False
+        assert ocr[0].endpoint_family == "layout_parsing"
 
 
 def test_ai_registry_bootstrap_does_not_reenable_operator_disabled_routes(tmp_path):

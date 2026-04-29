@@ -297,6 +297,9 @@ def _build_catalog_extractor(session, settings, *, worker_name: str):
                 session,
                 worker_name=worker_name,
             ),
+            provider_account_id=route.provider_account_id if route is not None else None,
+            thinking_type=_zai_thinking_type_for_route(route),
+            response_format=_zai_response_format_for_route(route),
             worker_name=worker_name,
         ),
         model=model,
@@ -359,6 +362,9 @@ def _build_lead_shadow_classifier(session, settings, *, worker_name: str):
                 session,
                 worker_name=worker_name,
             ),
+            provider_account_id=route.provider_account_id if route is not None else None,
+            thinking_type=_zai_thinking_type_for_route(route),
+            response_format=_zai_response_format_for_route(route),
             worker_name=worker_name,
         ),
         model=model,
@@ -450,6 +456,23 @@ def _select_ai_route(
     registry = AiRegistryService(session)
     routes = registry.select_routes(agent_key=agent_key, route_role=route_role)
     return routes[0] if routes else None
+
+
+def _zai_thinking_type_for_route(route: AiAgentRouteSelection | None) -> str | None:
+    if route is None or not route.supports_thinking:
+        return None
+    mode = str(route.thinking_mode or ("on" if route.thinking_enabled else "off")).casefold()
+    if mode in {"off", "disabled", "none", "false", "0"}:
+        return "disabled"
+    return "enabled"
+
+
+def _zai_response_format_for_route(route: AiAgentRouteSelection | None) -> dict[str, str] | None:
+    if route is None or not route.structured_output_required:
+        return None
+    if not (route.supports_structured_output or route.supports_json_mode):
+        return None
+    return {"type": "json_object"}
 
 
 def _build_telegram_client(session):

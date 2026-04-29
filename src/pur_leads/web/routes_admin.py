@@ -72,6 +72,7 @@ class AiAgentRouteUpsertRequest(BaseModel):
     max_output_tokens: int | None = None
     temperature: float | None = 0.0
     thinking_enabled: bool = False
+    thinking_mode: str | None = None
     structured_output_required: bool = True
     account_id: str | None = None
 
@@ -82,6 +83,7 @@ class AiAgentRouteUpdateRequest(BaseModel):
     max_output_tokens: int | None = None
     temperature: float | None = None
     thinking_enabled: bool | None = None
+    thinking_mode: str | None = None
     structured_output_required: bool | None = None
 
 
@@ -243,6 +245,7 @@ def upsert_ai_agent_route(
             max_output_tokens=payload.max_output_tokens,
             temperature=payload.temperature,
             thinking_enabled=payload.thinking_enabled,
+            thinking_mode=payload.thinking_mode,
             structured_output_required=payload.structured_output_required,
         )
     except KeyError as exc:
@@ -271,6 +274,7 @@ def update_ai_agent_route(
             max_output_tokens=payload.max_output_tokens,
             temperature=payload.temperature,
             thinking_enabled=payload.thinking_enabled,
+            thinking_mode=payload.thinking_mode,
             structured_output_required=payload.structured_output_required,
         )
     except KeyError as exc:

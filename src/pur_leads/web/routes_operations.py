@@ -24,6 +24,7 @@ from pur_leads.models.scheduler import job_runs_table, scheduler_jobs_table
 from pur_leads.models.telegram_sources import source_access_checks_table
 from pur_leads.services.audit import mask_secret_values
 from pur_leads.services.backup import BackupService
+from pur_leads.services.resource_capacity import ResourceCapacityService
 from pur_leads.services.web_auth import SessionValidationResult
 from pur_leads.web.dependencies import current_admin, get_session
 
@@ -36,6 +37,7 @@ def operations_summary(
     session: Session = Depends(get_session),
 ) -> dict[str, Any]:
     return {
+        "capacity": ResourceCapacityService(session).capacity_report(),
         "jobs": {
             "total": _table_count(session, scheduler_jobs_table),
             "by_status": _count_by(session, scheduler_jobs_table, "status"),
@@ -146,6 +148,14 @@ def operations_summary(
             "by_status": _count_by(session, restore_runs_table, "status"),
         },
     }
+
+
+@router.get("/capacity")
+def operations_capacity(
+    _validated: SessionValidationResult = Depends(current_admin),
+    session: Session = Depends(get_session),
+) -> dict[str, Any]:
+    return ResourceCapacityService(session).capacity_report()
 
 
 @router.get("/jobs")

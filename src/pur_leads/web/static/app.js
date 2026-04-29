@@ -1208,7 +1208,31 @@ async function loadOperationsSummary() {
   const verifiedBackups = summary.backups?.by_status?.verified || 0;
   const failedQualityRuns = summary.quality?.runs?.by_status?.failed || 0;
   const qualityCases = summary.quality?.cases?.total || 0;
+  const workerCapacity = summary.capacity?.worker_capacity || {};
+  const capacityTotals = summary.capacity?.totals || {};
+  const bottleneck = (summary.capacity?.bottlenecks || [])[0];
   target.innerHTML = `<div class="ops-metric-row">
+    ${renderOpsMetric(
+      "Воркеры",
+      workerCapacity.configured_worker_concurrency || 0,
+      `рекомендовано ${workerCapacity.recommended_worker_concurrency || 0}`,
+      bottleneck?.kind === "worker_concurrency" ? "is-warn" : ""
+    )}
+    ${renderOpsMetric(
+      "AI слоты",
+      capacityTotals.ai_model_available_slots || 0,
+      `${capacityTotals.ai_model_effective_slots || 0} всего`
+    )}
+    ${renderOpsMetric(
+      "Юзерботы",
+      capacityTotals.telegram_userbot_effective_slots || 0,
+      "чтение Telegram"
+    )}
+    ${renderOpsMetric(
+      "Боты",
+      capacityTotals.telegram_bot_effective_slots || 0,
+      "уведомления"
+    )}
     ${renderOpsMetric("Задачи", summary.jobs?.total || 0, `${queuedJobs} в очереди / ${runningJobs} выполняется`)}
     ${renderOpsMetric("Ошибки задач", failedJobs, "нужна проверка оператора", failedJobs ? "is-danger" : "")}
     ${renderOpsMetric("Запуски", summary.runs?.total || 0, "попытки воркеров")}

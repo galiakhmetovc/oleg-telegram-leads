@@ -55,6 +55,149 @@ The system must continuously read the PUR Telegram channel, parse messages and d
 - Retention is based on time and hot database size. Large/old data is archived and rotated, not simply deleted.
 - Local archive storage is the first phase. S3-compatible storage is represented in the schema and planned for a later phase.
 
+## Resource Orchestration And Capacity Planning
+
+The runtime must treat connected providers, models, Telegram user accounts, ordinary Telegram bots, and local worker processes as one capacity system.
+
+The goal is not to set one large worker count manually. The system must calculate how much work can be usefully executed from the currently connected resources, then let the scheduler keep those resources busy without starving live lead handling.
+
+### Resource Pools
+
+Each external or scarce capability is represented as a resource pool:
+
+- `ai_provider_account:model`: one concrete provider account and one concrete model, for example `zai-account-1:GLM-4-Plus`.
+- `telegram_userbot`: one Telegram user account session that can read chats/channels and download Telegram documents.
+- `telegram_bot`: one ordinary Bot API token that can send notifications, delete setup messages, and operate notification groups.
+- `local_parser`: CPU/local IO capacity for PDF text extraction, chunking, deduplication, and local heuristics.
+- `external_fetch`: HTTP fetch capacity for Telegraph and other configured domains.
+- `worker`: the global runtime execution slot used by every job.
+
+AI limits are scoped to concrete provider account + model. A model with the same public name on two enabled provider accounts is two separate pools. Provider-level model defaults may be used as a fallback, but the runtime planner must display and eventually enforce the account-level pool.
+
+Every resource pool stores or derives:
+
+- provider/account/model/bot/userbot identity;
+- capability tags such as `llm.text.fast`, `llm.text.strong`, `ocr.document`, `telegram.read_history`, `telegram.download_document`, `telegram.notify`;
+- raw limit;
+- utilization ratio, default `0.8`;
+- effective limit, using `max(1, floor(raw_limit * utilization_ratio))`;
+- active leases;
+- available slots;
+- current health: active, paused, flood-wait, rate-limited, disabled, missing credentials, or errored.
+
+AI model metadata must describe capabilities, not just a name and concurrency limit. For each provider model the registry stores the endpoint family, supported input/output modalities, whether the model supports structured JSON output, whether it supports thinking/reasoning controls, and which provider-specific control values are valid.
+
+This is provider-specific by design:
+
+- Z.AI chat-completion models that support reasoning use `thinking.type=enabled|disabled`; there is no `min/medium/high/xhigh` scale for Z.AI.
+- Other providers may expose reasoning effort as `off|min|medium|high|xhigh` or another enum. The route stores provider-neutral `thinking_mode`; the provider adapter translates it to the concrete API payload.
+- Z.AI structured output is a chat-completion capability enabled with `response_format={"type":"json_object"}` and must be sent only to models that support it.
+- Z.AI OCR is not a normal chat-completion model. `GLM-OCR` uses the `layout_parsing` endpoint, accepts PDF/images, and must not receive chat-only `thinking` or `response_format` options.
+
+Sources used for the initial Z.AI capability seed:
+
+- Chat completion parameters: `https://docs.z.ai/api-reference/llm/chat-completion`
+- Thinking mode: `https://docs.z.ai/guides/capabilities/thinking-mode`
+- Structured output: `https://docs.z.ai/guides/capabilities/struct-output`
+- GLM-OCR layout parsing: `https://docs.z.ai/guides/vlm/glm-ocr`
+
+### Task Definitions
+
+Scheduler job types must map to task definitions. The task definition tells the resource scheduler what is required before a job can run:
+
+| Task | Workload class | Required resource capabilities | Parallelism rule |
+| --- | --- | --- | --- |
+| `poll_monitored_source` / `telegram_read_history` | live or bulk | `worker`, `telegram.read_history` | serialized per userbot unless explicitly configured higher |
+| `download_artifact` | bulk | `worker`, `telegram.download_document` | bounded per userbot |
+| `fetch_external_page` | bulk | `worker`, `external_fetch` | bounded by HTTP fetch pool |
+| `parse_artifact` | bulk | `worker`, `local_parser` | bounded by local parser pool |
+| `ocr_artifact` | bulk | `worker`, `ocr.document` | bounded by selected OCR model pool |
+| `extract_catalog_facts` | bulk or normal | `worker`, `llm.text.fast` or `llm.text.strong` | routed by catalog agent route |
+| `classify_message_batch` | realtime | `worker`, optional `llm.text.fast` for shadow | lead fuzzy path is local, LLM shadow uses AI pool |
+| `send_notifications` | realtime | `worker`, `telegram.notify` | bounded per bot/group route |
+| `generate_contact_reasons` | normal | `worker`, `llm.text.fast` or local | routed by CRM agent route when enabled |
+
+Each scheduler job may store a workload class:
+
+- `realtime`: live leads, operator notifications, source access problems requiring action;
+- `normal`: current catalog updates, CRM reminders, routine checks;
+- `bulk`: initial channel ingest, historical backfill, retro research, large document batches.
+
+Bulk work may use all free capacity, but it must not permanently consume capacity reserved for realtime work.
+
+### Model Selection Strategy
+
+The scheduler must not blindly use the strongest model for every AI task.
+
+Model choice is task-dependent:
+
+- Fast/light language models are preferred for first-pass extraction, lead shadow checks, deduplication, normalization, and high-volume catalog chunks.
+- Stronger/heavier language models are reserved for low-confidence extraction, conflicting facts, high-value sources, final synthesis, or manual recheck.
+- OCR models are used only for scanned PDFs/images or files where local text extraction produced empty/low-quality chunks.
+- Fallback routes are explicit: fast model first, strong model on low confidence or invalid structured output, local heuristic fallback when configured.
+
+Agent routes therefore support multiple enabled models per task:
+
+- `primary`
+- `fallback`
+- `shadow`
+- `ensemble`
+- `split`
+- `manual_test`
+
+The route selector chooses from enabled routes that match the task, workload class, input type, and required capability. If several provider accounts expose the same model class, the least-loaded healthy pool wins.
+
+### Worker Count Calculation
+
+The system exposes three numbers:
+
+- `configured_worker_concurrency`: what the running worker process is currently configured to use.
+- `resource_limited_worker_capacity`: how many concurrent jobs can be useful given active resource pools.
+- `recommended_worker_concurrency`: `min(worker_global_cap, resource_limited_worker_capacity)`.
+
+The resource-limited capacity is not just AI capacity. It combines active pools that can run independent jobs:
+
+- active AI model slots across provider accounts and selected agent routes;
+- active Telegram userbot read/download slots;
+- ordinary bot notification slots;
+- local parser slots;
+- external page fetch slots.
+
+The UI must show the bottleneck explicitly. Examples:
+
+- If `GLM-4-Plus` has 16 effective slots but `configured_worker_concurrency=1`, the bottleneck is global worker count.
+- If there are 16 worker slots but one Telegram userbot, initial message fetching remains limited by that one userbot.
+- If scanned PDFs are queued and `GLM-OCR` has one effective slot, OCR is the bottleneck.
+- If live lead notifications are queued and no Telegram bot is enabled, notification routing is the bottleneck.
+
+### Reservations And Priority
+
+Realtime lead handling has priority over bulk catalog ingest.
+
+Initial default policy:
+
+- keep a configurable realtime worker reserve, default `2`;
+- keep a configurable realtime AI reserve per routed lead model when live LLM lead checks are enabled;
+- keep Telegram notification capacity available for urgent lead/operator messages;
+- let bulk catalog ingest consume all remaining free capacity;
+- avoid preemption in the first implementation by keeping jobs bounded and short.
+
+Future policy can support preemption or dynamic throttling, but the first implementation only needs short leases, frequent scheduling, and clear priority ordering.
+
+### Observability
+
+The web UI must expose a capacity view:
+
+- configured vs recommended worker count;
+- active provider accounts and model pools;
+- raw/effective/used/free slots per model account;
+- active userbots and their read/download slots;
+- active bots and notification routes;
+- queued/running jobs by workload class and job type;
+- current bottlenecks and recommended operator actions.
+
+Capacity calculation is advisory first, then becomes enforceable as resource leases are moved from individual adapters into the scheduler.
+
 ## Bootstrap Onboarding Flow
 
 After the built-in administrator changes the temporary password, the web UI routes incomplete installations to `/onboarding`.
@@ -1010,6 +1153,8 @@ Key fields:
 Rules:
 
 - Model names are scoped by provider. `provider:model` is the concurrency and routing identity.
+- `metadata_json` includes provider-specific capability details such as `endpoint_family`, `thinking_control_style`, `thinking_control_values`, `structured_output_mode`, and source URLs used to seed or verify those capabilities.
+- Structured output and thinking controls are independent flags. OCR/image/video/realtime models may share concurrency accounting with language models, but their request payloads are provider-specific.
 - The UI should allow enabling/disabling a model without deleting historical runs.
 
 ### `ai_model_limits`
@@ -1084,6 +1229,7 @@ Key fields:
 - `max_output_tokens`
 - `temperature`
 - `thinking_enabled`
+- `thinking_mode`: provider-neutral value such as `off`, `on`, `min`, `medium`, `high`, `xhigh`; provider adapters translate it to the concrete API payload
 - `structured_output_required`
 - `fallback_on_error`
 - `fallback_on_rate_limit`

@@ -125,6 +125,23 @@ def test_operations_routes_require_auth_and_expose_runtime_state(tmp_path):
     assert summary_after_backup["restores"]["by_status"]["completed"] == 1
 
 
+def test_operations_capacity_route_exposes_worker_recommendation(tmp_path):
+    fixture = _setup_app(tmp_path)
+    _login(fixture["client"])
+
+    capacity = fixture["client"].get("/api/operations/capacity")
+
+    assert capacity.status_code == 200
+    payload = capacity.json()
+    assert "worker_capacity" in payload
+    assert payload["worker_capacity"]["configured_worker_concurrency"] >= 1
+    assert "resource_limited_worker_capacity" in payload["worker_capacity"]
+    assert "ai_model_pools" in payload
+    assert "telegram_userbot_pools" in payload
+    assert "telegram_bot_pools" in payload
+    assert "bottlenecks" in payload
+
+
 def _setup_app(tmp_path):
     db_path = tmp_path / "test.db"
     engine = create_sqlite_engine(db_path)

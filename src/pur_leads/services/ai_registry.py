@@ -57,6 +57,58 @@ ZAI_MODEL_SEED: tuple[dict[str, Any], ...] = (
     {"model": "CogVideoX-3", "type": "video_generation", "limit": 1},
 )
 
+ZAI_THINKING_MODELS = {
+    "glm-5.1",
+    "glm-5",
+    "glm-5-turbo",
+    "glm-5v-turbo",
+    "glm-4.7",
+    "glm-4.7-flash",
+    "glm-4.7-flashx",
+    "glm-4.6",
+    "glm-4.6v",
+    "glm-4.6v-flash",
+    "glm-4.6v-flashx",
+    "glm-4.5",
+    "glm-4.5-air",
+    "glm-4.5-airx",
+    "glm-4.5-flash",
+    "glm-4.5v",
+}
+
+ZAI_STRUCTURED_OUTPUT_MODELS = {
+    "glm-5.1",
+    "glm-5",
+    "glm-5-turbo",
+    "glm-5v-turbo",
+    "glm-4.7",
+    "glm-4.7-flash",
+    "glm-4.7-flashx",
+    "glm-4.6",
+    "glm-4.6v",
+    "glm-4.6v-flash",
+    "glm-4.6v-flashx",
+    "glm-4.5",
+    "glm-4.5-air",
+    "glm-4.5-airx",
+    "glm-4.5-flash",
+    "glm-4.5v",
+    "glm-4-32b-0414-128k",
+}
+
+ZAI_VISION_LANGUAGE_MODELS = {
+    "glm-5v-turbo",
+    "glm-4.6v",
+    "glm-4.6v-flash",
+    "glm-4.6v-flashx",
+    "glm-4.5v",
+}
+
+ZAI_CHAT_COMPLETION_DOC_URL = "https://docs.z.ai/api-reference/llm/chat-completion"
+ZAI_THINKING_DOC_URL = "https://docs.z.ai/guides/capabilities/thinking-mode"
+ZAI_STRUCTURED_OUTPUT_DOC_URL = "https://docs.z.ai/guides/capabilities/struct-output"
+ZAI_OCR_DOC_URL = "https://docs.z.ai/guides/vlm/glm-ocr"
+
 AGENT_SEED: tuple[dict[str, Any], ...] = (
     {
         "agent_key": "catalog_extractor",
@@ -125,7 +177,17 @@ class AiAgentRouteSelection:
     max_output_tokens: int | None
     temperature: float | None
     thinking_enabled: bool
+    thinking_mode: str
     structured_output_required: bool
+    supports_structured_output: bool
+    supports_json_mode: bool
+    supports_thinking: bool
+    supports_tools: bool
+    supports_streaming: bool
+    supports_image_input: bool
+    supports_document_input: bool
+    endpoint_family: str | None
+    thinking_control_values: list[str]
 
 
 class AiRegistryService:
@@ -230,7 +292,16 @@ class AiRegistryService:
                     ai_agent_routes_table.c.max_output_tokens,
                     ai_agent_routes_table.c.temperature,
                     ai_agent_routes_table.c.thinking_enabled,
+                    ai_agent_routes_table.c.thinking_mode,
                     ai_agent_routes_table.c.structured_output_required,
+                    ai_models_table.c.supports_structured_output,
+                    ai_models_table.c.supports_json_mode,
+                    ai_models_table.c.supports_thinking,
+                    ai_models_table.c.supports_tools,
+                    ai_models_table.c.supports_streaming,
+                    ai_models_table.c.supports_image_input,
+                    ai_models_table.c.supports_document_input,
+                    ai_models_table.c.metadata_json.label("model_metadata_json"),
                 )
                 .select_from(
                     ai_agent_routes_table.join(
@@ -257,7 +328,7 @@ class AiRegistryService:
             .mappings()
             .all()
         )
-        return [AiAgentRouteSelection(**dict(row)) for row in rows]
+        return [_route_selection_from_row(row) for row in rows]
 
     def model_concurrency_limits(self, *, provider_key: str) -> dict[str, int]:
         rows = (
@@ -405,6 +476,7 @@ class AiRegistryService:
         max_output_tokens: int | None = None,
         temperature: float | None = 0.0,
         thinking_enabled: bool = False,
+        thinking_mode: str | None = None,
         structured_output_required: bool = True,
     ) -> dict[str, Any]:
         normalized_role = route_role.strip().casefold()
@@ -419,6 +491,10 @@ class AiRegistryService:
         resolved_account_id = account_id or self._default_account_id(str(model["ai_provider_id"]))
         if resolved_account_id is None:
             raise KeyError("provider account")
+        resolved_thinking_mode = _normalize_thinking_mode(
+            thinking_mode,
+            thinking_enabled=thinking_enabled,
+        )
         existing = self._route_by_agent_model_role(
             agent_id=str(agent["id"]),
             model_id=model_id,
@@ -436,7 +512,8 @@ class AiRegistryService:
             "max_input_tokens": None,
             "max_output_tokens": max_output_tokens,
             "temperature": temperature,
-            "thinking_enabled": bool(thinking_enabled),
+            "thinking_enabled": _thinking_enabled_from_mode(resolved_thinking_mode),
+            "thinking_mode": resolved_thinking_mode,
             "structured_output_required": bool(structured_output_required),
             "fallback_on_error": True,
             "fallback_on_rate_limit": True,
@@ -480,6 +557,7 @@ class AiRegistryService:
         max_output_tokens: int | None = None,
         temperature: float | None = None,
         thinking_enabled: bool | None = None,
+        thinking_mode: str | None = None,
         structured_output_required: bool | None = None,
     ) -> dict[str, Any]:
         old_value = self.route_payload(route_id)
@@ -494,8 +572,17 @@ class AiRegistryService:
             values["max_output_tokens"] = int(max_output_tokens)
         if temperature is not None:
             values["temperature"] = float(temperature)
-        if thinking_enabled is not None:
-            values["thinking_enabled"] = bool(thinking_enabled)
+        if thinking_mode is not None:
+            resolved_thinking_mode = _normalize_thinking_mode(thinking_mode)
+            values["thinking_mode"] = resolved_thinking_mode
+            values["thinking_enabled"] = _thinking_enabled_from_mode(resolved_thinking_mode)
+        if thinking_enabled is not None and thinking_mode is None:
+            resolved_thinking_mode = _normalize_thinking_mode(
+                None,
+                thinking_enabled=bool(thinking_enabled),
+            )
+            values["thinking_mode"] = resolved_thinking_mode
+            values["thinking_enabled"] = _thinking_enabled_from_mode(resolved_thinking_mode)
         if structured_output_required is not None:
             values["structured_output_required"] = bool(structured_output_required)
         self.session.execute(
@@ -598,6 +685,7 @@ class AiRegistryService:
             .first()
         )
         model_type = str(seed["type"])
+        capabilities = _zai_model_capabilities(normalized_model=normalized, model_type=model_type)
         values = {
             "ai_provider_id": provider_id,
             "provider_model_name": seed["model"],
@@ -606,23 +694,29 @@ class AiRegistryService:
             "model_type": model_type,
             "context_window_tokens": None,
             "max_output_tokens": None,
-            "supports_structured_output": model_type in {"language", "ocr", "vision_language"},
-            "supports_json_mode": model_type in {"language", "ocr", "vision_language"},
-            "supports_thinking": model_type in {"language", "vision_language"},
-            "supports_tools": False,
-            "supports_streaming": model_type in {"language", "vision_language"},
-            "supports_image_input": model_type in {"vision_language", "ocr", "image_generation"},
-            "supports_document_input": model_type == "ocr",
-            "supports_audio_input": model_type in {"audio", "realtime_audio_video"},
-            "supports_video_input": model_type in {"video_generation", "realtime_audio_video"},
+            "supports_structured_output": capabilities["supports_structured_output"],
+            "supports_json_mode": capabilities["supports_json_mode"],
+            "supports_thinking": capabilities["supports_thinking"],
+            "supports_tools": capabilities["supports_tools"],
+            "supports_streaming": capabilities["supports_streaming"],
+            "supports_image_input": capabilities["supports_image_input"],
+            "supports_document_input": capabilities["supports_document_input"],
+            "supports_audio_input": capabilities["supports_audio_input"],
+            "supports_video_input": capabilities["supports_video_input"],
             "default_temperature": 0.0 if model_type in {"language", "ocr"} else None,
             "status": "active",
-            "source_url": None,
+            "source_url": capabilities["source_url"],
             "verified_at": None,
-            "metadata_json": {},
+            "metadata_json": capabilities["metadata_json"],
             "updated_at": now,
         }
         if existing is not None:
+            update_values = {key: value for key, value in values.items() if key != "status"}
+            self.session.execute(
+                update(ai_models_table)
+                .where(ai_models_table.c.id == existing["id"])
+                .values(**update_values)
+            )
             return str(existing["id"])
         model_id = new_id()
         self.session.execute(insert(ai_models_table).values(id=model_id, created_at=now, **values))
@@ -721,6 +815,7 @@ class AiRegistryService:
             "max_output_tokens": seed.get("max_output_tokens"),
             "temperature": 0.0,
             "thinking_enabled": False,
+            "thinking_mode": "off",
             "structured_output_required": True,
             "fallback_on_error": True,
             "fallback_on_rate_limit": True,
@@ -844,7 +939,16 @@ class AiRegistryService:
                 ai_agent_routes_table.c.max_output_tokens,
                 ai_agent_routes_table.c.temperature,
                 ai_agent_routes_table.c.thinking_enabled,
+                ai_agent_routes_table.c.thinking_mode,
                 ai_agent_routes_table.c.structured_output_required,
+                ai_models_table.c.supports_structured_output,
+                ai_models_table.c.supports_json_mode,
+                ai_models_table.c.supports_thinking,
+                ai_models_table.c.supports_tools,
+                ai_models_table.c.supports_streaming,
+                ai_models_table.c.supports_image_input,
+                ai_models_table.c.supports_document_input,
+                ai_models_table.c.metadata_json.label("model_metadata_json"),
                 ai_agent_routes_table.c.fallback_on_error,
                 ai_agent_routes_table.c.fallback_on_rate_limit,
                 ai_agent_routes_table.c.fallback_on_invalid_output,
@@ -888,5 +992,109 @@ def _effective_limit(raw_limit: int, utilization_ratio: float) -> int:
     return max(1, floor(max(1, raw_limit) * max(0.0, min(1.0, utilization_ratio))))
 
 
+def _route_selection_from_row(row: dict[str, Any]) -> AiAgentRouteSelection:
+    data = dict(row)
+    model_metadata = data.pop("model_metadata_json") or {}
+    if not isinstance(model_metadata, dict):
+        model_metadata = {}
+    data["endpoint_family"] = _optional_string(model_metadata.get("endpoint_family"))
+    thinking_values = model_metadata.get("thinking_control_values")
+    data["thinking_control_values"] = (
+        [str(value) for value in thinking_values] if isinstance(thinking_values, list) else []
+    )
+    data["thinking_mode"] = _normalize_thinking_mode(
+        data.get("thinking_mode"),
+        thinking_enabled=bool(data.get("thinking_enabled")),
+    )
+    return AiAgentRouteSelection(**data)
+
+
+def _zai_model_capabilities(*, normalized_model: str, model_type: str) -> dict[str, Any]:
+    endpoint_family = _zai_endpoint_family(normalized_model=normalized_model, model_type=model_type)
+    supports_thinking = normalized_model in ZAI_THINKING_MODELS
+    supports_structured_output = normalized_model in ZAI_STRUCTURED_OUTPUT_MODELS
+    supports_json_mode = supports_structured_output
+    supports_vision_input = normalized_model in ZAI_VISION_LANGUAGE_MODELS
+    is_ocr = normalized_model == "glm-ocr"
+    is_language = model_type == "language"
+    metadata: dict[str, Any] = {
+        "endpoint_family": endpoint_family,
+        "thinking_control_style": "binary" if supports_thinking else "unsupported",
+        "thinking_control_values": ["enabled", "disabled"] if supports_thinking else [],
+        "provider_neutral_thinking_modes": ["off", "on"] if supports_thinking else ["off"],
+        "structured_output_mode": "json_object" if supports_json_mode else None,
+        "capability_source_urls": _zai_capability_source_urls(
+            endpoint_family=endpoint_family,
+            supports_thinking=supports_thinking,
+            supports_structured_output=supports_structured_output,
+        ),
+    }
+    return {
+        "supports_structured_output": supports_structured_output,
+        "supports_json_mode": supports_json_mode,
+        "supports_thinking": supports_thinking,
+        "supports_tools": is_language and endpoint_family == "chat_completions",
+        "supports_streaming": is_language and endpoint_family == "chat_completions",
+        "supports_image_input": supports_vision_input or is_ocr,
+        "supports_document_input": supports_vision_input or is_ocr,
+        "supports_audio_input": model_type == "realtime_audio_video",
+        "supports_video_input": model_type in {"video_generation", "realtime_audio_video"}
+        or supports_vision_input,
+        "source_url": _zai_source_url(endpoint_family=endpoint_family),
+        "metadata_json": metadata,
+    }
+
+
+def _zai_endpoint_family(*, normalized_model: str, model_type: str) -> str:
+    if normalized_model == "glm-ocr":
+        return "layout_parsing"
+    if model_type == "image_generation":
+        return "image_generation"
+    if model_type == "video_generation":
+        return "video_generation"
+    if model_type == "realtime_audio_video":
+        return "realtime_audio_video"
+    return "chat_completions"
+
+
+def _zai_source_url(*, endpoint_family: str) -> str:
+    if endpoint_family == "layout_parsing":
+        return ZAI_OCR_DOC_URL
+    return ZAI_CHAT_COMPLETION_DOC_URL
+
+
+def _zai_capability_source_urls(
+    *,
+    endpoint_family: str,
+    supports_thinking: bool,
+    supports_structured_output: bool,
+) -> list[str]:
+    urls = [ZAI_OCR_DOC_URL if endpoint_family == "layout_parsing" else ZAI_CHAT_COMPLETION_DOC_URL]
+    if supports_thinking:
+        urls.append(ZAI_THINKING_DOC_URL)
+    if supports_structured_output:
+        urls.append(ZAI_STRUCTURED_OUTPUT_DOC_URL)
+    return urls
+
+
 def _normalize_model(model: str) -> str:
     return model.strip().casefold().replace("_", "-")
+
+
+def _optional_string(value: Any) -> str | None:
+    return value if isinstance(value, str) else None
+
+
+def _normalize_thinking_mode(value: Any, *, thinking_enabled: bool = False) -> str:
+    if value is None:
+        return "on" if thinking_enabled else "off"
+    normalized = str(value).strip().casefold().replace("_", "-")
+    if normalized in {"", "false", "disabled", "disable", "none", "0", "no"}:
+        return "off"
+    if normalized in {"true", "enabled", "enable", "1", "yes"}:
+        return "on"
+    return normalized
+
+
+def _thinking_enabled_from_mode(thinking_mode: str) -> bool:
+    return thinking_mode not in {"off", "disabled", "none", "0", "false"}

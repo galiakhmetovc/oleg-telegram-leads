@@ -71,6 +71,40 @@ async def test_zai_chat_client_posts_to_coding_endpoint_and_returns_usage():
 
 
 @pytest.mark.asyncio
+async def test_zai_chat_client_omits_unsupported_thinking_and_adds_structured_output_mode():
+    def handler(request: httpx.Request) -> httpx.Response:
+        payload = json.loads(request.content)
+        assert "thinking" not in payload
+        assert payload["response_format"] == {"type": "json_object"}
+        return httpx.Response(
+            200,
+            json={
+                "request_id": "req-structured",
+                "model": "glm-4-32b-0414-128k",
+                "choices": [{"message": {"content": '{"ok": true}'}}],
+                "usage": {},
+            },
+        )
+
+    client = ZaiChatCompletionClient(
+        api_key="secret-key",
+        base_url="https://api.z.ai/api/coding/paas/v4",
+        http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
+        thinking_type=None,
+        response_format={"type": "json_object"},
+    )
+
+    completion = await client.complete(
+        messages=[{"role": "user", "content": "return json"}],
+        model="glm-4-32b-0414-128k",
+        temperature=0.0,
+        max_tokens=128,
+    )
+
+    assert completion.content == '{"ok": true}'
+
+
+@pytest.mark.asyncio
 async def test_zai_chat_client_uses_model_concurrency_limiter_and_releases_slot():
     requests: list[httpx.Request] = []
     limiter = FakeLimiter()

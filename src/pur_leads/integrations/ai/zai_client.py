@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+import inspect
 from typing import Any
 
 import httpx
@@ -40,6 +41,9 @@ class ZaiChatCompletionClient:
         timeout_seconds: float = 60.0,
         http_client: httpx.AsyncClient | None = None,
         concurrency_limiter: AiModelConcurrencyLimiter | None = None,
+        provider_account_id: str | None = None,
+        thinking_type: str | None = "disabled",
+        response_format: dict[str, Any] | None = None,
         worker_name: str = "worker",
     ) -> None:
         self.api_key = api_key
@@ -47,6 +51,9 @@ class ZaiChatCompletionClient:
         self.timeout_seconds = timeout_seconds
         self.http_client = http_client
         self.concurrency_limiter = concurrency_limiter
+        self.provider_account_id = provider_account_id
+        self.thinking_type = thinking_type
+        self.response_format = dict(response_format) if response_format is not None else None
         self.worker_name = worker_name
 
     async def complete(
@@ -64,18 +71,23 @@ class ZaiChatCompletionClient:
             "max_tokens": max_tokens,
             "stream": False,
             "do_sample": False,
-            "thinking": {"type": "disabled"},
         }
+        if self.thinking_type is not None:
+            payload["thinking"] = {"type": self.thinking_type}
+        if self.response_format is not None:
+            payload["response_format"] = self.response_format
         headers = {
             "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json",
         }
         lease: AiModelLease | None = None
         if self.concurrency_limiter is not None:
-            lease = self.concurrency_limiter.acquire_model_slot(
+            lease = _acquire_model_slot(
+                self.concurrency_limiter,
                 provider="zai",
                 model=model,
                 worker_name=self.worker_name,
+                provider_account_id=self.provider_account_id,
             )
             if lease is None:
                 raise AiModelConcurrencyLimitExceeded(
@@ -155,3 +167,23 @@ def _json_response(response: httpx.Response) -> dict[str, Any]:
 
 def _optional_string(value: Any) -> str | None:
     return value if isinstance(value, str) else None
+
+
+def _acquire_model_slot(
+    limiter: AiModelConcurrencyLimiter,
+    *,
+    provider: str,
+    model: str,
+    worker_name: str,
+    provider_account_id: str | None,
+) -> AiModelLease | None:
+    acquire = limiter.acquire_model_slot
+    parameters = inspect.signature(acquire).parameters
+    if "provider_account_id" in parameters:
+        return acquire(
+            provider=provider,
+            model=model,
+            worker_name=worker_name,
+            provider_account_id=provider_account_id,
+        )
+    return acquire(provider=provider, model=model, worker_name=worker_name)

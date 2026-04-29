@@ -27,6 +27,7 @@ class AiModelLease:
     id: str
     provider: str
     model: str
+    provider_account_id: str | None = None
 
 
 class AiModelConcurrencyLimitExceeded(RuntimeError):
@@ -47,6 +48,7 @@ class AiModelConcurrencyLimiter(Protocol):
         provider: str,
         model: str,
         worker_name: str,
+        provider_account_id: str | None = None,
     ) -> AiModelLease | None:
         """Acquire one model execution slot or return None when the model is saturated."""
 
