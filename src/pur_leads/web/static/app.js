@@ -1990,6 +1990,7 @@ function nextMorningIso() {
 }
 
 let adminAiRegistry = null;
+let onboardingAiRegistry = null;
 
 async function initAdmin() {
   await Promise.all([loadUsers(), loadUserbots(), loadSettings(), loadAiRegistry()]);
@@ -2278,8 +2279,11 @@ function initOnboarding() {
     .querySelector("#onboarding-group-discover")
     ?.addEventListener("click", discoverOnboardingGroups);
   document
-    .querySelector("#onboarding-session-form")
-    ?.addEventListener("submit", uploadOnboardingSession);
+    .querySelector("#onboarding-llm-form")
+    ?.addEventListener("submit", saveOnboardingLlmProvider);
+  document
+    .querySelector("#onboarding-llm-model-form")
+    ?.addEventListener("submit", saveOnboardingDefaultLlmModel);
   document
     .querySelector("#onboarding-interactive-start-form")
     ?.addEventListener("submit", startInteractiveUserbotLogin);
@@ -2287,6 +2291,7 @@ function initOnboarding() {
     .querySelector("#onboarding-interactive-complete-form")
     ?.addEventListener("submit", completeInteractiveUserbotLogin);
   loadOnboardingStatus();
+  loadOnboardingLlmRegistry();
 }
 
 function setOnboardingGroupDiscoverEnabled(enabled) {
@@ -2407,33 +2412,82 @@ async function saveOnboardingGroup(event) {
   }
 }
 
-async function uploadOnboardingSession(event) {
+async function saveOnboardingLlmProvider(event) {
   event.preventDefault();
   const form = event.currentTarget;
-  const status = document.querySelector("#onboarding-session-status");
-  const data = new FormData(form);
-  const file = data.get("session_file");
-  if (!(file instanceof File)) return;
+  const status = document.querySelector("#onboarding-llm-status");
   try {
-    const sessionFileBase64 = await fileToBase64(file);
-    await api("/api/onboarding/userbots/session-file", {
+    if (status) status.textContent = "Сохраняю ключ и загружаю модели...";
+    onboardingAiRegistry = await api("/api/onboarding/llm-provider", {
       method: "POST",
       body: JSON.stringify({
-        display_name: formValue(form, "display_name"),
-        session_name: formValue(form, "session_name"),
-        session_file_name: file.name,
-        session_file_base64: sessionFileBase64,
-        api_id: Number.parseInt(formValue(form, "api_id"), 10),
-        api_hash: formValue(form, "api_hash"),
-        make_default: formChecked(form, "make_default"),
+        base_url: formValue(form, "base_url"),
+        api_key: formValue(form, "api_key"),
+        display_name: "Z.AI",
       }),
     });
-    if (status) status.textContent = "Юзербот сохранен";
-    form.reset();
+    populateOnboardingLlmModels(onboardingAiRegistry.models || []);
+    const modelCount = (onboardingAiRegistry.models || []).length;
+    if (status) status.textContent = `Модели загружены: ${modelCount}`;
+    const apiKeyField = form.querySelector('[name="api_key"]');
+    if (apiKeyField && "value" in apiKeyField) apiKeyField.value = "";
     await loadOnboardingStatus();
   } catch (error) {
     if (status) status.textContent = error.message;
   }
+}
+
+async function saveOnboardingDefaultLlmModel(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const status = document.querySelector("#onboarding-llm-status");
+  try {
+    const modelId = formValue(form, "model_id");
+    if (!modelId) {
+      if (status) status.textContent = "Выберите модель.";
+      return;
+    }
+    const payload = await api("/api/onboarding/llm-default-model", {
+      method: "POST",
+      body: JSON.stringify({ model_id: modelId }),
+    });
+    if (status) status.textContent = `Модель по умолчанию: ${payload.model?.provider_model_name || "выбрана"}`;
+    await loadOnboardingStatus();
+  } catch (error) {
+    if (status) status.textContent = error.message;
+  }
+}
+
+async function loadOnboardingLlmRegistry() {
+  try {
+    onboardingAiRegistry = await api("/api/admin/ai-registry");
+    populateOnboardingLlmModels(onboardingAiRegistry.models || []);
+  } catch {
+    populateOnboardingLlmModels([]);
+  }
+}
+
+function populateOnboardingLlmModels(models) {
+  const select = document.querySelector("#onboarding-llm-model");
+  const saveButton = document.querySelector("#onboarding-llm-model-save");
+  if (!select) return;
+  const languageModels = (models || []).filter((model) => model.model_type === "language");
+  if (!languageModels.length) {
+    select.innerHTML = '<option value="">Языковые модели не найдены</option>';
+    if (saveButton) saveButton.disabled = true;
+    return;
+  }
+  select.innerHTML = languageModels
+    .map(
+      (model) =>
+        `<option value="${escapeHtml(model.id)}">${escapeHtml(model.provider_model_name || model.display_name)}</option>`
+    )
+    .join("");
+  const preferred = languageModels.find((model) => model.normalized_model_name === "glm-4.5-flash")
+    || languageModels.find((model) => model.normalized_model_name === "glm-4.5-air")
+    || languageModels[0];
+  select.value = preferred.id;
+  if (saveButton) saveButton.disabled = false;
 }
 
 async function startInteractiveUserbotLogin(event) {
@@ -2482,18 +2536,6 @@ async function completeInteractiveUserbotLogin(event) {
   } catch (error) {
     if (status) status.textContent = error.message;
   }
-}
-
-function fileToBase64(file) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.addEventListener("load", () => {
-      const value = String(reader.result || "");
-      resolve(value.includes(",") ? value.split(",", 2)[1] : value);
-    });
-    reader.addEventListener("error", () => reject(reader.error));
-    reader.readAsDataURL(file);
-  });
 }
 
 function parseSettingValue(value, valueType) {

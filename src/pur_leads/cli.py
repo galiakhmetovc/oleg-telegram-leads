@@ -250,7 +250,7 @@ def _build_catalog_extractor(session, settings, *, worker_name: str):
         return HeuristicCatalogExtractor(session)
     route = _select_ai_route(session, agent_key="catalog_extractor", route_role="primary")
     provider = str(_setting_or_route_provider(settings_service, "catalog_llm_provider", route))
-    api_key = settings.zai_api_key or _env_str("ZAI_API_KEY")
+    api_key = _zai_api_key(session, settings)
     fallback = bool(settings_service.get("catalog_llm_fallback_to_heuristic"))
     if provider != "zai" or not api_key:
         if fallback:
@@ -312,7 +312,7 @@ def _build_lead_shadow_classifier(session, settings, *, worker_name: str):
         return None
     route = _select_ai_route(session, agent_key="lead_detector", route_role="shadow")
     provider = str(_setting_or_route_provider(settings_service, "lead_llm_shadow_provider", route))
-    api_key = settings.zai_api_key or _env_str("ZAI_API_KEY")
+    api_key = _zai_api_key(session, settings)
     fallback = bool(settings_service.get("lead_llm_shadow_fallback_on_error"))
     if provider != "zai" or not api_key:
         if fallback:
@@ -490,6 +490,14 @@ def _setting_secret_or_env(session, setting_key: str, fallback: str | None) -> s
         return SecretRefService(session).resolve_setting_secret(setting_key) or fallback
     except (FileNotFoundError, KeyError, ValueError):
         return fallback
+
+
+def _zai_api_key(session, settings) -> str | None:
+    return _setting_secret_or_env(
+        session,
+        "zai_api_key_secret_ref",
+        settings.zai_api_key or _env_str("PUR_ZAI_API_KEY", "ZAI_API_KEY"),
+    )
 
 
 def _env_str(*names: str) -> str | None:

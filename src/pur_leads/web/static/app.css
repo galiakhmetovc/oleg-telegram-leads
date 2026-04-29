@@ -516,9 +516,14 @@ md-text-button {
   justify-self: start;
 }
 
-.onboarding-panel-session .material-form,
+.onboarding-panel-llm .material-form,
 .onboarding-panel-interactive .material-form {
   grid-template-columns: repeat(2, minmax(190px, 1fr));
+}
+
+.onboarding-panel-llm,
+.onboarding-panel-interactive {
+  grid-column: 1 / -1;
 }
 
 .material-action-row {
@@ -527,19 +532,8 @@ md-text-button {
   gap: 10px;
 }
 
-.material-file-field {
-  min-height: 56px;
-  justify-content: center;
-  padding: 8px 12px;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  background: #ffffff;
-}
-
-.material-file-field input {
-  min-height: 28px;
-  padding: 0;
-  border: 0;
+.onboarding-link-row {
+  align-items: center;
 }
 
 .material-checkbox-line {
@@ -549,6 +543,25 @@ md-text-button {
   gap: 8px;
   color: var(--text);
   font-size: 14px;
+}
+
+.material-select-field {
+  display: grid;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.material-select-field select {
+  min-height: 56px;
+  width: 100%;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: #ffffff;
+  color: var(--text);
+  font: 400 15px/1.4 var(--ui-font);
 }
 
 .onboarding-group-row {

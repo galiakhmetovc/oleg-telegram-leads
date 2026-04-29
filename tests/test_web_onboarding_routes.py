@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import base64
 import json
 from pathlib import Path
 
@@ -11,8 +10,8 @@ from sqlalchemy import select
 from pur_leads.db.engine import create_sqlite_engine
 from pur_leads.db.migrations import upgrade_database
 from pur_leads.db.session import create_session_factory
+from pur_leads.models.ai import ai_provider_accounts_table
 from pur_leads.models.settings import settings_table
-from pur_leads.models.telegram_sources import userbot_accounts_table
 from pur_leads.services.secrets import SecretRefService
 from pur_leads.services.web_auth import WebAuthService
 from pur_leads.web.app import create_app
@@ -86,6 +85,7 @@ def test_onboarding_configures_bot_token_and_notification_group(tmp_path):
 
     assert initial_status.status_code == 200
     assert initial_status.json()["steps"]["bot_token"]["done"] is False
+    assert initial_status.json()["steps"]["llm_provider"]["done"] is False
     assert token_response.status_code == 200
     assert token_response.json()["bot"]["username"] == "pur_leads_bot"
     assert "secret-token" not in json.dumps(token_response.json())
@@ -120,45 +120,50 @@ def test_onboarding_configures_bot_token_and_notification_group(tmp_path):
         assert settings["telegram_lead_notification_thread_id"] == 7
 
 
-def test_onboarding_uploads_session_file_userbot_and_sets_default(tmp_path):
+def test_onboarding_configures_llm_provider_and_default_model(tmp_path):
     fixture = _setup_onboarding_app(tmp_path)
     client = fixture["client"]
     _login_local(client)
-    encoded_session = base64.b64encode(b"telethon sqlite bytes").decode()
 
-    response = client.post(
-        "/api/onboarding/userbots/session-file",
+    provider_response = client.post(
+        "/api/onboarding/llm-provider",
         json={
-            "display_name": "Main userbot",
-            "session_name": "../main",
-            "session_file_name": "main.session",
-            "session_file_base64": encoded_session,
-            "api_id": 12345,
-            "api_hash": "api-hash-secret",
-            "make_default": True,
+            "base_url": "https://api.z.ai/api/coding/paas/v4",
+            "api_key": "zai-secret",
         },
     )
+    provider_payload = provider_response.json()
+    flash_model = next(
+        model
+        for model in provider_payload["models"]
+        if model["normalized_model_name"] == "glm-4.5-flash"
+    )
+    model_response = client.post(
+        "/api/onboarding/llm-default-model",
+        json={"model_id": flash_model["id"]},
+    )
+    status_response = client.get("/api/onboarding/status")
 
-    assert response.status_code == 200
-    userbot = response.json()["userbot"]
-    assert userbot["display_name"] == "Main userbot"
-    assert userbot["session_name"] == "main"
-    assert "session_path" not in userbot
-
-    session_file = tmp_path / "sessions" / "main.session"
-    assert session_file.read_bytes() == b"telethon sqlite bytes"
-    assert session_file.stat().st_mode & 0o777 == 0o600
+    assert provider_response.status_code == 200
+    assert "zai-secret" not in json.dumps(provider_payload)
+    assert provider_payload["provider"]["provider_key"] == "zai"
+    assert any(model["provider_model_name"] == "GLM-5.1" for model in provider_payload["models"])
+    assert model_response.status_code == 200
+    assert model_response.json()["model"]["provider_model_name"] == "GLM-4.5-Flash"
+    assert status_response.json()["steps"]["llm_provider"]["done"] is True
     with fixture["session_factory"]() as session:
-        account = session.execute(select(userbot_accounts_table)).mappings().one()
         settings = {
             row["key"]: row["value_json"]
             for row in session.execute(select(settings_table)).mappings().all()
         }
-        assert account["session_path"] == str(session_file)
-        assert settings["telegram_default_userbot_account_id"] == userbot["id"]
-        assert settings["telegram_api_id"] == 12345
-        api_hash_secret_id = settings["telegram_api_hash_secret_ref"]["secret_ref_id"]
-        assert SecretRefService(session).resolve_value(api_hash_secret_id) == "api-hash-secret"
+        account = session.execute(select(ai_provider_accounts_table)).mappings().one()
+        secret_id = settings["zai_api_key_secret_ref"]["secret_ref_id"]
+        assert SecretRefService(session).resolve_value(secret_id) == "zai-secret"
+        assert settings["catalog_llm_base_url"] == "https://api.z.ai/api/coding/paas/v4"
+        assert settings["lead_llm_shadow_base_url"] == "https://api.z.ai/api/coding/paas/v4"
+        assert settings["catalog_llm_model"] == "GLM-4.5-Flash"
+        assert account["base_url"] == "https://api.z.ai/api/coding/paas/v4"
+        assert account["auth_secret_ref"] == f"secret_ref:{secret_id}"
 
 
 def test_onboarding_interactive_userbot_login_start_and_complete(tmp_path):

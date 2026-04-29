@@ -1,0 +1,22 @@
+services:
+  web:
+    environment:
+      PYTHONPATH: /app/src
+    volumes:
+      - ./src:/app/src:ro
+      - ./migrations:/app/migrations:ro
+      - ./alembic.ini:/app/alembic.ini:ro
+      - ./data:/app/data
+      - ./artifacts:/app/artifacts
+      - ./sessions:/app/sessions
+
+  worker:
+    environment:
+      PYTHONPATH: /app/src
+    volumes:
+      - ./src:/app/src:ro
+      - ./migrations:/app/migrations:ro
+      - ./alembic.ini:/app/alembic.ini:ro
+      - ./data:/app/data
+      - ./artifacts:/app/artifacts
+      - ./sessions:/app/sessions

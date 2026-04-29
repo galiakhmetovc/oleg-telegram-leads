@@ -150,7 +150,9 @@ def test_workspace_and_admin_pages_are_protected_and_render_shells(tmp_path):
     assert "Онбординг" in onboarding_response.text
     assert "Обычный Telegram-бот" in onboarding_response.text
     assert "Группа уведомлений" in onboarding_response.text
+    assert "Провайдер LLM" in onboarding_response.text
     assert "Юзербот" in onboarding_response.text
+    assert "Юзербот через файл сессии" not in onboarding_response.text
     assert "onboarding-material-shell" in onboarding_response.text
     assert "<md-linear-progress" in onboarding_response.text
     assert '<md-outlined-text-field name="token"' in onboarding_response.text
@@ -160,12 +162,16 @@ def test_workspace_and_admin_pages_are_protected_and_render_shells(tmp_path):
     )
     assert 'id="onboarding-group-hint"' in onboarding_response.text
     assert "onboarding-panel-compact" in onboarding_response.text
-    assert "onboarding-panel-session" in onboarding_response.text
+    assert "onboarding-panel-llm" in onboarding_response.text
     assert '<md-checkbox name="make_default" checked' in onboarding_response.text
     assert 'id="onboarding-bot-form"' in onboarding_response.text
     assert 'id="onboarding-group-discover"' in onboarding_response.text
-    assert 'id="onboarding-session-form"' in onboarding_response.text
+    assert 'id="onboarding-session-form"' not in onboarding_response.text
+    assert 'id="onboarding-llm-form"' in onboarding_response.text
+    assert 'id="onboarding-llm-model-form"' in onboarding_response.text
     assert 'id="onboarding-interactive-start-form"' in onboarding_response.text
+    assert "https://web.telegram.org/k/" in onboarding_response.text
+    assert "https://my.telegram.org/auth?to=apps" in onboarding_response.text
     assert catalog_response.status_code == 200
     assert 'data-page="catalog"' in catalog_response.text
     assert 'id="catalog-candidate-list"' in catalog_response.text
@@ -211,7 +217,10 @@ def test_workspace_and_admin_pages_are_protected_and_render_shells(tmp_path):
     assert "setOnboardingGroupDiscoverEnabled" in js_response.text
     assert "payload.steps?.bot_token?.done" in js_response.text
     assert "/api/onboarding/bot-token" in js_response.text
-    assert "/api/onboarding/userbots/session-file" in js_response.text
+    assert "/api/onboarding/userbots/session-file" not in js_response.text
+    assert "/api/onboarding/llm-provider" in js_response.text
+    assert "/api/onboarding/llm-default-model" in js_response.text
+    assert "populateOnboardingLlmModels" in js_response.text
     assert "/api/onboarding/userbots/interactive/start" in js_response.text
     assert "/api/onboarding/userbots/interactive/complete" in js_response.text
     assert "/api/catalog/candidates" in js_response.text

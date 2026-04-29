@@ -158,6 +158,46 @@ class AiRegistryService:
             "actor": actor,
         }
 
+    def configure_zai_account(
+        self,
+        *,
+        actor: str,
+        base_url: str,
+        auth_secret_ref: str,
+    ) -> dict[str, Any]:
+        provider = self._provider_by_key("zai")
+        if provider is None:
+            bootstrap = self.bootstrap_defaults(actor=actor)
+            provider_id = str(bootstrap["provider_id"])
+        else:
+            provider_id = str(provider["id"])
+        account_id = self._default_account_id(provider_id)
+        if account_id is None:
+            account_id = self._upsert_account(provider_id)
+        old_value = self._account_by_id(account_id)
+        now = utc_now()
+        self.session.execute(
+            update(ai_provider_accounts_table)
+            .where(ai_provider_accounts_table.c.id == account_id)
+            .values(
+                base_url=base_url.strip().rstrip("/"),
+                auth_secret_ref=auth_secret_ref,
+                enabled=True,
+                updated_at=now,
+            )
+        )
+        updated = self._account_by_id(account_id)
+        AuditService(self.session).record_change(
+            actor=actor,
+            action="ai_registry.account_configure",
+            entity_type="ai_provider_account",
+            entity_id=account_id,
+            old_value_json=old_value,
+            new_value_json=updated,
+        )
+        self.session.commit()
+        return updated or {}
+
     def select_routes(
         self,
         *,
@@ -739,6 +779,18 @@ class AiRegistryService:
             .first()
         )
         return str(row["id"]) if row is not None else None
+
+    def _account_by_id(self, account_id: str) -> dict[str, Any] | None:
+        row = (
+            self.session.execute(
+                select(ai_provider_accounts_table).where(
+                    ai_provider_accounts_table.c.id == account_id
+                )
+            )
+            .mappings()
+            .first()
+        )
+        return dict(row) if row is not None else None
 
     def _limit_by_id(self, limit_id: str) -> dict[str, Any] | None:
         row = (

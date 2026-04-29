@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import base64
-import binascii
 import re
 from pathlib import Path
 from typing import Any
@@ -24,6 +22,7 @@ from pur_leads.integrations.telegram.userbot_login import (
     UserbotLoginPasswordRequired,
 )
 from pur_leads.models.telegram_sources import monitored_sources_table
+from pur_leads.services.ai_registry import AiRegistryService
 from pur_leads.services.secrets import SecretRefService
 from pur_leads.services.settings import SettingsService
 from pur_leads.services.userbots import UserbotAccountService
@@ -45,16 +44,6 @@ class NotificationGroupRequest(BaseModel):
     send_test: bool = True
 
 
-class SessionFileUserbotRequest(BaseModel):
-    display_name: str = Field(min_length=1)
-    session_name: str = Field(min_length=1)
-    session_file_name: str | None = None
-    session_file_base64: str = Field(min_length=1)
-    api_id: int = Field(gt=0)
-    api_hash: str = Field(min_length=1)
-    make_default: bool = True
-
-
 class InteractiveUserbotStartRequest(BaseModel):
     display_name: str = Field(min_length=1)
     session_name: str = Field(min_length=1)
@@ -70,6 +59,16 @@ class InteractiveUserbotCompleteRequest(BaseModel):
     password: str | None = None
 
 
+class LlmProviderRequest(BaseModel):
+    base_url: str = Field(min_length=1)
+    api_key: str = Field(min_length=1)
+    display_name: str = "Z.AI"
+
+
+class LlmDefaultModelRequest(BaseModel):
+    model_id: str = Field(min_length=1)
+
+
 @router.get("/status")
 def onboarding_status(
     validated: SessionValidationResult = Depends(current_admin),
@@ -77,8 +76,13 @@ def onboarding_status(
 ) -> dict[str, Any]:
     settings = SettingsService(session)
     bot_token_ref = settings.get("telegram_bot_token_secret_ref")
+    zai_api_key_ref = settings.get("zai_api_key_secret_ref")
     notification_chat_id = settings.get("telegram_lead_notification_chat_id")
     userbot_count = len(UserbotAccountService(session).list_accounts())
+    catalog_routes = AiRegistryService(session).select_routes(
+        agent_key="catalog_extractor",
+        route_role="primary",
+    )
     source_count = session.execute(
         select(func.count()).select_from(monitored_sources_table)
     ).scalar_one()
@@ -99,12 +103,22 @@ def onboarding_status(
             "done": userbot_count > 0,
             "label": "Юзербот добавлен",
         },
+        "llm_provider": {
+            "done": _is_secret_ref_value(zai_api_key_ref) and bool(catalog_routes),
+            "label": "Провайдер LLM подключен",
+        },
         "first_source": {
             "done": source_count > 0,
             "label": "Первый чат для поиска лидов добавлен",
         },
     }
-    required_keys = ("admin_password", "bot_token", "notification_group", "userbot")
+    required_keys = (
+        "admin_password",
+        "bot_token",
+        "notification_group",
+        "userbot",
+        "llm_provider",
+    )
     return {
         "steps": steps,
         "complete": all(steps[key]["done"] for key in required_keys),
@@ -209,29 +223,119 @@ async def configure_notification_group(
     }
 
 
-@router.post("/userbots/session-file")
-def upload_userbot_session_file(
-    payload: SessionFileUserbotRequest,
+@router.post("/llm-provider")
+def configure_llm_provider(
+    payload: LlmProviderRequest,
     request: Request,
     validated: SessionValidationResult = Depends(current_admin),
     session: Session = Depends(get_session),
 ) -> dict[str, Any]:
-    session_name = _safe_session_name(payload.session_name)
-    session_path = _session_file_path(request.app.state.telegram_session_storage_path, session_name)
-    session_path.write_bytes(_decode_session_file(payload.session_file_base64))
-    session_path.chmod(0o600)
-    account = _create_userbot_account(
-        session,
-        actor=_actor(validated),
-        display_name=payload.display_name,
-        session_name=session_name,
-        session_path=session_path,
-        secret_storage_root=request.app.state.local_secret_storage_path,
-        api_id=payload.api_id,
-        api_hash=payload.api_hash,
-        make_default=payload.make_default,
+    actor = _actor(validated)
+    base_url = payload.base_url.strip().rstrip("/")
+    secret_id = SecretRefService(session).create_local_secret(
+        secret_type="ai_api_key",
+        display_name=payload.display_name.strip() or "Z.AI",
+        value=payload.api_key.strip(),
+        storage_root=request.app.state.local_secret_storage_path,
     )
-    return {"userbot": UserbotAccountService(session).public_payload(account)}
+    settings = SettingsService(session)
+    settings.set(
+        "zai_api_key_secret_ref",
+        {"secret_ref_id": secret_id},
+        value_type="secret_ref",
+        updated_by=actor,
+        reason="configure Z.AI API key during onboarding",
+    )
+    for key in ("catalog_llm_base_url", "lead_llm_shadow_base_url"):
+        settings.set(
+            key,
+            base_url,
+            value_type="string",
+            updated_by=actor,
+            reason="configure Z.AI base URL during onboarding",
+        )
+    for key in ("catalog_llm_provider", "lead_llm_shadow_provider"):
+        settings.set(
+            key,
+            "zai",
+            value_type="string",
+            updated_by=actor,
+            reason="configure Z.AI provider during onboarding",
+        )
+    registry = AiRegistryService(session)
+    registry.bootstrap_defaults(actor=actor)
+    registry.configure_zai_account(
+        actor=actor,
+        base_url=base_url,
+        auth_secret_ref=f"secret_ref:{secret_id}",
+    )
+    snapshot = registry.snapshot()
+    provider = next(
+        (item for item in snapshot["providers"] if item["provider_key"] == "zai"),
+        None,
+    )
+    account = next(
+        (
+            item
+            for item in snapshot["accounts"]
+            if item["auth_secret_ref"] == f"secret_ref:{secret_id}"
+        ),
+        None,
+    )
+    return {
+        "provider": provider,
+        "account": account,
+        "models": snapshot["models"],
+        "routes": snapshot["routes"],
+    }
+
+
+@router.post("/llm-default-model")
+def configure_default_llm_model(
+    payload: LlmDefaultModelRequest,
+    validated: SessionValidationResult = Depends(current_admin),
+    session: Session = Depends(get_session),
+) -> dict[str, Any]:
+    actor = _actor(validated)
+    registry = AiRegistryService(session)
+    snapshot = registry.snapshot()
+    model = next((item for item in snapshot["models"] if item["id"] == payload.model_id), None)
+    if model is None:
+        raise HTTPException(status_code=404, detail="AI model not found")
+    if model["model_type"] != "language":
+        raise HTTPException(status_code=400, detail="Default LLM model must be a language model")
+    catalog_route = registry.upsert_agent_route(
+        agent_key="catalog_extractor",
+        model_id=payload.model_id,
+        route_role="primary",
+        actor=actor,
+        priority=10,
+        max_output_tokens=4096,
+        temperature=0.0,
+        enabled=True,
+        structured_output_required=True,
+    )
+    lead_route = registry.upsert_agent_route(
+        agent_key="lead_detector",
+        model_id=payload.model_id,
+        route_role="shadow",
+        actor=actor,
+        priority=10,
+        max_output_tokens=512,
+        temperature=0.0,
+        enabled=True,
+        structured_output_required=True,
+    )
+    settings = SettingsService(session)
+    for key in ("catalog_llm_model", "lead_llm_shadow_model"):
+        settings.set(
+            key,
+            model["provider_model_name"],
+            value_type="string",
+            updated_by=actor,
+            reason="select default LLM model during onboarding",
+        )
+    return {"model": model, "routes": [catalog_route, lead_route]}
 
 
 @router.post("/userbots/interactive/start")
@@ -360,13 +464,6 @@ def _create_userbot_account(
             reason="select default Telegram userbot during onboarding",
         )
     return account
-
-
-def _decode_session_file(value: str) -> bytes:
-    try:
-        return base64.b64decode(value, validate=True)
-    except (binascii.Error, ValueError) as exc:
-        raise HTTPException(status_code=400, detail="Invalid session file encoding") from exc
 
 
 def _safe_session_name(value: str) -> str:

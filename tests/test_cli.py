@@ -39,6 +39,7 @@ from pur_leads.models.telegram_sources import (
 from pur_leads.services.catalog_sources import CatalogSourceService
 from pur_leads.services.ai_registry import AiRegistryService
 from pur_leads.services.scheduler import SchedulerService
+from pur_leads.services.secrets import SecretRefService
 from pur_leads.services.settings import SettingsService
 from pur_leads.services.telegram_sources import TelegramSourceService
 from pur_leads.services.userbots import UserbotAccountService
@@ -384,6 +385,18 @@ def test_cli_worker_once_uses_ai_registry_catalog_route_after_explicit_bootstrap
     session_factory = create_session_factory(engine)
     with session_factory() as session:
         AiRegistryService(session).bootstrap_defaults(actor="test")
+        secret_id = SecretRefService(session).create_local_secret(
+            secret_type="ai_api_key",
+            display_name="Z.AI",
+            value="web-configured-key",
+            storage_root=tmp_path / "secrets",
+        )
+        SettingsService(session).set(
+            "zai_api_key_secret_ref",
+            {"secret_ref_id": secret_id},
+            value_type="secret_ref",
+            updated_by="test",
+        )
         raw_source = CatalogSourceService(session).upsert_source(
             source_type="telegram_message",
             origin="telegram:purmaster",
@@ -402,7 +415,6 @@ def test_cli_worker_once_uses_ai_registry_catalog_route_after_explicit_bootstrap
             payload_json={"source_id": raw_source.id, "chunk_id": chunk.id},
         )
 
-    monkeypatch.setenv("PUR_ZAI_API_KEY", "test-key")
     monkeypatch.setattr("pur_leads.cli.ZaiChatCompletionClient", FakeZaiChatCompletionClient)
     FakeZaiChatCompletionClient.instances.clear()
 
@@ -415,6 +427,7 @@ def test_cli_worker_once_uses_ai_registry_catalog_route_after_explicit_bootstrap
     assert stored is not None
     assert "succeeded job" in output
     assert run["model"] == "GLM-5.1"
+    assert FakeZaiChatCompletionClient.instances[0].api_key == "web-configured-key"
     assert FakeZaiChatCompletionClient.instances[0].calls[0]["model"] == "GLM-5.1"
 
 

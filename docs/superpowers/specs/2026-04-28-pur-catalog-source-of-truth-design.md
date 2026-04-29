@@ -23,7 +23,7 @@ The system must continuously read the PUR Telegram channel, parse messages and d
 - The web interface uses Material Web as the first design system for operator-facing screens. Bootstrap is not mixed into the same UI layer. Custom CSS is limited to layout, spacing, product composition, and Material token overrides.
 - A built-in local administrator account exists for bootstrap. Telegram admin accounts are added through that account.
 - On startup, the built-in administrator has a temporary password written to `PUR_BOOTSTRAP_ADMIN_PASSWORD_FILE` when the account still requires a password change. After the first successful local login and password change, the file is deleted and `must_change_password=false` becomes the durable marker that prevents regenerating or rewriting the bootstrap password on later restarts.
-- A clean installation/reset contains only the built-in local administrator and empty system tables. Telegram userbots, notification groups, bot tokens, Telegram API credentials, Z.AI/API credentials, AI provider routes, sources, catalog data, and session files are added explicitly by an administrator through the web/admin onboarding flow or an audited manual upload path.
+- A clean installation/reset contains only the built-in local administrator and empty system tables. Telegram userbots, notification groups, bot tokens, Telegram API credentials, Z.AI/API credentials, AI provider routes, sources, catalog data, and generated session files are added explicitly by an administrator through the web/admin onboarding flow.
 - Runtime workers must not silently seed provider accounts, userbots, notification chats, source rows, session files, or secrets from the deployment environment. Defaults may exist in code for form help and explicit "load defaults" actions, but they do not create operational database rows until an administrator confirms them.
 - `auto_pending` notification styling, campaign expiry, and external fetch domains are configurable in the web interface.
 - CRM is included as a lightweight client-memory layer, not a heavy sales pipeline.
@@ -31,7 +31,7 @@ The system must continuously read the PUR Telegram channel, parse messages and d
 - The first version assumes a single active admin user workflow, but tables include ownership/assignee fields for future expansion.
 - A central CRM job is generating reasons to contact existing or previously interested clients when catalog changes create a useful follow-up opportunity.
 - Runtime work is processed by a continuous job loop, not a single monolithic polling cycle.
-- Start with no Telegram userbot sessions configured. The first and additional userbot sessions are added through the web UI; the first runtime default remains one Telegram worker and one read job per configured session.
+- Start with no Telegram userbot sessions configured. The first and additional userbot sessions are created through interactive web login; the first runtime default remains one Telegram worker and one read job per configured session.
 - Monitoring chats are added through web onboarding with access check and preview before activation.
 - New live monitoring sources default to `from_now`; historical backfill is explicit and retro/web-only by default.
 - Telegram-read jobs are serialized per userbot session. AI and parse jobs can run in parallel with configurable limits.
@@ -62,10 +62,12 @@ After the built-in administrator changes the temporary password, the web UI rout
 The onboarding flow is part of the product UI, not a deployment-only script:
 
 - Auth and onboarding controls use a local pinned Material Web bundle served from the application static assets. External CDN examples are not used in production runtime.
-- The page shows embedded Russian setup guidance and a live checklist for password change, Telegram bot token, notification group, userbot, and first monitored source.
+- The page shows embedded Russian setup guidance and a live checklist for password change, Telegram bot token, notification group, userbot, LLM provider, and first monitored source.
 - The ordinary Telegram bot token is pasted in the web UI, validated through Telegram Bot API `getMe`, and stored as a local file-backed `secret_refs` value. API responses and UI state never return the raw token.
 - Notification group setup is discovered through Bot API `getUpdates`: the admin adds the bot to a group/topic, sends a setup message, and selects the discovered chat in the web UI. Saving the group sends a test `sendMessage` and stores `telegram_lead_notification_chat_id` plus optional `telegram_lead_notification_thread_id`.
-- Userbot setup supports both paths: upload an existing Telethon `.session` file or run an interactive phone/code/2FA login from the web UI. The session file is stored on disk with owner-only permissions; Telegram API hash is stored as a `secret_refs` value.
+- Userbot setup uses interactive phone/code/2FA login from the web UI. Existing Telethon `.session` file upload is not part of the onboarding flow. The generated session file is stored on disk with owner-only permissions; Telegram API hash is stored as a `secret_refs` value.
+- Userbot setup includes external helper links to Telegram API application management and Telegram Web. These pages are opened as separate tabs because Telegram sets frame restrictions that make iframe embedding unreliable.
+- LLM provider setup is required before adding the first monitored source. The first provider is Z.AI: the admin enters base URL and API key, the system stores the API key as a local `secret_refs` value, bootstraps known model/limit metadata, and lets the admin select the default language model for catalog extraction and lead LLM shadow routing.
 - Runtime web authentication and workers resolve Telegram bot/API credentials from settings-backed secret refs first, with environment fallback only for development or explicitly configured deployments.
 - The onboarding flow does not create monitoring sources implicitly. Source onboarding remains a separate audited web flow with access check and preview before activation.
 

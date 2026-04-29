@@ -296,7 +296,8 @@ def onboarding_page(
                   <md-linear-progress id="onboarding-progress" value="0"></md-linear-progress>
                   <md-list id="onboarding-status" class="onboarding-steps" aria-live="polite"></md-list>
                   <div class="onboarding-note">
-                    После смены временного пароля настройте бота, группу уведомлений и юзербота.
+                    После смены временного пароля настройте бота, группу уведомлений,
+                    юзербота и LLM-провайдера.
                     Источники для поиска лидов можно добавить позже в разделе
                     <a href="/sources">«Источники»</a>.
                   </div>
@@ -343,49 +344,57 @@ def onboarding_page(
                     <div id="onboarding-group-candidates" class="table-list"></div>
                     <p id="onboarding-group-status" class="status-line" role="status"></p>
                   </section>
-                  <section class="onboarding-panel onboarding-panel-session">
+                  <section class="onboarding-panel onboarding-panel-llm">
                     <div class="onboarding-panel-head">
-                      <md-icon aria-hidden="true">upload_file</md-icon>
+                      <md-icon aria-hidden="true">model_training</md-icon>
                       <div>
-                        <h2 class="md-typescale-title-large">Юзербот через файл сессии</h2>
-                        <p class="muted">Подходит, если Telethon-сессия уже создана и проверена.</p>
+                        <h2 class="md-typescale-title-large">Провайдер LLM</h2>
+                        <p class="muted">Сейчас доступен Z.AI. Он нужен до добавления первого чата.</p>
                       </div>
                     </div>
-                    <form id="onboarding-session-form" class="material-form">
-                      <md-outlined-text-field name="display_name" label="Название" required
-                        placeholder="Основной юзербот">
+                    <form id="onboarding-llm-form" class="material-form">
+                      <md-outlined-text-field name="base_url" label="Base URL"
+                        value="https://api.z.ai/api/coding/paas/v4" required>
                       </md-outlined-text-field>
-                      <md-outlined-text-field name="session_name" label="Имя сессии" required
-                        placeholder="main">
-                      </md-outlined-text-field>
-                      <label class="material-file-field">
-                        Файл .session
-                        <input name="session_file" type="file" accept=".session" required>
-                      </label>
-                      <md-outlined-text-field name="api_id" label="Telegram API ID" type="number"
-                        min="1" step="1" required>
-                      </md-outlined-text-field>
-                      <md-outlined-text-field name="api_hash" label="Telegram API hash" type="password"
+                      <md-outlined-text-field name="api_key" label="Z.AI API key" type="password"
                         autocomplete="off" required>
                       </md-outlined-text-field>
-                      <label class="material-checkbox-line">
-                        <md-checkbox name="make_default" checked></md-checkbox>
-                        Использовать по умолчанию
-                      </label>
                       <md-filled-button type="submit">
-                        <md-icon slot="icon">upload_file</md-icon>
-                        Загрузить сессию
+                        <md-icon slot="icon">sync</md-icon>
+                        Сохранить и получить модели
                       </md-filled-button>
                     </form>
-                    <p id="onboarding-session-status" class="status-line" role="status"></p>
+                    <form id="onboarding-llm-model-form" class="material-form">
+                      <label class="material-select-field">
+                        Модель по умолчанию
+                        <select id="onboarding-llm-model" name="model_id" required>
+                          <option value="">Сначала получите модели</option>
+                        </select>
+                      </label>
+                      <md-filled-button id="onboarding-llm-model-save" type="submit" disabled>
+                        <md-icon slot="icon">check_circle</md-icon>
+                        Выбрать модель
+                      </md-filled-button>
+                    </form>
+                    <p id="onboarding-llm-status" class="status-line" role="status"></p>
                   </section>
                   <section class="onboarding-panel onboarding-panel-interactive">
                     <div class="onboarding-panel-head">
                       <md-icon aria-hidden="true">person_add</md-icon>
                       <div>
-                        <h2 class="md-typescale-title-large">Интерактивный вход юзербота</h2>
-                        <p class="muted">Отправляет код Telegram на номер и создает сессию на сервере.</p>
+                        <h2 class="md-typescale-title-large">Юзербот</h2>
+                        <p class="muted">Интерактивный вход создает сессию на сервере.</p>
                       </div>
+                    </div>
+                    <div class="material-action-row onboarding-link-row">
+                      <md-outlined-button href="https://my.telegram.org/auth?to=apps" target="_blank" rel="noopener">
+                        <md-icon slot="icon">vpn_key</md-icon>
+                        Telegram API
+                      </md-outlined-button>
+                      <md-outlined-button href="https://web.telegram.org/k/" target="_blank" rel="noopener">
+                        <md-icon slot="icon">open_in_new</md-icon>
+                        Telegram Web
+                      </md-outlined-button>
                     </div>
                     <form id="onboarding-interactive-start-form" class="material-form">
                       <md-outlined-text-field name="display_name" label="Название" required

@@ -60,6 +60,7 @@ DEFAULT_SETTINGS: dict[str, SettingDefault] = {
     "high_value_negative_score_max": SettingDefault(0.35, "float"),
     "lead_cluster_notify_on_update": SettingDefault(False, "bool"),
     "catalog_ingestion_pur_channel_enabled": SettingDefault(True, "bool"),
+    "zai_api_key_secret_ref": SettingDefault(None, "secret_ref"),
     "catalog_llm_extraction_enabled": SettingDefault(True, "bool"),
     "catalog_llm_provider": SettingDefault("zai", "string"),
     "catalog_llm_base_url": SettingDefault("https://api.z.ai/api/coding/paas/v4", "string"),
