@@ -134,7 +134,7 @@ AGENT_SEED: tuple[dict[str, Any], ...] = (
 ROUTE_SEED: tuple[dict[str, Any], ...] = (
     {
         "agent_key": "catalog_extractor",
-        "model": "GLM-5.1",
+        "model": "GLM-4-Plus",
         "profile_key": "catalog-primary",
         "profile_display_name": "Каталог: основной JSON",
         "route_role": "primary",
@@ -143,7 +143,7 @@ ROUTE_SEED: tuple[dict[str, Any], ...] = (
         "max_output_tokens": 4096,
         "temperature": 0.0,
         "thinking_mode": "off",
-        "structured_output_required": True,
+        "structured_output_required": False,
     },
     {
         "agent_key": "catalog_extractor",

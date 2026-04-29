@@ -176,6 +176,30 @@ async def test_worker_retry_delay_grows_exponentially(runtime_session):
 
 
 @pytest.mark.asyncio
+async def test_worker_once_fails_non_retryable_exception_permanently(runtime_session):
+    class NonRetryableProviderError(Exception):
+        retryable = False
+
+    scheduler = SchedulerService(runtime_session)
+    job = scheduler.enqueue(job_type="extract_catalog_facts", scope_type="parser", max_attempts=3)
+
+    async def handler(acquired_job):
+        raise NonRetryableProviderError("invalid request")
+
+    runtime = WorkerRuntime(runtime_session, handlers={"extract_catalog_facts": handler})
+
+    result = await runtime.run_once()
+
+    stored = scheduler.repository.get(job.id)
+    assert stored is not None
+    assert result.status == "failed"
+    assert stored.status == "failed"
+    assert stored.attempt_count == 1
+    assert stored.next_retry_at is None
+    assert stored.last_error == "invalid request"
+
+
+@pytest.mark.asyncio
 async def test_worker_once_fails_unsupported_job_with_operational_event(runtime_session):
     scheduler = SchedulerService(runtime_session)
     job = scheduler.enqueue(job_type="parse_artifact", scope_type="parser")

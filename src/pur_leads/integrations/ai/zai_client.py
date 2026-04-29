@@ -26,12 +26,20 @@ class AiProviderError(RuntimeError):
         error_code: str | None,
         message: str,
         retry_after_seconds: int | None = None,
+        retryable: bool | None = None,
+        error_type: str | None = None,
     ) -> None:
         super().__init__(f"AI provider error {error_code or 'unknown'}: {message}")
         self.status_code = status_code
         self.error_code = error_code
         self.provider_message = message
         self.retry_after_seconds = retry_after_seconds
+        self.retryable = (
+            _is_retryable_error(status_code=status_code, error_code=error_code)
+            if retryable is None
+            else retryable
+        )
+        self.error_type = error_type or _error_type(status_code=status_code, error_code=error_code)
 
 
 class ZaiChatCompletionClient:
@@ -41,6 +49,7 @@ class ZaiChatCompletionClient:
         api_key: str,
         base_url: str,
         timeout_seconds: float = 60.0,
+        connect_timeout_seconds: float = 5.0,
         http_client: httpx.AsyncClient | None = None,
         concurrency_limiter: AiModelConcurrencyLimiter | None = None,
         provider_account_id: str | None = None,
@@ -51,6 +60,7 @@ class ZaiChatCompletionClient:
         self.api_key = api_key
         self.base_url = base_url.rstrip("/")
         self.timeout_seconds = timeout_seconds
+        self.connect_timeout_seconds = connect_timeout_seconds
         self.http_client = http_client
         self.concurrency_limiter = concurrency_limiter
         self.provider_account_id = provider_account_id
@@ -99,15 +109,41 @@ class ZaiChatCompletionClient:
                         getattr(self.concurrency_limiter, "retry_after_seconds", 5)
                     ),
                 )
-        client = self.http_client or httpx.AsyncClient(timeout=self.timeout_seconds)
+        timeout = httpx.Timeout(self.timeout_seconds, connect=self.connect_timeout_seconds)
+        client = self.http_client or httpx.AsyncClient(timeout=timeout)
         close_client = self.http_client is None
         try:
             try:
-                response = await client.post(
-                    f"{self.base_url}/chat/completions",
-                    headers=headers,
-                    json=payload,
-                )
+                try:
+                    response = await client.post(
+                        f"{self.base_url}/chat/completions",
+                        headers=headers,
+                        json=payload,
+                    )
+                except httpx.ReadTimeout as exc:
+                    raise AiProviderError(
+                        status_code=None,
+                        error_code="read_timeout",
+                        message="ReadTimeout",
+                        retryable=True,
+                        error_type="timeout",
+                    ) from exc
+                except httpx.TimeoutException as exc:
+                    raise AiProviderError(
+                        status_code=None,
+                        error_code="timeout",
+                        message=exc.__class__.__name__,
+                        retryable=True,
+                        error_type="timeout",
+                    ) from exc
+                except httpx.NetworkError as exc:
+                    raise AiProviderError(
+                        status_code=None,
+                        error_code="network_error",
+                        message=exc.__class__.__name__,
+                        retryable=True,
+                        error_type="network",
+                    ) from exc
             finally:
                 if lease is not None and self.concurrency_limiter is not None:
                     self.concurrency_limiter.release_model_slot(lease)
@@ -180,6 +216,31 @@ def _retry_after_seconds(response: httpx.Response, error: dict[str, Any]) -> int
     if _optional_string(error.get("code")) == "1302":
         return 60
     return None
+
+
+def _is_retryable_error(*, status_code: int | None, error_code: str | None) -> bool:
+    if status_code in {429, 502, 503, 504}:
+        return True
+    return str(error_code or "").casefold() in {
+        "1302",
+        "429",
+        "read_timeout",
+        "timeout",
+        "network_error",
+    }
+
+
+def _error_type(*, status_code: int | None, error_code: str | None) -> str:
+    code = str(error_code or "").casefold()
+    if code == "1302" or status_code == 429:
+        return "rate_limit"
+    if status_code in {502, 503, 504}:
+        return "provider_unavailable"
+    if code in {"read_timeout", "timeout"}:
+        return "timeout"
+    if code == "network_error":
+        return "network"
+    return "provider_error"
 
 
 def _optional_string(value: Any) -> str | None:

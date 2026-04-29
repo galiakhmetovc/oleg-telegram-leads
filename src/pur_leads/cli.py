@@ -314,9 +314,10 @@ def _build_catalog_extractor(session, settings, *, worker_name: str):
         settings_service,
         route=route,
         worker_name=worker_name,
-        allow_settings_overrides=True,
+        allow_settings_overrides=route is None,
         fallback_extractor=fallback_extractor,
         fallback_on_rate_limit=fallback_extractor is not None,
+        fallback_on_error=bool(route.fallback_on_error) if route is not None else False,
     )
 
 
@@ -364,6 +365,7 @@ def _build_catalog_llm_extractor_for_route(
     allow_settings_overrides: bool,
     fallback_extractor=None,  # noqa: ANN001
     fallback_on_rate_limit: bool = False,
+    fallback_on_error: bool = False,
 ):
     if allow_settings_overrides:
         base_url = str(
@@ -412,7 +414,13 @@ def _build_catalog_llm_extractor_for_route(
         client=ZaiChatCompletionClient(
             api_key=api_key,
             base_url=base_url,
-            timeout_seconds=settings.catalog_llm_timeout_seconds,
+            timeout_seconds=_llm_request_timeout_seconds(
+                settings_service,
+                task_type="catalog_extraction",
+                model=model,
+                default=settings.catalog_llm_timeout_seconds,
+            ),
+            connect_timeout_seconds=_llm_connect_timeout_seconds(settings_service),
             concurrency_limiter=_build_ai_model_concurrency_limiter(
                 session,
                 worker_name=worker_name,
@@ -428,6 +436,7 @@ def _build_catalog_llm_extractor_for_route(
         max_tokens=max_tokens,
         fallback_extractor=fallback_extractor,
         fallback_on_rate_limit=fallback_on_rate_limit,
+        fallback_on_error=fallback_on_error,
     )
 
 
@@ -479,7 +488,13 @@ def _build_lead_shadow_classifier(session, settings, *, worker_name: str):
         client=ZaiChatCompletionClient(
             api_key=api_key,
             base_url=base_url,
-            timeout_seconds=settings.lead_llm_shadow_timeout_seconds,
+            timeout_seconds=_llm_request_timeout_seconds(
+                settings_service,
+                task_type="lead_detection",
+                model=model,
+                default=settings.lead_llm_shadow_timeout_seconds,
+            ),
+            connect_timeout_seconds=_llm_connect_timeout_seconds(settings_service),
             concurrency_limiter=_build_ai_model_concurrency_limiter(
                 session,
                 worker_name=worker_name,
@@ -538,6 +553,54 @@ def _build_external_page_fetcher(session) -> HttpExternalPageFetcher:
 def _setting_or_default(settings_service: SettingsService, key: str, default):
     record = settings_service.repository.get(key)
     return record.value_json if record is not None else default
+
+
+def _llm_connect_timeout_seconds(settings_service: SettingsService) -> float:
+    return float(_setting_value_or_default(settings_service, "llm_connect_timeout_seconds", 5))
+
+
+def _llm_request_timeout_seconds(
+    settings_service: SettingsService,
+    *,
+    task_type: str,
+    model: str,
+    default: float,
+) -> float:
+    hard_cap = float(
+        _setting_value_or_default(settings_service, "llm_request_timeout_hard_cap_seconds", 180)
+    )
+    by_model = _setting_value_or_default(
+        settings_service, "llm_request_timeout_seconds_by_model", {}
+    )
+    by_task = _setting_value_or_default(settings_service, "llm_request_timeout_seconds_by_task", {})
+    selected = _timeout_from_map(by_model, model.casefold())
+    if selected is None:
+        selected = _timeout_from_map(by_task, task_type.casefold())
+    if selected is None:
+        selected = float(default)
+    return min(max(1.0, float(selected)), max(1.0, hard_cap))
+
+
+def _setting_value_or_default(settings_service: SettingsService, key: str, default):
+    try:
+        value = settings_service.get(key)
+    except Exception:
+        return default
+    return default if value is None else value
+
+
+def _timeout_from_map(value, key: str) -> float | None:  # noqa: ANN001
+    if not isinstance(value, dict):
+        return None
+    for raw_key, raw_value in value.items():
+        if str(raw_key).casefold() != key:
+            continue
+        try:
+            timeout = float(raw_value)
+        except (TypeError, ValueError):
+            return None
+        return timeout if timeout > 0 else None
+    return None
 
 
 def _setting_or_env_or_default(

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import random
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import asdict, dataclass, is_dataclass, replace
 from datetime import UTC, date, datetime, timedelta
@@ -257,6 +258,29 @@ class WorkerRuntime:
 
     def _fail_job(self, job: SchedulerJobRecord, exc: Exception) -> WorkerRunResult:
         error = _safe_exception_message(exc)
+        retryable = getattr(exc, "retryable", None)
+        if retryable is False:
+            _mark_failed_notification_event(self.session, job=job, error=error)
+            self.audit.record_event(
+                event_type="scheduler",
+                severity="error",
+                message=error,
+                entity_type="scheduler_job",
+                entity_id=job.id,
+                details_json={
+                    "reason": "non_retryable_handler_exception",
+                    "job_type": job.job_type,
+                    "error_code": getattr(exc, "error_code", None),
+                    "error_type": getattr(exc, "error_type", None),
+                },
+            )
+            self.scheduler.fail_permanently(job.id, error=error)
+            return WorkerRunResult(
+                status="failed",
+                job_id=job.id,
+                job_type=job.job_type,
+                message=error,
+            )
         retry_at = _retry_at_for_exception(
             self.session,
             exc,
@@ -1432,7 +1456,22 @@ def _retry_at_for_exception(
     max_delay = max(1.0, _float_setting(session, "worker_retry_max_delay_seconds", 900.0))
     exponent = max(0, attempt_number - 1)
     delay_seconds = min(max_delay, base_delay * (multiplier**exponent))
+    if not (isinstance(retry_after_seconds, int | float) and retry_after_seconds > 0):
+        delay_seconds = _jitter_delay(
+            delay_seconds,
+            mode=str(SettingsService(session).get("worker_retry_jitter_mode") or "full"),
+        )
     return utc_now() + timedelta(seconds=int(delay_seconds))
+
+
+def _jitter_delay(delay_seconds: float, *, mode: str) -> float:
+    bounded = max(1.0, delay_seconds)
+    normalized = mode.strip().casefold()
+    if normalized == "none":
+        return bounded
+    if normalized == "equal":
+        return bounded / 2 + random.uniform(0, bounded / 2)
+    return random.uniform(1.0, bounded)
 
 
 def _float_setting(session: Session, key: str, default: float) -> float:

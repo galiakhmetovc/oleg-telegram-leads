@@ -484,13 +484,86 @@ def test_cli_worker_once_uses_ai_registry_catalog_route_after_explicit_bootstrap
     output = capsys.readouterr().out
     assert stored is not None
     assert "succeeded job" in output
-    assert run["model"] == "GLM-5.1"
+    assert run["model"] == "GLM-4-Plus"
     called_instances = [
         instance
         for instance in FakeZaiChatCompletionClient.instances
-        if instance.calls and instance.calls[0]["model"] == "GLM-5.1"
+        if instance.calls and instance.calls[0]["model"] == "GLM-4-Plus"
     ]
     assert called_instances[0].api_key == "route-account-key"
+
+
+def test_cli_catalog_route_ignores_legacy_model_setting_when_registry_route_exists(
+    tmp_path,
+    capsys,
+    monkeypatch,
+):
+    db_path = tmp_path / "cli.db"
+    engine = create_sqlite_engine(db_path)
+    upgrade_database(engine)
+    session_factory = create_session_factory(engine)
+    with session_factory() as session:
+        registry = AiRegistryService(session)
+        registry.bootstrap_defaults(actor="test")
+        account_secret_id = SecretRefService(session).create_local_secret(
+            secret_type="ai_api_key",
+            display_name="Catalog Z.AI",
+            value="route-account-key",
+            storage_root=tmp_path / "secrets",
+        )
+        SettingsService(session).set(
+            "catalog_llm_model",
+            "GLM-4.5-Flash",
+            value_type="string",
+            updated_by="test",
+        )
+        registry.configure_zai_account(
+            actor="test",
+            base_url="https://api.z.ai/api/coding/paas/v4",
+            auth_secret_ref=f"secret_ref:{account_secret_id}",
+            display_name="Catalog Z.AI",
+        )
+        raw_source = CatalogSourceService(session).upsert_source(
+            source_type="telegram_message",
+            origin="telegram:purmaster",
+            external_id="18",
+            raw_text="Dahua Hero A1 Wi-Fi camera",
+        )
+        chunk = CatalogSourceService(session).replace_parsed_chunks(
+            raw_source.id,
+            chunks=["Dahua Hero A1 Wi-Fi camera"],
+            parser_name="test",
+            parser_version="1",
+        )[0]
+        job = SchedulerService(session).enqueue(
+            job_type="extract_catalog_facts",
+            scope_type="parser",
+            payload_json={"source_id": raw_source.id, "chunk_id": chunk.id},
+        )
+
+    monkeypatch.setattr("pur_leads.cli.ZaiChatCompletionClient", FakeZaiChatCompletionClient)
+    FakeZaiChatCompletionClient.instances.clear()
+
+    main(["--database-path", str(db_path), "worker", "once"])
+
+    with session_factory() as session:
+        stored = SchedulerService(session).repository.get(job.id)
+        run = session.execute(select(extraction_runs_table)).mappings().one()
+    output = capsys.readouterr().out
+    assert stored is not None
+    assert "succeeded job" in output
+    assert run["model"] == "GLM-4-Plus"
+    called_models = [
+        call["model"]
+        for instance in FakeZaiChatCompletionClient.instances
+        for call in instance.calls
+    ]
+    assert called_models == ["GLM-4-Plus"]
+    called_instance = next(
+        instance for instance in FakeZaiChatCompletionClient.instances if instance.calls
+    )
+    assert called_instance.timeout_seconds == 90.0
+    assert called_instance.kwargs["connect_timeout_seconds"] == 5.0
 
 
 def test_cli_catalog_extractor_uses_fallback_route_after_rate_limit(
@@ -547,9 +620,70 @@ def test_cli_catalog_extractor_uses_fallback_route_after_rate_limit(
     assert stored is not None
     assert "succeeded job" in output
     assert stored.status == "succeeded"
-    assert run["model"] == "GLM-5.1"
+    assert run["model"] == "GLM-4-Plus"
     assert [call["model"] for call in RateLimitThenFallbackZaiClient.calls] == [
-        "GLM-5.1",
+        "GLM-4-Plus",
+        "GLM-4.5-Air",
+    ]
+
+
+def test_cli_catalog_extractor_uses_fallback_route_after_read_timeout(
+    tmp_path,
+    capsys,
+    monkeypatch,
+):
+    db_path = tmp_path / "cli.db"
+    engine = create_sqlite_engine(db_path)
+    upgrade_database(engine)
+    session_factory = create_session_factory(engine)
+    with session_factory() as session:
+        registry = AiRegistryService(session)
+        registry.bootstrap_defaults(actor="test")
+        account_secret_id = SecretRefService(session).create_local_secret(
+            secret_type="ai_api_key",
+            display_name="Catalog Z.AI",
+            value="route-account-key",
+            storage_root=tmp_path / "secrets",
+        )
+        registry.configure_zai_account(
+            actor="test",
+            base_url="https://api.z.ai/api/coding/paas/v4",
+            auth_secret_ref=f"secret_ref:{account_secret_id}",
+            display_name="Catalog Z.AI",
+        )
+        raw_source = CatalogSourceService(session).upsert_source(
+            source_type="telegram_message",
+            origin="telegram:purmaster",
+            external_id="18",
+            raw_text="Dahua Hero A1 Wi-Fi camera",
+        )
+        chunk = CatalogSourceService(session).replace_parsed_chunks(
+            raw_source.id,
+            chunks=["Dahua Hero A1 Wi-Fi camera"],
+            parser_name="test",
+            parser_version="1",
+        )[0]
+        job = SchedulerService(session).enqueue(
+            job_type="extract_catalog_facts",
+            scope_type="parser",
+            payload_json={"source_id": raw_source.id, "chunk_id": chunk.id},
+        )
+
+    monkeypatch.setattr("pur_leads.cli.ZaiChatCompletionClient", ReadTimeoutThenFallbackZaiClient)
+    ReadTimeoutThenFallbackZaiClient.calls.clear()
+
+    main(["--database-path", str(db_path), "worker", "once"])
+
+    with session_factory() as session:
+        stored = SchedulerService(session).repository.get(job.id)
+        run = session.execute(select(extraction_runs_table)).mappings().one()
+    output = capsys.readouterr().out
+    assert stored is not None
+    assert "succeeded job" in output
+    assert stored.status == "succeeded"
+    assert run["model"] == "GLM-4-Plus"
+    assert [call["model"] for call in ReadTimeoutThenFallbackZaiClient.calls] == [
+        "GLM-4-Plus",
         "GLM-4.5-Air",
     ]
 
@@ -972,12 +1106,54 @@ class RateLimitThenFallbackZaiClient(FakeZaiChatCompletionClient):
             }
         )
         self.__class__.calls.append(self.calls[-1])
-        if model == "GLM-5.1":
+        if model == "GLM-4-Plus":
             raise AiProviderError(
                 status_code=429,
                 error_code="1302",
                 message="Rate limit reached for requests",
                 retry_after_seconds=60,
+            )
+        return AiChatCompletion(
+            content="""
+            {
+              "facts": [
+                {
+                  "fact_type": "product",
+                  "canonical_name": "Dahua Hero A1",
+                  "category": "video_surveillance",
+                  "terms": ["hero a1", "dahua hero"],
+                  "evidence_quote": "Dahua Hero A1 Wi-Fi camera",
+                  "confidence": 0.92
+                }
+              ]
+            }
+            """,
+            model=model,
+            request_id="fallback-request",
+            usage={},
+            raw_response={},
+        )
+
+
+class ReadTimeoutThenFallbackZaiClient(FakeZaiChatCompletionClient):
+    calls: list[dict[str, Any]] = []
+
+    async def complete(self, *, messages, model, temperature, max_tokens):  # noqa: ANN001
+        self.calls.append(
+            {
+                "messages": messages,
+                "model": model,
+                "temperature": temperature,
+                "max_tokens": max_tokens,
+            }
+        )
+        self.__class__.calls.append(self.calls[-1])
+        if model == "GLM-4-Plus":
+            raise AiProviderError(
+                status_code=None,
+                error_code="read_timeout",
+                message="ReadTimeout",
+                retryable=True,
             )
         return AiChatCompletion(
             content="""

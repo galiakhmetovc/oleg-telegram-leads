@@ -26,7 +26,7 @@ class AppSettings(BaseSettings):
     backup_path: Path = Path("./artifacts/backups")
     zai_api_key: str | None = None
     catalog_llm_base_url: str = "https://api.z.ai/api/coding/paas/v4"
-    catalog_llm_model: str = "glm-5.1"
+    catalog_llm_model: str = "GLM-4-Plus"
     catalog_llm_timeout_seconds: float = 60.0
     lead_llm_shadow_base_url: str = "https://api.z.ai/api/coding/paas/v4"
     lead_llm_shadow_model: str = "glm-4.5-flash"

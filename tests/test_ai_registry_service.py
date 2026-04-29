@@ -74,7 +74,7 @@ def test_ai_registry_bootstrap_creates_zai_models_agents_and_multi_model_routes(
         ]
         assert {route["route_role"] for route in catalog_routes} >= {"primary", "fallback"}
         assert {route["ai_model_id"] for route in catalog_routes} >= {
-            models["glm-5.1"]["id"],
+            models["glm-4-plus"]["id"],
             models["glm-4.5-air"]["id"],
         }
         assert all(route["ai_model_profile_id"] for route in catalog_routes)
@@ -90,14 +90,14 @@ def test_ai_registry_selects_enabled_routes_by_agent_and_role(tmp_path):
         fallback = service.select_routes(agent_key="catalog_extractor", route_role="fallback")
         ocr = service.select_routes(agent_key="ocr_extractor", route_role="primary")
 
-        assert [route.model for route in primary] == ["GLM-5.1"]
+        assert [route.model for route in primary] == ["GLM-4-Plus"]
         assert [route.model for route in fallback] == ["GLM-4.5-Air"]
         assert [route.model for route in ocr] == ["GLM-OCR"]
         assert primary[0].provider == "zai"
         assert primary[0].base_url == "https://api.z.ai/api/coding/paas/v4"
         assert primary[0].thinking_mode == "off"
-        assert primary[0].supports_thinking is True
-        assert primary[0].supports_structured_output is True
+        assert primary[0].supports_thinking is False
+        assert primary[0].supports_structured_output is False
         assert ocr[0].supports_thinking is False
         assert ocr[0].supports_structured_output is False
         assert ocr[0].endpoint_family == "layout_parsing"
@@ -120,9 +120,11 @@ def test_ai_registry_allows_same_model_route_role_on_different_accounts(tmp_path
             base_url="https://api.z.ai/api/coding/paas/v4",
             auth_secret_ref="secret_ref:second",
         )
-        glm51 = (
+        glm4plus = (
             session.execute(
-                select(ai_models_table).where(ai_models_table.c.normalized_model_name == "glm-5.1")
+                select(ai_models_table).where(
+                    ai_models_table.c.normalized_model_name == "glm-4-plus"
+                )
             )
             .mappings()
             .one()
@@ -130,7 +132,7 @@ def test_ai_registry_allows_same_model_route_role_on_different_accounts(tmp_path
         profile = (
             session.execute(
                 select(ai_model_profiles_table).where(
-                    ai_model_profiles_table.c.ai_model_id == glm51["id"],
+                    ai_model_profiles_table.c.ai_model_id == glm4plus["id"],
                     ai_model_profiles_table.c.profile_key == "catalog-primary",
                 )
             )

@@ -87,7 +87,7 @@ class LlmCatalogExtractor:
             return False
         if self.fallback_on_rate_limit and _is_rate_limit_error(exc):
             return True
-        return self.fallback_on_error
+        return self.fallback_on_error and _is_retryable_error(exc)
 
     def _load_scope(
         self,
@@ -160,6 +160,17 @@ def _is_rate_limit_error(exc: Exception) -> bool:
     status_code = getattr(exc, "status_code", None)
     error_code = str(getattr(exc, "error_code", "") or "")
     return status_code == 429 or error_code in {"1302", "429"}
+
+
+def _is_retryable_error(exc: Exception) -> bool:
+    retryable = getattr(exc, "retryable", None)
+    if retryable is True:
+        return True
+    status_code = getattr(exc, "status_code", None)
+    error_code = str(getattr(exc, "error_code", "") or "").casefold()
+    if status_code in {429, 502, 503, 504}:
+        return True
+    return error_code in {"1302", "429", "read_timeout", "timeout", "network_error"}
 
 
 def _facts_from_payload(

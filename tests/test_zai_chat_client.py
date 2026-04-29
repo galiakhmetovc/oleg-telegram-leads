@@ -225,3 +225,32 @@ async def test_zai_chat_client_marks_request_rate_limit_as_retryable():
 
     assert exc.value.error_code == "1302"
     assert exc.value.retry_after_seconds == 60
+
+
+@pytest.mark.asyncio
+async def test_zai_chat_client_wraps_read_timeout_as_retryable_provider_error():
+    limiter = FakeLimiter()
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        raise httpx.ReadTimeout("read timed out")
+
+    client = ZaiChatCompletionClient(
+        api_key="secret-key",
+        base_url="https://api.z.ai/api/coding/paas/v4/",
+        http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
+        concurrency_limiter=limiter,
+        worker_name="worker-1",
+    )
+
+    with pytest.raises(AiProviderError) as exc:
+        await client.complete(
+            messages=[{"role": "user", "content": "extract catalog"}],
+            model="glm-4.5-flash",
+            temperature=0.0,
+            max_tokens=1024,
+        )
+
+    assert exc.value.error_code == "read_timeout"
+    assert exc.value.retryable is True
+    assert "ReadTimeout" in str(exc.value)
+    assert limiter.released == ["lease-1"]

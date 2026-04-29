@@ -1283,12 +1283,29 @@ Key fields:
 Rules:
 
 - A task can use several models. Examples:
-  - catalog extraction: `GLM-5.1` primary, `GLM-4.5-Air` fallback, `GLM-4.5-Flash` shadow.
+  - catalog extraction: `GLM-4-Plus` primary, `GLM-4.5-Air` fallback, optional `GLM-4.5-Flash` only for explicitly configured cheap/fast experiments.
   - lead detection: fuzzy primary, LLM shadow, later LLM fallback or ensemble.
   - OCR: `GLM-OCR` primary, vision-language fallback if configured.
 - The router chooses task executors by role, priority, weight, model/profile availability, account/model limits, and route conditions.
 - Fallback can be triggered by provider error, rate limit, timeout, invalid JSON, schema validation failure, or operator-disabled route.
 - Shadow routes write traces/evaluation records but do not create operational side effects unless explicitly promoted.
+
+LLM retry and timeout policy:
+
+- Retryable provider failures are HTTP `429`, `502`, `503`, `504`, Z.AI `1302`, network errors, `TimeoutError`, and `ReadTimeout`.
+- Non-retryable provider failures include bad request/auth/configuration errors such as HTTP `400`, `401`, `403`, `404` and provider invalid-request codes such as `1301`.
+- Worker job retries are bounded by `max_attempts`; the runtime must never retry forever.
+- Retry delay uses exponential backoff from `worker_retry_base_delay_seconds`, `worker_retry_backoff_multiplier`, and `worker_retry_max_delay_seconds`.
+- If the provider returns `Retry-After` or an exception exposes `retry_after_seconds`, that value is honored before local backoff.
+- For local backoff, `worker_retry_jitter_mode` defaults to `full` to avoid many workers retrying at the same instant.
+- LLM timeouts are configurable separately from worker retries:
+  - `llm_connect_timeout_seconds`, default `5`;
+  - `llm_request_timeout_seconds_by_model`, default `GLM-4.5-Flash=45`, `GLM-4.5-Air=60`, `GLM-4-Plus=90`, `GLM-5.1=90`, `GLM-OCR=120`;
+  - `llm_request_timeout_seconds_by_task`, default `catalog_extraction=90`, `lead_detection=30`, `ocr=120`;
+  - `llm_request_timeout_hard_cap_seconds`, default `180`.
+- Model-specific timeout wins over task timeout. Task timeout wins over the legacy environment default. Hard cap is always applied.
+- Catalog ingestion must use the configured AI task route as source of truth. Legacy `catalog_llm_model` is used only when no AI registry route exists.
+- A catalog fallback route may be attempted inside the same job attempt for rate limit and retryable timeout/network/provider-unavailable failures, before the job is requeued.
 
 ### `ai_runs`
 
