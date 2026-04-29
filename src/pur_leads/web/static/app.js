@@ -1873,6 +1873,7 @@ async function initAdmin() {
   document.querySelector("#telegram-admin-form")?.addEventListener("submit", addTelegramAdmin);
   document.querySelector("#userbot-form")?.addEventListener("submit", addUserbot);
   document.querySelector("#setting-form")?.addEventListener("submit", saveSetting);
+  document.querySelector("#ai-registry-bootstrap")?.addEventListener("click", bootstrapAiRegistry);
   document.querySelector("#ai-registry-refresh")?.addEventListener("click", loadAiRegistry);
   document.querySelector("#ai-route-form")?.addEventListener("submit", saveAiRoute);
 }
@@ -1981,6 +1982,21 @@ async function loadAiRegistry() {
   try {
     adminAiRegistry = await api("/api/admin/ai-registry");
     renderAiRegistry(adminAiRegistry);
+  } catch (error) {
+    if (status) status.textContent = error.message;
+  }
+}
+
+async function bootstrapAiRegistry() {
+  const status = document.querySelector("#ai-registry-status");
+  if (status) status.textContent = "Loading defaults...";
+  try {
+    adminAiRegistry = await api("/api/admin/ai-registry/bootstrap-defaults", {
+      method: "POST",
+      body: JSON.stringify({}),
+    });
+    renderAiRegistry(adminAiRegistry);
+    if (status) status.textContent = "Defaults loaded";
   } catch (error) {
     if (status) status.textContent = error.message;
   }

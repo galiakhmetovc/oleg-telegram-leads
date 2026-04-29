@@ -184,6 +184,15 @@ def create_userbot_account(
 
 @router.get("/admin/ai-registry")
 def get_ai_registry(
+    _validated: SessionValidationResult = Depends(current_admin),
+    session: Session = Depends(get_session),
+) -> dict[str, Any]:
+    service = AiRegistryService(session)
+    return service.snapshot()
+
+
+@router.post("/admin/ai-registry/bootstrap-defaults")
+def bootstrap_ai_registry_defaults(
     validated: SessionValidationResult = Depends(current_admin),
     session: Session = Depends(get_session),
 ) -> dict[str, Any]:

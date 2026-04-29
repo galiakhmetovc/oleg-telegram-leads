@@ -21,13 +21,15 @@ The system must continuously read the PUR Telegram channel, parse messages and d
 - Oleg can manually add examples of leads, non-leads, catalog facts, or source links.
 - The web interface starts with one role: `admin`.
 - A built-in local administrator account exists for bootstrap. Telegram admin accounts are added through that account.
+- A clean installation/reset contains only the built-in local administrator and empty system tables. Telegram userbots, notification groups, bot tokens, Telegram API credentials, Z.AI/API credentials, AI provider routes, sources, catalog data, and session files are added explicitly by an administrator through the web/admin onboarding flow or an audited manual upload path.
+- Runtime workers must not silently seed provider accounts, userbots, notification chats, source rows, session files, or secrets from the deployment environment. Defaults may exist in code for form help and explicit "load defaults" actions, but they do not create operational database rows until an administrator confirms them.
 - `auto_pending` notification styling, campaign expiry, and external fetch domains are configurable in the web interface.
 - CRM is included as a lightweight client-memory layer, not a heavy sales pipeline.
 - CRM starts empty. Clients, interests, assets, and notes can be created manually or from confirmed leads.
 - The first version assumes a single active admin user workflow, but tables include ownership/assignee fields for future expansion.
 - A central CRM job is generating reasons to contact existing or previously interested clients when catalog changes create a useful follow-up opportunity.
 - Runtime work is processed by a continuous job loop, not a single monolithic polling cycle.
-- Start with one Telegram userbot session and one Telegram worker. Additional userbot sessions are a future configurable expansion through the web UI.
+- Start with no Telegram userbot sessions configured. The first and additional userbot sessions are added through the web UI; the first runtime default remains one Telegram worker and one read job per configured session.
 - Monitoring chats are added through web onboarding with access check and preview before activation.
 - New live monitoring sources default to `from_now`; historical backfill is explicit and retro/web-only by default.
 - Telegram-read jobs are serialized per userbot session. AI and parse jobs can run in parallel with configurable limits.
@@ -2743,6 +2745,7 @@ Rules:
 - Settings are versioned and audited.
 - Secret values are represented through `secret_refs`, not stored directly.
 - Runtime workers should read settings through one typed settings layer so web changes, scheduler behavior, and prompt building stay consistent.
+- Empty-bootstrap rule: no settings row is created during reset/startup except those explicitly changed by an administrator. Built-in defaults are read-only fallback behavior until the administrator saves an override.
 
 ### `settings_revisions`
 
@@ -2913,6 +2916,8 @@ Purpose:
 - `ai_parse_max_parallel_jobs = 2`
 - `ai_provider_policy_warning_enabled = true`
 - `ai_default_provider_key = "zai"`
+- `ai_registry_auto_bootstrap_enabled = false`
+- `ai_registry_load_defaults_requires_admin_action = true`
 - `ai_default_provider_account_id = null`
 - `ai_model_concurrency_utilization_ratio = 0.8`
 - `ai_model_concurrency_default_limit = 1`
@@ -4644,8 +4649,8 @@ Migration path:
 
 1. Add SQLite database alongside JSON files.
 2. Import existing chats/checkpoints/leads/examples into SQLite.
-3. Seed empty CRM tables and the built-in local bootstrap admin user.
-4. Keep the current Telegram bot/userbot runtime.
+3. Seed empty CRM tables and the built-in local bootstrap admin user only.
+4. Leave Telegram bot/userbot, notification groups, AI providers, tokens, and session files unconfigured until the administrator adds them through web/admin onboarding or an audited manual upload path.
 5. Replace JSON lead persistence with SQLite `lead_events` and `lead_clusters`.
 6. Add PUR channel sync into the same userbot runtime.
 7. Add parser/extractor pipeline.

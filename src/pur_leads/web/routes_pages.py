@@ -193,7 +193,10 @@ def admin_page(
                 <section class="ai-admin-section">
                   <div class="section-head">
                     <h2>AI registry</h2>
-                    <button id="ai-registry-refresh" type="button">Refresh</button>
+                    <div class="row-actions">
+                      <button id="ai-registry-bootstrap" type="button">Load defaults</button>
+                      <button id="ai-registry-refresh" type="button">Refresh</button>
+                    </div>
                   </div>
                   <div class="ai-admin-grid">
                     <section>

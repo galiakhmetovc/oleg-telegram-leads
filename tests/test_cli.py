@@ -1,6 +1,7 @@
 from datetime import UTC, datetime
 from typing import Any
 
+from sqlalchemy import func
 from sqlalchemy import insert
 from sqlalchemy import inspect
 from sqlalchemy import select
@@ -20,7 +21,14 @@ from pur_leads.models.catalog import (
     extraction_runs_table,
     parsed_chunks_table,
 )
-from pur_leads.models.ai import ai_model_limits_table, ai_models_table
+from pur_leads.models.ai import (
+    ai_agent_routes_table,
+    ai_agents_table,
+    ai_model_limits_table,
+    ai_models_table,
+    ai_provider_accounts_table,
+    ai_providers_table,
+)
 from pur_leads.models.evaluation import decision_records_table
 from pur_leads.models.leads import lead_clusters_table, lead_events_table
 from pur_leads.models.telegram_sources import (
@@ -99,6 +107,36 @@ def test_cli_worker_once_reports_noop(tmp_path, capsys):
 
     output = capsys.readouterr().out
     assert "no queued jobs" in output
+
+
+def test_cli_worker_once_does_not_seed_ai_registry_on_empty_database(tmp_path, capsys):
+    db_path = tmp_path / "cli.db"
+    engine = create_sqlite_engine(db_path)
+    upgrade_database(engine)
+
+    main(["--database-path", str(db_path), "worker", "once"])
+
+    with create_session_factory(engine)() as session:
+        counts = {
+            "providers": session.scalar(select(func.count()).select_from(ai_providers_table)),
+            "provider_accounts": session.scalar(
+                select(func.count()).select_from(ai_provider_accounts_table)
+            ),
+            "models": session.scalar(select(func.count()).select_from(ai_models_table)),
+            "model_limits": session.scalar(select(func.count()).select_from(ai_model_limits_table)),
+            "agents": session.scalar(select(func.count()).select_from(ai_agents_table)),
+            "routes": session.scalar(select(func.count()).select_from(ai_agent_routes_table)),
+        }
+    output = capsys.readouterr().out
+    assert "no queued jobs" in output
+    assert counts == {
+        "providers": 0,
+        "provider_accounts": 0,
+        "models": 0,
+        "model_limits": 0,
+        "agents": 0,
+        "routes": 0,
+    }
 
 
 def test_cli_worker_once_uses_canonical_handler_registry(tmp_path, capsys):
@@ -335,7 +373,7 @@ def test_cli_worker_once_uses_configured_zai_llm_extractor(tmp_path, capsys, mon
     )
 
 
-def test_cli_worker_once_uses_ai_registry_catalog_route_when_not_overridden(
+def test_cli_worker_once_uses_ai_registry_catalog_route_after_explicit_bootstrap(
     tmp_path,
     capsys,
     monkeypatch,
@@ -345,6 +383,7 @@ def test_cli_worker_once_uses_ai_registry_catalog_route_when_not_overridden(
     upgrade_database(engine)
     session_factory = create_session_factory(engine)
     with session_factory() as session:
+        AiRegistryService(session).bootstrap_defaults(actor="test")
         raw_source = CatalogSourceService(session).upsert_source(
             source_type="telegram_message",
             origin="telegram:purmaster",

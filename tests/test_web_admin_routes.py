@@ -3,12 +3,21 @@ import hashlib
 import hmac
 
 from fastapi.testclient import TestClient
+from sqlalchemy import func
 from sqlalchemy import select
 
 from pur_leads.db.engine import create_sqlite_engine
 from pur_leads.db.migrations import upgrade_database
 from pur_leads.db.session import create_session_factory
 from pur_leads.models.audit import audit_log_table
+from pur_leads.models.ai import (
+    ai_agent_routes_table,
+    ai_agents_table,
+    ai_model_limits_table,
+    ai_models_table,
+    ai_provider_accounts_table,
+    ai_providers_table,
+)
 from pur_leads.models.settings import settings_revisions_table
 from pur_leads.models.web_auth import web_auth_sessions_table, web_users_table
 from pur_leads.services.web_auth import WebAuthService
@@ -256,6 +265,9 @@ def test_admin_ai_registry_routes_list_update_limits_and_add_agent_routes(tmp_pa
 
     denied_response = client.get("/api/admin/ai-registry")
     _login_local(client)
+    empty_registry_response = client.get("/api/admin/ai-registry")
+    empty_registry_counts = _ai_registry_counts(fixture["session_factory"])
+    bootstrap_response = client.post("/api/admin/ai-registry/bootstrap-defaults")
     registry_response = client.get("/api/admin/ai-registry")
     registry = registry_response.json()
     flash = next(
@@ -283,6 +295,19 @@ def test_admin_ai_registry_routes_list_update_limits_and_add_agent_routes(tmp_pa
     updated_registry = client.get("/api/admin/ai-registry").json()
 
     assert denied_response.status_code == 401
+    assert empty_registry_response.status_code == 200
+    assert empty_registry_response.json()["models"] == []
+    assert empty_registry_response.json()["agents"] == []
+    assert empty_registry_response.json()["routes"] == []
+    assert empty_registry_counts == {
+        "providers": 0,
+        "provider_accounts": 0,
+        "models": 0,
+        "model_limits": 0,
+        "agents": 0,
+        "routes": 0,
+    }
+    assert bootstrap_response.status_code == 200
     assert registry_response.status_code == 200
     assert any(model["normalized_model_name"] == "glm-ocr" for model in registry["models"])
     assert any(agent["agent_key"] == "ocr_extractor" for agent in registry["agents"])
@@ -302,6 +327,20 @@ def test_admin_ai_registry_routes_list_update_limits_and_add_agent_routes(tmp_pa
             row["action"] for row in session.execute(select(audit_log_table)).mappings().all()
         }
     assert {"ai_registry.limit_update", "ai_registry.route_upsert"}.issubset(audit_actions)
+
+
+def _ai_registry_counts(session_factory) -> dict[str, int]:
+    with session_factory() as session:
+        return {
+            "providers": session.scalar(select(func.count()).select_from(ai_providers_table)),
+            "provider_accounts": session.scalar(
+                select(func.count()).select_from(ai_provider_accounts_table)
+            ),
+            "models": session.scalar(select(func.count()).select_from(ai_models_table)),
+            "model_limits": session.scalar(select(func.count()).select_from(ai_model_limits_table)),
+            "agents": session.scalar(select(func.count()).select_from(ai_agents_table)),
+            "routes": session.scalar(select(func.count()).select_from(ai_agent_routes_table)),
+        }
 
 
 def _setup_admin_app(tmp_path):

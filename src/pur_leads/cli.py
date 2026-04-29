@@ -201,7 +201,6 @@ def _engine_from_args(args: argparse.Namespace):
 
 def _build_worker_handlers(session, *, worker_name: str = "cli-worker"):
     settings = load_settings()
-    AiRegistryService(session).bootstrap_defaults(actor="worker")
     handlers = {}
     handlers.update(
         build_catalog_handler_registry(
@@ -367,12 +366,12 @@ def _build_ai_model_concurrency_limiter(session, *, worker_name: str):
     if not bool(settings_service.get("ai_model_concurrency_enabled")):
         return None
     registry = AiRegistryService(session)
-    registry.bootstrap_defaults(actor=worker_name)
     configured_limits = settings_service.repository.get("ai_model_concurrency_limits")
+    registry_limits = registry.model_concurrency_limits(provider_key="zai")
     limits_value = (
         configured_limits.value_json
         if configured_limits is not None
-        else registry.model_concurrency_limits(provider_key="zai")
+        else registry_limits or settings_service.get("ai_model_concurrency_limits")
     )
     limits = limits_value if isinstance(limits_value, dict) else None
     return AiModelConcurrencyService(
@@ -443,7 +442,6 @@ def _select_ai_route(
     route_role: str,
 ) -> AiAgentRouteSelection | None:
     registry = AiRegistryService(session)
-    registry.bootstrap_defaults(actor="worker")
     routes = registry.select_routes(agent_key=agent_key, route_role=route_role)
     return routes[0] if routes else None
 
