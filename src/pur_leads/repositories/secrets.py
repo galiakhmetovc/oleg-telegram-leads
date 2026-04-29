@@ -33,13 +33,14 @@ class SecretRefsRepository:
     def create(
         self,
         *,
+        secret_id: str | None = None,
         secret_type: str,
         display_name: str,
         storage_backend: str,
         storage_ref: str,
         now: datetime,
     ) -> SecretRefRecord:
-        secret_id = new_id()
+        secret_id = secret_id or new_id()
         self.session.execute(
             insert(secret_refs_table).values(
                 id=secret_id,

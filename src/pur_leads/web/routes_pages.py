@@ -81,6 +81,7 @@ def inbox_page(
                   <a href="/crm">CRM</a>
                   <a href="/quality">Качество</a>
                   <a href="/operations">Операции</a>
+                  <a href="/onboarding">Онбординг</a>
                   <a href="/admin">Админка</a>
                   <button id="logout-button" type="button">Выйти</button>
                 </nav>
@@ -151,6 +152,7 @@ def admin_page(
                   <a href="/crm">CRM</a>
                   <a href="/quality">Качество</a>
                   <a href="/operations">Операции</a>
+                  <a href="/onboarding">Онбординг</a>
                   <a href="/admin">Админка</a>
                   <button id="logout-button" type="button">Выйти</button>
                 </nav>
@@ -253,6 +255,198 @@ def admin_page(
     )
 
 
+@router.get("/onboarding", response_class=HTMLResponse)
+def onboarding_page(
+    request: Request,
+    auth_service: WebAuthService = Depends(get_auth_service),
+) -> Response:
+    if not _has_page_session(request, auth_service):
+        return RedirectResponse("/login", status_code=303)
+    return HTMLResponse(
+        _page(
+            page="onboarding",
+            title="Онбординг",
+            main="""
+            <main class="workspace onboarding-workspace">
+              <header class="topbar">
+                <div>
+                  <span class="eyebrow">PUR Leads</span>
+                  <h1>Онбординг</h1>
+                </div>
+                <nav>
+                  <a href="/">Лиды</a>
+                  <a href="/today">Сегодня</a>
+                  <a href="/sources">Источники</a>
+                  <a href="/catalog">Каталог</a>
+                  <a href="/crm">CRM</a>
+                  <a href="/quality">Качество</a>
+                  <a href="/operations">Операции</a>
+                  <a href="/onboarding">Онбординг</a>
+                  <a href="/admin">Админка</a>
+                  <button id="logout-button" type="button">Выйти</button>
+                </nav>
+              </header>
+              <section class="onboarding-layout">
+                <aside class="onboarding-rail" aria-label="Шаги подключения">
+                  <div class="section-head">
+                    <h2>Статус</h2>
+                    <button id="onboarding-refresh" class="icon-button" type="button" title="Обновить">
+                      <span class="material-symbols-outlined" aria-hidden="true">refresh</span>
+                    </button>
+                  </div>
+                  <div id="onboarding-status" class="onboarding-steps" aria-live="polite"></div>
+                  <div class="onboarding-note">
+                    После смены временного пароля настройте бота, группу уведомлений и юзербота.
+                    Источники для поиска лидов можно добавить позже в разделе
+                    <a href="/sources">«Источники»</a>.
+                  </div>
+                </aside>
+                <section class="onboarding-main">
+                  <section class="onboarding-panel">
+                    <div class="onboarding-panel-head">
+                      <span class="material-symbols-outlined" aria-hidden="true">smart_toy</span>
+                      <div>
+                        <h2>Обычный Telegram-бот</h2>
+                        <p class="muted">Нужен для входа через Telegram и оперативных уведомлений.</p>
+                      </div>
+                    </div>
+                    <form id="onboarding-bot-form" class="material-form">
+                      <label>
+                        Токен BotFather
+                        <input name="token" type="password" autocomplete="off" required
+                          placeholder="123456:ABC...">
+                      </label>
+                      <label>
+                        Название
+                        <input name="display_name" value="PUR Leads bot">
+                      </label>
+                      <button type="submit">
+                        <span class="material-symbols-outlined" aria-hidden="true">send</span>
+                        Проверить и сохранить
+                      </button>
+                    </form>
+                    <p id="onboarding-bot-status" class="status-line" role="status"></p>
+                  </section>
+                  <section class="onboarding-panel">
+                    <div class="onboarding-panel-head">
+                      <span class="material-symbols-outlined" aria-hidden="true">forum</span>
+                      <div>
+                        <h2>Группа уведомлений</h2>
+                        <p class="muted">Добавьте бота в группу, отправьте любое сообщение и выберите чат здесь.</p>
+                      </div>
+                    </div>
+                    <div class="inline-form">
+                      <button id="onboarding-group-discover" type="button">
+                        <span class="material-symbols-outlined" aria-hidden="true">refresh</span>
+                        Найти доступные группы
+                      </button>
+                    </div>
+                    <div id="onboarding-group-candidates" class="table-list"></div>
+                    <p id="onboarding-group-status" class="status-line" role="status"></p>
+                  </section>
+                  <section class="onboarding-panel">
+                    <div class="onboarding-panel-head">
+                      <span class="material-symbols-outlined" aria-hidden="true">upload_file</span>
+                      <div>
+                        <h2>Юзербот через файл сессии</h2>
+                        <p class="muted">Подходит, если Telethon-сессия уже создана и проверена.</p>
+                      </div>
+                    </div>
+                    <form id="onboarding-session-form" class="material-form">
+                      <label>
+                        Название
+                        <input name="display_name" required placeholder="Основной юзербот">
+                      </label>
+                      <label>
+                        Имя сессии
+                        <input name="session_name" required placeholder="main">
+                      </label>
+                      <label>
+                        Файл .session
+                        <input name="session_file" type="file" accept=".session" required>
+                      </label>
+                      <label>
+                        Telegram API ID
+                        <input name="api_id" type="number" min="1" step="1" required>
+                      </label>
+                      <label>
+                        Telegram API hash
+                        <input name="api_hash" type="password" autocomplete="off" required>
+                      </label>
+                      <label class="checkbox-line">
+                        <input name="make_default" type="checkbox" checked>
+                        Использовать по умолчанию
+                      </label>
+                      <button type="submit">
+                        <span class="material-symbols-outlined" aria-hidden="true">upload_file</span>
+                        Загрузить сессию
+                      </button>
+                    </form>
+                    <p id="onboarding-session-status" class="status-line" role="status"></p>
+                  </section>
+                  <section class="onboarding-panel">
+                    <div class="onboarding-panel-head">
+                      <span class="material-symbols-outlined" aria-hidden="true">person_add</span>
+                      <div>
+                        <h2>Интерактивный вход юзербота</h2>
+                        <p class="muted">Отправляет код Telegram на номер и создает сессию на сервере.</p>
+                      </div>
+                    </div>
+                    <form id="onboarding-interactive-start-form" class="material-form">
+                      <label>
+                        Название
+                        <input name="display_name" required placeholder="Основной юзербот">
+                      </label>
+                      <label>
+                        Имя сессии
+                        <input name="session_name" required placeholder="main">
+                      </label>
+                      <label>
+                        Телефон
+                        <input name="phone" required placeholder="+79990000000">
+                      </label>
+                      <label>
+                        Telegram API ID
+                        <input name="api_id" type="number" min="1" step="1" required>
+                      </label>
+                      <label>
+                        Telegram API hash
+                        <input name="api_hash" type="password" autocomplete="off" required>
+                      </label>
+                      <label class="checkbox-line">
+                        <input name="make_default" type="checkbox" checked>
+                        Использовать по умолчанию
+                      </label>
+                      <button type="submit">
+                        <span class="material-symbols-outlined" aria-hidden="true">send</span>
+                        Получить код
+                      </button>
+                    </form>
+                    <form id="onboarding-interactive-complete-form" class="material-form is-hidden">
+                      <input name="login_id" type="hidden">
+                      <label>
+                        Код Telegram
+                        <input name="code" required inputmode="numeric">
+                      </label>
+                      <label>
+                        Пароль 2FA
+                        <input name="password" type="password" autocomplete="off">
+                      </label>
+                      <button type="submit">
+                        <span class="material-symbols-outlined" aria-hidden="true">check_circle</span>
+                        Завершить вход
+                      </button>
+                    </form>
+                    <p id="onboarding-interactive-status" class="status-line" role="status"></p>
+                  </section>
+                </section>
+              </section>
+            </main>
+            """,
+        )
+    )
+
+
 @router.get("/crm", response_class=HTMLResponse)
 def crm_page(
     request: Request,
@@ -279,6 +473,7 @@ def crm_page(
                   <a href="/crm">CRM</a>
                   <a href="/quality">Качество</a>
                   <a href="/operations">Операции</a>
+                  <a href="/onboarding">Онбординг</a>
                   <a href="/admin">Админка</a>
                   <button id="logout-button" type="button">Выйти</button>
                 </nav>
@@ -365,6 +560,7 @@ def sources_page(
                   <a href="/crm">CRM</a>
                   <a href="/quality">Качество</a>
                   <a href="/operations">Операции</a>
+                  <a href="/onboarding">Онбординг</a>
                   <a href="/admin">Админка</a>
                   <button id="logout-button" type="button">Выйти</button>
                 </nav>
@@ -439,6 +635,7 @@ def catalog_page(
                   <a href="/crm">CRM</a>
                   <a href="/quality">Качество</a>
                   <a href="/operations">Операции</a>
+                  <a href="/onboarding">Онбординг</a>
                   <a href="/admin">Админка</a>
                   <button id="logout-button" type="button">Выйти</button>
                 </nav>
@@ -527,6 +724,7 @@ def today_page(
                   <a href="/crm">CRM</a>
                   <a href="/quality">Качество</a>
                   <a href="/operations">Операции</a>
+                  <a href="/onboarding">Онбординг</a>
                   <a href="/admin">Админка</a>
                   <button id="logout-button" type="button">Выйти</button>
                 </nav>
@@ -617,6 +815,7 @@ def operations_page(
                   <a href="/crm">CRM</a>
                   <a href="/quality">Качество</a>
                   <a href="/operations">Операции</a>
+                  <a href="/onboarding">Онбординг</a>
                   <a href="/admin">Админка</a>
                   <button id="logout-button" type="button">Выйти</button>
                 </nav>
@@ -714,6 +913,7 @@ def quality_page(
                   <a href="/crm">CRM</a>
                   <a href="/quality">Качество</a>
                   <a href="/operations">Операции</a>
+                  <a href="/onboarding">Онбординг</a>
                   <a href="/admin">Админка</a>
                   <button id="logout-button" type="button">Выйти</button>
                 </nav>
@@ -777,6 +977,7 @@ def _page(*, page: str, title: str, main: str) -> str:
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{title}</title>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined&amp;icon_names=check_circle,forum,person_add,radio_button_unchecked,refresh,send,smart_toy,upload_file&amp;display=block">
   <link rel="stylesheet" href="/static/app.css">
 </head>
 <body data-page="{page}">

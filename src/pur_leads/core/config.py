@@ -17,6 +17,8 @@ class AppSettings(BaseSettings):
     bootstrap_admin_username: str = "admin"
     bootstrap_admin_password: str | None = None
     bootstrap_admin_password_file: Path = Path("./data/bootstrap-admin-password.txt")
+    local_secret_storage_path: Path = Path("./data/secrets")
+    telegram_session_storage_path: Path = Path("./sessions/userbots")
     telegram_bot_token: str | None = None
     web_session_cookie_name: str = "pur_session"
     web_cookie_secure: bool = False

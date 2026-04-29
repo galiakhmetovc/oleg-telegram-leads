@@ -35,3 +35,5 @@ docker compose run --rm worker
 ## Bootstrap Admin
 
 On first start the app creates the built-in `admin` account and writes its temporary password to `./data/bootstrap-admin-password.txt` by default. After login the admin must set a new password; the temporary password file is then removed and is not regenerated on later restarts.
+
+After the password is changed, incomplete installations open `/onboarding`. The onboarding page validates and stores the Telegram bot token, discovers the notification group through bot updates, supports Telethon userbot setup by `.session` upload or interactive phone/code login, and keeps raw secrets in local file-backed `secret_refs` instead of returning them through the UI.

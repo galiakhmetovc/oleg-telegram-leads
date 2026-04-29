@@ -47,6 +47,7 @@ def test_workspace_and_admin_pages_are_protected_and_render_shells(tmp_path):
     admin_denied = client.get("/admin", follow_redirects=False)
     crm_denied = client.get("/crm", follow_redirects=False)
     sources_denied = client.get("/sources", follow_redirects=False)
+    onboarding_denied = client.get("/onboarding", follow_redirects=False)
     catalog_denied = client.get("/catalog", follow_redirects=False)
     today_denied = client.get("/today", follow_redirects=False)
     operations_denied = client.get("/operations", follow_redirects=False)
@@ -56,6 +57,7 @@ def test_workspace_and_admin_pages_are_protected_and_render_shells(tmp_path):
     admin_response = client.get("/admin")
     crm_response = client.get("/crm")
     sources_response = client.get("/sources")
+    onboarding_response = client.get("/onboarding")
     catalog_response = client.get("/catalog")
     today_response = client.get("/today")
     operations_response = client.get("/operations")
@@ -70,6 +72,8 @@ def test_workspace_and_admin_pages_are_protected_and_render_shells(tmp_path):
     assert crm_denied.headers["location"] == "/login"
     assert sources_denied.status_code == 303
     assert sources_denied.headers["location"] == "/login"
+    assert onboarding_denied.status_code == 303
+    assert onboarding_denied.headers["location"] == "/login"
     assert catalog_denied.status_code == 303
     assert catalog_denied.headers["location"] == "/login"
     assert today_denied.status_code == 303
@@ -118,6 +122,16 @@ def test_workspace_and_admin_pages_are_protected_and_render_shells(tmp_path):
     assert 'id="source-form"' in sources_response.text
     assert 'name="start_recent_days"' in sources_response.text
     assert 'id="source-detail"' in sources_response.text
+    assert onboarding_response.status_code == 200
+    assert 'data-page="onboarding"' in onboarding_response.text
+    assert "Онбординг" in onboarding_response.text
+    assert "Обычный Telegram-бот" in onboarding_response.text
+    assert "Группа уведомлений" in onboarding_response.text
+    assert "Юзербот" in onboarding_response.text
+    assert 'id="onboarding-bot-form"' in onboarding_response.text
+    assert 'id="onboarding-group-discover"' in onboarding_response.text
+    assert 'id="onboarding-session-form"' in onboarding_response.text
+    assert 'id="onboarding-interactive-start-form"' in onboarding_response.text
     assert catalog_response.status_code == 200
     assert 'data-page="catalog"' in catalog_response.text
     assert 'id="catalog-candidate-list"' in catalog_response.text
@@ -159,6 +173,11 @@ def test_workspace_and_admin_pages_are_protected_and_render_shells(tmp_path):
     assert "/api/crm/clients" in js_response.text
     assert "/crm/convert" in js_response.text
     assert "/api/sources" in js_response.text
+    assert "/api/onboarding/status" in js_response.text
+    assert "/api/onboarding/bot-token" in js_response.text
+    assert "/api/onboarding/userbots/session-file" in js_response.text
+    assert "/api/onboarding/userbots/interactive/start" in js_response.text
+    assert "/api/onboarding/userbots/interactive/complete" in js_response.text
     assert "/api/catalog/candidates" in js_response.text
     assert "оценочный кейс" in js_response.text
     assert "/api/operations/summary" in js_response.text

@@ -29,17 +29,23 @@ class TelegramBotLeadNotifier:
         self.transport = transport
         self.timeout = timeout
 
-    async def send_lead_notification(self, *, chat_id: str, text: str) -> dict[str, Any]:
+    async def send_lead_notification(
+        self,
+        *,
+        chat_id: str,
+        text: str,
+        message_thread_id: int | None = None,
+    ) -> dict[str, Any]:
         url = f"https://api.telegram.org/bot{self.bot_token}/sendMessage"
+        payload: dict[str, Any] = {
+            "chat_id": chat_id,
+            "text": text,
+            "disable_web_page_preview": True,
+        }
+        if message_thread_id is not None:
+            payload["message_thread_id"] = message_thread_id
         async with httpx.AsyncClient(timeout=self.timeout, transport=self.transport) as client:
-            response = await client.post(
-                url,
-                json={
-                    "chat_id": chat_id,
-                    "text": text,
-                    "disable_web_page_preview": True,
-                },
-            )
+            response = await client.post(url, json=payload)
             _raise_for_bot_error(response)
             payload = response.json()
         result = payload.get("result") if isinstance(payload, dict) else None

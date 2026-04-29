@@ -5,6 +5,7 @@ from collections.abc import Iterator
 from fastapi import Depends, HTTPException, Request
 from sqlalchemy.orm import Session, sessionmaker
 
+from pur_leads.services.secrets import SecretRefService
 from pur_leads.services.web_auth import AuthError, SessionValidationResult, WebAuthService
 
 
@@ -20,7 +21,7 @@ def get_auth_service(
 ) -> WebAuthService:
     return WebAuthService(
         session,
-        telegram_bot_token=request.app.state.telegram_bot_token,
+        telegram_bot_token=_telegram_bot_token(request, session),
         session_duration_hours=request.app.state.web_session_duration_hours,
     )
 
@@ -77,3 +78,13 @@ def _record_authorization_denied(
         old_value_json=None,
         new_value_json={"reason": reason, "method": request.method},
     )
+
+
+def _telegram_bot_token(request: Request, session: Session) -> str | None:
+    try:
+        return (
+            SecretRefService(session).resolve_setting_secret("telegram_bot_token_secret_ref")
+            or request.app.state.telegram_bot_token
+        )
+    except (FileNotFoundError, KeyError, ValueError):
+        return request.app.state.telegram_bot_token

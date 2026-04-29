@@ -7,6 +7,7 @@ from pur_leads.db.session import create_session_factory
 from pur_leads.models.audit import operational_events_table
 from pur_leads.models.secrets import secret_refs_table
 from pur_leads.services.secrets import SecretRefService
+from pur_leads.services.settings import SettingsService
 
 
 @pytest.fixture
@@ -57,6 +58,36 @@ def test_public_view_does_not_expose_storage_ref(secret_service):
         "storage_backend": "env",
         "status": "active",
     }
+
+
+def test_local_secret_values_are_written_resolved_and_never_exposed(secret_service, tmp_path):
+    service, session = secret_service
+    secret_id = service.create_local_secret(
+        secret_type="telegram_api",
+        display_name="Telegram API hash",
+        value="api-hash-secret",
+        storage_root=tmp_path / "secrets",
+    )
+    SettingsService(session).set(
+        "telegram_api_hash_secret_ref",
+        {"secret_ref_id": secret_id},
+        value_type="secret_ref",
+        updated_by="admin",
+        reason="configure Telegram API",
+    )
+
+    row = session.execute(select(secret_refs_table)).mappings().one()
+    secret_path = tmp_path / "secrets" / f"{secret_id}.secret"
+    public_view = service.public_view(secret_id)
+
+    assert row["storage_backend"] == "file"
+    assert row["storage_ref"] == str(secret_path)
+    assert secret_path.read_text() == "api-hash-secret"
+    assert secret_path.stat().st_mode & 0o777 == 0o600
+    assert service.resolve_value(secret_id) == "api-hash-secret"
+    assert service.resolve_setting_secret("telegram_api_hash_secret_ref") == "api-hash-secret"
+    assert "storage_ref" not in public_view
+    assert "api-hash-secret" not in str(public_view)
 
 
 def test_mark_missing_updates_status_and_records_masked_event(secret_service):

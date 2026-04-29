@@ -121,6 +121,7 @@ document.addEventListener("DOMContentLoaded", () => {
   if (page === "operations") initOperations();
   if (page === "quality") initQuality();
   if (page === "admin") initAdmin();
+  if (page === "onboarding") initOnboarding();
 });
 
 function bindLogin() {
@@ -146,7 +147,7 @@ function bindLogin() {
         changeForm?.querySelector('[name="new_password"]')?.focus();
         return;
       }
-      window.location.assign("/");
+      await redirectAfterAuth();
     } catch (error) {
       status.textContent = error.message;
     }
@@ -160,11 +161,20 @@ function bindLogin() {
         method: "POST",
         body: JSON.stringify({ new_password: data.get("new_password") }),
       });
-      window.location.assign("/");
+      await redirectAfterAuth();
     } catch (error) {
       changeStatus.textContent = error.message;
     }
   });
+}
+
+async function redirectAfterAuth() {
+  try {
+    const status = await api("/api/onboarding/status");
+    window.location.assign(status.complete ? "/" : "/onboarding");
+  } catch (_error) {
+    window.location.assign("/");
+  }
 }
 
 function bindLogout() {
@@ -2240,6 +2250,212 @@ async function toggleAiRoute(event) {
   } catch (error) {
     if (status) status.textContent = error.message;
   }
+}
+
+function initOnboarding() {
+  document.querySelector("#onboarding-refresh")?.addEventListener("click", loadOnboardingStatus);
+  document.querySelector("#onboarding-bot-form")?.addEventListener("submit", saveOnboardingBot);
+  document
+    .querySelector("#onboarding-group-discover")
+    ?.addEventListener("click", discoverOnboardingGroups);
+  document
+    .querySelector("#onboarding-session-form")
+    ?.addEventListener("submit", uploadOnboardingSession);
+  document
+    .querySelector("#onboarding-interactive-start-form")
+    ?.addEventListener("submit", startInteractiveUserbotLogin);
+  document
+    .querySelector("#onboarding-interactive-complete-form")
+    ?.addEventListener("submit", completeInteractiveUserbotLogin);
+  loadOnboardingStatus();
+}
+
+async function loadOnboardingStatus() {
+  const target = document.querySelector("#onboarding-status");
+  if (!target) return;
+  try {
+    const payload = await api("/api/onboarding/status");
+    target.innerHTML = Object.entries(payload.steps || {})
+      .map(([key, step]) => {
+        const icon = step.done ? "check_circle" : "radio_button_unchecked";
+        const state = step.done ? "is-done" : "";
+        return `<div class="onboarding-step ${state}" data-step="${escapeHtml(key)}">
+          <span class="material-symbols-outlined" aria-hidden="true">${icon}</span>
+          <span>${escapeHtml(step.label || key)}</span>
+        </div>`;
+      })
+      .join("");
+  } catch (error) {
+    target.innerHTML = `<div class="empty-state">${escapeHtml(error.message)}</div>`;
+  }
+}
+
+async function saveOnboardingBot(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const status = document.querySelector("#onboarding-bot-status");
+  const data = new FormData(form);
+  try {
+    const payload = await api("/api/onboarding/bot-token", {
+      method: "POST",
+      body: JSON.stringify({
+        token: data.get("token"),
+        display_name: data.get("display_name") || "Telegram bot",
+      }),
+    });
+    if (status) status.textContent = `Бот @${payload.bot?.username || "telegram"} сохранен`;
+    form.reset();
+    await loadOnboardingStatus();
+  } catch (error) {
+    if (status) status.textContent = error.message;
+  }
+}
+
+async function discoverOnboardingGroups() {
+  const target = document.querySelector("#onboarding-group-candidates");
+  const status = document.querySelector("#onboarding-group-status");
+  if (status) status.textContent = "";
+  try {
+    const payload = await api("/api/onboarding/notification-groups/discover");
+    const candidates = payload.candidates || [];
+    if (!candidates.length) {
+      target.innerHTML = '<div class="empty-state">Группы не найдены</div>';
+      return;
+    }
+    target.innerHTML = candidates
+      .map(
+        (candidate) => `<div class="table-row onboarding-group-row">
+          <div>
+            <strong>${escapeHtml(candidate.title)}</strong>
+            <p class="muted">${escapeHtml(candidate.chat_type)} ${escapeHtml(candidate.chat_id)}</p>
+          </div>
+          <button type="button"
+            data-chat-id="${escapeHtml(candidate.chat_id)}"
+            data-title="${escapeHtml(candidate.title)}"
+            data-thread-id="${escapeHtml(candidate.message_thread_id ?? "")}">
+            Выбрать
+          </button>
+        </div>`
+      )
+      .join("");
+    target.querySelectorAll("[data-chat-id]").forEach((button) => {
+      button.addEventListener("click", saveOnboardingGroup);
+    });
+  } catch (error) {
+    if (status) status.textContent = error.message;
+  }
+}
+
+async function saveOnboardingGroup(event) {
+  const button = event.currentTarget;
+  const status = document.querySelector("#onboarding-group-status");
+  const threadId = button.dataset.threadId;
+  try {
+    await api("/api/onboarding/notification-group", {
+      method: "POST",
+      body: JSON.stringify({
+        chat_id: button.dataset.chatId,
+        title: button.dataset.title,
+        message_thread_id: threadId ? Number.parseInt(threadId, 10) : null,
+        send_test: true,
+      }),
+    });
+    if (status) status.textContent = "Группа уведомлений сохранена, тестовое сообщение отправлено";
+    await loadOnboardingStatus();
+  } catch (error) {
+    if (status) status.textContent = error.message;
+  }
+}
+
+async function uploadOnboardingSession(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const status = document.querySelector("#onboarding-session-status");
+  const data = new FormData(form);
+  const file = data.get("session_file");
+  if (!(file instanceof File)) return;
+  try {
+    const sessionFileBase64 = await fileToBase64(file);
+    await api("/api/onboarding/userbots/session-file", {
+      method: "POST",
+      body: JSON.stringify({
+        display_name: data.get("display_name"),
+        session_name: data.get("session_name"),
+        session_file_name: file.name,
+        session_file_base64: sessionFileBase64,
+        api_id: Number.parseInt(data.get("api_id"), 10),
+        api_hash: data.get("api_hash"),
+        make_default: data.get("make_default") === "on",
+      }),
+    });
+    if (status) status.textContent = "Юзербот сохранен";
+    form.reset();
+    await loadOnboardingStatus();
+  } catch (error) {
+    if (status) status.textContent = error.message;
+  }
+}
+
+async function startInteractiveUserbotLogin(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const status = document.querySelector("#onboarding-interactive-status");
+  const completeForm = document.querySelector("#onboarding-interactive-complete-form");
+  const data = new FormData(form);
+  try {
+    const payload = await api("/api/onboarding/userbots/interactive/start", {
+      method: "POST",
+      body: JSON.stringify({
+        display_name: data.get("display_name"),
+        session_name: data.get("session_name"),
+        phone: data.get("phone"),
+        api_id: Number.parseInt(data.get("api_id"), 10),
+        api_hash: data.get("api_hash"),
+        make_default: data.get("make_default") === "on",
+      }),
+    });
+    completeForm?.classList.remove("is-hidden");
+    completeForm.querySelector('[name="login_id"]').value = payload.login_id;
+    completeForm.querySelector('[name="code"]')?.focus();
+    if (status) status.textContent = "Код отправлен в Telegram";
+  } catch (error) {
+    if (status) status.textContent = error.message;
+  }
+}
+
+async function completeInteractiveUserbotLogin(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const status = document.querySelector("#onboarding-interactive-status");
+  const data = new FormData(form);
+  try {
+    await api("/api/onboarding/userbots/interactive/complete", {
+      method: "POST",
+      body: JSON.stringify({
+        login_id: data.get("login_id"),
+        code: data.get("code"),
+        password: data.get("password") || null,
+      }),
+    });
+    if (status) status.textContent = "Интерактивный вход завершен";
+    form.reset();
+    form.classList.add("is-hidden");
+    await loadOnboardingStatus();
+  } catch (error) {
+    if (status) status.textContent = error.message;
+  }
+}
+
+function fileToBase64(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.addEventListener("load", () => {
+      const value = String(reader.result || "");
+      resolve(value.includes(",") ? value.split(",", 2)[1] : value);
+    });
+    reader.addEventListener("error", () => reject(reader.error));
+    reader.readAsDataURL(file);
+  });
 }
 
 function parseSettingValue(value, valueType) {

@@ -168,7 +168,13 @@ class LeadShadowClassifierAdapter(Protocol):
 
 
 class LeadNotifierAdapter(Protocol):
-    async def send_lead_notification(self, *, chat_id: str, text: str) -> Any:
+    async def send_lead_notification(
+        self,
+        *,
+        chat_id: str,
+        text: str,
+        message_thread_id: int | None = None,
+    ) -> Any:
         """Send an urgent lead notification to an operator channel/chat."""
 
 
@@ -764,13 +770,17 @@ def build_lead_handler_registry(
         chat_id = payload.get("chat_id")
         text = payload.get("text")
         cluster_id = payload.get("cluster_id")
+        message_thread_id = payload.get("message_thread_id")
         if not isinstance(chat_id, str) or not chat_id.strip():
             raise ValueError("send_notifications requires payload.chat_id")
         if not isinstance(text, str) or not text.strip():
             raise ValueError("send_notifications requires payload.text")
         if not isinstance(cluster_id, str) or not cluster_id.strip():
             raise ValueError("send_notifications requires payload.cluster_id")
-        provider_result = await notifier.send_lead_notification(chat_id=chat_id, text=text)
+        notification_kwargs: dict[str, Any] = {"chat_id": chat_id, "text": text}
+        if isinstance(message_thread_id, int):
+            notification_kwargs["message_thread_id"] = message_thread_id
+        provider_result = await notifier.send_lead_notification(**notification_kwargs)
         notification_event_id = payload.get("notification_event_id")
         if isinstance(notification_event_id, str) and notification_event_id.strip():
             notification_policy.mark_sent(notification_event_id, provider_result)
@@ -1060,6 +1070,7 @@ def _enqueue_lead_notification(
 ) -> None:
     chat_id = settings.get("telegram_lead_notification_chat_id")
     stripped_chat_id = chat_id.strip() if isinstance(chat_id, str) else None
+    message_thread_id = settings.get("telegram_lead_notification_thread_id")
     text = _lead_notification_text(
         decision=decision,
         confidence=confidence,
@@ -1105,6 +1116,7 @@ def _enqueue_lead_notification(
             "notification_event_id": notification_event_id,
             "chat_id": stripped_chat_id,
             "text": text,
+            "message_thread_id": message_thread_id if isinstance(message_thread_id, int) else None,
         },
     )
     notification_policy.mark_queued_job(notification_event_id, job.id)

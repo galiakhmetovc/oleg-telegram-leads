@@ -1,7 +1,9 @@
 """FastAPI application factory."""
 
+from collections.abc import Callable
 from pathlib import Path
 import secrets
+from typing import Any
 
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
@@ -17,6 +19,7 @@ from pur_leads.web.routes_catalog import router as catalog_router
 from pur_leads.web.routes_crm import router as crm_router
 from pur_leads.web.routes_health import router as health_router
 from pur_leads.web.routes_leads import router as leads_router
+from pur_leads.web.routes_onboarding import router as onboarding_router
 from pur_leads.web.routes_operations import router as operations_router
 from pur_leads.web.routes_pages import router as pages_router
 from pur_leads.web.routes_quality import router as quality_router
@@ -35,6 +38,11 @@ def create_app(
     web_cookie_secure: bool | None = None,
     backup_path: Path | str | None = None,
     bootstrap_admin_password_file: Path | str | None = None,
+    local_secret_storage_path: Path | str | None = None,
+    telegram_session_storage_path: Path | str | None = None,
+    telegram_bot_api_base_url: str = "https://api.telegram.org",
+    telegram_bot_api_transport: Any | None = None,
+    userbot_login_client_factory: Callable[[], Any] | None = None,
 ) -> FastAPI:
     settings = load_settings()
     resolved_database_path = (
@@ -49,7 +57,21 @@ def create_app(
     app.state.session_factory = session_factory
     app.state.database_path = resolved_database_path
     app.state.backup_path = Path(backup_path) if backup_path is not None else settings.backup_path
+    app.state.local_secret_storage_path = (
+        Path(local_secret_storage_path)
+        if local_secret_storage_path is not None
+        else settings.local_secret_storage_path
+    )
+    app.state.telegram_session_storage_path = (
+        Path(telegram_session_storage_path)
+        if telegram_session_storage_path is not None
+        else settings.telegram_session_storage_path
+    )
     app.state.telegram_bot_token = telegram_bot_token or settings.telegram_bot_token
+    app.state.telegram_bot_api_base_url = telegram_bot_api_base_url
+    app.state.telegram_bot_api_transport = telegram_bot_api_transport
+    app.state.userbot_login_client_factory = userbot_login_client_factory
+    app.state.userbot_login_attempts = {}
     app.state.web_session_duration_hours = (
         web_session_duration_hours or settings.web_session_duration_hours
     )
@@ -85,6 +107,7 @@ def create_app(
     app.include_router(health_router)
     app.include_router(auth_router)
     app.include_router(leads_router)
+    app.include_router(onboarding_router)
     app.include_router(crm_router)
     app.include_router(catalog_router)
     app.include_router(sources_router)

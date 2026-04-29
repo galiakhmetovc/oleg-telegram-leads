@@ -31,6 +31,7 @@ from pur_leads.integrations.telegram.types import (
 )
 from pur_leads.services.ai_concurrency import AiModelConcurrencyService
 from pur_leads.services.ai_registry import AiAgentRouteSelection, AiRegistryService
+from pur_leads.services.secrets import SecretRefService
 from pur_leads.services.settings import SettingsService
 from pur_leads.services.userbots import UserbotAccountService
 from pur_leads.workers.runtime import (
@@ -219,7 +220,7 @@ def _build_worker_handlers(session, *, worker_name: str = "cli-worker"):
                 settings,
                 worker_name=worker_name,
             ),
-            notifier=_build_lead_notifier(settings),
+            notifier=_build_lead_notifier(session, settings),
         )
     )
     handlers.update(
@@ -232,10 +233,15 @@ def _build_worker_handlers(session, *, worker_name: str = "cli-worker"):
     return handlers
 
 
-def _build_lead_notifier(settings):
-    if not settings.telegram_bot_token:
+def _build_lead_notifier(session, settings):
+    bot_token = _setting_secret_or_env(
+        session,
+        "telegram_bot_token_secret_ref",
+        settings.telegram_bot_token,
+    )
+    if not bot_token:
         return None
-    return TelegramBotLeadNotifier(settings.telegram_bot_token)
+    return TelegramBotLeadNotifier(bot_token)
 
 
 def _build_catalog_extractor(session, settings, *, worker_name: str):
@@ -447,8 +453,16 @@ def _select_ai_route(
 
 
 def _build_telegram_client(session):
+    settings_service = SettingsService(session)
+    configured_api_id = settings_service.get("telegram_api_id")
     api_id = _env_int("PUR_TELEGRAM_API_ID", "TELEGRAM_API_ID")
-    api_hash = _env_str("PUR_TELEGRAM_API_HASH", "TELEGRAM_API_HASH")
+    if api_id is None and configured_api_id is not None:
+        api_id = int(configured_api_id)
+    api_hash = _setting_secret_or_env(
+        session,
+        "telegram_api_hash_secret_ref",
+        _env_str("PUR_TELEGRAM_API_HASH", "TELEGRAM_API_HASH"),
+    )
     userbot = UserbotAccountService(session).select_default_userbot()
     if api_id is None or not api_hash or userbot is None:
         return _UnconfiguredTelegramClient()
@@ -469,6 +483,13 @@ def _history_wait_seconds(session) -> int:
         return configured
     value = SettingsService(session).get("telegram_get_history_wait_seconds")
     return int(value if value is not None else 1)
+
+
+def _setting_secret_or_env(session, setting_key: str, fallback: str | None) -> str | None:
+    try:
+        return SecretRefService(session).resolve_setting_secret(setting_key) or fallback
+    except (FileNotFoundError, KeyError, ValueError):
+        return fallback
 
 
 def _env_str(*names: str) -> str | None:

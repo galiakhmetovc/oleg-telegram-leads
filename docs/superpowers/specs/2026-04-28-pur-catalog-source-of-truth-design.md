@@ -54,6 +54,19 @@ The system must continuously read the PUR Telegram channel, parse messages and d
 - Retention is based on time and hot database size. Large/old data is archived and rotated, not simply deleted.
 - Local archive storage is the first phase. S3-compatible storage is represented in the schema and planned for a later phase.
 
+## Bootstrap Onboarding Flow
+
+After the built-in administrator changes the temporary password, the web UI routes incomplete installations to `/onboarding`.
+
+The onboarding flow is part of the product UI, not a deployment-only script:
+
+- The page shows embedded Russian setup guidance and a live checklist for password change, Telegram bot token, notification group, userbot, and first monitored source.
+- The ordinary Telegram bot token is pasted in the web UI, validated through Telegram Bot API `getMe`, and stored as a local file-backed `secret_refs` value. API responses and UI state never return the raw token.
+- Notification group setup is discovered through Bot API `getUpdates`: the admin adds the bot to a group/topic, sends a setup message, and selects the discovered chat in the web UI. Saving the group sends a test `sendMessage` and stores `telegram_lead_notification_chat_id` plus optional `telegram_lead_notification_thread_id`.
+- Userbot setup supports both paths: upload an existing Telethon `.session` file or run an interactive phone/code/2FA login from the web UI. The session file is stored on disk with owner-only permissions; Telegram API hash is stored as a `secret_refs` value.
+- Runtime web authentication and workers resolve Telegram bot/API credentials from settings-backed secret refs first, with environment fallback only for development or explicitly configured deployments.
+- The onboarding flow does not create monitoring sources implicitly. Source onboarding remains a separate audited web flow with access check and preview before activation.
+
 ## Source Layers
 
 ### Raw Sources
