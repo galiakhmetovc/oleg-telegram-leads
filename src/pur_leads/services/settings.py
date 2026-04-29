@@ -101,6 +101,7 @@ DEFAULT_SETTINGS: dict[str, SettingDefault] = {
     "catalog_llm_rate_limit_fallback_enabled": SettingDefault(True, "bool"),
     "catalog_quality_idle_validation_enabled": SettingDefault(True, "bool"),
     "catalog_quality_idle_batch_size": SettingDefault(5, "int"),
+    "catalog_quality_idle_max_active_jobs": SettingDefault(1, "int"),
     "catalog_quality_validator_model": SettingDefault("GLM-5.1", "string"),
     "catalog_quality_validator_profile": SettingDefault("catalog-validator-strong", "string"),
     "catalog_quality_validation_statuses": SettingDefault(["auto_pending"], "json"),

@@ -199,6 +199,7 @@ The first idle quality pass validates existing catalog candidates rather than re
 - prefer candidates produced by weaker or fast models, lower-confidence candidates, older candidates, offers, lead phrases, and facts with limited evidence;
 - skip candidates that already have a review from the same validator model/profile unless the operator requests a forced recheck;
 - enqueue bounded jobs with idempotency key `catalog-quality-review:{candidate_id}:{validator_model}:{validator_profile}`;
+- cap active idle validation jobs separately from total worker concurrency via `catalog_quality_idle_max_active_jobs`;
 - run through the normal AI registry route for `catalog_candidate_validator`, initially `GLM-5.1` with a structured-output profile;
 - store the validator decision separately from the catalog candidate so the strong model never silently rewrites the operational catalog.
 
@@ -221,7 +222,7 @@ Initial behavior is conservative:
 - the web UI shows the latest strong-model review next to the candidate;
 - future settings may allow auto-apply for high-confidence `confirm`/`reject`, but only after the operator explicitly enables it.
 
-Idle quality jobs are not preempted mid-request in the first implementation. Instead, they are kept small and new idle jobs are created only after the scheduler confirms that no higher-priority work is due or running. If new lead or ingest work appears, it wins the next scheduler acquisition.
+Idle quality jobs are not preempted mid-request in the first implementation. Instead, they are kept small and new idle jobs are created only after the scheduler confirms that no higher-priority work is due or running. Total worker concurrency may be high, for example `32`, but idle validation has its own active-job cap so a one-slot strong model such as `GLM-5.1` is not flooded by many low-priority requests. If new lead or ingest work appears, it wins the next scheduler acquisition.
 
 ### Observability
 

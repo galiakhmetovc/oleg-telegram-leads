@@ -393,6 +393,50 @@ async def test_worker_enqueues_idle_quality_validation_only_without_active_norma
 
 
 @pytest.mark.asyncio
+async def test_idle_quality_validation_respects_active_job_cap(runtime_session):
+    candidate = _create_catalog_candidate(runtime_session)
+    scheduler = SchedulerService(runtime_session)
+    active_job = scheduler.enqueue(
+        job_type="catalog_candidate_validation",
+        priority="low",
+        scope_type="parser",
+        scope_id=candidate.id,
+        idempotency_key=f"catalog-quality-review:{candidate.id}:GLM-5.1:catalog-validator-strong",
+        payload_json={
+            "candidate_id": candidate.id,
+            "validator_model": "GLM-5.1",
+            "validator_profile": "catalog-validator-strong",
+        },
+    )
+    acquired = scheduler.acquire_next("already-running", now=utc_now())
+    assert acquired is not None
+    assert acquired.id == active_job.id
+
+    runtime = WorkerRuntime(
+        runtime_session,
+        handlers=build_catalog_handler_registry(
+            runtime_session,
+            candidate_validator=FakeCandidateValidator(),
+        ),
+    )
+
+    result = await runtime.run_once()
+
+    quality_jobs = (
+        runtime_session.execute(
+            select(scheduler_jobs_table).where(
+                scheduler_jobs_table.c.job_type == "catalog_candidate_validation"
+            )
+        )
+        .mappings()
+        .all()
+    )
+    assert result.status == "idle"
+    assert len(quality_jobs) == 1
+    assert quality_jobs[0]["status"] == "running"
+
+
+@pytest.mark.asyncio
 async def test_catalog_handler_without_adapter_fails_visibly(runtime_session):
     job = SchedulerService(runtime_session).enqueue(job_type="parse_artifact", scope_type="parser")
     runtime = WorkerRuntime(

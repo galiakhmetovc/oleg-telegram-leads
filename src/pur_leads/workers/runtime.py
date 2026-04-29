@@ -1136,6 +1136,16 @@ def _enqueue_idle_quality_validation_if_available(
     batch_size = _positive_int(settings.get("catalog_quality_idle_batch_size"), default=5)
     validator_model = settings.get("catalog_quality_validator_model") or "GLM-5.1"
     validator_profile = settings.get("catalog_quality_validator_profile")
+    max_active = _positive_int(settings.get("catalog_quality_idle_max_active_jobs"), default=1)
+    active_count = _active_catalog_quality_validation_count(
+        session,
+        validator_model=str(validator_model),
+        validator_profile=str(validator_profile) if validator_profile else None,
+    )
+    available_slots = max(0, max_active - active_count)
+    if available_slots <= 0:
+        return
+    batch_size = min(batch_size, available_slots)
     statuses = _string_list_setting(
         settings.get("catalog_quality_validation_statuses"),
         default=["auto_pending"],
@@ -1152,6 +1162,36 @@ def _enqueue_idle_quality_validation_if_available(
         weak_models=weak_models,
         run_after_at=now,
     )
+
+
+def _active_catalog_quality_validation_count(
+    session: Session,
+    *,
+    validator_model: str,
+    validator_profile: str | None,
+) -> int:
+    rows = (
+        session.execute(
+            select(scheduler_jobs_table.c.payload_json).where(
+                scheduler_jobs_table.c.job_type == "catalog_candidate_validation",
+                scheduler_jobs_table.c.status.in_(["queued", "running"]),
+            )
+        )
+        .mappings()
+        .all()
+    )
+    count = 0
+    for row in rows:
+        payload = row["payload_json"] or {}
+        if not isinstance(payload, dict):
+            continue
+        if str(payload.get("validator_model") or "") != validator_model:
+            continue
+        profile = payload.get("validator_profile")
+        if (str(profile) if profile else None) != validator_profile:
+            continue
+        count += 1
+    return count
 
 
 def _has_active_poll_job(session: Session, source_id: str) -> bool:
