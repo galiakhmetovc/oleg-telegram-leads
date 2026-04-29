@@ -225,6 +225,7 @@ def admin_page(
                       <form id="ai-route-form" class="inline-form">
                         <select name="agent_key" required></select>
                         <select name="model_id" required></select>
+                        <select name="account_id" required></select>
                         <select name="route_role" required>
                           <option value="primary">Основной</option>
                           <option value="fallback">Резерв</option>

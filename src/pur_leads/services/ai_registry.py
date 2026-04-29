@@ -511,12 +511,18 @@ class AiRegistryService:
         resolved_account_id = account_id or self._default_account_id(str(model["ai_provider_id"]))
         if resolved_account_id is None:
             raise KeyError("provider account")
+        account = self._account_by_id(resolved_account_id)
+        if account is None:
+            raise KeyError("provider account")
+        if str(account["ai_provider_id"]) != str(model["ai_provider_id"]):
+            raise ValueError("provider account must belong to the model provider")
         resolved_thinking_mode = _normalize_thinking_mode(
             thinking_mode,
             thinking_enabled=thinking_enabled,
         )
         existing = self._route_by_agent_model_role(
             agent_id=str(agent["id"]),
+            account_id=resolved_account_id,
             model_id=model_id,
             route_role=normalized_role,
         )
@@ -850,6 +856,7 @@ class AiRegistryService:
             self.session.execute(
                 select(ai_agent_routes_table).where(
                     ai_agent_routes_table.c.ai_agent_id == agent_id,
+                    ai_agent_routes_table.c.ai_provider_account_id == account_id,
                     ai_agent_routes_table.c.ai_model_id == model_id,
                     ai_agent_routes_table.c.route_role == seed["route_role"],
                 )
@@ -971,6 +978,7 @@ class AiRegistryService:
         self,
         *,
         agent_id: str,
+        account_id: str,
         model_id: str,
         route_role: str,
     ) -> dict[str, Any] | None:
@@ -978,6 +986,7 @@ class AiRegistryService:
             self.session.execute(
                 select(ai_agent_routes_table).where(
                     ai_agent_routes_table.c.ai_agent_id == agent_id,
+                    ai_agent_routes_table.c.ai_provider_account_id == account_id,
                     ai_agent_routes_table.c.ai_model_id == model_id,
                     ai_agent_routes_table.c.route_role == route_role,
                 )

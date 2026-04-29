@@ -94,6 +94,52 @@ def test_ai_registry_selects_enabled_routes_by_agent_and_role(tmp_path):
         assert ocr[0].endpoint_family == "layout_parsing"
 
 
+def test_ai_registry_allows_same_model_route_role_on_different_accounts(tmp_path):
+    session_factory = _session_factory(tmp_path)
+    with session_factory() as session:
+        service = AiRegistryService(session)
+        service.bootstrap_defaults(actor="test")
+        first_account = service.configure_zai_account(
+            actor="test",
+            display_name="Z.AI primary",
+            base_url="https://api.z.ai/api/coding/paas/v4",
+            auth_secret_ref="secret_ref:first",
+        )
+        second_account = service.configure_zai_account(
+            actor="test",
+            display_name="Z.AI secondary",
+            base_url="https://api.z.ai/api/coding/paas/v4",
+            auth_secret_ref="secret_ref:second",
+        )
+        glm51 = (
+            session.execute(
+                select(ai_models_table).where(ai_models_table.c.normalized_model_name == "glm-5.1")
+            )
+            .mappings()
+            .one()
+        )
+
+        route = service.upsert_agent_route(
+            agent_key="catalog_extractor",
+            model_id=glm51["id"],
+            route_role="primary",
+            account_id=second_account["id"],
+            actor="test",
+            priority=15,
+            max_output_tokens=4096,
+        )
+        selected_routes = service.select_routes(
+            agent_key="catalog_extractor",
+            route_role="primary",
+        )
+
+        assert route["provider_account"] == "Z.AI secondary"
+        assert {route.provider_account_id for route in selected_routes} >= {
+            first_account["id"],
+            second_account["id"],
+        }
+
+
 def test_ai_registry_bootstrap_does_not_reenable_operator_disabled_routes(tmp_path):
     session_factory = _session_factory(tmp_path)
     with session_factory() as session:

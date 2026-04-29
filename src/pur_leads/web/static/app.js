@@ -2161,6 +2161,7 @@ function renderAiRouteForm(registry) {
   if (!form) return;
   const agentSelect = form.querySelector('[name="agent_key"]');
   const modelSelect = form.querySelector('[name="model_id"]');
+  const accountSelect = form.querySelector('[name="account_id"]');
   if (agentSelect) {
     agentSelect.innerHTML = (registry.agents || [])
       .map((agent) => `<option value="${escapeHtml(agent.agent_key)}">${escapeHtml(agent.agent_key)}</option>`)
@@ -2176,6 +2177,35 @@ function renderAiRouteForm(registry) {
       )
       .join("");
   }
+  if (modelSelect && accountSelect) {
+    populateAiRouteAccountSelect(registry);
+    modelSelect.onchange = () => populateAiRouteAccountSelect(registry);
+  }
+}
+
+function populateAiRouteAccountSelect(registry) {
+  const form = document.querySelector("#ai-route-form");
+  const modelSelect = form?.querySelector('[name="model_id"]');
+  const accountSelect = form?.querySelector('[name="account_id"]');
+  if (!modelSelect || !accountSelect) return;
+  const model = (registry.models || []).find((item) => item.id === modelSelect.value);
+  const accounts = (registry.accounts || []).filter(
+    (account) => account.enabled !== false && (!model || account.ai_provider_id === model.ai_provider_id)
+  );
+  if (!accounts.length) {
+    accountSelect.innerHTML = '<option value="">Нет активных аккаунтов провайдера</option>';
+    return;
+  }
+  const current = accountSelect.value;
+  accountSelect.innerHTML = accounts
+    .map(
+      (account) =>
+        `<option value="${escapeHtml(account.id)}">${escapeHtml(
+          account.display_name || account.base_url || account.id
+        )}</option>`
+    )
+    .join("");
+  accountSelect.value = accounts.some((account) => account.id === current) ? current : accounts[0].id;
 }
 
 function renderAiModels(models) {
@@ -2216,7 +2246,7 @@ function renderAiRoutes(routes) {
         (route) => `<div class="table-row">
         <div>
           <strong>${escapeHtml(route.agent_key)} / ${escapeHtml(label(route.route_role))}</strong>
-          <p class="muted">${escapeHtml(route.model)} / приоритет ${escapeHtml(route.priority)}</p>
+          <p class="muted">${escapeHtml(route.provider_account || "аккаунт")} / ${escapeHtml(route.model)} / приоритет ${escapeHtml(route.priority)}</p>
         </div>
         <div class="row-actions">
           ${badge(route.enabled ? "включен" : "отключен", route.enabled ? "" : "is-warn")}
@@ -2265,6 +2295,7 @@ async function saveAiRoute(event) {
       method: "POST",
       body: JSON.stringify({
         model_id: data.get("model_id"),
+        account_id: data.get("account_id"),
         route_role: data.get("route_role"),
         priority: Number.parseInt(data.get("priority"), 10),
         max_output_tokens: data.get("max_output_tokens")

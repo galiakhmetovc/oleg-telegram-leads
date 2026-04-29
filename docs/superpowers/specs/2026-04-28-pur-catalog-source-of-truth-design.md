@@ -218,6 +218,7 @@ The onboarding flow is part of the product UI, not a deployment-only script:
 - LLM provider setup is required before adding the first monitored source. The first provider is Z.AI: the admin enters resource name, base URL, and API key. The system stores the API key as a local `secret_refs` value and bootstraps known provider/model/limit metadata.
 - LLM model selection is not part of onboarding. Model capabilities and agent routes live in the AI registry/admin surface, where the operator can manage provider metadata, model capabilities, limits, and task routes.
 - AI routes bind a task to a concrete provider account and model. Runtime clients resolve the selected account's `auth_secret_ref` and `base_url`, so two Z.AI resources with different tokens are separate executable pools rather than aliases for one global key.
+- The same task/model/role may have separate routes for separate provider accounts. This is how the scheduler can later use multiple subscriptions or tokens for the same model without losing account-level limits and auditability.
 - Runtime web authentication and workers resolve Telegram bot/API credentials from settings-backed secret refs first, with environment fallback only for development or explicitly configured deployments.
 - The onboarding flow does not create monitoring sources implicitly. Source onboarding remains a separate audited web flow with access check and preview before activation.
 
