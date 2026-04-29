@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 
-from sqlalchemy import Select, func, or_, select
+from sqlalchemy import Select, func, not_, or_, select
+from sqlalchemy.sql.elements import ColumnElement
 from sqlalchemy.orm import Session
 
 from pur_leads.models.catalog import (
@@ -34,7 +35,8 @@ class LeadInboxFilters:
     auto_pending: bool | None = None
     operator_issues: bool | None = None
     min_confidence: float | None = None
-    limit: int = 20
+    limit: int = 50
+    offset: int = 0
 
 
 @dataclass(frozen=True)
@@ -64,6 +66,30 @@ class LeadClusterQueueRow:
 
 
 @dataclass(frozen=True)
+class LeadInboxPagination:
+    limit: int
+    offset: int
+    total: int
+    has_more: bool
+
+
+@dataclass(frozen=True)
+class LeadInboxSummary:
+    total: int
+    by_status: dict[str, int]
+    auto_pending: int
+    retro: int
+    maybe: int
+
+
+@dataclass(frozen=True)
+class LeadClusterQueuePage:
+    items: list[LeadClusterQueueRow]
+    pagination: LeadInboxPagination
+    summary: LeadInboxSummary
+
+
+@dataclass(frozen=True)
 class LeadClusterDetail:
     cluster: LeadClusterQueueRow
     timeline: list[dict[str, Any]]
@@ -81,28 +107,57 @@ class LeadInboxService:
         filters: LeadInboxFilters | None = None,
     ) -> list[LeadClusterQueueRow]:
         filters = filters or LeadInboxFilters()
-        query = self._cluster_query()
-        if filters.status is not None:
-            query = query.where(lead_clusters_table.c.cluster_status == filters.status)
-        if filters.source_id is not None:
-            query = query.where(lead_clusters_table.c.monitored_source_id == filters.source_id)
-        if filters.category_id is not None:
-            query = query.where(lead_clusters_table.c.category_id == filters.category_id)
-        if filters.min_confidence is not None:
-            query = query.where(lead_clusters_table.c.confidence_max >= filters.min_confidence)
-        query = query.limit(_limit(filters.limit))
+        query = (
+            self._filtered_cluster_query(filters)
+            .limit(_limit(filters.limit))
+            .offset(_offset(filters.offset))
+        )
 
         cluster_rows = self.session.execute(query).mappings().all()
-        rows = [self._queue_row(dict(row)) for row in cluster_rows]
-        if filters.retro is not None:
-            rows = [row for row in rows if row.is_retro is filters.retro]
-        if filters.maybe is not None:
-            rows = [row for row in rows if row.is_maybe is filters.maybe]
-        if filters.auto_pending is not None:
-            rows = [row for row in rows if row.has_auto_pending is filters.auto_pending]
-        if filters.operator_issues is not None:
-            rows = [row for row in rows if _has_operator_issue(row) is filters.operator_issues]
-        return rows
+        return self._queue_rows([dict(row) for row in cluster_rows])
+
+    def list_cluster_page(
+        self,
+        filters: LeadInboxFilters | None = None,
+    ) -> LeadClusterQueuePage:
+        filters = filters or LeadInboxFilters()
+        limit = _limit(filters.limit)
+        offset = _offset(filters.offset)
+        filters = replace(filters, limit=limit, offset=offset)
+        total = self.count_cluster_queue(filters)
+        items = self.list_cluster_queue(filters)
+        return LeadClusterQueuePage(
+            items=items,
+            pagination=LeadInboxPagination(
+                limit=limit,
+                offset=offset,
+                total=total,
+                has_more=offset + len(items) < total,
+            ),
+            summary=self.queue_summary(filters, total=total),
+        )
+
+    def count_cluster_queue(self, filters: LeadInboxFilters | None = None) -> int:
+        filters = filters or LeadInboxFilters()
+        query = self._filtered_cluster_query(filters).order_by(None).subquery()
+        return self.session.scalar(select(func.count()).select_from(query)) or 0
+
+    def queue_summary(
+        self,
+        filters: LeadInboxFilters | None = None,
+        *,
+        total: int | None = None,
+    ) -> LeadInboxSummary:
+        filters = filters or LeadInboxFilters()
+        return LeadInboxSummary(
+            total=total if total is not None else self.count_cluster_queue(filters),
+            by_status=self._status_counts(filters),
+            auto_pending=self.count_cluster_queue(
+                replace(filters, auto_pending=True, operator_issues=None)
+            ),
+            retro=self.count_cluster_queue(replace(filters, retro=True, operator_issues=None)),
+            maybe=self.count_cluster_queue(replace(filters, maybe=True, operator_issues=None)),
+        )
 
     def get_cluster_detail(self, cluster_id: str) -> LeadClusterDetail:
         cluster = (
@@ -115,7 +170,7 @@ class LeadInboxService:
         if cluster is None:
             raise KeyError(cluster_id)
 
-        row = self._queue_row(dict(cluster))
+        row = self._queue_rows([dict(cluster)])[0]
         events = self._event_rows(cluster_id)
         matches = self._match_rows(cluster_id)
         feedback = self._feedback_rows(cluster_id)
@@ -166,11 +221,72 @@ class LeadInboxService:
             .order_by(lead_clusters_table.c.last_message_at.desc())
         )
 
-    def _queue_row(self, cluster: dict[str, Any]) -> LeadClusterQueueRow:
+    def _filtered_cluster_query(
+        self,
+        filters: LeadInboxFilters,
+    ) -> Select[tuple[Any, ...]]:
+        query = self._cluster_query()
+        if filters.status is not None:
+            query = query.where(lead_clusters_table.c.cluster_status == filters.status)
+        if filters.source_id is not None:
+            query = query.where(lead_clusters_table.c.monitored_source_id == filters.source_id)
+        if filters.category_id is not None:
+            query = query.where(lead_clusters_table.c.category_id == filters.category_id)
+        if filters.min_confidence is not None:
+            query = query.where(lead_clusters_table.c.confidence_max >= filters.min_confidence)
+        query = _apply_bool_filter(query, filters.retro, _retro_exists_expr())
+        query = _apply_bool_filter(query, filters.maybe, _maybe_expr())
+        query = _apply_bool_filter(query, filters.auto_pending, _auto_pending_expr())
+        query = _apply_bool_filter(query, filters.operator_issues, _operator_issue_expr())
+        return query
+
+    def _status_counts(self, filters: LeadInboxFilters) -> dict[str, int]:
+        query = self._filtered_cluster_query(replace(filters, status=None)).order_by(None)
+        status_query = query.subquery()
+        rows = (
+            self.session.execute(
+                select(status_query.c.cluster_status, func.count().label("count")).group_by(
+                    status_query.c.cluster_status
+                )
+            )
+            .mappings()
+            .all()
+        )
+        return {row["cluster_status"]: row["count"] for row in rows}
+
+    def _queue_rows(self, clusters: list[dict[str, Any]]) -> list[LeadClusterQueueRow]:
+        cluster_ids = [cluster["cluster_id"] for cluster in clusters]
+        if not cluster_ids:
+            return []
+        event_summaries = self._event_summaries_by_cluster(cluster_ids)
+        match_rows = self._raw_match_rows_by_cluster(cluster_ids)
+        feedback_counts = self._feedback_counts_by_cluster(
+            cluster_ids,
+            event_summaries=event_summaries,
+            match_rows=match_rows,
+        )
+        auto_merge_cluster_ids = self._auto_merge_cluster_ids(cluster_ids)
+        return [
+            self._queue_row(
+                cluster,
+                event_summary=event_summaries[cluster["cluster_id"]],
+                match_rows=match_rows[cluster["cluster_id"]],
+                feedback_count=feedback_counts[cluster["cluster_id"]],
+                auto_merge_cluster_ids=auto_merge_cluster_ids,
+            )
+            for cluster in clusters
+        ]
+
+    def _queue_row(
+        self,
+        cluster: dict[str, Any],
+        *,
+        event_summary: dict[str, Any],
+        match_rows: list[dict[str, Any]],
+        feedback_count: int,
+        auto_merge_cluster_ids: set[str],
+    ) -> LeadClusterQueueRow:
         cluster_id = cluster["cluster_id"]
-        event_ids = self._event_ids(cluster_id)
-        match_rows = self._raw_match_rows(cluster_id)
-        feedback_count = len(self._feedback_rows(cluster_id))
         matched_terms = _unique_dicts(
             [
                 {
@@ -196,8 +312,8 @@ class LeadInboxService:
             ],
             key="id",
         )
-        is_retro = self._has_retro_event(cluster_id)
-        is_maybe = cluster["cluster_status"] == "maybe" or self._has_maybe_event(cluster_id)
+        is_retro = event_summary["is_retro"]
+        is_maybe = cluster["cluster_status"] == "maybe" or event_summary["is_maybe"]
         has_auto_pending = any(
             match["status_at_detection"] == "auto_pending"
             or match["item_status_at_detection"] == "auto_pending"
@@ -229,14 +345,136 @@ class LeadInboxService:
             is_retro=is_retro,
             is_maybe=is_maybe,
             has_auto_pending=has_auto_pending,
-            has_auto_merge_pending=self._has_auto_merge_action(cluster_id),
+            has_auto_merge_pending=cluster_id in auto_merge_cluster_ids,
             merge_strategy=cluster["merge_strategy"],
             merge_reason=cluster["merge_reason"],
-            event_count=len(event_ids),
+            event_count=len(event_summary["event_ids"]),
             feedback_count=feedback_count,
             crm_candidate_count=cluster["crm_candidate_count"],
             primary_task_id=cluster["primary_task_id"],
         )
+
+    def _event_summaries_by_cluster(self, cluster_ids: list[str]) -> dict[str, dict[str, Any]]:
+        summaries: dict[str, dict[str, Any]] = {
+            cluster_id: {"event_ids": [], "is_retro": False, "is_maybe": False}
+            for cluster_id in cluster_ids
+        }
+        rows = (
+            self.session.execute(
+                select(
+                    lead_events_table.c.id,
+                    lead_events_table.c.lead_cluster_id,
+                    lead_events_table.c.is_retro,
+                    lead_events_table.c.decision,
+                )
+                .where(lead_events_table.c.lead_cluster_id.in_(cluster_ids))
+                .order_by(lead_events_table.c.created_at)
+            )
+            .mappings()
+            .all()
+        )
+        for row in rows:
+            cluster_id = row["lead_cluster_id"]
+            if cluster_id is None or cluster_id not in summaries:
+                continue
+            summaries[cluster_id]["event_ids"].append(row["id"])
+            summaries[cluster_id]["is_retro"] = summaries[cluster_id]["is_retro"] or row["is_retro"]
+            summaries[cluster_id]["is_maybe"] = (
+                summaries[cluster_id]["is_maybe"] or row["decision"] == "maybe"
+            )
+        return summaries
+
+    def _raw_match_rows_by_cluster(self, cluster_ids: list[str]) -> dict[str, list[dict[str, Any]]]:
+        matches_by_cluster: dict[str, list[dict[str, Any]]] = {
+            cluster_id: [] for cluster_id in cluster_ids
+        }
+        rows = (
+            self.session.execute(
+                self._match_query()
+                .add_columns(lead_events_table.c.lead_cluster_id.label("cluster_id"))
+                .where(lead_events_table.c.lead_cluster_id.in_(cluster_ids))
+                .order_by(
+                    lead_events_table.c.lead_cluster_id,
+                    lead_matches_table.c.score.desc(),
+                    lead_matches_table.c.created_at,
+                )
+            )
+            .mappings()
+            .all()
+        )
+        for row in rows:
+            cluster_id = row["cluster_id"]
+            if cluster_id is None or cluster_id not in matches_by_cluster:
+                continue
+            matches_by_cluster[cluster_id].append(_match_payload(dict(row)))
+        return matches_by_cluster
+
+    def _feedback_counts_by_cluster(
+        self,
+        cluster_ids: list[str],
+        *,
+        event_summaries: dict[str, dict[str, Any]],
+        match_rows: dict[str, list[dict[str, Any]]],
+    ) -> dict[str, int]:
+        counts = {cluster_id: 0 for cluster_id in cluster_ids}
+        event_to_cluster = {
+            event_id: cluster_id
+            for cluster_id, summary in event_summaries.items()
+            for event_id in summary["event_ids"]
+        }
+        match_to_cluster = {
+            match["match_id"]: cluster_id
+            for cluster_id, matches in match_rows.items()
+            for match in matches
+            if match["match_id"] is not None
+        }
+        target_conditions: list[ColumnElement[bool]] = [
+            (feedback_events_table.c.target_type == "lead_cluster")
+            & feedback_events_table.c.target_id.in_(cluster_ids)
+        ]
+        if event_to_cluster:
+            target_conditions.append(
+                (feedback_events_table.c.target_type == "lead_event")
+                & feedback_events_table.c.target_id.in_(list(event_to_cluster))
+            )
+        if match_to_cluster:
+            target_conditions.append(
+                (feedback_events_table.c.target_type == "lead_match")
+                & feedback_events_table.c.target_id.in_(list(match_to_cluster))
+            )
+        rows = (
+            self.session.execute(
+                select(
+                    feedback_events_table.c.target_type, feedback_events_table.c.target_id
+                ).where(or_(*target_conditions))
+            )
+            .mappings()
+            .all()
+        )
+        for row in rows:
+            target_type = row["target_type"]
+            target_id = row["target_id"]
+            cluster_id: str | None = None
+            if target_type == "lead_cluster":
+                cluster_id = target_id
+            elif target_type == "lead_event":
+                cluster_id = event_to_cluster.get(target_id)
+            elif target_type == "lead_match":
+                cluster_id = match_to_cluster.get(target_id)
+            if cluster_id is not None and cluster_id in counts:
+                counts[cluster_id] += 1
+        return counts
+
+    def _auto_merge_cluster_ids(self, cluster_ids: list[str]) -> set[str]:
+        rows = self.session.execute(
+            select(lead_cluster_actions_table.c.to_cluster_id)
+            .where(
+                lead_cluster_actions_table.c.action_type == "auto_merge",
+                lead_cluster_actions_table.c.to_cluster_id.in_(cluster_ids),
+            )
+            .distinct()
+        ).all()
+        return {row.to_cluster_id for row in rows if row.to_cluster_id is not None}
 
     def _event_ids(self, cluster_id: str) -> list[str]:
         rows = self.session.execute(
@@ -281,39 +519,7 @@ class LeadInboxService:
     def _raw_match_rows(self, cluster_id: str) -> list[dict[str, Any]]:
         rows = (
             self.session.execute(
-                select(
-                    lead_matches_table.c.lead_event_id.label("event_id"),
-                    lead_matches_table.c.match_type,
-                    lead_matches_table.c.matched_text,
-                    lead_matches_table.c.score,
-                    lead_matches_table.c.catalog_item_id,
-                    catalog_items_table.c.name.label("catalog_item_name"),
-                    lead_matches_table.c.item_status_at_detection,
-                    lead_matches_table.c.catalog_term_id,
-                    catalog_terms_table.c.term.label("catalog_term_text"),
-                    lead_matches_table.c.term_status_at_detection,
-                    lead_matches_table.c.offer_status_at_detection,
-                    lead_matches_table.c.category_id,
-                    catalog_categories_table.c.name.label("category_name"),
-                )
-                .select_from(
-                    lead_matches_table.join(
-                        lead_events_table,
-                        lead_matches_table.c.lead_event_id == lead_events_table.c.id,
-                    )
-                    .outerjoin(
-                        catalog_items_table,
-                        lead_matches_table.c.catalog_item_id == catalog_items_table.c.id,
-                    )
-                    .outerjoin(
-                        catalog_terms_table,
-                        lead_matches_table.c.catalog_term_id == catalog_terms_table.c.id,
-                    )
-                    .outerjoin(
-                        catalog_categories_table,
-                        lead_matches_table.c.category_id == catalog_categories_table.c.id,
-                    )
-                )
+                self._match_query()
                 .where(lead_events_table.c.lead_cluster_id == cluster_id)
                 .order_by(lead_matches_table.c.score.desc(), lead_matches_table.c.created_at)
             )
@@ -321,6 +527,41 @@ class LeadInboxService:
             .all()
         )
         return [_match_payload(dict(row)) for row in rows]
+
+    def _match_query(self) -> Select[tuple[Any, ...]]:
+        return select(
+            lead_matches_table.c.id.label("match_id"),
+            lead_matches_table.c.lead_event_id.label("event_id"),
+            lead_matches_table.c.match_type,
+            lead_matches_table.c.matched_text,
+            lead_matches_table.c.score,
+            lead_matches_table.c.catalog_item_id,
+            catalog_items_table.c.name.label("catalog_item_name"),
+            lead_matches_table.c.item_status_at_detection,
+            lead_matches_table.c.catalog_term_id,
+            catalog_terms_table.c.term.label("catalog_term_text"),
+            lead_matches_table.c.term_status_at_detection,
+            lead_matches_table.c.offer_status_at_detection,
+            lead_matches_table.c.category_id,
+            catalog_categories_table.c.name.label("category_name"),
+        ).select_from(
+            lead_matches_table.join(
+                lead_events_table,
+                lead_matches_table.c.lead_event_id == lead_events_table.c.id,
+            )
+            .outerjoin(
+                catalog_items_table,
+                lead_matches_table.c.catalog_item_id == catalog_items_table.c.id,
+            )
+            .outerjoin(
+                catalog_terms_table,
+                lead_matches_table.c.catalog_term_id == catalog_terms_table.c.id,
+            )
+            .outerjoin(
+                catalog_categories_table,
+                lead_matches_table.c.category_id == catalog_categories_table.c.id,
+            )
+        )
 
     def _feedback_rows(self, cluster_id: str) -> list[dict[str, Any]]:
         event_ids = self._event_ids(cluster_id)
@@ -455,6 +696,7 @@ def _match_payload(row: dict[str, Any]) -> dict[str, Any]:
         or row["offer_status_at_detection"]
     )
     return {
+        "match_id": row["match_id"],
         "event_id": row["event_id"],
         "match_type": row["match_type"],
         "matched_text": row["matched_text"],
@@ -492,7 +734,11 @@ def _message_text(row: dict[str, Any]) -> str | None:
 
 
 def _limit(value: int) -> int:
-    return min(max(value, 1), 20)
+    return min(max(value, 1), 100)
+
+
+def _offset(value: int) -> int:
+    return max(value, 0)
 
 
 def _unique_dicts(values: list[dict[str, Any]], *, key: str) -> list[dict[str, Any]]:
@@ -509,3 +755,74 @@ def _unique_dicts(values: list[dict[str, Any]], *, key: str) -> list[dict[str, A
 
 def _has_operator_issue(row: LeadClusterQueueRow) -> bool:
     return row.has_auto_pending or row.has_auto_merge_pending or row.is_maybe
+
+
+def _apply_bool_filter(
+    query: Select[tuple[Any, ...]],
+    expected: bool | None,
+    expression: ColumnElement[bool],
+) -> Select[tuple[Any, ...]]:
+    if expected is None:
+        return query
+    if expected:
+        return query.where(expression)
+    return query.where(not_(expression))
+
+
+def _retro_exists_expr() -> ColumnElement[bool]:
+    return (
+        select(lead_events_table.c.id)
+        .where(
+            lead_events_table.c.lead_cluster_id == lead_clusters_table.c.id,
+            lead_events_table.c.is_retro.is_(True),
+        )
+        .exists()
+    )
+
+
+def _maybe_expr() -> ColumnElement[bool]:
+    return or_(
+        lead_clusters_table.c.cluster_status == "maybe",
+        select(lead_events_table.c.id)
+        .where(
+            lead_events_table.c.lead_cluster_id == lead_clusters_table.c.id,
+            lead_events_table.c.decision == "maybe",
+        )
+        .exists(),
+    )
+
+
+def _auto_pending_expr() -> ColumnElement[bool]:
+    return (
+        select(lead_matches_table.c.id)
+        .select_from(
+            lead_matches_table.join(
+                lead_events_table,
+                lead_matches_table.c.lead_event_id == lead_events_table.c.id,
+            )
+        )
+        .where(
+            lead_events_table.c.lead_cluster_id == lead_clusters_table.c.id,
+            or_(
+                lead_matches_table.c.term_status_at_detection == "auto_pending",
+                lead_matches_table.c.item_status_at_detection == "auto_pending",
+                lead_matches_table.c.offer_status_at_detection == "auto_pending",
+            ),
+        )
+        .exists()
+    )
+
+
+def _auto_merge_expr() -> ColumnElement[bool]:
+    return (
+        select(lead_cluster_actions_table.c.id)
+        .where(
+            lead_cluster_actions_table.c.to_cluster_id == lead_clusters_table.c.id,
+            lead_cluster_actions_table.c.action_type == "auto_merge",
+        )
+        .exists()
+    )
+
+
+def _operator_issue_expr() -> ColumnElement[bool]:
+    return or_(_auto_pending_expr(), _auto_merge_expr(), _maybe_expr())

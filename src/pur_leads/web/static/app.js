@@ -81,15 +81,27 @@ function bindLogout() {
 }
 
 function initInbox() {
-  const state = { items: [], selectedId: null };
+  const state = { items: [], selectedId: null, limit: 50, offset: 0, pagination: null, loading: false };
   const form = document.querySelector("#lead-filters");
-  form?.addEventListener("change", () => loadLeads(state));
-  form?.addEventListener("input", () => loadLeads(state));
+  const reset = () => loadLeads(state, { reset: true });
+  form?.addEventListener("change", reset);
+  form?.addEventListener("input", reset);
+  document.querySelector("#lead-load-more")?.addEventListener("click", () => {
+    if (!state.pagination?.has_more || state.loading) return;
+    state.offset = state.items.length;
+    loadLeads(state, { append: true });
+  });
   loadLeads(state);
 }
 
-async function loadLeads(state) {
-  const params = new URLSearchParams({ limit: "20" });
+async function loadLeads(state, options = {}) {
+  if (options.reset) state.offset = 0;
+  state.loading = true;
+  renderPagination(state);
+  const params = new URLSearchParams({
+    limit: String(state.limit),
+    offset: String(state.offset),
+  });
   const form = document.querySelector("#lead-filters");
   if (form) {
     const data = new FormData(form);
@@ -98,12 +110,25 @@ async function loadLeads(state) {
       else if (value) params.set(key, value);
     }
   }
-  const payload = await api(`/api/leads?${params.toString()}`);
-  state.items = payload.items || [];
+  let payload;
+  try {
+    payload = await api(`/api/leads?${params.toString()}`);
+  } finally {
+    state.loading = false;
+  }
+  const incoming = payload.items || [];
+  state.items = options.append ? [...state.items, ...incoming] : incoming;
+  state.pagination = payload.pagination || {
+    limit: state.limit,
+    offset: state.offset,
+    total: state.items.length,
+    has_more: false,
+  };
   const selectedStillVisible = state.items.some((item) => item.cluster_id === state.selectedId);
   state.selectedId = selectedStillVisible ? state.selectedId : state.items[0]?.cluster_id || null;
-  renderSignals(state.items);
+  renderSignals(state.items, payload.summary);
   renderQueue(state);
+  renderPagination(state);
   if (state.selectedId) {
     await loadDetail(state.selectedId);
   } else {
@@ -112,10 +137,10 @@ async function loadLeads(state) {
   }
 }
 
-function renderSignals(items) {
-  const autoPending = items.filter((item) => item.has_auto_pending).length;
-  const retro = items.filter((item) => item.is_retro).length;
-  const maybe = items.filter((item) => item.is_maybe).length;
+function renderSignals(items, summary = {}) {
+  const autoPending = summary.auto_pending ?? items.filter((item) => item.has_auto_pending).length;
+  const retro = summary.retro ?? items.filter((item) => item.is_retro).length;
+  const maybe = summary.maybe ?? items.filter((item) => item.is_maybe).length;
   document.querySelector("#signal-auto").textContent = autoPending;
   document.querySelector("#signal-retro").textContent = retro;
   document.querySelector("#signal-maybe").textContent = maybe;
@@ -151,6 +176,19 @@ function renderQueue(state) {
       await loadDetail(state.selectedId);
     });
   });
+}
+
+function renderPagination(state) {
+  const pagination = state.pagination || { total: 0, has_more: false };
+  const meta = document.querySelector("#lead-pagination");
+  const button = document.querySelector("#lead-load-more");
+  if (meta) {
+    meta.textContent = `${Math.min(state.items.length, pagination.total)} / ${pagination.total}`;
+  }
+  if (button) {
+    button.hidden = !pagination.has_more;
+    button.disabled = state.loading;
+  }
 }
 
 async function loadDetail(clusterId) {

@@ -74,7 +74,8 @@ def list_leads(
     auto_pending: bool | None = None,
     operator_issues: bool | None = None,
     min_confidence: float | None = None,
-    limit: int = 20,
+    limit: int = 50,
+    offset: int = 0,
     _validated: SessionValidationResult = Depends(current_admin),
     session: Session = Depends(get_session),
 ) -> dict[str, Any]:
@@ -88,9 +89,10 @@ def list_leads(
         operator_issues=operator_issues,
         min_confidence=min_confidence,
         limit=limit,
+        offset=offset,
     )
-    rows = LeadInboxService(session).list_cluster_queue(filters)
-    return {"items": jsonable_encoder(rows)}
+    page = LeadInboxService(session).list_cluster_page(filters)
+    return jsonable_encoder(page)
 
 
 @router.get("/leads/{cluster_id}")

@@ -1,7 +1,7 @@
 from datetime import datetime
 
 import pytest
-from sqlalchemy import insert, select
+from sqlalchemy import event, insert, select
 
 from pur_leads.core.ids import new_id
 from pur_leads.core.time import utc_now
@@ -238,10 +238,112 @@ def test_list_cluster_queue_limits_latest_rows_before_expensive_row_mapping(inbo
     assert first_cluster_id not in {row.cluster_id for row in rows}
 
 
+def test_list_cluster_queue_applies_expensive_filters_before_limit(inbox_session):
+    session = inbox_session["session"]
+    auto_pending_cluster_id = _record_cluster(
+        session,
+        source_id=inbox_session["source_id"],
+        classifier_version_id=inbox_session["classifier_version_id"],
+        snapshot_entry_id=inbox_session["camera_snapshot_id"],
+        category_id=inbox_session["camera_category_id"],
+        item_id=inbox_session["camera_item_id"],
+        term_id=inbox_session["camera_term_id"],
+        telegram_message_id=216,
+        sender_id="sender-auto",
+        text="нужна камера",
+        message_date=datetime(2026, 4, 28, 10, 0, 0),
+        confidence=0.91,
+    )
+    _record_cluster(
+        session,
+        source_id=inbox_session["source_id"],
+        classifier_version_id=inbox_session["classifier_version_id"],
+        snapshot_entry_id=inbox_session["alarm_snapshot_id"],
+        category_id=inbox_session["alarm_category_id"],
+        item_id=inbox_session["alarm_item_id"],
+        term_id=inbox_session["alarm_term_id"],
+        telegram_message_id=217,
+        sender_id="sender-approved",
+        text="нужна сигнализация",
+        message_date=datetime(2026, 4, 28, 11, 0, 0),
+        confidence=0.91,
+    )
+    session.commit()
+
+    rows = LeadInboxService(session).list_cluster_queue(
+        LeadInboxFilters(auto_pending=True, limit=1)
+    )
+
+    assert [row.cluster_id for row in rows] == [auto_pending_cluster_id]
+
+
+def test_list_cluster_queue_supports_offset_pagination(inbox_session):
+    session = inbox_session["session"]
+    cluster_ids = [
+        _record_cluster(
+            session,
+            source_id=inbox_session["source_id"],
+            classifier_version_id=inbox_session["classifier_version_id"],
+            snapshot_entry_id=inbox_session["camera_snapshot_id"],
+            category_id=inbox_session["camera_category_id"],
+            item_id=inbox_session["camera_item_id"],
+            term_id=inbox_session["camera_term_id"],
+            telegram_message_id=220 + index,
+            sender_id=f"sender-{index}",
+            text=f"нужна камера {index}",
+            message_date=datetime(2026, 4, 28, 10 + index, 0, 0),
+            confidence=0.91,
+        )
+        for index in range(4)
+    ]
+    session.commit()
+
+    rows = LeadInboxService(session).list_cluster_queue(LeadInboxFilters(limit=2, offset=1))
+
+    assert [row.cluster_id for row in rows] == [cluster_ids[2], cluster_ids[1]]
+
+
+def test_list_cluster_queue_batches_page_enrichment_queries(inbox_session):
+    session = inbox_session["session"]
+    for index in range(5):
+        cluster_id = _record_cluster(
+            session,
+            source_id=inbox_session["source_id"],
+            classifier_version_id=inbox_session["classifier_version_id"],
+            snapshot_entry_id=inbox_session["camera_snapshot_id"],
+            category_id=inbox_session["camera_category_id"],
+            item_id=inbox_session["camera_item_id"],
+            term_id=inbox_session["camera_term_id"],
+            telegram_message_id=240 + index,
+            sender_id=f"sender-{index}",
+            text=f"нужна камера {index}",
+            message_date=datetime(2026, 4, 28, 10 + index, 0, 0),
+            confidence=0.91,
+        )
+        _insert_feedback(session, target_type="lead_cluster", target_id=cluster_id)
+    session.commit()
+
+    statements: list[str] = []
+    engine = session.get_bind()
+
+    def capture_selects(_conn, _cursor, statement, _parameters, _context, _executemany):
+        if statement.lstrip().upper().startswith("SELECT"):
+            statements.append(statement)
+
+    event.listen(engine, "before_cursor_execute", capture_selects)
+    try:
+        rows = LeadInboxService(session).list_cluster_queue(LeadInboxFilters(limit=4))
+    finally:
+        event.remove(engine, "before_cursor_execute", capture_selects)
+
+    assert len(rows) == 4
+    assert len(statements) <= 8
+
+
 def test_lead_inbox_limit_caps_large_client_requests():
     assert _limit(0) == 1
-    assert _limit(20) == 20
-    assert _limit(100) == 20
+    assert _limit(100) == 100
+    assert _limit(1000) == 100
 
 
 def test_get_cluster_detail_returns_timeline_events_matches_and_feedback(inbox_session):

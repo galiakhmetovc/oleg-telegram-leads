@@ -31,6 +31,7 @@ def test_leads_api_requires_auth_and_returns_queue_detail_with_filters(tmp_path)
 
     response = client.get("/api/leads", params={"auto_pending": "true", "operator_issues": "true"})
     limited_response = client.get("/api/leads", params={"limit": "1"})
+    offset_response = client.get("/api/leads", params={"limit": "1", "offset": "1"})
     detail_response = client.get(f"/api/leads/{fixture['cluster_id']}")
 
     assert response.status_code == 200
@@ -39,8 +40,24 @@ def test_leads_api_requires_auth_and_returns_queue_detail_with_filters(tmp_path)
     assert rows[0]["primary_message"]["text"] == "нужна камера на дачу"
     assert rows[0]["has_auto_pending"] is True
     assert rows[0]["category"]["name"] == "Video"
+    assert response.json()["pagination"]["total"] == 1
+    assert response.json()["summary"]["total"] == 1
     assert limited_response.status_code == 200
     assert len(limited_response.json()["items"]) == 1
+    assert limited_response.json()["pagination"] == {
+        "limit": 1,
+        "offset": 0,
+        "total": 2,
+        "has_more": True,
+    }
+    assert offset_response.status_code == 200
+    assert [row["cluster_id"] for row in offset_response.json()["items"]] == [fixture["cluster_id"]]
+    assert offset_response.json()["pagination"] == {
+        "limit": 1,
+        "offset": 1,
+        "total": 2,
+        "has_more": False,
+    }
     assert detail_response.status_code == 200
     detail = detail_response.json()
     assert detail["cluster"]["cluster_id"] == fixture["cluster_id"]

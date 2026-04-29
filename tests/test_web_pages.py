@@ -32,6 +32,7 @@ def test_login_page_and_static_assets_are_served(tmp_path):
     assert "primary_sender_name" in js_response.text
     assert "work_outcome" in js_response.text
     assert "primary_task_id" in js_response.text
+    assert "pagination.has_more" in js_response.text
 
 
 def test_workspace_and_admin_pages_are_protected_and_render_shells(tmp_path):
@@ -81,6 +82,7 @@ def test_workspace_and_admin_pages_are_protected_and_render_shells(tmp_path):
     assert '<a href="/quality">Quality</a>' in workspace_response.text
     assert '<a href="/operations">Operations</a>' in workspace_response.text
     assert 'id="lead-queue"' in workspace_response.text
+    assert 'id="lead-load-more"' in workspace_response.text
     assert 'id="lead-detail"' in workspace_response.text
     assert 'data-field="auto_pending"' in workspace_response.text
     assert 'data-field="retro"' in workspace_response.text
@@ -156,7 +158,8 @@ def test_workspace_and_admin_pages_are_protected_and_render_shells(tmp_path):
     assert "/api/operations/extraction-runs" in js_response.text
     assert "/api/operations/backups" in js_response.text
     assert "/api/today" in js_response.text
-    assert 'limit: "20"' in js_response.text
+    assert "limit: String(state.limit)" in js_response.text
+    assert "offset: String(state.offset)" in js_response.text
     assert "loadCatalogCandidateDetail" in js_response.text
     assert "initOperations" in js_response.text
     assert "initQuality" in js_response.text

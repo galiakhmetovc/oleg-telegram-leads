@@ -90,6 +90,10 @@ def inbox_page(
                       placeholder="Min confidence" aria-label="Minimum confidence">
                   </form>
                   <div id="lead-queue" class="queue-list" aria-live="polite"></div>
+                  <div class="queue-pagination">
+                    <span id="lead-pagination" class="muted">0 / 0</span>
+                    <button id="lead-load-more" type="button" hidden>Load more</button>
+                  </div>
                 </aside>
                 <section id="lead-detail" class="detail-pane" aria-live="polite">
                   <div class="empty-state">Select a lead</div>

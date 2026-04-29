@@ -248,6 +248,14 @@ h3 {
   gap: 8px;
 }
 
+.queue-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding-top: 10px;
+}
+
 .queue-item,
 .table-row,
 .detail-section {
