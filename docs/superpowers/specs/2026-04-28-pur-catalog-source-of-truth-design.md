@@ -1327,6 +1327,39 @@ LLM retry and timeout policy:
 - Before at least `llm_adaptive_timeout_min_samples` measurements exist for the concrete task/model/profile window, runtime must keep using static timeout settings unless `llm_adaptive_timeout_manual_overrides` contains a matching operator value.
 - The target formula is `timeout = min(max(p95_latency * buffer_ratio, task_min_timeout), task_max_timeout, hard_cap)`.
 
+Telegram resource circuit breaker and adaptive limit policy:
+
+- The same protection model applies to Telegram user accounts and ordinary Telegram bots, but with Telegram-specific scopes and errors.
+- Userbot breaker scope defaults to `userbot_account_operation`, so a problematic account/read operation can pause without disabling every Telegram source.
+- Bot breaker scope defaults to `bot_token_chat_operation`, so a problematic notification group can pause without disabling all notifications.
+- Telegram userbot retryable/degradation signals include `FloodWait`, slow mode, temporary network errors, Telegram server errors, auth/session revocation, banned/deactivated account, access denied, and repeated database/session lock failures.
+- Telegram bot retryable/degradation signals include Bot API `429 retry_after`, `5xx`, network errors, `403 forbidden` for a chat, missing admin rights, and repeated send timeouts.
+- Breakers must distinguish temporary overload from configuration/auth problems in UI labels. Permanent auth/configuration failures should require operator action, not blind retry.
+- Planned userbot settings:
+  - `telegram_userbot_circuit_breaker_enabled`, default `false`;
+  - `telegram_userbot_circuit_breaker_failure_threshold`, default `3`;
+  - `telegram_userbot_circuit_breaker_recovery_timeout_seconds`, default `300`;
+  - `telegram_userbot_circuit_breaker_scope`, default `userbot_account_operation`;
+  - `telegram_userbot_adaptive_limit_enabled`, default `false`;
+  - `telegram_userbot_adaptive_limit_activation_mode`, default `metrics_or_manual`;
+  - `telegram_userbot_adaptive_limit_min_samples`, default `100`;
+  - `telegram_userbot_adaptive_limit_manual_overrides`, default `{}`;
+  - `telegram_userbot_adaptive_limit_window_hours`, default `24`;
+  - `telegram_userbot_adaptive_limit_target_success_ratio`, default `0.98`.
+- Planned bot settings:
+  - `telegram_bot_circuit_breaker_enabled`, default `false`;
+  - `telegram_bot_circuit_breaker_failure_threshold`, default `5`;
+  - `telegram_bot_circuit_breaker_recovery_timeout_seconds`, default `120`;
+  - `telegram_bot_circuit_breaker_scope`, default `bot_token_chat_operation`;
+  - `telegram_bot_adaptive_limit_enabled`, default `false`;
+  - `telegram_bot_adaptive_limit_activation_mode`, default `metrics_or_manual`;
+  - `telegram_bot_adaptive_limit_min_samples`, default `100`;
+  - `telegram_bot_adaptive_limit_manual_overrides`, default `{}`;
+  - `telegram_bot_adaptive_limit_window_hours`, default `24`;
+  - `telegram_bot_adaptive_limit_target_success_ratio`, default `0.99`.
+- Before at least the configured minimum sample count exists for the concrete account/bot scope, runtime must keep using static Telegram settings unless manual overrides are configured.
+- Manual overrides should support at least per-account/per-bot pause, max concurrent jobs, min interval, and explicit recovery time.
+
 ### `ai_runs`
 
 Stores one logical AI agent run.

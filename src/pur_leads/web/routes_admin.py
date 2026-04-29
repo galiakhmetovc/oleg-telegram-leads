@@ -680,6 +680,106 @@ def _setting_help(key: str) -> dict[str, str]:
             "Сколько задач чтения истории можно вести одним юзерботом.",
             "Увеличение ускоряет backfill, но повышает риск flood-wait.",
         ),
+        "telegram_userbot_circuit_breaker_enabled": (
+            "Telegram",
+            "Заготовка circuit breaker для юзерботов Telegram.",
+            "Когда будет включено, серия flood-wait, auth, banned или сетевых ошибок временно остановит конкретный юзербот/операцию и переключит работу на другие аккаунты.",
+        ),
+        "telegram_userbot_circuit_breaker_failure_threshold": (
+            "Telegram",
+            "Сколько подряд ошибок чтения открывает breaker юзербота.",
+            "Низкое значение быстрее защищает аккаунт от блокировок, высокое меньше реагирует на единичные сбои.",
+        ),
+        "telegram_userbot_circuit_breaker_recovery_timeout_seconds": (
+            "Telegram",
+            "Сколько секунд ждать перед пробной операцией после открытия breaker юзербота.",
+            "Задает паузу восстановления после flood-wait, временных блокировок или сетевой деградации.",
+        ),
+        "telegram_userbot_circuit_breaker_scope": (
+            "Telegram",
+            "Ключ агрегации breaker для юзербота: обычно userbot_account_operation.",
+            "Позволяет остановить чтение одним аккаунтом, не отключая все Telegram-операции системы.",
+        ),
+        "telegram_userbot_adaptive_limit_enabled": (
+            "Telegram",
+            "Заготовка адаптивных лимитов чтения для юзерботов.",
+            "Когда будет включено, система сможет снижать или повышать параллельность/паузы по истории успешности и flood-wait.",
+        ),
+        "telegram_userbot_adaptive_limit_activation_mode": (
+            "Telegram",
+            "Когда применять адаптивные лимиты юзербота: metrics_only, manual_only или metrics_or_manual.",
+            "До накопления метрик можно использовать ручные override для конкретного аккаунта или операции.",
+        ),
+        "telegram_userbot_adaptive_limit_min_samples": (
+            "Telegram",
+            "Минимум измерений операций юзербота для автоматического расчета лимитов.",
+            "До накопления этого количества используются статические настройки или ручной override.",
+        ),
+        "telegram_userbot_adaptive_limit_manual_overrides": (
+            "Telegram",
+            "JSON-карта ручных лимитов юзерботов по account/operation.",
+            "Позволяет оператору задать безопасные паузы или параллельность до накопления статистики.",
+        ),
+        "telegram_userbot_adaptive_limit_window_hours": (
+            "Telegram",
+            "Окно истории для расчета адаптивных лимитов юзербота.",
+            "Определяет, за какой период учитывать flood-wait, ошибки и успешные чтения.",
+        ),
+        "telegram_userbot_adaptive_limit_target_success_ratio": (
+            "Telegram",
+            "Целевая доля успешных операций юзербота.",
+            "Если фактическая успешность ниже цели, будущая логика сможет снижать нагрузку.",
+        ),
+        "telegram_bot_circuit_breaker_enabled": (
+            "Telegram",
+            "Заготовка circuit breaker для обычных Telegram-ботов.",
+            "Когда будет включено, серия rate-limit, forbidden или сетевых ошибок временно остановит отправку через конкретного бота/чат.",
+        ),
+        "telegram_bot_circuit_breaker_failure_threshold": (
+            "Telegram",
+            "Сколько подряд ошибок отправки открывает breaker Telegram-бота.",
+            "Защищает уведомления от каскадных повторов при rate-limit или проблемах прав в группе.",
+        ),
+        "telegram_bot_circuit_breaker_recovery_timeout_seconds": (
+            "Telegram",
+            "Сколько секунд ждать перед пробной отправкой после открытия breaker бота.",
+            "Помогает не добивать Bot API повторными уведомлениями во время rate-limit.",
+        ),
+        "telegram_bot_circuit_breaker_scope": (
+            "Telegram",
+            "Ключ агрегации breaker для бота: обычно bot_token_chat_operation.",
+            "Позволяет остановить проблемную группу уведомлений, не отключая все остальные маршруты.",
+        ),
+        "telegram_bot_adaptive_limit_enabled": (
+            "Telegram",
+            "Заготовка адаптивных лимитов отправки Telegram-ботов.",
+            "Когда будет включено, система сможет менять интервалы и параллельность отправки по метрикам или ручным override.",
+        ),
+        "telegram_bot_adaptive_limit_activation_mode": (
+            "Telegram",
+            "Когда применять адаптивные лимиты бота: metrics_only, manual_only или metrics_or_manual.",
+            "До накопления метрик можно задать ручные лимиты для конкретного бота или группы.",
+        ),
+        "telegram_bot_adaptive_limit_min_samples": (
+            "Telegram",
+            "Минимум измерений отправки для автоматического расчета лимитов бота.",
+            "До накопления этого количества используются статические настройки или ручной override.",
+        ),
+        "telegram_bot_adaptive_limit_manual_overrides": (
+            "Telegram",
+            "JSON-карта ручных лимитов отправки по bot/chat/operation.",
+            "Позволяет оператору ограничить проблемный маршрут уведомлений до накопления статистики.",
+        ),
+        "telegram_bot_adaptive_limit_window_hours": (
+            "Telegram",
+            "Окно истории для расчета адаптивных лимитов Telegram-бота.",
+            "Определяет, за какой период учитывать rate-limit, forbidden и успешные отправки.",
+        ),
+        "telegram_bot_adaptive_limit_target_success_ratio": (
+            "Telegram",
+            "Целевая доля успешных отправок Telegram-бота.",
+            "Если фактическая успешность ниже цели, будущая логика сможет снижать нагрузку.",
+        ),
     }
     if key in explicit:
         group, description, impact = explicit[key]

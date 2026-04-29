@@ -425,6 +425,26 @@ def test_admin_ai_registry_updates_model_context_window_and_lists_task_types(tmp
         for item in settings_response.json()["items"]
         if item["key"] == "llm_adaptive_timeout_activation_mode"
     )
+    telegram_userbot_breaker_setting = next(
+        item
+        for item in settings_response.json()["items"]
+        if item["key"] == "telegram_userbot_circuit_breaker_enabled"
+    )
+    telegram_userbot_min_samples_setting = next(
+        item
+        for item in settings_response.json()["items"]
+        if item["key"] == "telegram_userbot_adaptive_limit_min_samples"
+    )
+    telegram_bot_breaker_setting = next(
+        item
+        for item in settings_response.json()["items"]
+        if item["key"] == "telegram_bot_circuit_breaker_enabled"
+    )
+    telegram_bot_min_samples_setting = next(
+        item
+        for item in settings_response.json()["items"]
+        if item["key"] == "telegram_bot_adaptive_limit_min_samples"
+    )
     assert worker_setting["description"]
     assert worker_setting["impact"]
     assert circuit_breaker_setting["value"] is False
@@ -435,6 +455,12 @@ def test_admin_ai_registry_updates_model_context_window_and_lists_task_types(tmp
     assert adaptive_buffer_setting["value"] == 1.2
     assert adaptive_min_samples_setting["value"] == 100
     assert adaptive_mode_setting["value"] == "metrics_or_manual"
+    assert telegram_userbot_breaker_setting["value"] is False
+    assert "юзербот" in telegram_userbot_breaker_setting["description"]
+    assert telegram_userbot_min_samples_setting["value"] == 100
+    assert telegram_bot_breaker_setting["value"] is False
+    assert "Telegram-бот" in telegram_bot_breaker_setting["description"]
+    assert telegram_bot_min_samples_setting["value"] == 100
 
     with fixture["session_factory"]() as session:
         audit_actions = {
