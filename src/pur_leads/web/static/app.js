@@ -2276,6 +2276,12 @@ function initOnboarding() {
   document.querySelector("#onboarding-refresh")?.addEventListener("click", loadOnboardingStatus);
   document.querySelector("#onboarding-bot-form")?.addEventListener("submit", saveOnboardingBot);
   document
+    .querySelector("#onboarding-group-bot-select")
+    ?.addEventListener("change", () => {
+      updateOnboardingGroupDiscoverEnabled();
+      loadOnboardingGroups();
+    });
+  document
     .querySelector("#onboarding-group-discover")
     ?.addEventListener("click", discoverOnboardingGroups);
   document
@@ -2291,17 +2297,26 @@ function initOnboarding() {
     .querySelector("#onboarding-interactive-complete-form")
     ?.addEventListener("submit", completeInteractiveUserbotLogin);
   loadOnboardingStatus();
+  loadOnboardingBots();
+  loadOnboardingGroups();
   loadOnboardingLlmRegistry();
+  loadOnboardingUserbotCredentials();
 }
 
 function setOnboardingGroupDiscoverEnabled(enabled) {
+  updateOnboardingGroupDiscoverEnabled(enabled);
+}
+
+function updateOnboardingGroupDiscoverEnabled(forceEnabled = null) {
   const button = document.querySelector("#onboarding-group-discover");
   const hint = document.querySelector("#onboarding-group-hint");
+  const selectedBotId = document.querySelector("#onboarding-group-bot-select")?.value || "";
+  const enabled = forceEnabled === null ? Boolean(selectedBotId) : Boolean(forceEnabled && selectedBotId);
   if (button) button.disabled = !enabled;
   if (hint) {
     hint.textContent = enabled
-      ? "Бот подключен. Теперь можно найти группу уведомлений."
-      : "Сначала сохраните и проверьте токен бота.";
+      ? "Бот выбран. Можно найти все группы, куда он добавлен."
+      : "Сначала сохраните бота и выберите его здесь.";
   }
 }
 
@@ -2343,9 +2358,76 @@ async function saveOnboardingBot(event) {
         display_name: formValue(form, "display_name") || "Telegram bot",
       }),
     });
-    if (status) status.textContent = `Бот @${payload.bot?.username || "telegram"} сохранен`;
+    if (status) status.textContent = `Бот @${payload.bot?.telegram_username || "telegram"} сохранен`;
     form.reset();
+    await loadOnboardingBots();
     await loadOnboardingStatus();
+  } catch (error) {
+    if (status) status.textContent = error.message;
+  }
+}
+
+async function loadOnboardingBots() {
+  const target = document.querySelector("#onboarding-bot-list");
+  try {
+    const payload = await api("/api/onboarding/bots");
+    const bots = payload.items || [];
+    renderOnboardingBots(bots);
+    populateOnboardingGroupBotSelect(bots);
+    updateOnboardingGroupDiscoverEnabled();
+  } catch (error) {
+    if (target) target.innerHTML = `<div class="empty-state">${escapeHtml(error.message)}</div>`;
+  }
+}
+
+function renderOnboardingBots(bots) {
+  const target = document.querySelector("#onboarding-bot-list");
+  if (!target) return;
+  if (!bots.length) {
+    target.innerHTML = '<div class="empty-state">Сохраненных ботов пока нет</div>';
+    return;
+  }
+  target.innerHTML = bots
+    .map(
+      (bot) => `<div class="onboarding-mini-row">
+        <div>
+          <strong>${escapeHtml(bot.display_name || bot.telegram_username || "Telegram bot")}</strong>
+          <p class="muted">${escapeHtml(bot.telegram_username ? `@${bot.telegram_username}` : "username не получен")}</p>
+        </div>
+        <md-outlined-button type="button" data-delete-bot="${escapeHtml(bot.id)}">Удалить</md-outlined-button>
+      </div>`
+    )
+    .join("");
+  target.querySelectorAll("[data-delete-bot]").forEach((button) => {
+    button.addEventListener("click", deleteOnboardingBot);
+  });
+}
+
+function populateOnboardingGroupBotSelect(bots) {
+  const select = document.querySelector("#onboarding-group-bot-select");
+  if (!select) return;
+  const current = select.value;
+  if (!bots.length) {
+    select.innerHTML = '<option value="">Сначала сохраните бота</option>';
+    return;
+  }
+  select.innerHTML = bots
+    .map(
+      (bot) =>
+        `<option value="${escapeHtml(bot.id)}">${escapeHtml(bot.display_name || bot.telegram_username || "Telegram bot")}</option>`
+    )
+    .join("");
+  select.value = bots.some((bot) => bot.id === current) ? current : bots[0].id;
+}
+
+async function deleteOnboardingBot(event) {
+  const status = document.querySelector("#onboarding-bot-status");
+  try {
+    await api(`/api/onboarding/bots/${encodeURIComponent(event.currentTarget.dataset.deleteBot)}`, {
+      method: "DELETE",
+    });
+    if (status) status.textContent = "Бот удален";
+    await Promise.all([loadOnboardingBots(), loadOnboardingGroups(), loadOnboardingStatus()]);
   } catch (error) {
     if (status) status.textContent = error.message;
   }
@@ -2355,13 +2437,14 @@ async function discoverOnboardingGroups() {
   const button = document.querySelector("#onboarding-group-discover");
   const target = document.querySelector("#onboarding-group-candidates");
   const status = document.querySelector("#onboarding-group-status");
+  const botId = document.querySelector("#onboarding-group-bot-select")?.value || "";
   if (status) status.textContent = "";
   if (button?.disabled) {
-    if (status) status.textContent = "Сначала сохраните и проверьте токен бота.";
+    if (status) status.textContent = "Сначала выберите бота.";
     return;
   }
   try {
-    const payload = await api("/api/onboarding/notification-groups/discover");
+    const payload = await api(`/api/onboarding/notification-groups/discover?bot_id=${encodeURIComponent(botId)}`);
     const candidates = payload.candidates || [];
     if (!candidates.length) {
       target.innerHTML = '<div class="empty-state">Группы не найдены</div>';
@@ -2377,6 +2460,7 @@ async function discoverOnboardingGroups() {
           <md-filled-button type="button"
             data-chat-id="${escapeHtml(candidate.chat_id)}"
             data-title="${escapeHtml(candidate.title)}"
+            data-chat-type="${escapeHtml(candidate.chat_type)}"
             data-thread-id="${escapeHtml(candidate.message_thread_id ?? "")}">
             Выбрать
           </md-filled-button>
@@ -2395,18 +2479,68 @@ async function saveOnboardingGroup(event) {
   const button = event.currentTarget;
   const status = document.querySelector("#onboarding-group-status");
   const threadId = button.dataset.threadId;
+  const botId = document.querySelector("#onboarding-group-bot-select")?.value || "";
   try {
     await api("/api/onboarding/notification-group", {
       method: "POST",
       body: JSON.stringify({
+        bot_id: botId,
         chat_id: button.dataset.chatId,
         title: button.dataset.title,
+        chat_type: button.dataset.chatType || null,
         message_thread_id: threadId ? Number.parseInt(threadId, 10) : null,
         send_test: true,
       }),
     });
     if (status) status.textContent = "Группа уведомлений сохранена, тестовое сообщение отправлено";
+    await loadOnboardingGroups();
     await loadOnboardingStatus();
+  } catch (error) {
+    if (status) status.textContent = error.message;
+  }
+}
+
+async function loadOnboardingGroups() {
+  const target = document.querySelector("#onboarding-group-list");
+  try {
+    const payload = await api("/api/onboarding/notification-groups");
+    renderOnboardingGroups(payload.items || []);
+  } catch (error) {
+    if (target) target.innerHTML = `<div class="empty-state">${escapeHtml(error.message)}</div>`;
+  }
+}
+
+function renderOnboardingGroups(groups) {
+  const target = document.querySelector("#onboarding-group-list");
+  if (!target) return;
+  if (!groups.length) {
+    target.innerHTML = '<div class="empty-state">Сохраненных групп уведомлений пока нет</div>';
+    return;
+  }
+  target.innerHTML = groups
+    .map(
+      (group) => `<div class="onboarding-mini-row">
+        <div>
+          <strong>${escapeHtml(group.title || group.chat_id)}</strong>
+          <p class="muted">${escapeHtml(group.bot_name || "бот")} / ${escapeHtml(group.chat_id)}${group.message_thread_id ? ` / topic ${escapeHtml(group.message_thread_id)}` : ""}</p>
+        </div>
+        <md-outlined-button type="button" data-delete-group="${escapeHtml(group.id)}">Удалить</md-outlined-button>
+      </div>`
+    )
+    .join("");
+  target.querySelectorAll("[data-delete-group]").forEach((button) => {
+    button.addEventListener("click", deleteOnboardingGroup);
+  });
+}
+
+async function deleteOnboardingGroup(event) {
+  const status = document.querySelector("#onboarding-group-status");
+  try {
+    await api(`/api/onboarding/notification-groups/${encodeURIComponent(event.currentTarget.dataset.deleteGroup)}`, {
+      method: "DELETE",
+    });
+    if (status) status.textContent = "Группа уведомлений удалена";
+    await Promise.all([loadOnboardingGroups(), loadOnboardingStatus()]);
   } catch (error) {
     if (status) status.textContent = error.message;
   }
@@ -2427,6 +2561,7 @@ async function saveOnboardingLlmProvider(event) {
       }),
     });
     populateOnboardingLlmModels(onboardingAiRegistry.models || []);
+    renderOnboardingLlmProviders(onboardingAiRegistry.accounts || [], onboardingAiRegistry.routes || []);
     const modelCount = (onboardingAiRegistry.models || []).length;
     if (status) status.textContent = `Модели загружены: ${modelCount}`;
     const apiKeyField = form.querySelector('[name="api_key"]');
@@ -2452,6 +2587,7 @@ async function saveOnboardingDefaultLlmModel(event) {
       body: JSON.stringify({ model_id: modelId }),
     });
     if (status) status.textContent = `Модель по умолчанию: ${payload.model?.provider_model_name || "выбрана"}`;
+    await loadOnboardingLlmRegistry();
     await loadOnboardingStatus();
   } catch (error) {
     if (status) status.textContent = error.message;
@@ -2462,8 +2598,10 @@ async function loadOnboardingLlmRegistry() {
   try {
     onboardingAiRegistry = await api("/api/admin/ai-registry");
     populateOnboardingLlmModels(onboardingAiRegistry.models || []);
+    renderOnboardingLlmProviders(onboardingAiRegistry.accounts || [], onboardingAiRegistry.routes || []);
   } catch {
     populateOnboardingLlmModels([]);
+    renderOnboardingLlmProviders([], []);
   }
 }
 
@@ -2488,6 +2626,60 @@ function populateOnboardingLlmModels(models) {
     || languageModels[0];
   select.value = preferred.id;
   if (saveButton) saveButton.disabled = false;
+}
+
+function renderOnboardingLlmProviders(accounts, routes) {
+  const target = document.querySelector("#onboarding-llm-provider-list");
+  if (!target) return;
+  const activeAccounts = (accounts || []).filter((account) => account.enabled !== false);
+  if (!activeAccounts.length) {
+    target.innerHTML = '<div class="empty-state">Сохраненных LLM-провайдеров пока нет</div>';
+    return;
+  }
+  const routeLines = (routes || [])
+    .filter((route) => route.enabled !== false)
+    .map((route) => `${route.agent_key} / ${route.route_role} -> ${route.model}`);
+  target.innerHTML = activeAccounts
+    .map(
+      (account) => `<div class="onboarding-mini-row">
+        <div>
+          <strong>${escapeHtml(account.display_name || account.provider_account || "LLM provider")}</strong>
+          <p class="muted">${escapeHtml(account.base_url || "")}</p>
+          <p class="muted">${escapeHtml(routeLines.join("; ") || "routes не выбраны")}</p>
+        </div>
+        <md-outlined-button type="button" data-delete-llm="${escapeHtml(account.id)}">Удалить</md-outlined-button>
+      </div>`
+    )
+    .join("");
+  target.querySelectorAll("[data-delete-llm]").forEach((button) => {
+    button.addEventListener("click", deleteOnboardingLlmProvider);
+  });
+}
+
+async function deleteOnboardingLlmProvider(event) {
+  const status = document.querySelector("#onboarding-llm-status");
+  try {
+    await api(`/api/onboarding/llm-providers/${encodeURIComponent(event.currentTarget.dataset.deleteLlm)}`, {
+      method: "DELETE",
+    });
+    if (status) status.textContent = "LLM-провайдер отключен";
+    await Promise.all([loadOnboardingLlmRegistry(), loadOnboardingStatus()]);
+  } catch (error) {
+    if (status) status.textContent = error.message;
+  }
+}
+
+async function loadOnboardingUserbotCredentials() {
+  const target = document.querySelector("#onboarding-userbot-credentials");
+  if (!target) return;
+  try {
+    const payload = await api("/api/onboarding/userbot-credentials");
+    target.textContent = payload.telegram_api_id
+      ? `Сохранено: Telegram API ID ${payload.telegram_api_id}, API hash ${payload.api_hash_configured ? `в secret_refs:${payload.api_hash_secret_ref_id}` : "не сохранен"}. Raw hash в интерфейсе не показываем.`
+      : "Telegram API ID и API hash пока не сохранены.";
+  } catch (error) {
+    target.textContent = error.message;
+  }
 }
 
 async function startInteractiveUserbotLogin(event) {
@@ -2532,6 +2724,7 @@ async function completeInteractiveUserbotLogin(event) {
     if (status) status.textContent = "Интерактивный вход завершен";
     form.reset();
     form.classList.add("is-hidden");
+    await loadOnboardingUserbotCredentials();
     await loadOnboardingStatus();
   } catch (error) {
     if (status) status.textContent = error.message;

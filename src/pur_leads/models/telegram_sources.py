@@ -15,6 +15,33 @@ from sqlalchemy import (
 
 metadata = MetaData()
 
+telegram_bots_table = Table(
+    "telegram_bots",
+    metadata,
+    Column("id", String(36), primary_key=True),
+    Column("display_name", String(160), nullable=False),
+    Column("telegram_bot_id", String(80), nullable=True),
+    Column("telegram_username", String(160), nullable=True),
+    Column("token_secret_ref", String(36), nullable=False),
+    Column("status", String(32), nullable=False),
+    Column("created_at", DateTime(timezone=True), nullable=False),
+    Column("updated_at", DateTime(timezone=True), nullable=False),
+)
+
+telegram_notification_groups_table = Table(
+    "telegram_notification_groups",
+    metadata,
+    Column("id", String(36), primary_key=True),
+    Column("telegram_bot_id", String(36), nullable=False),
+    Column("chat_id", String(120), nullable=False),
+    Column("title", String(255), nullable=True),
+    Column("chat_type", String(64), nullable=True),
+    Column("message_thread_id", Integer, nullable=True),
+    Column("status", String(32), nullable=False),
+    Column("created_at", DateTime(timezone=True), nullable=False),
+    Column("updated_at", DateTime(timezone=True), nullable=False),
+)
+
 userbot_accounts_table = Table(
     "userbot_accounts",
     metadata,

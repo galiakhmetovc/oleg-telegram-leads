@@ -8,10 +8,11 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
-from sqlalchemy import func, select
+from sqlalchemy import func, insert, select, update
 from sqlalchemy.orm import Session
 
 from pur_leads.core.ids import new_id
+from pur_leads.core.time import utc_now
 from pur_leads.integrations.telegram.bot_setup import (
     TelegramBotSetupClient,
     TelegramBotSetupError,
@@ -21,7 +22,12 @@ from pur_leads.integrations.telegram.userbot_login import (
     TelethonUserbotLoginClient,
     UserbotLoginPasswordRequired,
 )
-from pur_leads.models.telegram_sources import monitored_sources_table
+from pur_leads.models.ai import ai_provider_accounts_table
+from pur_leads.models.telegram_sources import (
+    monitored_sources_table,
+    telegram_bots_table,
+    telegram_notification_groups_table,
+)
 from pur_leads.services.ai_registry import AiRegistryService
 from pur_leads.services.secrets import SecretRefService
 from pur_leads.services.settings import SettingsService
@@ -38,8 +44,10 @@ class BotTokenRequest(BaseModel):
 
 
 class NotificationGroupRequest(BaseModel):
+    bot_id: str = Field(min_length=1)
     chat_id: str = Field(min_length=1)
     title: str | None = None
+    chat_type: str | None = None
     message_thread_id: int | None = None
     send_test: bool = True
 
@@ -77,7 +85,8 @@ def onboarding_status(
     settings = SettingsService(session)
     bot_token_ref = settings.get("telegram_bot_token_secret_ref")
     zai_api_key_ref = settings.get("zai_api_key_secret_ref")
-    notification_chat_id = settings.get("telegram_lead_notification_chat_id")
+    bot_count = _active_bot_count(session)
+    notification_group_count = _active_notification_group_count(session)
     userbot_count = len(UserbotAccountService(session).list_accounts())
     catalog_routes = AiRegistryService(session).select_routes(
         agent_key="catalog_extractor",
@@ -92,11 +101,11 @@ def onboarding_status(
             "label": "Пароль администратора изменен",
         },
         "bot_token": {
-            "done": _is_secret_ref_value(bot_token_ref),
+            "done": bot_count > 0 or _is_secret_ref_value(bot_token_ref),
             "label": "Обычный Telegram-бот подключен",
         },
         "notification_group": {
-            "done": isinstance(notification_chat_id, str) and bool(notification_chat_id.strip()),
+            "done": notification_group_count > 0,
             "label": "Группа уведомлений выбрана",
         },
         "userbot": {
@@ -125,6 +134,30 @@ def onboarding_status(
     }
 
 
+@router.get("/bots")
+def list_bots(
+    _validated: SessionValidationResult = Depends(current_admin),
+    session: Session = Depends(get_session),
+) -> dict[str, Any]:
+    return {"items": _bot_payloads(session)}
+
+
+@router.get("/userbot-credentials")
+def userbot_credentials_status(
+    _validated: SessionValidationResult = Depends(current_admin),
+    session: Session = Depends(get_session),
+) -> dict[str, Any]:
+    settings = SettingsService(session)
+    api_hash_ref = settings.get("telegram_api_hash_secret_ref")
+    return {
+        "telegram_api_id": settings.get("telegram_api_id"),
+        "api_hash_configured": _is_secret_ref_value(api_hash_ref),
+        "api_hash_secret_ref_id": api_hash_ref.get("secret_ref_id")
+        if _is_secret_ref_value(api_hash_ref)
+        else None,
+    }
+
+
 @router.post("/bot-token")
 async def configure_bot_token(
     payload: BotTokenRequest,
@@ -145,29 +178,61 @@ async def configure_bot_token(
         value=token,
         storage_root=request.app.state.local_secret_storage_path,
     )
+    actor = _actor(validated)
     SettingsService(session).set(
         "telegram_bot_token_secret_ref",
         {"secret_ref_id": secret_id},
         value_type="secret_ref",
-        updated_by=_actor(validated),
+        updated_by=actor,
         reason="configure Telegram bot token during onboarding",
+    )
+    bot_payload = _upsert_telegram_bot(
+        session,
+        display_name=payload.display_name.strip() or "Telegram bot",
+        telegram_bot_id=str(bot.get("id")) if isinstance(bot, dict) and bot.get("id") else None,
+        telegram_username=bot.get("username") if isinstance(bot, dict) else None,
+        token_secret_ref=secret_id,
     )
     request.app.state.telegram_bot_token = token
     return {
-        "bot": {
-            "id": bot.get("id") if isinstance(bot, dict) else None,
-            "username": bot.get("username") if isinstance(bot, dict) else None,
-        }
+        "bot": bot_payload,
+        "items": _bot_payloads(session),
     }
+
+
+@router.delete("/bots/{bot_id}")
+def delete_bot(
+    bot_id: str,
+    validated: SessionValidationResult = Depends(current_admin),
+    session: Session = Depends(get_session),
+) -> dict[str, Any]:
+    bot = _bot_by_id(session, bot_id)
+    if bot is None:
+        raise HTTPException(status_code=404, detail="Telegram bot not found")
+    now = utc_now()
+    session.execute(
+        update(telegram_bots_table)
+        .where(telegram_bots_table.c.id == bot_id)
+        .values(status="revoked", updated_at=now)
+    )
+    session.execute(
+        update(telegram_notification_groups_table)
+        .where(telegram_notification_groups_table.c.telegram_bot_id == bot_id)
+        .values(status="revoked", updated_at=now)
+    )
+    _refresh_default_notification_settings(session, actor=_actor(validated))
+    session.commit()
+    return {"items": _bot_payloads(session)}
 
 
 @router.get("/notification-groups/discover")
 async def discover_notification_groups(
     request: Request,
+    bot_id: str | None = None,
     _: SessionValidationResult = Depends(current_admin),
     session: Session = Depends(get_session),
 ) -> dict[str, Any]:
-    token = _resolve_bot_token(request, session)
+    token = _resolve_bot_token(request, session, bot_id=bot_id)
     if not token:
         raise HTTPException(status_code=400, detail="Telegram bot token is not configured")
     client = _bot_setup_client(request)
@@ -178,6 +243,15 @@ async def discover_notification_groups(
     return {"candidates": notification_candidates_from_updates(updates)}
 
 
+@router.get("/notification-groups")
+def list_notification_groups(
+    bot_id: str | None = None,
+    _validated: SessionValidationResult = Depends(current_admin),
+    session: Session = Depends(get_session),
+) -> dict[str, Any]:
+    return {"items": _notification_group_payloads(session, bot_id=bot_id)}
+
+
 @router.post("/notification-group")
 async def configure_notification_group(
     payload: NotificationGroupRequest,
@@ -185,7 +259,10 @@ async def configure_notification_group(
     validated: SessionValidationResult = Depends(current_admin),
     session: Session = Depends(get_session),
 ) -> dict[str, Any]:
-    token = _resolve_bot_token(request, session)
+    bot = _bot_by_id(session, payload.bot_id)
+    if bot is None:
+        raise HTTPException(status_code=404, detail="Telegram bot not found")
+    token = _resolve_bot_token(request, session, bot_id=payload.bot_id)
     if not token:
         raise HTTPException(status_code=400, detail="Telegram bot token is not configured")
     if payload.send_test:
@@ -198,29 +275,74 @@ async def configure_notification_group(
             )
         except TelegramBotSetupError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
-    settings = SettingsService(session)
     actor = _actor(validated)
+    group = _upsert_notification_group(
+        session,
+        telegram_bot_id=payload.bot_id,
+        chat_id=payload.chat_id.strip(),
+        title=payload.title,
+        chat_type=payload.chat_type,
+        message_thread_id=payload.message_thread_id,
+    )
+    _set_default_notification_settings(
+        session,
+        actor=actor,
+        token_secret_ref=str(bot["token_secret_ref"]),
+        chat_id=payload.chat_id.strip(),
+        message_thread_id=payload.message_thread_id,
+    )
+    return {"notification_group": group, "items": _notification_group_payloads(session)}
+
+
+@router.delete("/notification-groups/{group_id}")
+def delete_notification_group(
+    group_id: str,
+    validated: SessionValidationResult = Depends(current_admin),
+    session: Session = Depends(get_session),
+) -> dict[str, Any]:
+    row = _notification_group_by_id(session, group_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="Notification group not found")
+    session.execute(
+        update(telegram_notification_groups_table)
+        .where(telegram_notification_groups_table.c.id == group_id)
+        .values(status="revoked", updated_at=utc_now())
+    )
+    _refresh_default_notification_settings(session, actor=_actor(validated))
+    session.commit()
+    return {"items": _notification_group_payloads(session)}
+
+
+def _set_default_notification_settings(
+    session: Session,
+    *,
+    actor: str,
+    token_secret_ref: str,
+    chat_id: str | None,
+    message_thread_id: int | None,
+) -> None:
+    settings = SettingsService(session)
+    settings.set(
+        "telegram_bot_token_secret_ref",
+        {"secret_ref_id": token_secret_ref},
+        value_type="secret_ref",
+        updated_by=actor,
+        reason="select default Telegram bot during onboarding",
+    )
     settings.set(
         "telegram_lead_notification_chat_id",
-        payload.chat_id.strip(),
+        chat_id or "",
         value_type="string",
         updated_by=actor,
         reason="configure Telegram notification group during onboarding",
     )
     settings.set(
         "telegram_lead_notification_thread_id",
-        payload.message_thread_id,
+        message_thread_id,
         value_type="int",
         updated_by=actor,
         reason="configure Telegram notification topic during onboarding",
     )
-    return {
-        "notification_group": {
-            "chat_id": payload.chat_id.strip(),
-            "title": payload.title,
-            "message_thread_id": payload.message_thread_id,
-        }
-    }
 
 
 @router.post("/llm-provider")
@@ -287,7 +409,40 @@ def configure_llm_provider(
         "account": account,
         "models": snapshot["models"],
         "routes": snapshot["routes"],
+        "accounts": _llm_provider_accounts(snapshot),
     }
+
+
+@router.get("/llm-providers")
+def list_llm_providers(
+    _validated: SessionValidationResult = Depends(current_admin),
+    session: Session = Depends(get_session),
+) -> dict[str, Any]:
+    return {"items": _llm_provider_accounts(AiRegistryService(session).snapshot())}
+
+
+@router.delete("/llm-providers/{account_id}")
+def delete_llm_provider(
+    account_id: str,
+    _validated: SessionValidationResult = Depends(current_admin),
+    session: Session = Depends(get_session),
+) -> dict[str, Any]:
+    row = (
+        session.execute(
+            select(ai_provider_accounts_table).where(ai_provider_accounts_table.c.id == account_id)
+        )
+        .mappings()
+        .first()
+    )
+    if row is None:
+        raise HTTPException(status_code=404, detail="LLM provider account not found")
+    session.execute(
+        update(ai_provider_accounts_table)
+        .where(ai_provider_accounts_table.c.id == account_id)
+        .values(enabled=False, updated_at=utc_now())
+    )
+    session.commit()
+    return {"items": _llm_provider_accounts(AiRegistryService(session).snapshot())}
 
 
 @router.post("/llm-default-model")
@@ -479,12 +634,295 @@ def _session_file_path(root: Path | str, session_name: str) -> Path:
     return path / f"{session_name}.session"
 
 
-def _resolve_bot_token(request: Request, session: Session) -> str | None:
+def _active_bot_count(session: Session) -> int:
+    return int(
+        session.execute(
+            select(func.count())
+            .select_from(telegram_bots_table)
+            .where(telegram_bots_table.c.status == "active")
+        ).scalar_one()
+    )
+
+
+def _active_notification_group_count(session: Session) -> int:
+    return int(
+        session.execute(
+            select(func.count())
+            .select_from(telegram_notification_groups_table)
+            .where(telegram_notification_groups_table.c.status == "active")
+        ).scalar_one()
+    )
+
+
+def _bot_payloads(session: Session) -> list[dict[str, Any]]:
+    rows = (
+        session.execute(
+            select(telegram_bots_table)
+            .where(telegram_bots_table.c.status == "active")
+            .order_by(telegram_bots_table.c.created_at.desc())
+        )
+        .mappings()
+        .all()
+    )
+    return [_bot_payload(dict(row)) for row in rows]
+
+
+def _bot_payload(row: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "id": row["id"],
+        "display_name": row["display_name"],
+        "telegram_bot_id": row["telegram_bot_id"],
+        "telegram_username": row["telegram_username"],
+        "status": row["status"],
+        "created_at": row["created_at"],
+        "updated_at": row["updated_at"],
+    }
+
+
+def _bot_by_id(session: Session, bot_id: str) -> dict[str, Any] | None:
+    row = (
+        session.execute(
+            select(telegram_bots_table).where(
+                telegram_bots_table.c.id == bot_id,
+                telegram_bots_table.c.status == "active",
+            )
+        )
+        .mappings()
+        .first()
+    )
+    return dict(row) if row is not None else None
+
+
+def _upsert_telegram_bot(
+    session: Session,
+    *,
+    display_name: str,
+    telegram_bot_id: str | None,
+    telegram_username: str | None,
+    token_secret_ref: str,
+) -> dict[str, Any]:
+    now = utc_now()
+    existing = None
+    if telegram_bot_id:
+        existing = (
+            session.execute(
+                select(telegram_bots_table).where(
+                    telegram_bots_table.c.telegram_bot_id == telegram_bot_id,
+                    telegram_bots_table.c.status == "active",
+                )
+            )
+            .mappings()
+            .first()
+        )
+    values = {
+        "display_name": display_name,
+        "telegram_bot_id": telegram_bot_id,
+        "telegram_username": telegram_username,
+        "token_secret_ref": token_secret_ref,
+        "status": "active",
+        "updated_at": now,
+    }
+    if existing is None:
+        bot_id = new_id()
+        session.execute(
+            insert(telegram_bots_table).values(id=bot_id, created_at=now, **values)
+        )
+    else:
+        bot_id = str(existing["id"])
+        session.execute(
+            update(telegram_bots_table)
+            .where(telegram_bots_table.c.id == bot_id)
+            .values(**values)
+        )
+    session.commit()
+    row = _bot_by_id(session, bot_id)
+    return _bot_payload(row) if row is not None else {}
+
+
+def _notification_group_payloads(
+    session: Session,
+    *,
+    bot_id: str | None = None,
+) -> list[dict[str, Any]]:
+    conditions = [telegram_notification_groups_table.c.status == "active"]
+    if bot_id:
+        conditions.append(telegram_notification_groups_table.c.telegram_bot_id == bot_id)
+    rows = (
+        session.execute(
+            select(telegram_notification_groups_table, telegram_bots_table.c.display_name.label("bot_name"))
+            .select_from(
+                telegram_notification_groups_table.join(
+                    telegram_bots_table,
+                    telegram_notification_groups_table.c.telegram_bot_id == telegram_bots_table.c.id,
+                )
+            )
+            .where(*conditions)
+            .order_by(telegram_notification_groups_table.c.created_at.desc())
+        )
+        .mappings()
+        .all()
+    )
+    return [
+        {
+            "id": row["id"],
+            "bot_id": row["telegram_bot_id"],
+            "bot_name": row["bot_name"],
+            "chat_id": row["chat_id"],
+            "title": row["title"],
+            "chat_type": row["chat_type"],
+            "message_thread_id": row["message_thread_id"],
+            "status": row["status"],
+            "created_at": row["created_at"],
+            "updated_at": row["updated_at"],
+        }
+        for row in rows
+    ]
+
+
+def _notification_group_by_id(session: Session, group_id: str) -> dict[str, Any] | None:
+    row = (
+        session.execute(
+            select(telegram_notification_groups_table).where(
+                telegram_notification_groups_table.c.id == group_id,
+                telegram_notification_groups_table.c.status == "active",
+            )
+        )
+        .mappings()
+        .first()
+    )
+    return dict(row) if row is not None else None
+
+
+def _upsert_notification_group(
+    session: Session,
+    *,
+    telegram_bot_id: str,
+    chat_id: str,
+    title: str | None,
+    chat_type: str | None,
+    message_thread_id: int | None,
+) -> dict[str, Any]:
+    conditions = [
+        telegram_notification_groups_table.c.telegram_bot_id == telegram_bot_id,
+        telegram_notification_groups_table.c.chat_id == chat_id,
+    ]
+    if message_thread_id is None:
+        conditions.append(telegram_notification_groups_table.c.message_thread_id.is_(None))
+    else:
+        conditions.append(telegram_notification_groups_table.c.message_thread_id == message_thread_id)
+    existing = (
+        session.execute(select(telegram_notification_groups_table).where(*conditions))
+        .mappings()
+        .first()
+    )
+    now = utc_now()
+    values = {
+        "telegram_bot_id": telegram_bot_id,
+        "chat_id": chat_id,
+        "title": title or chat_id,
+        "chat_type": chat_type,
+        "message_thread_id": message_thread_id,
+        "status": "active",
+        "updated_at": now,
+    }
+    if existing is None:
+        group_id = new_id()
+        session.execute(
+            insert(telegram_notification_groups_table).values(
+                id=group_id,
+                created_at=now,
+                **values,
+            )
+        )
+    else:
+        group_id = str(existing["id"])
+        session.execute(
+            update(telegram_notification_groups_table)
+            .where(telegram_notification_groups_table.c.id == group_id)
+            .values(**values)
+        )
+    session.commit()
+    rows = _notification_group_payloads(session, bot_id=telegram_bot_id)
+    return next((row for row in rows if row["id"] == group_id), rows[0] if rows else {})
+
+
+def _refresh_default_notification_settings(session: Session, *, actor: str) -> None:
+    row = (
+        session.execute(
+            select(
+                telegram_notification_groups_table.c.chat_id,
+                telegram_notification_groups_table.c.message_thread_id,
+                telegram_bots_table.c.token_secret_ref,
+            )
+            .select_from(
+                telegram_notification_groups_table.join(
+                    telegram_bots_table,
+                    telegram_notification_groups_table.c.telegram_bot_id == telegram_bots_table.c.id,
+                )
+            )
+            .where(
+                telegram_notification_groups_table.c.status == "active",
+                telegram_bots_table.c.status == "active",
+            )
+            .order_by(telegram_notification_groups_table.c.created_at.desc())
+        )
+        .mappings()
+        .first()
+    )
+    if row is None:
+        SettingsService(session).set(
+            "telegram_lead_notification_chat_id",
+            "",
+            value_type="string",
+            updated_by=actor,
+            reason="clear default Telegram notification group during onboarding",
+        )
+        return
+    _set_default_notification_settings(
+        session,
+        actor=actor,
+        token_secret_ref=str(row["token_secret_ref"]),
+        chat_id=str(row["chat_id"]),
+        message_thread_id=row["message_thread_id"],
+    )
+
+
+def _resolve_bot_token(
+    request: Request,
+    session: Session,
+    *,
+    bot_id: str | None = None,
+) -> str | None:
+    if bot_id:
+        bot = _bot_by_id(session, bot_id)
+        if bot is None:
+            return None
+        try:
+            return SecretRefService(session).resolve_value(str(bot["token_secret_ref"]))
+        except (FileNotFoundError, KeyError, ValueError):
+            return None
     try:
         token = SecretRefService(session).resolve_setting_secret("telegram_bot_token_secret_ref")
     except (FileNotFoundError, KeyError, ValueError):
         token = None
     return token or request.app.state.telegram_bot_token
+
+
+def _llm_provider_accounts(snapshot: dict[str, Any]) -> list[dict[str, Any]]:
+    providers = {provider["id"]: provider for provider in snapshot.get("providers", [])}
+    return [
+        {
+            "id": account["id"],
+            "display_name": account["display_name"],
+            "provider_key": providers.get(account["ai_provider_id"], {}).get("provider_key"),
+            "base_url": account["base_url"],
+            "enabled": account["enabled"],
+            "created_at": account["created_at"],
+            "updated_at": account["updated_at"],
+        }
+        for account in snapshot.get("accounts", [])
+        if account.get("enabled")
+    ]
 
 
 def _bot_setup_client(request: Request) -> TelegramBotSetupClient:

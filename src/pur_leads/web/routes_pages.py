@@ -322,6 +322,7 @@ def onboarding_page(
                         Проверить и сохранить
                       </md-filled-button>
                     </form>
+                    <div id="onboarding-bot-list" class="table-list onboarding-mini-list"></div>
                     <p id="onboarding-bot-status" class="status-line" role="status"></p>
                   </section>
                   <section class="onboarding-panel onboarding-panel-compact">
@@ -332,6 +333,12 @@ def onboarding_page(
                         <p class="muted">Добавьте бота в группу, отправьте любое сообщение и выберите чат здесь.</p>
                       </div>
                     </div>
+                    <label class="material-select-field">
+                      Бот для проверки групп
+                      <select id="onboarding-group-bot-select" name="bot_id">
+                        <option value="">Сначала сохраните бота</option>
+                      </select>
+                    </label>
                     <div class="material-action-row">
                       <md-filled-button id="onboarding-group-discover" type="button" disabled>
                         <md-icon slot="icon">refresh</md-icon>
@@ -342,6 +349,7 @@ def onboarding_page(
                       Сначала сохраните и проверьте токен бота.
                     </p>
                     <div id="onboarding-group-candidates" class="table-list"></div>
+                    <div id="onboarding-group-list" class="table-list onboarding-mini-list"></div>
                     <p id="onboarding-group-status" class="status-line" role="status"></p>
                   </section>
                   <section class="onboarding-panel onboarding-panel-llm">
@@ -376,6 +384,7 @@ def onboarding_page(
                         Выбрать модель
                       </md-filled-button>
                     </form>
+                    <div id="onboarding-llm-provider-list" class="table-list onboarding-mini-list"></div>
                     <p id="onboarding-llm-status" class="status-line" role="status"></p>
                   </section>
                   <section class="onboarding-panel onboarding-panel-interactive">
@@ -396,6 +405,7 @@ def onboarding_page(
                         Telegram Web
                       </md-outlined-button>
                     </div>
+                    <div id="onboarding-userbot-credentials" class="onboarding-credential-note"></div>
                     <form id="onboarding-interactive-start-form" class="material-form">
                       <md-outlined-text-field name="display_name" label="Название" required
                         placeholder="Основной юзербот">

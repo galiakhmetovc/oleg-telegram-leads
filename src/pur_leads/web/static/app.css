@@ -572,6 +572,28 @@ md-text-button {
   padding: 12px;
 }
 
+.onboarding-mini-list {
+  display: grid;
+  gap: 8px;
+}
+
+.onboarding-mini-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 0;
+  border-top: 1px solid var(--line);
+}
+
+.onboarding-credential-note {
+  padding: 10px 12px;
+  border-left: 3px solid var(--accent);
+  background: #fbfcfd;
+  color: var(--muted);
+  font-size: 14px;
+}
+
 .json-block {
   max-height: 340px;
   overflow: auto;
