@@ -1,5 +1,6 @@
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -304,7 +305,7 @@ class FakeTelethonClient:
         self.messages = messages
         self.authorized = authorized
         self.connect_count = 0
-        self.iter_calls = []
+        self.iter_calls: list[dict[str, Any]] = []
 
     async def connect(self) -> None:
         self.connect_count += 1
@@ -363,7 +364,7 @@ class FakeDocument:
         video: bool,
         audio: bool,
     ) -> None:
-        attributes = [FakeDocumentAttributeFilename(file_name)]
+        attributes: list[Any] = [FakeDocumentAttributeFilename(file_name)]
         if video:
             attributes.append(FakeDocumentAttributeVideo())
         if audio:

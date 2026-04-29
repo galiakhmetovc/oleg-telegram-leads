@@ -19,6 +19,7 @@ from pur_leads.integrations.catalog.heuristic_extractor import HeuristicCatalogE
 from pur_leads.integrations.catalog.llm_extractor import LlmCatalogExtractor
 from pur_leads.integrations.documents.pdf_parser import PdfArtifactParser
 from pur_leads.integrations.leads.fuzzy_classifier import FuzzyCatalogLeadClassifier
+from pur_leads.integrations.leads.llm_shadow_classifier import LlmLeadShadowClassifier
 from pur_leads.integrations.telegram.bot_notifier import TelegramBotLeadNotifier
 from pur_leads.integrations.telegram.telethon_client import TelethonTelegramClient
 from pur_leads.integrations.telegram.types import (
@@ -181,6 +182,7 @@ def _build_worker_handlers(session):
         build_lead_handler_registry(
             session,
             classifier=FuzzyCatalogLeadClassifier(session),
+            shadow_classifier=_build_lead_shadow_classifier(session, settings),
             notifier=_build_lead_notifier(settings),
         )
     )
@@ -227,6 +229,45 @@ def _build_catalog_extractor(session, settings):
         ),
         model=model,
         session=session,
+        temperature=temperature,
+        max_tokens=max_tokens,
+    )
+
+
+def _build_lead_shadow_classifier(session, settings):
+    settings_service = SettingsService(session)
+    if not bool(settings_service.get("lead_llm_shadow_enabled")):
+        return None
+    provider = str(settings_service.get("lead_llm_shadow_provider") or "zai")
+    api_key = settings.zai_api_key or _env_str("ZAI_API_KEY")
+    fallback = bool(settings_service.get("lead_llm_shadow_fallback_on_error"))
+    if provider != "zai" or not api_key:
+        if fallback:
+            return None
+        raise ValueError("lead LLM shadow classifier is enabled but Z.AI is not configured")
+    base_url = str(
+        _setting_or_default(
+            settings_service,
+            "lead_llm_shadow_base_url",
+            settings.lead_llm_shadow_base_url,
+        )
+    )
+    model = str(
+        _setting_or_default(
+            settings_service,
+            "lead_llm_shadow_model",
+            settings.lead_llm_shadow_model,
+        )
+    )
+    temperature = float(_setting_or_default(settings_service, "lead_llm_shadow_temperature", 0.0))
+    max_tokens = int(_setting_or_default(settings_service, "lead_llm_shadow_max_tokens", 2048))
+    return LlmLeadShadowClassifier(
+        client=ZaiChatCompletionClient(
+            api_key=api_key,
+            base_url=base_url,
+            timeout_seconds=settings.lead_llm_shadow_timeout_seconds,
+        ),
+        model=model,
         temperature=temperature,
         max_tokens=max_tokens,
     )

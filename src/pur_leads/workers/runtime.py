@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import asdict, dataclass, is_dataclass, replace
 from datetime import UTC, date, datetime, timedelta
@@ -26,6 +27,7 @@ from pur_leads.services.audit import AuditService
 from pur_leads.services.catalog_candidates import CatalogCandidateService
 from pur_leads.services.catalog_sources import CatalogSourceService
 from pur_leads.services.classifier_snapshots import ClassifierSnapshotService
+from pur_leads.services.evaluation import EvaluationService
 from pur_leads.services.leads import LeadDetectionResult, LeadMatchInput, LeadService
 from pur_leads.services.notifications import NotificationPolicyService
 from pur_leads.services.scheduler import SchedulerService
@@ -148,6 +150,21 @@ class LeadClassifierAdapter(Protocol):
         payload: dict[str, Any],
     ) -> list[LeadClassifierResult]:
         """Classify one batch of saved source messages into lead detection results."""
+
+
+class LeadShadowClassifierAdapter(Protocol):
+    model: str
+    prompt_hash: str
+    prompt_version: str
+    last_token_usage_json: dict[str, Any] | None
+
+    async def classify_message_batch(
+        self,
+        *,
+        messages: list[LeadMessageForClassification],
+        payload: dict[str, Any],
+    ) -> list[LeadClassifierResult]:
+        """Evaluate a batch in shadow mode without creating lead events."""
 
 
 class LeadNotifierAdapter(Protocol):
@@ -573,9 +590,11 @@ def build_lead_handler_registry(
     session: Session,
     *,
     classifier: LeadClassifierAdapter | None = None,
+    shadow_classifier: LeadShadowClassifierAdapter | None = None,
     notifier: LeadNotifierAdapter | None = None,
 ) -> dict[str, JobHandler]:
     lead_service = LeadService(session)
+    evaluation_service = EvaluationService(session)
     notification_policy = NotificationPolicyService(session)
     scheduler = SchedulerService(session)
     settings = SettingsService(session)
@@ -647,6 +666,14 @@ def build_lead_handler_registry(
             results = [replace(result, detection_mode=force_detection_mode) for result in results]
         message_ids = {message.source_message_id for message in messages}
         _validate_classifier_results(message_ids, results)
+        shadow_summary = await _run_shadow_classification(
+            session,
+            settings,
+            evaluation_service,
+            shadow_classifier=shadow_classifier,
+            messages=messages,
+            payload=payload,
+        )
         cluster_ids: set[str] = set()
         event_count = 0
         window_minutes = _positive_int(payload.get("cluster_window_minutes"), default=60)
@@ -721,13 +748,14 @@ def build_lead_handler_registry(
                 cursor=next_cursor,
             )
 
-        return JobHandlerResult(
-            result_summary={
-                "message_count": len(messages),
-                "event_count": event_count,
-                "cluster_count": len(cluster_ids),
-            }
-        )
+        result_summary = {
+            "message_count": len(messages),
+            "event_count": event_count,
+            "cluster_count": len(cluster_ids),
+        }
+        if shadow_summary is not None:
+            result_summary.update(shadow_summary)
+        return JobHandlerResult(result_summary=result_summary)
 
     async def send_notifications(job: SchedulerJobRecord) -> JobHandlerResult:
         if notifier is None:
@@ -759,6 +787,151 @@ def build_lead_handler_registry(
         "classify_message_batch": classify_message_batch,
         "reclassify_messages": reclassify_messages,
         "send_notifications": send_notifications,
+    }
+
+
+async def _run_shadow_classification(
+    session: Session,
+    settings: SettingsService,
+    evaluation_service: EvaluationService,
+    *,
+    shadow_classifier: LeadShadowClassifierAdapter | None,
+    messages: list[LeadMessageForClassification],
+    payload: dict[str, Any],
+) -> dict[str, Any] | None:
+    if shadow_classifier is None or not _lead_shadow_enabled(settings, payload):
+        return None
+
+    limit = _positive_int(
+        payload.get(
+            "lead_llm_shadow_max_messages_per_job",
+            settings.get("lead_llm_shadow_max_messages_per_job"),
+        ),
+        default=10,
+    )
+    shadow_messages = messages[:limit]
+    shadow_payload = dict(payload)
+    shadow_payload["shadow_mode"] = True
+    shadow_payload.setdefault("detection_mode", "live")
+    try:
+        shadow_results = await shadow_classifier.classify_message_batch(
+            messages=shadow_messages,
+            payload=shadow_payload,
+        )
+        _validate_classifier_results(
+            {message.source_message_id for message in shadow_messages},
+            shadow_results,
+        )
+    except Exception as exc:
+        error = _safe_exception_message(exc)
+        AuditService(session).record_event(
+            event_type="ai_request",
+            severity="warning",
+            message=f"Lead LLM shadow classifier failed: {error}",
+            entity_type="lead_detection_shadow",
+            details_json={
+                "reason": "shadow_classifier_failed",
+                "error": error,
+                "model": shadow_classifier.model,
+                "prompt_version": shadow_classifier.prompt_version,
+                "message_count": len(shadow_messages),
+            },
+        )
+        if not _lead_shadow_fallback_on_error(settings, payload):
+            raise
+        return {"shadow_decision_count": 0, "shadow_error": error}
+
+    message_by_id = {message.source_message_id: message for message in shadow_messages}
+    for result in shadow_results:
+        _record_shadow_decision(
+            evaluation_service,
+            shadow_classifier=shadow_classifier,
+            message=message_by_id[result.source_message_id],
+            result=result,
+        )
+    return {"shadow_decision_count": len(shadow_results)}
+
+
+def _lead_shadow_enabled(settings: SettingsService, payload: dict[str, Any]) -> bool:
+    if "lead_llm_shadow_enabled" in payload:
+        return _truthy(payload["lead_llm_shadow_enabled"])
+    return _truthy(settings.get("lead_llm_shadow_enabled"))
+
+
+def _lead_shadow_fallback_on_error(settings: SettingsService, payload: dict[str, Any]) -> bool:
+    if "lead_llm_shadow_fallback_on_error" in payload:
+        return _truthy(payload["lead_llm_shadow_fallback_on_error"])
+    configured = settings.get("lead_llm_shadow_fallback_on_error")
+    return True if configured is None else _truthy(configured)
+
+
+def _record_shadow_decision(
+    evaluation_service: EvaluationService,
+    *,
+    shadow_classifier: LeadShadowClassifierAdapter,
+    message: LeadMessageForClassification,
+    result: LeadClassifierResult,
+) -> None:
+    evaluation_service.record_decision(
+        decision_type="lead_detection_shadow",
+        entity_type="source_message",
+        entity_id=result.source_message_id,
+        dedupe_key=_lead_shadow_dedupe_key(shadow_classifier, result),
+        source_message_id=result.source_message_id,
+        prompt_hash=shadow_classifier.prompt_hash,
+        prompt_version=shadow_classifier.prompt_version,
+        model=shadow_classifier.model,
+        decision=result.decision,
+        confidence=result.confidence,
+        reason=result.reason,
+        input_json={
+            "message_text": message.message_text,
+            "telegram_message_id": message.telegram_message_id,
+            "sender_id": message.sender_id,
+            "detection_mode": result.detection_mode,
+            "shadow_mode": True,
+        },
+        evidence_json={
+            "matches": [_shadow_decision_trace_match(match) for match in result.matches or []],
+            "high_value_signals": result.high_value_signals_json,
+            "negative_signals": result.negative_signals_json,
+        },
+        output_json={
+            "commercial_value_score": result.commercial_value_score,
+            "negative_score": result.negative_score,
+            "notify_reason": result.notify_reason,
+            "token_usage": shadow_classifier.last_token_usage_json,
+        },
+        created_by="llm-shadow",
+    )
+
+
+def _lead_shadow_dedupe_key(
+    shadow_classifier: LeadShadowClassifierAdapter,
+    result: LeadClassifierResult,
+) -> str:
+    material = {
+        "source_message_id": result.source_message_id,
+        "detection_mode": result.detection_mode,
+        "model": shadow_classifier.model,
+        "prompt_hash": shadow_classifier.prompt_hash,
+        "prompt_version": shadow_classifier.prompt_version,
+    }
+    digest = hashlib.sha256(
+        json.dumps(material, sort_keys=True, ensure_ascii=True).encode("utf-8")
+    ).hexdigest()[:32]
+    return f"lead_detection_shadow:{digest}"
+
+
+def _shadow_decision_trace_match(match: LeadClassifierMatch) -> dict[str, Any]:
+    return {
+        "catalog_item_id": match.catalog_item_id,
+        "catalog_term_id": match.catalog_term_id,
+        "catalog_offer_id": match.catalog_offer_id,
+        "category_id": match.category_id,
+        "match_type": match.match_type,
+        "matched_text": match.matched_text,
+        "score": match.score,
     }
 
 

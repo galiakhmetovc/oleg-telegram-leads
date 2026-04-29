@@ -1,4 +1,5 @@
 from datetime import UTC, datetime
+from typing import Any
 
 from sqlalchemy import insert
 from sqlalchemy import inspect
@@ -19,6 +20,7 @@ from pur_leads.models.catalog import (
     extraction_runs_table,
     parsed_chunks_table,
 )
+from pur_leads.models.evaluation import decision_records_table
 from pur_leads.models.leads import lead_clusters_table, lead_events_table
 from pur_leads.models.telegram_sources import (
     monitored_sources_table,
@@ -27,6 +29,7 @@ from pur_leads.models.telegram_sources import (
 )
 from pur_leads.services.catalog_sources import CatalogSourceService
 from pur_leads.services.scheduler import SchedulerService
+from pur_leads.services.settings import SettingsService
 from pur_leads.services.telegram_sources import TelegramSourceService
 from pur_leads.services.userbots import UserbotAccountService
 from pur_leads.workers.runtime import ParsedArtifact
@@ -297,6 +300,80 @@ def test_cli_worker_once_uses_configured_zai_llm_extractor(tmp_path, capsys, mon
     )
 
 
+def test_cli_worker_once_uses_configured_zai_lead_shadow_classifier(
+    tmp_path,
+    capsys,
+    monkeypatch,
+):
+    db_path = tmp_path / "cli.db"
+    engine = create_sqlite_engine(db_path)
+    upgrade_database(engine)
+    session_factory = create_session_factory(engine)
+    with session_factory() as session:
+        source_id = _insert_monitored_source(session)
+        message_id = _insert_source_message(
+            session,
+            source_id,
+            text="Ищу камеру Dahua для дома",
+        )
+        _insert_candidate(session, canonical_name="Видеонаблюдение", terms=["камера"])
+        SettingsService(session).set(
+            "catalog_llm_extraction_enabled",
+            False,
+            value_type="bool",
+            updated_by="test",
+        )
+        SettingsService(session).set(
+            "lead_llm_shadow_enabled",
+            True,
+            value_type="bool",
+            updated_by="test",
+        )
+        SettingsService(session).set(
+            "lead_llm_shadow_model",
+            "glm-4.5-flash",
+            value_type="string",
+            updated_by="test",
+        )
+        job = SchedulerService(session).enqueue(
+            job_type="classify_message_batch",
+            scope_type="telegram_source",
+            monitored_source_id=source_id,
+            payload_json={"limit": 10},
+        )
+
+    monkeypatch.setenv("PUR_ZAI_API_KEY", "test-key")
+    monkeypatch.setattr("pur_leads.cli.ZaiChatCompletionClient", FakeZaiChatCompletionClient)
+    FakeZaiChatCompletionClient.instances.clear()
+
+    main(["--database-path", str(db_path), "worker", "once"])
+
+    with session_factory() as session:
+        stored = SchedulerService(session).repository.get(job.id)
+        shadow = (
+            session.execute(
+                select(decision_records_table).where(
+                    decision_records_table.c.decision_type == "lead_detection_shadow"
+                )
+            )
+            .mappings()
+            .one()
+        )
+    output = capsys.readouterr().out
+    assert stored is not None
+    assert "succeeded job" in output
+    assert stored.result_summary_json == {
+        "message_count": 1,
+        "event_count": 1,
+        "cluster_count": 1,
+        "shadow_decision_count": 1,
+    }
+    assert shadow["source_message_id"] == message_id
+    assert shadow["model"] == "glm-4.5-flash"
+    assert shadow["decision"] == "lead"
+    assert FakeZaiChatCompletionClient.instances[0].calls[0]["model"] == "glm-4.5-flash"
+
+
 def test_cli_worker_once_uses_configured_telethon_client(tmp_path, capsys, monkeypatch):
     db_path = tmp_path / "cli.db"
     engine = create_sqlite_engine(db_path)
@@ -483,7 +560,7 @@ def _insert_candidate(session, *, canonical_name: str, terms: list[str]) -> str:
 
 
 class FakeConfiguredTelegramClient:
-    instances = []
+    instances: list["FakeConfiguredTelegramClient"] = []
 
     def __init__(self, *, session_path, api_id, api_hash, **_kwargs) -> None:
         self.session_path = session_path
@@ -536,17 +613,47 @@ class FakePdfArtifactParser:
 
 
 class FakeZaiChatCompletionClient:
-    instances = []
+    instances: list["FakeZaiChatCompletionClient"] = []
 
     def __init__(self, *, api_key, base_url, timeout_seconds=60.0) -> None:
         self.api_key = api_key
         self.base_url = base_url
         self.timeout_seconds = timeout_seconds
+        self.calls: list[dict[str, Any]] = []
         self.instances.append(self)
 
     async def complete(self, *, messages, model, temperature, max_tokens):  # noqa: ANN001
-        return AiChatCompletion(
-            content="""
+        self.calls.append(
+            {
+                "messages": messages,
+                "model": model,
+                "temperature": temperature,
+                "max_tokens": max_tokens,
+            }
+        )
+        if any("lead-detection evaluator" in _message_content(message) for message in messages):
+            content = """
+            {
+              "items": [
+                {
+                  "source_message_id": "PLACEHOLDER",
+                  "decision": "lead",
+                  "confidence": 0.86,
+                  "commercial_value_score": 0.72,
+                  "negative_score": 0.02,
+                  "reason": "User is looking for a camera",
+                  "signals": ["ищу камеру"],
+                  "negative_signals": [],
+                  "matched_text": ["Ищу камеру"],
+                  "notify_reason": "purchase_intent"
+                }
+              ]
+            }
+            """
+            source_message_id = _source_message_id_from_prompt(messages)
+            content = content.replace("PLACEHOLDER", source_message_id)
+        else:
+            content = """
             {
               "facts": [
                 {
@@ -559,9 +666,26 @@ class FakeZaiChatCompletionClient:
                 }
               ]
             }
-            """,
+            """
+        return AiChatCompletion(
+            content=content,
             model=model,
             request_id="fake-zai-request",
             usage={"prompt_tokens": 20, "completion_tokens": 10, "total_tokens": 30},
             raw_response={},
         )
+
+
+def _message_content(message) -> str:  # noqa: ANN001
+    if hasattr(message, "content"):
+        return str(message.content)
+    return str(message.get("content", ""))
+
+
+def _source_message_id_from_prompt(messages) -> str:  # noqa: ANN001
+    for message in messages:
+        content = _message_content(message)
+        marker = '"source_message_id": "'
+        if marker in content:
+            return content.split(marker, 1)[1].split('"', 1)[0]
+    return "unknown"

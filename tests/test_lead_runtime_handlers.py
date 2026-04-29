@@ -15,6 +15,7 @@ from pur_leads.models.catalog import (
     classifier_snapshot_entries_table,
     classifier_versions_table,
 )
+from pur_leads.models.evaluation import decision_records_table
 from pur_leads.models.leads import lead_clusters_table, lead_events_table, lead_matches_table
 from pur_leads.models.notifications import notification_events_table
 from pur_leads.models.scheduler import scheduler_jobs_table
@@ -163,6 +164,57 @@ class ConfigurableLeadClassifier(FakeLeadClassifier):
             )
             for message in messages
         ]
+
+
+class FakeShadowLeadClassifier:
+    model = "glm-4.5-flash"
+    prompt_hash = "shadow-prompt-hash"
+    prompt_version = "lead-shadow-v1"
+
+    def __init__(self, *, decision: str = "not_lead", confidence: float = 0.73) -> None:
+        self.decision = decision
+        self.confidence = confidence
+        self.last_token_usage_json = {
+            "prompt_tokens": 100,
+            "completion_tokens": 30,
+            "total_tokens": 130,
+            "request_id": "shadow-request",
+            "model": self.model,
+        }
+        self.seen_messages: list[str] = []
+        self.seen_payload: dict | None = None
+
+    async def classify_message_batch(self, *, messages: list, payload: dict):
+        self.seen_messages = [message.source_message_id for message in messages]
+        self.seen_payload = payload
+        return [
+            LeadClassifierResult(
+                source_message_id=message.source_message_id,
+                classifier_version_id="",
+                decision=self.decision,
+                detection_mode=payload.get("detection_mode", "live"),
+                confidence=self.confidence,
+                commercial_value_score=0.2,
+                negative_score=0.1,
+                high_value_signals_json=["llm_shadow_signal"],
+                negative_signals_json=[],
+                notify_reason="llm_shadow_review",
+                reason="LLM shadow classified the message",
+                matches=[
+                    LeadClassifierMatch(
+                        match_type="llm_signal",
+                        matched_text="llm_shadow_signal",
+                        score=self.confidence,
+                    )
+                ],
+            )
+            for message in messages
+        ]
+
+
+class FailingShadowLeadClassifier(FakeShadowLeadClassifier):
+    async def classify_message_batch(self, *, messages: list, payload: dict):
+        raise RuntimeError("shadow unavailable")
 
 
 class FakeLeadNotifier:
@@ -372,6 +424,155 @@ async def test_classify_lead_queues_context_and_sends_configured_notification(ru
     ]
     assert cluster["last_notified_at"] is not None
     assert cluster["notify_update_count"] == 1
+
+
+@pytest.mark.asyncio
+async def test_classify_message_batch_records_llm_shadow_decisions_without_side_effects(
+    runtime_session,
+):
+    session = runtime_session["session"]
+    message_id = _insert_source_message(
+        session,
+        runtime_session["source_id"],
+        telegram_message_id=119,
+        sender_id="sender-1",
+        text="нужна камера для дома",
+        status="queued",
+    )
+    SettingsService(session).set(
+        "lead_llm_shadow_enabled",
+        True,
+        value_type="bool",
+        updated_by="admin",
+    )
+    classifier = FakeLeadClassifier(
+        classifier_version_id=runtime_session["classifier_version_id"],
+        snapshot_entry_id=runtime_session["snapshot_entry_id"],
+        category_id=runtime_session["category_id"],
+        term_id=runtime_session["term_id"],
+    )
+    shadow_classifier = FakeShadowLeadClassifier(decision="not_lead", confidence=0.74)
+    SchedulerService(session).enqueue(
+        job_type="classify_message_batch",
+        scope_type="telegram_source",
+        monitored_source_id=runtime_session["source_id"],
+        payload_json={"limit": 10},
+    )
+    runtime = WorkerRuntime(
+        session,
+        handlers=build_lead_handler_registry(
+            session,
+            classifier=classifier,
+            shadow_classifier=shadow_classifier,
+        ),
+    )
+
+    result = await runtime.run_once()
+
+    events = session.execute(select(lead_events_table)).mappings().all()
+    clusters = session.execute(select(lead_clusters_table)).mappings().all()
+    decisions = (
+        session.execute(
+            select(decision_records_table).order_by(decision_records_table.c.decision_type)
+        )
+        .mappings()
+        .all()
+    )
+    assert result.status == "succeeded"
+    assert len(events) == 1
+    assert len(clusters) == 1
+    assert {row["decision_type"] for row in decisions} == {
+        "lead_detection",
+        "lead_detection_shadow",
+    }
+    shadow = next(row for row in decisions if row["decision_type"] == "lead_detection_shadow")
+    assert shadow["entity_type"] == "source_message"
+    assert shadow["entity_id"] == message_id
+    assert shadow["source_message_id"] == message_id
+    assert shadow["lead_event_id"] is None
+    assert shadow["classifier_version_id"] is None
+    assert shadow["model"] == "glm-4.5-flash"
+    assert shadow["prompt_version"] == "lead-shadow-v1"
+    assert shadow["decision"] == "not_lead"
+    assert shadow["confidence"] == 0.74
+    assert shadow["input_json"]["shadow_mode"] is True
+    assert shadow["input_json"]["message_text"] == "нужна камера для дома"
+    assert shadow["evidence_json"]["matches"][0]["matched_text"] == "llm_shadow_signal"
+    assert shadow["output_json"]["token_usage"]["total_tokens"] == 130
+    assert shadow_classifier.seen_messages == [message_id]
+    assert shadow_classifier.seen_payload == {
+        "limit": 10,
+        "shadow_mode": True,
+        "detection_mode": "live",
+    }
+
+
+@pytest.mark.asyncio
+async def test_classify_message_batch_continues_when_llm_shadow_fails(runtime_session):
+    session = runtime_session["session"]
+    _insert_source_message(
+        session,
+        runtime_session["source_id"],
+        telegram_message_id=118,
+        sender_id="sender-1",
+        text="нужна камера для дома",
+        status="queued",
+    )
+    SettingsService(session).set(
+        "lead_llm_shadow_enabled",
+        True,
+        value_type="bool",
+        updated_by="admin",
+    )
+    classifier = FakeLeadClassifier(
+        classifier_version_id=runtime_session["classifier_version_id"],
+        snapshot_entry_id=runtime_session["snapshot_entry_id"],
+        category_id=runtime_session["category_id"],
+        term_id=runtime_session["term_id"],
+    )
+    SchedulerService(session).enqueue(
+        job_type="classify_message_batch",
+        scope_type="telegram_source",
+        monitored_source_id=runtime_session["source_id"],
+        payload_json={"limit": 10},
+    )
+    runtime = WorkerRuntime(
+        session,
+        handlers=build_lead_handler_registry(
+            session,
+            classifier=classifier,
+            shadow_classifier=FailingShadowLeadClassifier(),
+        ),
+    )
+
+    result = await runtime.run_once()
+
+    events = session.execute(select(lead_events_table)).mappings().all()
+    shadow_decisions = (
+        session.execute(
+            select(decision_records_table).where(
+                decision_records_table.c.decision_type == "lead_detection_shadow"
+            )
+        )
+        .mappings()
+        .all()
+    )
+    audit_event = (
+        session.execute(
+            select(operational_events_table).where(
+                operational_events_table.c.event_type == "ai_request",
+                operational_events_table.c.entity_type == "lead_detection_shadow",
+            )
+        )
+        .mappings()
+        .one()
+    )
+    assert result.status == "succeeded"
+    assert len(events) == 1
+    assert shadow_decisions == []
+    assert audit_event["severity"] == "warning"
+    assert audit_event["details_json"]["reason"] == "shadow_classifier_failed"
+    assert audit_event["details_json"]["error"] == "shadow unavailable"
 
 
 @pytest.mark.asyncio
