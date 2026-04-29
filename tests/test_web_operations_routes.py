@@ -8,10 +8,12 @@ from pur_leads.db.engine import create_sqlite_engine
 from pur_leads.db.migrations import upgrade_database
 from pur_leads.db.session import create_session_factory
 from pur_leads.models.catalog import extraction_runs_table
+from pur_leads.models.evaluation import evaluation_runs_table
 from pur_leads.models.notifications import notification_events_table
 from pur_leads.models.scheduler import scheduler_jobs_table
 from pur_leads.models.telegram_sources import monitored_sources_table, source_access_checks_table
 from pur_leads.services.audit import AuditService
+from pur_leads.services.evaluation import EvaluationService
 from pur_leads.services.scheduler import SchedulerService
 from pur_leads.services.web_auth import WebAuthService
 from pur_leads.web.app import create_app
@@ -59,6 +61,20 @@ def test_operations_routes_require_auth_and_expose_runtime_state(tmp_path):
         _insert_notification(session, status="suppressed", reason="maybe_web_only")
         _insert_extraction_run(session, status="failed", error="llm timeout")
         _insert_access_check(session, status="flood_wait", error="wait 60s")
+        dataset = EvaluationService(session).get_or_create_feedback_regression_dataset(
+            created_by="test"
+        )
+        failed_evaluation = EvaluationService(session).start_run(
+            evaluation_dataset_id=dataset.id,
+            run_type="lead_detection",
+            created_by="test",
+        )
+        session.execute(
+            update(evaluation_runs_table)
+            .where(evaluation_runs_table.c.id == failed_evaluation.id)
+            .values(status="failed", error="quality threshold missed")
+        )
+        session.commit()
 
     _login(client)
     summary = client.get("/api/operations/summary").json()
@@ -85,6 +101,8 @@ def test_operations_routes_require_auth_and_expose_runtime_state(tmp_path):
     assert summary["notifications"]["by_status"]["suppressed"] == 1
     assert summary["extraction_runs"]["by_status"]["failed"] == 1
     assert summary["access_checks"]["by_status"]["flood_wait"] == 1
+    assert summary["quality"]["runs"]["by_status"]["failed"] == 1
+    assert summary["quality"]["runs"]["recent_failed"][0]["error"] == "quality threshold missed"
     assert jobs["items"][0]["id"] == failed_job.id
     assert jobs["items"][0]["last_error"] == "parser missing"
     assert job_detail["job"]["id"] == queued_job.id

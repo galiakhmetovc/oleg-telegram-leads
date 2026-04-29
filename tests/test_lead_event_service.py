@@ -9,6 +9,7 @@ from pur_leads.db.engine import create_sqlite_engine
 from pur_leads.db.migrations import upgrade_database
 from pur_leads.db.session import create_session_factory
 from pur_leads.models.catalog import classifier_snapshot_entries_table, classifier_versions_table
+from pur_leads.models.evaluation import decision_records_table
 from pur_leads.models.leads import lead_events_table, lead_matches_table
 from pur_leads.models.telegram_sources import monitored_sources_table, source_messages_table
 from pur_leads.services.leads import LeadDetectionResult, LeadMatchInput, LeadService
@@ -109,6 +110,67 @@ def test_record_detection_deduplicates_same_message_classifier_and_mode(lead_ses
     assert second.id == first.id
     assert len(session.execute(select(lead_events_table)).all()) == 1
     assert len(session.execute(select(lead_matches_table)).all()) == 1
+
+
+def test_record_detection_creates_decision_trace(lead_session):
+    session, _, message_id, classifier_version_id, snapshot_entry_id = lead_session
+    service = LeadService(session)
+
+    event = service.record_detection(
+        source_message_id=message_id,
+        classifier_version_id=classifier_version_id,
+        result=LeadDetectionResult(
+            decision="lead",
+            detection_mode="live",
+            confidence=0.91,
+            commercial_value_score=0.7,
+            negative_score=0.05,
+            notify_reason="lead_now",
+            reason="User asks for a camera",
+            matches=[
+                LeadMatchInput(
+                    classifier_snapshot_entry_id=snapshot_entry_id,
+                    catalog_term_id="term-1",
+                    category_id="category-1",
+                    match_type="term",
+                    matched_text="камера",
+                    score=0.9,
+                )
+            ],
+        ),
+    )
+
+    decision = session.execute(select(decision_records_table)).mappings().one()
+    assert decision["decision_type"] == "lead_detection"
+    assert decision["entity_type"] == "lead_event"
+    assert decision["entity_id"] == event.id
+    assert decision["dedupe_key"] == f"lead_detection:{event.id}"
+    assert decision["source_message_id"] == message_id
+    assert decision["lead_event_id"] == event.id
+    assert decision["classifier_version_id"] == classifier_version_id
+    assert decision["decision"] == "lead"
+    assert decision["confidence"] == 0.91
+    assert decision["reason"] == "User asks for a camera"
+    assert decision["input_json"] == {
+        "message_text": "нужна камера на дачу",
+        "detection_mode": "live",
+    }
+    assert decision["evidence_json"]["matches"] == [
+        {
+            "catalog_item_id": None,
+            "catalog_term_id": "term-1",
+            "catalog_offer_id": None,
+            "category_id": "category-1",
+            "match_type": "term",
+            "matched_text": "камера",
+            "score": 0.9,
+        }
+    ]
+    assert decision["output_json"] == {
+        "commercial_value_score": 0.7,
+        "negative_score": 0.05,
+        "notify_reason": "lead_now",
+    }
 
 
 def _insert_monitored_source(session) -> str:

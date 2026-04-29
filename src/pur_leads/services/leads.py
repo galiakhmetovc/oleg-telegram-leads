@@ -10,7 +10,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from pur_leads.core.time import utc_now
-from pur_leads.models.catalog import classifier_snapshot_entries_table
+from pur_leads.models.catalog import classifier_snapshot_entries_table, classifier_versions_table
 from pur_leads.models.leads import lead_matches_table
 from pur_leads.models.telegram_sources import monitored_sources_table, source_messages_table
 from pur_leads.repositories.leads import (
@@ -20,6 +20,7 @@ from pur_leads.repositories.leads import (
     LeadRepository,
 )
 from pur_leads.repositories.tasks import TaskRecord
+from pur_leads.services.evaluation import EvaluationService
 from pur_leads.services.tasks import TaskService
 
 
@@ -146,6 +147,34 @@ class LeadService:
                 ),
                 created_at=now,
             )
+        classifier_version = self._classifier_version(classifier_version_id)
+        EvaluationService(self.session).record_decision(
+            decision_type="lead_detection",
+            entity_type="lead_event",
+            entity_id=event.id,
+            dedupe_key=f"lead_detection:{event.id}",
+            source_message_id=source_message_id,
+            lead_event_id=event.id,
+            classifier_version_id=classifier_version_id,
+            catalog_hash=classifier_version.get("catalog_hash") if classifier_version else None,
+            prompt_hash=classifier_version.get("prompt_hash") if classifier_version else None,
+            model=classifier_version.get("model") if classifier_version else None,
+            settings_hash=classifier_version.get("settings_hash") if classifier_version else None,
+            decision=result.decision,
+            confidence=result.confidence,
+            reason=result.reason,
+            input_json={
+                "message_text": _message_text(message),
+                "detection_mode": result.detection_mode,
+            },
+            evidence_json={"matches": [_decision_trace_match(match) for match in result.matches]},
+            output_json={
+                "commercial_value_score": result.commercial_value_score,
+                "negative_score": result.negative_score,
+                "notify_reason": result.notify_reason,
+            },
+            created_by="system",
+        )
         self.session.commit()
         return event
 
@@ -541,6 +570,18 @@ class LeadService:
         )
         return dict(row) if row is not None else None
 
+    def _classifier_version(self, classifier_version_id: str) -> dict[str, Any] | None:
+        row = (
+            self.session.execute(
+                select(classifier_versions_table).where(
+                    classifier_versions_table.c.id == classifier_version_id
+                )
+            )
+            .mappings()
+            .first()
+        )
+        return dict(row) if row is not None else None
+
     def _create_feedback_event(
         self,
         *,
@@ -560,7 +601,7 @@ class LeadService:
         if action == "not_lead" and not reason_code:
             raise ValueError("reason_code is required for not_lead feedback")
         now = utc_now()
-        return self.repository.create_feedback_event(
+        feedback = self.repository.create_feedback_event(
             target_type=target_type,
             target_id=target_id,
             action=action,
@@ -576,6 +617,12 @@ class LeadService:
             created_at=now,
             metadata_json=metadata_json or {},
         )
+        if _should_promote_feedback_to_regression(feedback):
+            EvaluationService(self.session).promote_feedback_to_regression_case(
+                feedback.id,
+                actor=created_by,
+            )
+        return feedback
 
     def _event_category_id(self, event_id: str) -> str | None:
         row = (
@@ -628,6 +675,18 @@ def _sender_name(message: dict[str, Any]) -> str | None:
     return None
 
 
+def _decision_trace_match(match: LeadMatchInput) -> dict[str, Any]:
+    return {
+        "catalog_item_id": match.catalog_item_id,
+        "catalog_term_id": match.catalog_term_id,
+        "catalog_offer_id": match.catalog_offer_id,
+        "category_id": match.category_id,
+        "match_type": match.match_type,
+        "matched_text": match.matched_text,
+        "score": match.score,
+    }
+
+
 _CLUSTER_FEEDBACK_ACTIONS = {
     "lead_confirmed",
     "not_lead",
@@ -666,6 +725,15 @@ def _default_learning_effect(action: str) -> str:
     if action == "not_lead":
         return "negative_example"
     return "no_classifier_learning"
+
+
+def _should_promote_feedback_to_regression(feedback: FeedbackEventRecord) -> bool:
+    return (
+        feedback.feedback_scope == "classifier"
+        and feedback.learning_effect
+        in {"positive_example", "negative_example", "match_correction", "term_weight_down"}
+        and feedback.application_status in {"recorded", "applied"}
+    )
 
 
 def _cluster_status_for_decision(decision: str) -> str:

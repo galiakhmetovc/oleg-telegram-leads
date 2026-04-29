@@ -30,4 +30,10 @@ def test_foundation_migration_creates_core_tables(tmp_path):
         "notification_events",
         "backup_runs",
         "restore_runs",
+        "decision_records",
+        "evaluation_datasets",
+        "evaluation_cases",
+        "evaluation_runs",
+        "evaluation_results",
+        "quality_metric_snapshots",
     }.issubset(tables)

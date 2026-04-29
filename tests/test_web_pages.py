@@ -44,6 +44,7 @@ def test_workspace_and_admin_pages_are_protected_and_render_shells(tmp_path):
     catalog_denied = client.get("/catalog", follow_redirects=False)
     today_denied = client.get("/today", follow_redirects=False)
     operations_denied = client.get("/operations", follow_redirects=False)
+    quality_denied = client.get("/quality", follow_redirects=False)
     _login(client)
     workspace_response = client.get("/")
     admin_response = client.get("/admin")
@@ -52,6 +53,7 @@ def test_workspace_and_admin_pages_are_protected_and_render_shells(tmp_path):
     catalog_response = client.get("/catalog")
     today_response = client.get("/today")
     operations_response = client.get("/operations")
+    quality_response = client.get("/quality")
     js_response = client.get("/static/app.js")
 
     assert workspace_denied.status_code == 303
@@ -68,12 +70,15 @@ def test_workspace_and_admin_pages_are_protected_and_render_shells(tmp_path):
     assert today_denied.headers["location"] == "/login"
     assert operations_denied.status_code == 303
     assert operations_denied.headers["location"] == "/login"
+    assert quality_denied.status_code == 303
+    assert quality_denied.headers["location"] == "/login"
     assert workspace_response.status_code == 200
     assert 'data-page="leads-inbox"' in workspace_response.text
     assert '<a href="/today">Today</a>' in workspace_response.text
     assert '<a href="/sources">Sources</a>' in workspace_response.text
     assert '<a href="/catalog">Catalog</a>' in workspace_response.text
     assert '<a href="/crm">CRM</a>' in workspace_response.text
+    assert '<a href="/quality">Quality</a>' in workspace_response.text
     assert '<a href="/operations">Operations</a>' in workspace_response.text
     assert 'id="lead-queue"' in workspace_response.text
     assert 'id="lead-detail"' in workspace_response.text
@@ -86,6 +91,7 @@ def test_workspace_and_admin_pages_are_protected_and_render_shells(tmp_path):
     assert '<a href="/sources">Sources</a>' in admin_response.text
     assert '<a href="/catalog">Catalog</a>' in admin_response.text
     assert '<a href="/crm">CRM</a>' in admin_response.text
+    assert '<a href="/quality">Quality</a>' in admin_response.text
     assert 'id="admin-users"' in admin_response.text
     assert 'id="userbot-form"' in admin_response.text
     assert 'id="userbot-accounts"' in admin_response.text
@@ -95,6 +101,7 @@ def test_workspace_and_admin_pages_are_protected_and_render_shells(tmp_path):
     assert '<a href="/today">Today</a>' in crm_response.text
     assert '<a href="/sources">Sources</a>' in crm_response.text
     assert '<a href="/catalog">Catalog</a>' in crm_response.text
+    assert '<a href="/quality">Quality</a>' in crm_response.text
     assert 'id="crm-client-list"' in crm_response.text
     assert 'id="crm-client-form"' in crm_response.text
     assert sources_response.status_code == 200
@@ -134,16 +141,24 @@ def test_workspace_and_admin_pages_are_protected_and_render_shells(tmp_path):
     assert 'id="operations-restores"' in operations_response.text
     assert 'id="operations-backup-create"' in operations_response.text
     assert 'id="operations-audit"' in operations_response.text
+    assert quality_response.status_code == 200
+    assert 'data-page="quality"' in quality_response.text
+    assert 'id="quality-summary"' in quality_response.text
+    assert 'id="quality-datasets"' in quality_response.text
+    assert 'id="quality-runs"' in quality_response.text
+    assert 'id="quality-failed-results"' in quality_response.text
     assert "/api/crm/clients" in js_response.text
     assert "/crm/convert" in js_response.text
     assert "/api/sources" in js_response.text
     assert "/api/catalog/candidates" in js_response.text
     assert "/api/operations/summary" in js_response.text
+    assert "/api/quality/summary" in js_response.text
     assert "/api/operations/extraction-runs" in js_response.text
     assert "/api/operations/backups" in js_response.text
     assert "/api/today" in js_response.text
     assert "loadCatalogCandidateDetail" in js_response.text
     assert "initOperations" in js_response.text
+    assert "initQuality" in js_response.text
     assert "initToday" in js_response.text
     assert 'method: "PATCH"' in js_response.text
     assert "/api/admin/userbots" in js_response.text

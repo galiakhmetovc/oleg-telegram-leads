@@ -13,6 +13,7 @@ from pur_leads.models.catalog import (
     classifier_snapshot_entries_table,
     classifier_versions_table,
 )
+from pur_leads.models.evaluation import evaluation_cases_table, evaluation_datasets_table
 from pur_leads.models.leads import (
     feedback_events_table,
     lead_cluster_actions_table,
@@ -102,6 +103,52 @@ def test_record_feedback_requires_reason_and_supports_narrow_targets(feedback_se
     assert feedback_row["comment"] == "Matched term is too broad here"
     assert commercial_row["feedback_scope"] == "crm_outcome"
     assert commercial_row["learning_effect"] == "no_classifier_learning"
+
+
+def test_classifier_feedback_promotes_regression_case(feedback_session):
+    session, source_id, category_id, classifier_version_id, snapshot_entry_id = feedback_session
+    event, cluster = _create_clustered_event(
+        session,
+        source_id,
+        category_id,
+        classifier_version_id,
+        snapshot_entry_id,
+        telegram_message_id=205,
+    )
+    match_id = session.execute(
+        select(lead_matches_table.c.id).where(lead_matches_table.c.lead_event_id == event.id)
+    ).scalar_one()
+    service = LeadService(session)
+
+    feedback = service.record_feedback(
+        target_type="lead_match",
+        target_id=match_id,
+        action="wrong_product_or_term",
+        reason_code="wrong_product_or_term",
+        feedback_scope="classifier",
+        learning_effect="match_correction",
+        created_by="oleg",
+    )
+    commercial = service.record_feedback(
+        target_type="lead_cluster",
+        target_id=cluster.id,
+        action="commercial_too_expensive",
+        created_by="oleg",
+    )
+
+    datasets = session.execute(select(evaluation_datasets_table)).mappings().all()
+    cases = session.execute(select(evaluation_cases_table)).mappings().all()
+    assert len(datasets) == 1
+    assert datasets[0]["dataset_key"] == "feedback_regression:lead_detection"
+    assert len(cases) == 1
+    assert cases[0]["feedback_event_id"] == feedback.id
+    assert cases[0]["lead_event_id"] == event.id
+    assert cases[0]["lead_cluster_id"] == cluster.id
+    assert cases[0]["source_message_id"] == event.source_message_id
+    assert cases[0]["expected_decision"] == "not_lead"
+    assert cases[0]["expected_reason_code"] == "wrong_product_or_term"
+    assert cases[0]["context_json"]["feedback"]["learning_effect"] == "match_correction"
+    assert cases[0]["feedback_event_id"] != commercial.id
 
 
 def test_apply_cluster_review_actions_updates_state_and_feedback(feedback_session):

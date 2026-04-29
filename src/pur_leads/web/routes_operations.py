@@ -12,6 +12,13 @@ from sqlalchemy.orm import Session
 from pur_leads.models.audit import audit_log_table, operational_events_table
 from pur_leads.models.backup import backup_runs_table, restore_runs_table
 from pur_leads.models.catalog import extraction_runs_table
+from pur_leads.models.evaluation import (
+    decision_records_table,
+    evaluation_cases_table,
+    evaluation_datasets_table,
+    evaluation_results_table,
+    evaluation_runs_table,
+)
 from pur_leads.models.notifications import notification_events_table
 from pur_leads.models.scheduler import job_runs_table, scheduler_jobs_table
 from pur_leads.models.telegram_sources import source_access_checks_table
@@ -86,6 +93,35 @@ def operations_summary(
                 .order_by(source_access_checks_table.c.checked_at.desc())
                 .limit(10),
             ),
+        },
+        "quality": {
+            "decisions": {
+                "total": _table_count(session, decision_records_table),
+                "by_type": _count_by(session, decision_records_table, "decision_type"),
+            },
+            "datasets": {
+                "total": _table_count(session, evaluation_datasets_table),
+                "by_type": _count_by(session, evaluation_datasets_table, "dataset_type"),
+            },
+            "cases": {
+                "total": _table_count(session, evaluation_cases_table),
+                "by_label_source": _count_by(session, evaluation_cases_table, "label_source"),
+            },
+            "runs": {
+                "total": _table_count(session, evaluation_runs_table),
+                "by_status": _count_by(session, evaluation_runs_table, "status"),
+                "recent_failed": _rows(
+                    session,
+                    select(evaluation_runs_table)
+                    .where(evaluation_runs_table.c.status == "failed")
+                    .order_by(evaluation_runs_table.c.started_at.desc())
+                    .limit(10),
+                ),
+            },
+            "results": {
+                "total": _table_count(session, evaluation_results_table),
+                "by_failure_type": _count_by(session, evaluation_results_table, "failure_type"),
+            },
         },
         "audit": {
             "total": _table_count(session, audit_log_table),

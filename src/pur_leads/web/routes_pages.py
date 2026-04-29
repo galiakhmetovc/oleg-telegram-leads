@@ -67,6 +67,7 @@ def inbox_page(
                   <a href="/sources">Sources</a>
                   <a href="/catalog">Catalog</a>
                   <a href="/crm">CRM</a>
+                  <a href="/quality">Quality</a>
                   <a href="/operations">Operations</a>
                   <a href="/admin">Admin</a>
                   <button id="logout-button" type="button">Logout</button>
@@ -132,6 +133,7 @@ def admin_page(
                   <a href="/sources">Sources</a>
                   <a href="/catalog">Catalog</a>
                   <a href="/crm">CRM</a>
+                  <a href="/quality">Quality</a>
                   <a href="/operations">Operations</a>
                   <a href="/admin">Admin</a>
                   <button id="logout-button" type="button">Logout</button>
@@ -215,6 +217,7 @@ def crm_page(
                   <a href="/sources">Sources</a>
                   <a href="/catalog">Catalog</a>
                   <a href="/crm">CRM</a>
+                  <a href="/quality">Quality</a>
                   <a href="/operations">Operations</a>
                   <a href="/admin">Admin</a>
                   <button id="logout-button" type="button">Logout</button>
@@ -300,6 +303,7 @@ def sources_page(
                   <a href="/sources">Sources</a>
                   <a href="/catalog">Catalog</a>
                   <a href="/crm">CRM</a>
+                  <a href="/quality">Quality</a>
                   <a href="/operations">Operations</a>
                   <a href="/admin">Admin</a>
                   <button id="logout-button" type="button">Logout</button>
@@ -373,6 +377,7 @@ def catalog_page(
                   <a href="/sources">Sources</a>
                   <a href="/catalog">Catalog</a>
                   <a href="/crm">CRM</a>
+                  <a href="/quality">Quality</a>
                   <a href="/operations">Operations</a>
                   <a href="/admin">Admin</a>
                   <button id="logout-button" type="button">Logout</button>
@@ -459,6 +464,7 @@ def today_page(
                   <a href="/sources">Sources</a>
                   <a href="/catalog">Catalog</a>
                   <a href="/crm">CRM</a>
+                  <a href="/quality">Quality</a>
                   <a href="/operations">Operations</a>
                   <a href="/admin">Admin</a>
                   <button id="logout-button" type="button">Logout</button>
@@ -548,6 +554,7 @@ def operations_page(
                   <a href="/sources">Sources</a>
                   <a href="/catalog">Catalog</a>
                   <a href="/crm">CRM</a>
+                  <a href="/quality">Quality</a>
                   <a href="/operations">Operations</a>
                   <a href="/admin">Admin</a>
                   <button id="logout-button" type="button">Logout</button>
@@ -610,6 +617,76 @@ def operations_page(
                     <section>
                       <h2>Audit</h2>
                       <div id="operations-audit" class="table-list" aria-live="polite"></div>
+                    </section>
+                  </aside>
+                </section>
+              </section>
+            </main>
+            """,
+        )
+    )
+
+
+@router.get("/quality", response_class=HTMLResponse)
+def quality_page(
+    request: Request,
+    auth_service: WebAuthService = Depends(get_auth_service),
+) -> Response:
+    if not _has_page_session(request, auth_service):
+        return RedirectResponse("/login", status_code=303)
+    return HTMLResponse(
+        _page(
+            page="quality",
+            title="Quality",
+            main="""
+            <main class="workspace operations-workspace">
+              <header class="topbar">
+                <div>
+                  <span class="eyebrow">PUR Leads</span>
+                  <h1>Quality</h1>
+                </div>
+                <nav>
+                  <a href="/">Inbox</a>
+                  <a href="/today">Today</a>
+                  <a href="/sources">Sources</a>
+                  <a href="/catalog">Catalog</a>
+                  <a href="/crm">CRM</a>
+                  <a href="/quality">Quality</a>
+                  <a href="/operations">Operations</a>
+                  <a href="/admin">Admin</a>
+                  <button id="logout-button" type="button">Logout</button>
+                </nav>
+              </header>
+              <section class="operations-shell">
+                <section id="quality-summary" class="operations-summary" aria-live="polite">
+                  <div class="empty-state">Loading quality state</div>
+                </section>
+                <section class="operations-layout">
+                  <aside class="queue-pane" aria-label="Evaluation datasets">
+                    <div class="section-head">
+                      <h2>Datasets</h2>
+                      <button id="quality-refresh" type="button">Refresh</button>
+                    </div>
+                    <div id="quality-datasets" class="queue-list" aria-live="polite"></div>
+                  </aside>
+                  <section class="detail-pane" aria-live="polite">
+                    <div class="section-head">
+                      <h2>Evaluation Runs</h2>
+                    </div>
+                    <div id="quality-runs" class="table-list" aria-live="polite"></div>
+                    <div class="section-head">
+                      <h2>Failed Cases</h2>
+                    </div>
+                    <div id="quality-failed-results" class="table-list" aria-live="polite"></div>
+                  </section>
+                  <aside class="side-pane operations-signals" aria-label="Quality signals">
+                    <section>
+                      <h2>Recent Decisions</h2>
+                      <div id="quality-decisions" class="table-list" aria-live="polite"></div>
+                    </section>
+                    <section>
+                      <h2>Cases</h2>
+                      <div id="quality-cases" class="table-list" aria-live="polite"></div>
                     </section>
                   </aside>
                 </section>

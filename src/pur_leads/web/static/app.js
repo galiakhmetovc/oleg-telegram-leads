@@ -47,6 +47,7 @@ document.addEventListener("DOMContentLoaded", () => {
   if (page === "crm") initCrm();
   if (page === "today") initToday();
   if (page === "operations") initOperations();
+  if (page === "quality") initQuality();
   if (page === "admin") initAdmin();
 });
 
@@ -1043,6 +1044,8 @@ async function loadOperationsSummary() {
   ]);
   const failedBackups = summary.backups?.by_status?.failed || 0;
   const verifiedBackups = summary.backups?.by_status?.verified || 0;
+  const failedQualityRuns = summary.quality?.runs?.by_status?.failed || 0;
+  const qualityCases = summary.quality?.cases?.total || 0;
   target.innerHTML = `<div class="ops-metric-row">
     ${renderOpsMetric("Jobs", summary.jobs?.total || 0, `${queuedJobs} queued / ${runningJobs} running`)}
     ${renderOpsMetric("Failed jobs", failedJobs, "needs operator check", failedJobs ? "is-danger" : "")}
@@ -1051,6 +1054,7 @@ async function loadOperationsSummary() {
     ${renderOpsMetric("Notifications", summary.notifications?.total || 0, `${suppressedNotifications} suppressed`)}
     ${renderOpsMetric("Extraction", summary.extraction_runs?.total || 0, `${failedExtractions} failed`, failedExtractions ? "is-danger" : "")}
     ${renderOpsMetric("Access", summary.access_checks?.total || 0, `${accessIssues} issues`, accessIssues ? "is-danger" : "")}
+    ${renderOpsMetric("Quality", qualityCases, `${failedQualityRuns} failed runs`, failedQualityRuns ? "is-danger" : "")}
     ${renderOpsMetric("Backups", summary.backups?.total || 0, `${verifiedBackups} verified`, failedBackups ? "is-danger" : "")}
     ${renderOpsMetric("Audit", summary.audit?.total || 0, "recorded changes")}
   </div>`;
@@ -1367,6 +1371,143 @@ function renderOperationAudit(item) {
       <p class="muted">${escapeHtml(entity || item.actor || "")}</p>
     </div>
     <span>${escapeHtml(time(item.created_at))}</span>
+  </div>`;
+}
+
+function initQuality() {
+  document.querySelector("#quality-refresh")?.addEventListener("click", loadQuality);
+  loadQuality();
+}
+
+async function loadQuality() {
+  const [summary, datasets, runs, failedResults, decisions, cases] = await Promise.all([
+    api("/api/quality/summary"),
+    api("/api/quality/datasets?limit=20"),
+    api("/api/quality/runs?limit=20"),
+    api("/api/quality/results?passed=false&limit=20"),
+    api("/api/quality/decisions?limit=20"),
+    api("/api/quality/cases?limit=20"),
+  ]);
+  renderQualitySummary(summary);
+  renderQualityDatasets(datasets.items || []);
+  renderQualityRuns(runs.items || []);
+  renderQualityFailedResults(failedResults.items || []);
+  renderQualityDecisions(decisions.items || []);
+  renderQualityCases(cases.items || []);
+}
+
+function renderQualitySummary(summary) {
+  const target = document.querySelector("#quality-summary");
+  if (!target) return;
+  const failedResults = summary.results?.failed || 0;
+  const failedRuns = summary.runs?.by_status?.failed || 0;
+  const totalRuns = summary.runs?.total || 0;
+  target.innerHTML = `<div class="ops-metric-row">
+    ${renderOpsMetric("Decisions", summary.decisions?.total || 0, "recorded traces")}
+    ${renderOpsMetric("Datasets", summary.datasets?.total || 0, "quality sets")}
+    ${renderOpsMetric("Cases", summary.cases?.total || 0, "labeled examples")}
+    ${renderOpsMetric("Runs", totalRuns, `${failedRuns} failed`, failedRuns ? "is-danger" : "")}
+    ${renderOpsMetric("Failed cases", failedResults, "needs review", failedResults ? "is-danger" : "")}
+  </div>`;
+}
+
+function renderQualityDatasets(items) {
+  const target = document.querySelector("#quality-datasets");
+  if (!target) return;
+  if (!items.length) {
+    target.innerHTML = `<div class="empty-state">No datasets</div>`;
+    return;
+  }
+  target.innerHTML = items
+    .map(
+      (item) => `<div class="queue-item">
+        <strong>${escapeHtml(item.name || item.dataset_key)}</strong>
+        <span class="muted">${escapeHtml(item.dataset_key || item.id)}</span>
+        <span class="queue-meta">
+          ${badge(item.dataset_type || "dataset")}
+          ${badge(item.status || "unknown", operationsStatusClass(item.status))}
+        </span>
+      </div>`
+    )
+    .join("");
+}
+
+function renderQualityRuns(items) {
+  const target = document.querySelector("#quality-runs");
+  if (!target) return;
+  target.innerHTML =
+    items.map(renderQualityRun).join("") || '<div class="empty-state">No runs</div>';
+}
+
+function renderQualityRun(item) {
+  const metrics = item.metrics_json || {};
+  const detail = [
+    item.model,
+    metrics.total !== undefined ? `${metrics.passed || 0}/${metrics.total} passed` : "",
+    time(item.finished_at || item.started_at),
+  ]
+    .filter(Boolean)
+    .join(" / ");
+  return `<div class="table-row">
+    <div>
+      <strong>${escapeHtml(item.run_type || "evaluation")}</strong>
+      <p class="muted">${escapeHtml(item.error || detail)}</p>
+    </div>
+    <span>${badge(item.status || "unknown", operationsStatusClass(item.status))}</span>
+  </div>`;
+}
+
+function renderQualityFailedResults(items) {
+  const target = document.querySelector("#quality-failed-results");
+  if (!target) return;
+  target.innerHTML =
+    items.map(renderQualityResult).join("") ||
+    '<div class="empty-state">No failed cases</div>';
+}
+
+function renderQualityResult(item) {
+  const detail = item.details_json?.reason || item.evaluation_case_id || item.id;
+  return `<div class="table-row">
+    <div>
+      <strong>${escapeHtml(item.failure_type || "failed")}</strong>
+      <p class="muted">${escapeHtml(shortText(detail || "", 120))}</p>
+    </div>
+    <span>${badge(item.actual_decision || "n/a", "is-danger")}</span>
+  </div>`;
+}
+
+function renderQualityDecisions(items) {
+  const target = document.querySelector("#quality-decisions");
+  if (!target) return;
+  target.innerHTML =
+    items.map(renderQualityDecision).join("") ||
+    '<div class="empty-state">No decisions</div>';
+}
+
+function renderQualityDecision(item) {
+  return `<div class="table-row">
+    <div>
+      <strong>${escapeHtml(item.decision_type || "decision")}</strong>
+      <p class="muted">${escapeHtml(shortText(item.reason || item.entity_id || "", 120))}</p>
+    </div>
+    <span>${badge(item.decision || "n/a")}</span>
+  </div>`;
+}
+
+function renderQualityCases(items) {
+  const target = document.querySelector("#quality-cases");
+  if (!target) return;
+  target.innerHTML =
+    items.map(renderQualityCase).join("") || '<div class="empty-state">No cases</div>';
+}
+
+function renderQualityCase(item) {
+  return `<div class="table-row">
+    <div>
+      <strong>${escapeHtml(item.expected_decision || "expected")}</strong>
+      <p class="muted">${escapeHtml(shortText(item.message_text || item.id, 120))}</p>
+    </div>
+    <span>${badge(item.label_source || "manual")}</span>
   </div>`;
 }
 
