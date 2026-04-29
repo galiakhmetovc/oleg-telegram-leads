@@ -99,6 +99,27 @@ ai_model_limits_table = Table(
     Column("updated_at", DateTime(timezone=True), nullable=False),
 )
 
+ai_model_profiles_table = Table(
+    "ai_model_profiles",
+    metadata,
+    Column("id", String(36), primary_key=True),
+    Column("ai_model_id", String(36), nullable=False),
+    Column("profile_key", String(120), nullable=False),
+    Column("display_name", String(160), nullable=False),
+    Column("description", Text, nullable=True),
+    Column("status", String(32), nullable=False),
+    Column("max_input_tokens", Integer, nullable=True),
+    Column("max_output_tokens", Integer, nullable=True),
+    Column("temperature", Float, nullable=True),
+    Column("thinking_mode", String(32), nullable=False),
+    Column("structured_output_required", Boolean, nullable=False),
+    Column("response_format_json", JSON, nullable=True),
+    Column("provider_options_json", JSON, nullable=True),
+    Column("metadata_json", JSON, nullable=True),
+    Column("created_at", DateTime(timezone=True), nullable=False),
+    Column("updated_at", DateTime(timezone=True), nullable=False),
+)
+
 ai_agents_table = Table(
     "ai_agents",
     metadata,
@@ -122,6 +143,7 @@ ai_agent_routes_table = Table(
     Column("ai_agent_id", String(36), nullable=False),
     Column("ai_provider_account_id", String(36), nullable=False),
     Column("ai_model_id", String(36), nullable=False),
+    Column("ai_model_profile_id", String(36), nullable=True),
     Column("route_role", String(64), nullable=False),
     Column("priority", Integer, nullable=False),
     Column("weight", Float, nullable=False),

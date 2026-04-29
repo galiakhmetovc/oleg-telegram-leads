@@ -23,7 +23,7 @@ The system must continuously read the PUR Telegram channel, parse messages and d
 - The web interface uses Material Web as the first design system for operator-facing screens. Bootstrap is not mixed into the same UI layer. Custom CSS is limited to layout, spacing, product composition, and Material token overrides.
 - A built-in local administrator account exists for bootstrap. Telegram admin accounts are added through that account.
 - On startup, the built-in administrator has a temporary password written to `PUR_BOOTSTRAP_ADMIN_PASSWORD_FILE` when the account still requires a password change. After the first successful local login and password change, the file is deleted and `must_change_password=false` becomes the durable marker that prevents regenerating or rewriting the bootstrap password on later restarts.
-- A clean installation/reset contains only the built-in local administrator and empty system tables. Telegram userbots, notification groups, bot tokens, Telegram API credentials, Z.AI/API credentials, AI provider routes, sources, catalog data, and generated session files are added explicitly by an administrator through the web/admin onboarding flow.
+- A clean installation/reset contains only the built-in local administrator and empty system tables. Telegram userbots, notification groups, bot tokens, Telegram API credentials, Z.AI/API credentials, AI provider resources, model profiles, task executors, sources, catalog data, and generated session files are added explicitly by an administrator through audited web sections.
 - Runtime workers must not silently seed provider accounts, userbots, notification chats, source rows, session files, or secrets from the deployment environment. Defaults may exist in code for form help and explicit "load defaults" actions, but they do not create operational database rows until an administrator confirms them.
 - `auto_pending` notification styling, campaign expiry, and external fetch domains are configurable in the web interface.
 - CRM is included as a lightweight client-memory layer, not a heavy sales pipeline.
@@ -32,7 +32,7 @@ The system must continuously read the PUR Telegram channel, parse messages and d
 - A central CRM job is generating reasons to contact existing or previously interested clients when catalog changes create a useful follow-up opportunity.
 - Runtime work is processed by a continuous job loop, not a single monolithic polling cycle.
 - Start with no Telegram userbot sessions configured. The first and additional userbot sessions are created through interactive web login; the first runtime default remains one Telegram worker and one read job per configured session.
-- Monitoring chats are added through web onboarding with access check and preview before activation.
+- Monitoring chats are added through the web Sources section with access check and preview before activation.
 - New live monitoring sources default to `from_now`; historical backfill is explicit and retro/web-only by default.
 - Telegram-read jobs are serialized per userbot session. AI and parse jobs can run in parallel with configurable limits.
 - Logging and audit are first-class requirements for source sync, access issues, AI calls, parser runs, catalog changes, CRM changes, and notifications.
@@ -74,6 +74,8 @@ Each external or scarce capability is represented as a resource pool:
 
 AI limits are scoped to concrete provider account + model. A model with the same public name on two enabled provider accounts is two separate pools. Provider-level model defaults may be used as a fallback, but the runtime planner must display and eventually enforce the account-level pool.
 
+AI execution is scoped to a model profile, not just a model name. A model profile belongs to one provider model and stores the concrete run parameters that are valid for that model: max input/output token caps, temperature, thinking/reasoning mode, structured-output requirement, response format, and provider-specific options. One model may have many profiles, for example `catalog-primary-json`, `lead-shadow-fast`, and `manual-test-high-context`. A task executor therefore binds `task/agent + provider account resource + model profile`; the profile points to the underlying model.
+
 Every resource pool stores or derives:
 
 - provider/account/model/bot/userbot identity;
@@ -85,7 +87,7 @@ Every resource pool stores or derives:
 - available slots;
 - current health: active, paused, flood-wait, rate-limited, disabled, missing credentials, or errored.
 
-AI model metadata must describe capabilities, not just a name and concurrency limit. For each provider model the registry stores the endpoint family, supported input/output modalities, whether the model supports structured JSON output, whether it supports thinking/reasoning controls, and which provider-specific control values are valid.
+AI model metadata must describe capabilities, not just a name and concurrency limit. For each provider model the registry stores the endpoint family, supported input/output modalities, context-window size, maximum provider output size, whether the model supports structured JSON output, whether it supports thinking/reasoning controls, and which provider-specific control values are valid. Context window and max output may be detected from provider metadata when available or configured manually in the web UI.
 
 This is provider-specific by design:
 
@@ -136,7 +138,7 @@ Model choice is task-dependent:
 - OCR models are used only for scanned PDFs/images or files where local text extraction produced empty/low-quality chunks.
 - Fallback routes are explicit: fast model first, strong model on low confidence or invalid structured output, local heuristic fallback when configured.
 
-Agent routes therefore support multiple enabled models per task:
+Task executors therefore support multiple enabled model profiles per task:
 
 - `primary`
 - `fallback`
@@ -145,7 +147,7 @@ Agent routes therefore support multiple enabled models per task:
 - `split`
 - `manual_test`
 
-The route selector chooses from enabled routes that match the task, workload class, input type, and required capability. If several provider accounts expose the same model class, the least-loaded healthy pool wins.
+The selector chooses from enabled task executors that match the task, workload class, input type, required capability, provider account, and model profile. If several provider accounts expose the same model/profile class, the least-loaded healthy pool wins.
 
 ### Worker Count Calculation
 
@@ -202,25 +204,26 @@ Capacity calculation is advisory first, then becomes enforceable as resource lea
 
 ## Bootstrap Onboarding Flow
 
-After the built-in administrator changes the temporary password, the web UI routes incomplete installations to `/onboarding`.
+After the built-in administrator changes the temporary password, the web UI opens the Leads Inbox. Required runtime resources are managed from a permanent `/resources` section rather than a one-time onboarding page.
 
-The onboarding flow is part of the product UI, not a deployment-only script:
+Resource setup is part of the product UI, not a deployment-only script:
 
-- Auth and onboarding controls use a local pinned Material Web bundle served from the application static assets. External CDN examples are not used in production runtime.
-- The page shows embedded Russian setup guidance and a live checklist for password change, required resource types, and first monitored source.
-- The main onboarding workspace is a single resource list with one `Добавить ресурс` action. The admin selects a resource type in a dialog, then fills only the fields for that type.
+- Auth and resource controls use a local pinned Material Web bundle served from the application static assets. External CDN examples are not used in production runtime.
+- The resource page shows embedded Russian setup guidance for required resource types.
+- Resource setup is a permanent section with one `Добавить ресурс` action. The admin selects a resource type in a dialog, then fills only the fields for that type.
 - All resource instances have a human-readable name, status, health, type, delete action, and a future edit action. Type-specific secrets and runtime fields remain in their existing tables.
 - Initial resource types are `telegram_bot`, `telegram_notification_group`, `telegram_userbot`, and `ai_provider_account`.
 - The ordinary Telegram bot token is pasted in the resource dialog, validated through Telegram Bot API `getMe`, and stored as a local file-backed `secret_refs` value. API responses and UI state never return the raw token.
 - Notification group setup is discovered through Bot API `getUpdates`: the admin adds the bot to a group/topic, sends a setup message, and selects the discovered chat in the resource dialog. Saving the group sends a test `sendMessage` and stores `telegram_lead_notification_chat_id` plus optional `telegram_lead_notification_thread_id`.
-- Userbot setup uses interactive phone/code/2FA login from the resource dialog. Existing Telethon `.session` file upload is not part of the onboarding flow. The generated session file is stored on disk with owner-only permissions; Telegram API hash is stored as a `secret_refs` value.
+- Userbot setup uses interactive phone/code/2FA login from the resource dialog. Existing Telethon `.session` file upload is not part of the setup flow. The generated session file is stored on disk with owner-only permissions; Telegram API hash is stored as a `secret_refs` value.
 - Userbot setup includes external helper links to Telegram API application management and Telegram Web. These pages are opened as separate tabs because Telegram sets frame restrictions that make iframe embedding unreliable.
 - LLM provider setup is required before adding the first monitored source. The first provider is Z.AI: the admin enters resource name, base URL, and API key. The system stores the API key as a local `secret_refs` value and bootstraps known provider/model/limit metadata.
-- LLM model selection is not part of onboarding. Model capabilities and agent routes live in the AI registry/admin surface, where the operator can manage provider metadata, model capabilities, limits, and task routes.
-- AI routes bind a task to a concrete provider account and model. Runtime clients resolve the selected account's `auth_secret_ref` and `base_url`, so two Z.AI resources with different tokens are separate executable pools rather than aliases for one global key.
-- The same task/model/role may have separate routes for separate provider accounts. This is how the scheduler can later use multiple subscriptions or tokens for the same model without losing account-level limits and auditability.
+- LLM model selection is not part of resource setup. Model capabilities live in `AI-реестр`; task execution bindings live in `Исполнители задач`.
+- AI model profiles are configured in `AI-реестр`. A profile stores the concrete run parameters for one model. A task executor then binds an application task/agent to a provider account resource and a model profile.
+- Runtime clients resolve the selected account's `auth_secret_ref` and `base_url`, then execute the underlying model with the selected profile's parameters. Two Z.AI resources with different tokens are separate executable pools rather than aliases for one global key.
+- The same task/model profile/role may have separate executors for separate provider accounts. This is how the scheduler can later use multiple subscriptions or tokens for the same model/profile without losing account-level limits and auditability.
 - Runtime web authentication and workers resolve Telegram bot/API credentials from settings-backed secret refs first, with environment fallback only for development or explicitly configured deployments.
-- The onboarding flow does not create monitoring sources implicitly. Source onboarding remains a separate audited web flow with access check and preview before activation.
+- Resource setup does not create monitoring sources implicitly. Source setup remains a separate audited web flow with access check and preview before activation.
 
 ## Source Layers
 
@@ -1195,6 +1198,35 @@ Rules:
 - Provider limits for raw `1` stay effective `1`.
 - Allow prompt builder to estimate token budget and choose fallback strategies.
 
+### `ai_model_profiles`
+
+Stores concrete execution profiles for one provider model.
+
+Key fields:
+
+- `id`
+- `ai_model_id`
+- `profile_key`
+- `display_name`
+- `description`
+- `status`: `active`, `disabled`, `deprecated`
+- `max_input_tokens`
+- `max_output_tokens`
+- `temperature`
+- `thinking_mode`: provider-neutral value such as `off`, `on`, `min`, `medium`, `high`, `xhigh`
+- `structured_output_required`
+- `response_format_json`
+- `provider_options_json`
+- `metadata_json`
+- `created_at`
+- `updated_at`
+
+Rules:
+
+- A model may have many profiles.
+- Profiles must not enable a parameter the model does not support. For example, a Z.AI OCR profile must not enable chat-only structured output or thinking parameters.
+- Task execution uses a profile id. Routes may keep denormalized model ids for compatibility and reporting, but the selected profile is the source of run parameters.
+
 ### `ai_agents`
 
 Stores logical AI workers that perform a task, independent of model choice.
@@ -1219,9 +1251,9 @@ Rules:
 - Agents must request structured output whenever the provider/model supports it.
 - Agent output must be validated before it can mutate catalog, leads, CRM, or notification state.
 
-### `ai_agent_routes`
+### `ai_agent_routes` / Task Executors
 
-Maps one agent to one or more provider/model/account routes.
+Maps one agent to one or more provider-account/model-profile execution bindings. The UI name is `Исполнители задач`; the historical table name may remain `ai_agent_routes`.
 
 Key fields:
 
@@ -1229,6 +1261,7 @@ Key fields:
 - `ai_agent_id`
 - `ai_provider_account_id`
 - `ai_model_id`
+- `ai_model_profile_id`
 - `route_role`: `primary`, `fallback`, `shadow`, `ensemble_member`, `split_bucket`, `manual_test`
 - `priority`
 - `weight`
@@ -1253,7 +1286,7 @@ Rules:
   - catalog extraction: `GLM-5.1` primary, `GLM-4.5-Air` fallback, `GLM-4.5-Flash` shadow.
   - lead detection: fuzzy primary, LLM shadow, later LLM fallback or ensemble.
   - OCR: `GLM-OCR` primary, vision-language fallback if configured.
-- The router chooses routes by role, priority, weight, model availability, limits, and route conditions.
+- The router chooses task executors by role, priority, weight, model/profile availability, account/model limits, and route conditions.
 - Fallback can be triggered by provider error, rate limit, timeout, invalid JSON, schema validation failure, or operator-disabled route.
 - Shadow routes write traces/evaluation records but do not create operational side effects unless explicitly promoted.
 
@@ -3097,13 +3130,13 @@ Purpose:
 - `ai_model_registry_seed_enabled = true`
 - `ai_agent_catalog_extractor_enabled = true`
 - `ai_agent_catalog_extractor_strategy = "primary_fallback"`
-- `ai_agent_catalog_extractor_routes = [{"model":"GLM-5.1","role":"primary"},{"model":"GLM-4.5-Air","role":"fallback"}]`
+- `ai_agent_catalog_extractor_routes = [{"profile":"catalog-primary","role":"primary"},{"profile":"catalog-fallback","role":"fallback"}]`
 - `ai_agent_lead_detector_enabled = true`
 - `ai_agent_lead_detector_strategy = "fuzzy_primary_llm_shadow"`
-- `ai_agent_lead_detector_routes = [{"model":"builtin-fuzzy","role":"primary"},{"model":"GLM-4.5-Flash","role":"shadow"}]`
+- `ai_agent_lead_detector_routes = [{"model":"builtin-fuzzy","role":"primary"},{"profile":"lead-shadow","role":"shadow"}]`
 - `ai_agent_ocr_extractor_enabled = true`
 - `ai_agent_ocr_extractor_strategy = "primary_fallback"`
-- `ai_agent_ocr_extractor_routes = [{"model":"GLM-OCR","role":"primary"}]`
+- `ai_agent_ocr_extractor_routes = [{"profile":"ocr-primary","role":"primary"}]`
 - `ai_agent_route_fallback_on_rate_limit = true`
 - `ai_agent_route_fallback_on_invalid_output = true`
 - `ai_agent_shadow_writes_side_effects = false`
@@ -4822,7 +4855,7 @@ Migration path:
 1. Add SQLite database alongside JSON files.
 2. Import existing chats/checkpoints/leads/examples into SQLite.
 3. Seed empty CRM tables and the built-in local bootstrap admin user only.
-4. Leave Telegram bot/userbot, notification groups, AI providers, tokens, and session files unconfigured until the administrator adds them through web/admin onboarding or an audited manual upload path.
+4. Leave Telegram bot/userbot, notification groups, AI providers, tokens, and session files unconfigured until the administrator adds them through audited web resource sections.
 5. Replace JSON lead persistence with SQLite `lead_events` and `lead_clusters`.
 6. Add PUR channel sync into the same userbot runtime.
 7. Add parser/extractor pipeline.

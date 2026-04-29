@@ -833,6 +833,18 @@ md-text-button {
   padding: 20px;
 }
 
+.admin-section-layout {
+  display: grid;
+  gap: 18px;
+  padding: 20px;
+}
+
+.admin-section-layout > section {
+  display: grid;
+  align-content: start;
+  gap: 14px;
+}
+
 .ai-admin-section {
   grid-column: 1 / -1;
 }
@@ -998,6 +1010,18 @@ md-text-button {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 8px;
+}
+
+.ai-profile-form,
+.executor-form,
+.settings-form {
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+}
+
+.ai-profile-head {
+  margin-top: 8px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
 }
 
 .table-row {

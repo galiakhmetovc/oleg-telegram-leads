@@ -142,6 +142,12 @@ document.addEventListener("DOMContentLoaded", () => {
   if (page === "quality") initQuality();
   if (page === "admin") initAdmin();
   if (page === "onboarding") initOnboarding();
+  if (page === "resources") initResources();
+  if (page === "users") initUsersPage();
+  if (page === "settings") initSettingsPage();
+  if (page === "ai-registry") initAiRegistryPage();
+  if (page === "task-executors") initTaskExecutors();
+  if (page === "task-types") initTaskTypes();
 });
 
 function bindLogin() {
@@ -188,12 +194,7 @@ function bindLogin() {
 }
 
 async function redirectAfterAuth() {
-  try {
-    const status = await api("/api/onboarding/status");
-    window.location.assign(status.complete ? "/" : "/onboarding");
-  } catch (_error) {
-    window.location.assign("/");
-  }
+  window.location.assign("/");
 }
 
 function bindLogout() {
@@ -2026,6 +2027,34 @@ async function initAdmin() {
   document.querySelector("#ai-route-form")?.addEventListener("submit", saveAiRoute);
 }
 
+async function initUsersPage() {
+  await loadUsers();
+  document.querySelector("#telegram-admin-form")?.addEventListener("submit", addTelegramAdmin);
+}
+
+async function initSettingsPage() {
+  await loadSettings();
+  document.querySelector("#setting-form")?.addEventListener("submit", saveSetting);
+}
+
+async function initAiRegistryPage() {
+  await loadAiRegistry();
+  document.querySelector("#ai-registry-bootstrap")?.addEventListener("click", bootstrapAiRegistry);
+  document.querySelector("#ai-registry-refresh")?.addEventListener("click", loadAiRegistry);
+  document.querySelector("#ai-profile-form")?.addEventListener("submit", saveAiProfile);
+}
+
+async function initTaskExecutors() {
+  await loadAiRegistry();
+  document.querySelector("#ai-registry-refresh")?.addEventListener("click", loadAiRegistry);
+  document.querySelector("#ai-route-form")?.addEventListener("submit", saveAiRoute);
+}
+
+async function initTaskTypes() {
+  document.querySelector("#task-types-refresh")?.addEventListener("click", loadTaskTypes);
+  await loadTaskTypes();
+}
+
 async function loadUsers() {
   const payload = await api("/api/admin/users");
   const target = document.querySelector("#admin-users");
@@ -2099,12 +2128,20 @@ async function loadSettings() {
       (setting) => `<div class="table-row">
         <div>
           <strong>${escapeHtml(setting.key)}</strong>
-          <p class="muted">${escapeHtml(setting.value_type)}${setting.is_default ? " / значение по умолчанию" : ""}</p>
+          <p class="muted">${escapeHtml(setting.group || "Система")} / ${escapeHtml(setting.value_type)}${setting.is_default ? " / значение по умолчанию" : ""}</p>
+          <p class="muted">${escapeHtml(setting.description || "")}</p>
+          <p class="muted">${escapeHtml(setting.impact || "")}</p>
         </div>
-        <span>${escapeHtml(JSON.stringify(setting.value))}</span>
+        <div class="row-actions">
+          <span>${escapeHtml(JSON.stringify(setting.value))}</span>
+          ${setting.is_default ? "" : `<button type="button" data-delete-setting="${escapeHtml(setting.key)}">Удалить</button>`}
+        </div>
       </div>`
     )
     .join("");
+  target.querySelectorAll("[data-delete-setting]").forEach((button) => {
+    button.addEventListener("click", deleteSetting);
+  });
 }
 
 async function saveSetting(event) {
@@ -2121,6 +2158,12 @@ async function saveSetting(event) {
     }),
   });
   event.currentTarget.reset();
+  await loadSettings();
+}
+
+async function deleteSetting(event) {
+  const key = event.currentTarget.dataset.deleteSetting;
+  await api(`/api/settings/${encodeURIComponent(key)}`, { method: "DELETE" });
   await loadSettings();
 }
 
@@ -2152,7 +2195,9 @@ async function bootstrapAiRegistry() {
 
 function renderAiRegistry(registry) {
   renderAiRouteForm(registry);
+  renderAiProfileForm(registry);
   renderAiModels(registry.models || []);
+  renderAiProfiles(registry.profiles || []);
   renderAiRoutes(registry.routes || []);
 }
 
@@ -2160,37 +2205,37 @@ function renderAiRouteForm(registry) {
   const form = document.querySelector("#ai-route-form");
   if (!form) return;
   const agentSelect = form.querySelector('[name="agent_key"]');
-  const modelSelect = form.querySelector('[name="model_id"]');
+  const profileSelect = form.querySelector('[name="profile_id"]');
   const accountSelect = form.querySelector('[name="account_id"]');
   if (agentSelect) {
     agentSelect.innerHTML = (registry.agents || [])
       .map((agent) => `<option value="${escapeHtml(agent.agent_key)}">${escapeHtml(agent.agent_key)}</option>`)
       .join("");
   }
-  if (modelSelect) {
-    modelSelect.innerHTML = (registry.models || [])
+  if (profileSelect) {
+    profileSelect.innerHTML = (registry.profiles || [])
       .map(
-        (model) =>
-          `<option value="${escapeHtml(model.id)}">${escapeHtml(model.model_type)} / ${escapeHtml(
-            model.provider_model_name
+        (profile) =>
+          `<option value="${escapeHtml(profile.id)}">${escapeHtml(profile.model)} / ${escapeHtml(
+            profile.display_name
           )}</option>`
       )
       .join("");
   }
-  if (modelSelect && accountSelect) {
+  if (profileSelect && accountSelect) {
     populateAiRouteAccountSelect(registry);
-    modelSelect.onchange = () => populateAiRouteAccountSelect(registry);
+    profileSelect.onchange = () => populateAiRouteAccountSelect(registry);
   }
 }
 
 function populateAiRouteAccountSelect(registry) {
   const form = document.querySelector("#ai-route-form");
-  const modelSelect = form?.querySelector('[name="model_id"]');
+  const profileSelect = form?.querySelector('[name="profile_id"]');
   const accountSelect = form?.querySelector('[name="account_id"]');
-  if (!modelSelect || !accountSelect) return;
-  const model = (registry.models || []).find((item) => item.id === modelSelect.value);
+  if (!profileSelect || !accountSelect) return;
+  const profile = (registry.profiles || []).find((item) => item.id === profileSelect.value);
   const accounts = (registry.accounts || []).filter(
-    (account) => account.enabled !== false && (!model || account.ai_provider_id === model.ai_provider_id)
+    (account) => account.enabled !== false && (!profile || account.ai_provider_id === profile.ai_provider_id)
   );
   if (!accounts.length) {
     accountSelect.innerHTML = '<option value="">Нет активных аккаунтов провайдера</option>';
@@ -2208,6 +2253,21 @@ function populateAiRouteAccountSelect(registry) {
   accountSelect.value = accounts.some((account) => account.id === current) ? current : accounts[0].id;
 }
 
+function renderAiProfileForm(registry) {
+  const form = document.querySelector("#ai-profile-form");
+  if (!form) return;
+  const modelSelect = form.querySelector('[name="model_id"]');
+  if (!modelSelect) return;
+  modelSelect.innerHTML = (registry.models || [])
+    .map(
+      (model) =>
+        `<option value="${escapeHtml(model.id)}">${escapeHtml(model.provider_model_name)} / ${escapeHtml(
+          label(model.model_type)
+        )}</option>`
+    )
+    .join("");
+}
+
 function renderAiModels(models) {
   const target = document.querySelector("#ai-models");
   if (!target) return;
@@ -2215,12 +2275,16 @@ function renderAiModels(models) {
     models
       .map((model) => {
         const limit = model.limit || {};
-        return `<form class="table-row ai-limit-form" data-limit-id="${escapeHtml(limit.id || "")}">
+        return `<form class="table-row ai-limit-form" data-limit-id="${escapeHtml(limit.id || "")}" data-model-id="${escapeHtml(model.id)}">
           <div>
-            <strong>${escapeHtml(model.provider_model_name)}</strong>
-            <p class="muted">${escapeHtml(label(model.model_type))} / ${escapeHtml(label(model.status))}</p>
+            <input name="display_name" value="${escapeHtml(model.display_name || model.provider_model_name)}" aria-label="Название модели">
+            <p class="muted">${escapeHtml(model.provider_model_name)} / ${escapeHtml(label(model.model_type))} / ${escapeHtml(label(model.status))}</p>
           </div>
           <div class="row-actions">
+            <input class="compact-input" name="context_window_tokens" type="number" min="1" step="1"
+              value="${escapeHtml(model.context_window_tokens || "")}" placeholder="context" aria-label="Контекстное окно">
+            <input class="compact-input" name="model_max_output_tokens" type="number" min="1" step="1"
+              value="${escapeHtml(model.max_output_tokens || "")}" placeholder="output" aria-label="Max output модели">
             <input class="compact-input" name="raw_limit" type="number" min="1" step="1"
               value="${escapeHtml(limit.raw_limit || 1)}" aria-label="Сырой лимит параллельности">
             <input class="compact-input" name="utilization_ratio" type="number" min="0.1" max="1"
@@ -2237,6 +2301,42 @@ function renderAiModels(models) {
   });
 }
 
+function renderAiProfiles(profiles) {
+  const target = document.querySelector("#ai-model-profiles");
+  if (!target) return;
+  target.innerHTML =
+    profiles
+      .map(
+        (profile) => `<form class="table-row ai-profile-row" data-profile-id="${escapeHtml(profile.id)}">
+          <div>
+            <strong>${escapeHtml(profile.display_name)}</strong>
+            <p class="muted">${escapeHtml(profile.model)} / ${escapeHtml(profile.profile_key)} / ${escapeHtml(label(profile.status))}</p>
+          </div>
+          <div class="row-actions">
+            <input class="compact-input" name="max_input_tokens" type="number" min="1" step="1"
+              value="${escapeHtml(profile.max_input_tokens || "")}" placeholder="input" aria-label="Max input">
+            <input class="compact-input" name="max_output_tokens" type="number" min="1" step="1"
+              value="${escapeHtml(profile.max_output_tokens || "")}" placeholder="output" aria-label="Max output">
+            <input class="compact-input" name="temperature" type="number" min="0" max="2" step="0.1"
+              value="${escapeHtml(profile.temperature ?? "")}" placeholder="temp" aria-label="Temperature">
+            <select name="thinking_mode" aria-label="Thinking mode">
+              <option value="off" ${profile.thinking_mode === "off" ? "selected" : ""}>off</option>
+              <option value="on" ${profile.thinking_mode === "on" ? "selected" : ""}>on</option>
+            </select>
+            <label class="checkbox-line">
+              <input name="structured_output_required" type="checkbox" ${profile.structured_output_required ? "checked" : ""}>
+              JSON
+            </label>
+            <button type="submit">Сохранить</button>
+          </div>
+        </form>`
+      )
+      .join("") || '<div class="empty-state">Профилей моделей нет</div>';
+  target.querySelectorAll(".ai-profile-row").forEach((form) => {
+    form.addEventListener("submit", updateAiProfile);
+  });
+}
+
 function renderAiRoutes(routes) {
   const target = document.querySelector("#ai-routes");
   if (!target) return;
@@ -2246,7 +2346,7 @@ function renderAiRoutes(routes) {
         (route) => `<div class="table-row">
         <div>
           <strong>${escapeHtml(route.agent_key)} / ${escapeHtml(label(route.route_role))}</strong>
-          <p class="muted">${escapeHtml(route.provider_account || "аккаунт")} / ${escapeHtml(route.model)} / приоритет ${escapeHtml(route.priority)}</p>
+          <p class="muted">${escapeHtml(route.provider_account || "аккаунт")} / ${escapeHtml(route.model)} / ${escapeHtml(route.model_profile || "профиль")} / приоритет ${escapeHtml(route.priority)}</p>
         </div>
         <div class="row-actions">
           ${badge(route.enabled ? "включен" : "отключен", route.enabled ? "" : "is-warn")}
@@ -2256,7 +2356,7 @@ function renderAiRoutes(routes) {
         </div>
       </div>`
       )
-      .join("") || '<div class="empty-state">Маршрутов нет</div>';
+      .join("") || '<div class="empty-state">Исполнителей задач нет</div>';
   target.querySelectorAll("[data-route-id]").forEach((button) => {
     button.addEventListener("click", toggleAiRoute);
   });
@@ -2267,9 +2367,23 @@ async function saveAiLimit(event) {
   const form = event.currentTarget;
   const status = document.querySelector("#ai-registry-status");
   const limitId = form.dataset.limitId;
-  if (!limitId) return;
+  const modelId = form.dataset.modelId;
+  if (!limitId || !modelId) return;
   const data = new FormData(form);
   try {
+    await api(`/api/admin/ai-models/${encodeURIComponent(modelId)}`, {
+      method: "PATCH",
+      body: JSON.stringify({
+        display_name: data.get("display_name"),
+        context_window_tokens: data.get("context_window_tokens")
+          ? Number.parseInt(data.get("context_window_tokens"), 10)
+          : null,
+        max_output_tokens: data.get("model_max_output_tokens")
+          ? Number.parseInt(data.get("model_max_output_tokens"), 10)
+          : null,
+        status: "active",
+      }),
+    });
     await api(`/api/admin/ai-model-limits/${encodeURIComponent(limitId)}`, {
       method: "PATCH",
       body: JSON.stringify({
@@ -2277,11 +2391,63 @@ async function saveAiLimit(event) {
         utilization_ratio: Number.parseFloat(data.get("utilization_ratio")),
       }),
     });
-    if (status) status.textContent = "Лимит модели сохранен";
+    if (status) status.textContent = "Модель и лимит сохранены";
     await loadAiRegistry();
   } catch (error) {
     if (status) status.textContent = error.message;
   }
+}
+
+async function saveAiProfile(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const status = document.querySelector("#ai-registry-status");
+  const data = new FormData(form);
+  const modelId = data.get("model_id");
+  try {
+    await api(`/api/admin/ai-models/${encodeURIComponent(modelId)}/profiles`, {
+      method: "POST",
+      body: JSON.stringify(aiProfilePayload(data, true)),
+    });
+    form.reset();
+    if (status) status.textContent = "Профиль модели сохранен";
+    await loadAiRegistry();
+  } catch (error) {
+    if (status) status.textContent = error.message;
+  }
+}
+
+async function updateAiProfile(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const status = document.querySelector("#ai-registry-status");
+  const data = new FormData(form);
+  try {
+    await api(`/api/admin/ai-model-profiles/${encodeURIComponent(form.dataset.profileId)}`, {
+      method: "PATCH",
+      body: JSON.stringify(aiProfilePayload(data, false)),
+    });
+    if (status) status.textContent = "Профиль модели обновлен";
+    await loadAiRegistry();
+  } catch (error) {
+    if (status) status.textContent = error.message;
+  }
+}
+
+function aiProfilePayload(data, includeIdentity) {
+  const payload = {
+    max_input_tokens: data.get("max_input_tokens") ? Number.parseInt(data.get("max_input_tokens"), 10) : null,
+    max_output_tokens: data.get("max_output_tokens") ? Number.parseInt(data.get("max_output_tokens"), 10) : null,
+    temperature: data.get("temperature") ? Number.parseFloat(data.get("temperature")) : null,
+    thinking_mode: data.get("thinking_mode") || "off",
+    structured_output_required: data.get("structured_output_required") === "on",
+    status: "active",
+  };
+  if (includeIdentity) {
+    payload.profile_key = data.get("profile_key");
+    payload.display_name = data.get("display_name");
+  }
+  return payload;
 }
 
 async function saveAiRoute(event) {
@@ -2294,18 +2460,14 @@ async function saveAiRoute(event) {
     await api(`/api/admin/ai-agents/${encodeURIComponent(agentKey)}/routes`, {
       method: "POST",
       body: JSON.stringify({
-        model_id: data.get("model_id"),
+        profile_id: data.get("profile_id"),
         account_id: data.get("account_id"),
         route_role: data.get("route_role"),
         priority: Number.parseInt(data.get("priority"), 10),
-        max_output_tokens: data.get("max_output_tokens")
-          ? Number.parseInt(data.get("max_output_tokens"), 10)
-          : null,
         enabled: data.get("enabled") === "on",
-        structured_output_required: true,
       }),
     });
-    if (status) status.textContent = "Маршрут сохранен";
+    if (status) status.textContent = "Исполнитель задачи сохранен";
     await loadAiRegistry();
   } catch (error) {
     if (status) status.textContent = error.message;
@@ -2324,6 +2486,30 @@ async function toggleAiRoute(event) {
     await loadAiRegistry();
   } catch (error) {
     if (status) status.textContent = error.message;
+  }
+}
+
+async function loadTaskTypes() {
+  const target = document.querySelector("#task-type-list");
+  if (!target) return;
+  try {
+    const payload = await api("/api/admin/task-types");
+    target.innerHTML =
+      (payload.items || [])
+        .map(
+          (task) => `<div class="table-row">
+          <div>
+            <strong>${escapeHtml(task.task_type)}</strong>
+            <p class="muted">${escapeHtml(task.display_name)} / ${escapeHtml(task.workload_class)} / ${escapeHtml(task.status)}</p>
+            <p class="muted">${escapeHtml(task.parallelism_rule)}</p>
+            <p class="muted">${escapeHtml((task.required_capabilities || []).join(", "))}</p>
+          </div>
+          <span>${escapeHtml((task.config_keys || []).join(", ") || "без настроек")}</span>
+        </div>`
+        )
+        .join("") || '<div class="empty-state">Типов задач нет</div>';
+  } catch (error) {
+    target.innerHTML = `<div class="empty-state">${escapeHtml(error.message)}</div>`;
   }
 }
 
@@ -2359,6 +2545,10 @@ function initOnboarding() {
   loadOnboardingResources();
   loadOnboardingBots();
   updateOnboardingResourceForm();
+}
+
+function initResources() {
+  initOnboarding();
 }
 
 function openOnboardingResourceDialog(event) {

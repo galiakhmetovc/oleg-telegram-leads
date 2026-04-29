@@ -185,6 +185,46 @@ class SettingsService:
         )
         self.session.commit()
 
+    def delete(
+        self,
+        key: str,
+        *,
+        updated_by: str,
+        scope: str = "global",
+        scope_id: str | None = None,
+        reason: str | None = None,
+    ) -> bool:
+        existing = self.repository.delete(key, scope=scope, scope_id=scope_id)
+        if existing is None:
+            return False
+        now = utc_now()
+        self.repository.add_revision(
+            setting_key=key,
+            scope=scope,
+            scope_id=scope_id,
+            old_value_hash=self._hash_value(existing.value_json),
+            new_value_hash=self._hash_value(None),
+            old_value_json=existing.value_json,
+            new_value_json=None,
+            changed_by=updated_by,
+            change_reason=reason,
+            created_at=now,
+        )
+        self.audit.record_change(
+            actor=updated_by,
+            action="settings.delete",
+            entity_type="setting",
+            entity_id=key,
+            old_value_json={
+                "value": existing.value_json,
+                "scope": existing.scope,
+                "scope_id": existing.scope_id,
+            },
+            new_value_json={"value": None, "scope": scope, "scope_id": scope_id},
+        )
+        self.session.commit()
+        return True
+
     def list(self, scope: str | None = None):
         return self.repository.list(scope=scope)
 

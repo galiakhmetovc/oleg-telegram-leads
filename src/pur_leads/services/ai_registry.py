@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from math import floor
 from typing import Any
 
-from sqlalchemy import insert, select, update
+from sqlalchemy import insert, or_, select, update
 from sqlalchemy.orm import Session
 
 from pur_leads.core.ids import new_id
@@ -15,6 +15,7 @@ from pur_leads.models.ai import (
     ai_agent_routes_table,
     ai_agents_table,
     ai_model_limits_table,
+    ai_model_profiles_table,
     ai_models_table,
     ai_provider_accounts_table,
     ai_providers_table,
@@ -134,30 +135,54 @@ ROUTE_SEED: tuple[dict[str, Any], ...] = (
     {
         "agent_key": "catalog_extractor",
         "model": "GLM-5.1",
+        "profile_key": "catalog-primary",
+        "profile_display_name": "Каталог: основной JSON",
         "route_role": "primary",
         "priority": 10,
+        "max_input_tokens": None,
         "max_output_tokens": 4096,
+        "temperature": 0.0,
+        "thinking_mode": "off",
+        "structured_output_required": True,
     },
     {
         "agent_key": "catalog_extractor",
         "model": "GLM-4.5-Air",
+        "profile_key": "catalog-fallback",
+        "profile_display_name": "Каталог: резервный JSON",
         "route_role": "fallback",
         "priority": 20,
+        "max_input_tokens": None,
         "max_output_tokens": 4096,
+        "temperature": 0.0,
+        "thinking_mode": "off",
+        "structured_output_required": True,
     },
     {
         "agent_key": "lead_detector",
         "model": "GLM-4.5-Flash",
+        "profile_key": "lead-shadow",
+        "profile_display_name": "Лиды: быстрая теневая проверка",
         "route_role": "shadow",
         "priority": 10,
+        "max_input_tokens": None,
         "max_output_tokens": 512,
+        "temperature": 0.0,
+        "thinking_mode": "off",
+        "structured_output_required": True,
     },
     {
         "agent_key": "ocr_extractor",
         "model": "GLM-OCR",
+        "profile_key": "ocr-primary",
+        "profile_display_name": "OCR: документы",
         "route_role": "primary",
         "priority": 10,
+        "max_input_tokens": None,
         "max_output_tokens": 4096,
+        "temperature": 0.0,
+        "thinking_mode": "off",
+        "structured_output_required": False,
     },
 )
 
@@ -168,13 +193,16 @@ class AiAgentRouteSelection:
     agent_id: str
     provider_account_id: str
     model_id: str
+    model_profile_id: str | None
     auth_secret_ref: str | None
     provider: str
     model: str
+    model_profile: str | None
     model_type: str
     base_url: str
     route_role: str
     priority: int
+    max_input_tokens: int | None
     max_output_tokens: int | None
     temperature: float | None
     thinking_enabled: bool
@@ -203,13 +231,30 @@ class AiRegistryService:
         }
         for seed in ZAI_MODEL_SEED:
             self._upsert_limit(provider_id, model_ids[seed["model"]], raw_limit=int(seed["limit"]))
+            self._upsert_model_profile(
+                model_ids[seed["model"]],
+                {
+                    "profile_key": "default",
+                    "profile_display_name": f"{seed['model']}: default",
+                    "max_input_tokens": None,
+                    "max_output_tokens": None,
+                    "temperature": 0.0 if seed["type"] in {"language", "ocr"} else None,
+                    "thinking_mode": "off",
+                    "structured_output_required": False,
+                },
+            )
         agent_ids = {seed["agent_key"]: self._upsert_agent(seed) for seed in AGENT_SEED}
         for seed in ROUTE_SEED:
             model_id = model_ids.get(seed["model"])
             agent_id = agent_ids.get(seed["agent_key"])
             if model_id is not None and agent_id is not None:
+                profile_id = self._upsert_model_profile(model_id, seed)
                 self._upsert_route(
-                    account_id=account_id, agent_id=agent_id, model_id=model_id, seed=seed
+                    account_id=account_id,
+                    agent_id=agent_id,
+                    model_id=model_id,
+                    profile_id=profile_id,
+                    seed=seed,
                 )
         self.session.commit()
         return {
@@ -292,6 +337,10 @@ class AiRegistryService:
             ai_provider_accounts_table.c.enabled.is_(True),
             ai_models_table.c.status == "active",
             ai_providers_table.c.status == "active",
+            or_(
+                ai_agent_routes_table.c.ai_model_profile_id.is_(None),
+                ai_model_profiles_table.c.status == "active",
+            ),
         ]
         if route_role is not None:
             conditions.append(ai_agent_routes_table.c.route_role == route_role)
@@ -302,18 +351,30 @@ class AiRegistryService:
                     ai_agents_table.c.id.label("agent_id"),
                     ai_provider_accounts_table.c.id.label("provider_account_id"),
                     ai_models_table.c.id.label("model_id"),
+                    ai_model_profiles_table.c.id.label("model_profile_id"),
                     ai_provider_accounts_table.c.auth_secret_ref,
                     ai_providers_table.c.provider_key.label("provider"),
                     ai_models_table.c.provider_model_name.label("model"),
+                    ai_model_profiles_table.c.display_name.label("model_profile"),
                     ai_models_table.c.model_type,
                     ai_provider_accounts_table.c.base_url,
                     ai_agent_routes_table.c.route_role,
                     ai_agent_routes_table.c.priority,
-                    ai_agent_routes_table.c.max_output_tokens,
-                    ai_agent_routes_table.c.temperature,
+                    ai_agent_routes_table.c.max_input_tokens.label("route_max_input_tokens"),
+                    ai_agent_routes_table.c.max_output_tokens.label("route_max_output_tokens"),
+                    ai_agent_routes_table.c.temperature.label("route_temperature"),
                     ai_agent_routes_table.c.thinking_enabled,
-                    ai_agent_routes_table.c.thinking_mode,
-                    ai_agent_routes_table.c.structured_output_required,
+                    ai_agent_routes_table.c.thinking_mode.label("route_thinking_mode"),
+                    ai_agent_routes_table.c.structured_output_required.label(
+                        "route_structured_output_required"
+                    ),
+                    ai_model_profiles_table.c.max_input_tokens.label("profile_max_input_tokens"),
+                    ai_model_profiles_table.c.max_output_tokens.label("profile_max_output_tokens"),
+                    ai_model_profiles_table.c.temperature.label("profile_temperature"),
+                    ai_model_profiles_table.c.thinking_mode.label("profile_thinking_mode"),
+                    ai_model_profiles_table.c.structured_output_required.label(
+                        "profile_structured_output_required"
+                    ),
                     ai_models_table.c.supports_structured_output,
                     ai_models_table.c.supports_json_mode,
                     ai_models_table.c.supports_thinking,
@@ -336,6 +397,10 @@ class AiRegistryService:
                     .join(
                         ai_models_table,
                         ai_agent_routes_table.c.ai_model_id == ai_models_table.c.id,
+                    )
+                    .outerjoin(
+                        ai_model_profiles_table,
+                        ai_agent_routes_table.c.ai_model_profile_id == ai_model_profiles_table.c.id,
                     )
                     .join(
                         ai_providers_table,
@@ -418,6 +483,30 @@ class AiRegistryService:
             .mappings()
             .all()
         ]
+        profiles = [
+            dict(row)
+            for row in self.session.execute(
+                select(
+                    ai_model_profiles_table,
+                    ai_models_table.c.ai_provider_id.label("ai_provider_id"),
+                    ai_models_table.c.provider_model_name.label("model"),
+                    ai_models_table.c.normalized_model_name.label("normalized_model_name"),
+                    ai_models_table.c.model_type.label("model_type"),
+                )
+                .select_from(
+                    ai_model_profiles_table.join(
+                        ai_models_table,
+                        ai_model_profiles_table.c.ai_model_id == ai_models_table.c.id,
+                    )
+                )
+                .order_by(
+                    ai_models_table.c.normalized_model_name,
+                    ai_model_profiles_table.c.profile_key,
+                )
+            )
+            .mappings()
+            .all()
+        ]
         agents = [
             dict(row)
             for row in self.session.execute(
@@ -430,6 +519,7 @@ class AiRegistryService:
             "providers": providers,
             "accounts": accounts,
             "models": models,
+            "profiles": profiles,
             "agents": agents,
             "routes": self.list_route_payloads(),
         }
@@ -483,21 +573,197 @@ class AiRegistryService:
         )
         return self._limit_payload(updated)
 
+    def update_model_metadata(
+        self,
+        model_id: str,
+        *,
+        actor: str,
+        display_name: str | None = None,
+        context_window_tokens: int | None = None,
+        max_output_tokens: int | None = None,
+        status: str | None = None,
+    ) -> dict[str, Any]:
+        existing = self._model_by_id(model_id)
+        if existing is None:
+            raise KeyError(model_id)
+        values: dict[str, Any] = {"updated_at": utc_now()}
+        if display_name is not None:
+            stripped = display_name.strip()
+            if not stripped:
+                raise ValueError("display_name must not be empty")
+            values["display_name"] = stripped
+        if context_window_tokens is not None:
+            if int(context_window_tokens) < 1:
+                raise ValueError("context_window_tokens must be >= 1")
+            values["context_window_tokens"] = int(context_window_tokens)
+        if max_output_tokens is not None:
+            if int(max_output_tokens) < 1:
+                raise ValueError("max_output_tokens must be >= 1")
+            values["max_output_tokens"] = int(max_output_tokens)
+        if status is not None:
+            normalized_status = status.strip().casefold()
+            if normalized_status not in {"active", "disabled", "deprecated"}:
+                raise ValueError("Unsupported model status")
+            values["status"] = normalized_status
+        self.session.execute(
+            update(ai_models_table).where(ai_models_table.c.id == model_id).values(**values)
+        )
+        updated = self._model_by_id(model_id)
+        AuditService(self.session).record_change(
+            actor=actor,
+            action="ai_registry.model_update",
+            entity_type="ai_model",
+            entity_id=model_id,
+            old_value_json=existing,
+            new_value_json=updated,
+        )
+        return updated or {}
+
+    def upsert_model_profile(
+        self,
+        *,
+        model_id: str,
+        profile_key: str,
+        actor: str,
+        display_name: str,
+        description: str | None = None,
+        max_input_tokens: int | None = None,
+        max_output_tokens: int | None = None,
+        temperature: float | None = None,
+        thinking_mode: str | None = None,
+        structured_output_required: bool = True,
+        status: str = "active",
+    ) -> dict[str, Any]:
+        model = self._model_by_id(model_id)
+        if model is None:
+            raise KeyError(model_id)
+        normalized_key = _normalize_profile_key(profile_key)
+        if not normalized_key:
+            raise ValueError("profile_key is required")
+        existing = self._profile_by_model_key(model_id=model_id, profile_key=normalized_key)
+        values = self._profile_values(
+            model=model,
+            profile_key=normalized_key,
+            display_name=display_name,
+            description=description,
+            max_input_tokens=max_input_tokens,
+            max_output_tokens=max_output_tokens,
+            temperature=temperature,
+            thinking_mode=thinking_mode,
+            structured_output_required=structured_output_required,
+            status=status,
+        )
+        values["updated_at"] = utc_now()
+        if existing is None:
+            profile_id = new_id()
+            self.session.execute(
+                insert(ai_model_profiles_table).values(
+                    id=profile_id,
+                    created_at=values["updated_at"],
+                    **values,
+                )
+            )
+            old_value = None
+        else:
+            profile_id = str(existing["id"])
+            old_value = existing
+            self.session.execute(
+                update(ai_model_profiles_table)
+                .where(ai_model_profiles_table.c.id == profile_id)
+                .values(**values)
+            )
+        updated = self._profile_by_id(profile_id)
+        AuditService(self.session).record_change(
+            actor=actor,
+            action="ai_registry.model_profile_update",
+            entity_type="ai_model_profile",
+            entity_id=profile_id,
+            old_value_json=old_value,
+            new_value_json=updated,
+        )
+        return updated or {}
+
+    def update_model_profile(
+        self,
+        profile_id: str,
+        *,
+        actor: str,
+        display_name: str | None = None,
+        description: str | None = None,
+        max_input_tokens: int | None = None,
+        max_output_tokens: int | None = None,
+        temperature: float | None = None,
+        thinking_mode: str | None = None,
+        structured_output_required: bool | None = None,
+        status: str | None = None,
+    ) -> dict[str, Any]:
+        existing = self._profile_by_id(profile_id)
+        if existing is None:
+            raise KeyError(profile_id)
+        model = self._model_by_id(str(existing["ai_model_id"]))
+        if model is None:
+            raise KeyError(existing["ai_model_id"])
+        values = self._profile_values(
+            model=model,
+            profile_key=str(existing["profile_key"]),
+            display_name=display_name
+            if display_name is not None
+            else str(existing["display_name"]),
+            description=description if description is not None else existing.get("description"),
+            max_input_tokens=(
+                max_input_tokens
+                if max_input_tokens is not None
+                else existing.get("max_input_tokens")
+            ),
+            max_output_tokens=(
+                max_output_tokens
+                if max_output_tokens is not None
+                else existing.get("max_output_tokens")
+            ),
+            temperature=temperature if temperature is not None else existing.get("temperature"),
+            thinking_mode=thinking_mode
+            if thinking_mode is not None
+            else existing.get("thinking_mode"),
+            structured_output_required=(
+                structured_output_required
+                if structured_output_required is not None
+                else bool(existing.get("structured_output_required"))
+            ),
+            status=status if status is not None else str(existing["status"]),
+        )
+        values["updated_at"] = utc_now()
+        self.session.execute(
+            update(ai_model_profiles_table)
+            .where(ai_model_profiles_table.c.id == profile_id)
+            .values(**values)
+        )
+        updated = self._profile_by_id(profile_id)
+        AuditService(self.session).record_change(
+            actor=actor,
+            action="ai_registry.model_profile_update",
+            entity_type="ai_model_profile",
+            entity_id=profile_id,
+            old_value_json=existing,
+            new_value_json=updated,
+        )
+        return updated or {}
+
     def upsert_agent_route(
         self,
         *,
         agent_key: str,
-        model_id: str,
+        profile_id: str | None = None,
+        model_id: str | None = None,
         route_role: str,
         actor: str,
         account_id: str | None = None,
         priority: int = 50,
         enabled: bool = True,
         max_output_tokens: int | None = None,
-        temperature: float | None = 0.0,
+        temperature: float | None = None,
         thinking_enabled: bool = False,
         thinking_mode: str | None = None,
-        structured_output_required: bool = True,
+        structured_output_required: bool | None = None,
     ) -> dict[str, Any]:
         normalized_role = route_role.strip().casefold()
         if not normalized_role:
@@ -505,9 +771,16 @@ class AiRegistryService:
         agent = self._agent_by_key(agent_key)
         if agent is None:
             raise KeyError(agent_key)
+        profile = self._profile_by_id(profile_id) if profile_id is not None else None
+        if profile is not None:
+            model_id = str(profile["ai_model_id"])
+        if model_id is None:
+            raise KeyError("model profile")
         model = self._model_by_id(model_id)
         if model is None:
             raise KeyError(model_id)
+        if profile is None:
+            profile = self._default_profile_for_model(model_id)
         resolved_account_id = account_id or self._default_account_id(str(model["ai_provider_id"]))
         if resolved_account_id is None:
             raise KeyError("provider account")
@@ -516,14 +789,16 @@ class AiRegistryService:
             raise KeyError("provider account")
         if str(account["ai_provider_id"]) != str(model["ai_provider_id"]):
             raise ValueError("provider account must belong to the model provider")
+        profile_thinking_mode = profile.get("thinking_mode") if profile is not None else None
         resolved_thinking_mode = _normalize_thinking_mode(
-            thinking_mode,
+            thinking_mode or profile_thinking_mode,
             thinking_enabled=thinking_enabled,
         )
         existing = self._route_by_agent_model_role(
             agent_id=str(agent["id"]),
             account_id=resolved_account_id,
             model_id=model_id,
+            profile_id=str(profile["id"]) if profile is not None else None,
             route_role=normalized_role,
         )
         now = utc_now()
@@ -531,16 +806,29 @@ class AiRegistryService:
             "ai_agent_id": agent["id"],
             "ai_provider_account_id": resolved_account_id,
             "ai_model_id": model_id,
+            "ai_model_profile_id": profile["id"] if profile is not None else None,
             "route_role": normalized_role,
             "priority": max(0, int(priority)),
             "weight": 1.0,
             "enabled": bool(enabled),
             "max_input_tokens": None,
             "max_output_tokens": max_output_tokens,
-            "temperature": temperature,
+            "temperature": (
+                temperature
+                if temperature is not None
+                else profile.get("temperature")
+                if profile
+                else None
+            ),
             "thinking_enabled": _thinking_enabled_from_mode(resolved_thinking_mode),
             "thinking_mode": resolved_thinking_mode,
-            "structured_output_required": bool(structured_output_required),
+            "structured_output_required": bool(
+                structured_output_required
+                if structured_output_required is not None
+                else profile.get("structured_output_required")
+                if profile
+                else True
+            ),
             "fallback_on_error": True,
             "fallback_on_rate_limit": True,
             "fallback_on_invalid_output": True,
@@ -771,7 +1059,11 @@ class AiRegistryService:
             "updated_at": now,
         }
         if existing is not None:
-            update_values = {key: value for key, value in values.items() if key != "status"}
+            update_values = {
+                key: value
+                for key, value in values.items()
+                if key not in {"status", "context_window_tokens", "max_output_tokens"}
+            }
             self.session.execute(
                 update(ai_models_table)
                 .where(ai_models_table.c.id == existing["id"])
@@ -781,6 +1073,102 @@ class AiRegistryService:
         model_id = new_id()
         self.session.execute(insert(ai_models_table).values(id=model_id, created_at=now, **values))
         return model_id
+
+    def _upsert_model_profile(self, model_id: str, seed: dict[str, Any]) -> str:
+        model = self._model_by_id(model_id)
+        if model is None:
+            raise KeyError(model_id)
+        profile_key = _normalize_profile_key(str(seed["profile_key"]))
+        existing = self._profile_by_model_key(model_id=model_id, profile_key=profile_key)
+        values = self._profile_values(
+            model=model,
+            profile_key=profile_key,
+            display_name=str(seed["profile_display_name"]),
+            description=None,
+            max_input_tokens=seed.get("max_input_tokens"),
+            max_output_tokens=seed.get("max_output_tokens"),
+            temperature=seed.get("temperature"),
+            thinking_mode=seed.get("thinking_mode"),
+            structured_output_required=bool(seed.get("structured_output_required", True)),
+            status="active",
+        )
+        values["updated_at"] = utc_now()
+        if existing is not None:
+            update_values = {key: value for key, value in values.items() if key != "status"}
+            self.session.execute(
+                update(ai_model_profiles_table)
+                .where(ai_model_profiles_table.c.id == existing["id"])
+                .values(**update_values)
+            )
+            return str(existing["id"])
+        profile_id = new_id()
+        self.session.execute(
+            insert(ai_model_profiles_table).values(
+                id=profile_id,
+                created_at=values["updated_at"],
+                **values,
+            )
+        )
+        return profile_id
+
+    def _profile_values(
+        self,
+        *,
+        model: dict[str, Any],
+        profile_key: str,
+        display_name: str,
+        description: str | None,
+        max_input_tokens: int | None,
+        max_output_tokens: int | None,
+        temperature: float | None,
+        thinking_mode: str | None,
+        structured_output_required: bool,
+        status: str,
+    ) -> dict[str, Any]:
+        stripped_name = display_name.strip()
+        if not stripped_name:
+            raise ValueError("display_name must not be empty")
+        normalized_status = status.strip().casefold()
+        if normalized_status not in {"active", "disabled", "deprecated"}:
+            raise ValueError("Unsupported model profile status")
+        if max_input_tokens is not None and int(max_input_tokens) < 1:
+            raise ValueError("max_input_tokens must be >= 1")
+        if max_output_tokens is not None and int(max_output_tokens) < 1:
+            raise ValueError("max_output_tokens must be >= 1")
+        resolved_thinking_mode = _normalize_thinking_mode(thinking_mode)
+        if _thinking_enabled_from_mode(resolved_thinking_mode) and not model.get(
+            "supports_thinking"
+        ):
+            raise ValueError("model profile enables thinking for a model that does not support it")
+        if structured_output_required and not model.get("supports_structured_output"):
+            raise ValueError(
+                "model profile requires structured output for a model that does not support it"
+            )
+        return {
+            "ai_model_id": model["id"],
+            "profile_key": profile_key,
+            "display_name": stripped_name,
+            "description": description,
+            "status": normalized_status,
+            "max_input_tokens": int(max_input_tokens) if max_input_tokens is not None else None,
+            "max_output_tokens": int(max_output_tokens) if max_output_tokens is not None else None,
+            "temperature": float(temperature) if temperature is not None else None,
+            "thinking_mode": resolved_thinking_mode,
+            "structured_output_required": bool(structured_output_required),
+            "response_format_json": (
+                {"type": "json_object"} if structured_output_required else None
+            ),
+            "provider_options_json": {
+                "thinking": {"type": "enabled" if resolved_thinking_mode == "on" else "disabled"}
+                if model.get("supports_thinking")
+                else None
+            },
+            "metadata_json": {
+                "profile_parameter_source": "operator_or_seed",
+                "model_supports_thinking": bool(model.get("supports_thinking")),
+                "model_supports_structured_output": bool(model.get("supports_structured_output")),
+            },
+        }
 
     def _upsert_limit(self, provider_id: str, model_id: str, *, raw_limit: int) -> str:
         now = utc_now()
@@ -849,35 +1237,32 @@ class AiRegistryService:
         account_id: str,
         agent_id: str,
         model_id: str,
+        profile_id: str,
         seed: dict[str, Any],
     ) -> str:
         now = utc_now()
-        existing = (
-            self.session.execute(
-                select(ai_agent_routes_table).where(
-                    ai_agent_routes_table.c.ai_agent_id == agent_id,
-                    ai_agent_routes_table.c.ai_provider_account_id == account_id,
-                    ai_agent_routes_table.c.ai_model_id == model_id,
-                    ai_agent_routes_table.c.route_role == seed["route_role"],
-                )
-            )
-            .mappings()
-            .first()
+        existing = self._route_by_agent_model_role(
+            agent_id=agent_id,
+            account_id=account_id,
+            model_id=model_id,
+            profile_id=profile_id,
+            route_role=str(seed["route_role"]),
         )
         values = {
             "ai_agent_id": agent_id,
             "ai_provider_account_id": account_id,
             "ai_model_id": model_id,
+            "ai_model_profile_id": profile_id,
             "route_role": seed["route_role"],
             "priority": seed["priority"],
             "weight": 1.0,
             "enabled": True,
             "max_input_tokens": None,
-            "max_output_tokens": seed.get("max_output_tokens"),
-            "temperature": 0.0,
-            "thinking_enabled": False,
-            "thinking_mode": "off",
-            "structured_output_required": True,
+            "max_output_tokens": None,
+            "temperature": None,
+            "thinking_enabled": _thinking_enabled_from_mode(str(seed["thinking_mode"])),
+            "thinking_mode": seed["thinking_mode"],
+            "structured_output_required": bool(seed.get("structured_output_required", True)),
             "fallback_on_error": True,
             "fallback_on_rate_limit": True,
             "fallback_on_invalid_output": True,
@@ -886,6 +1271,16 @@ class AiRegistryService:
             "updated_at": now,
         }
         if existing is not None:
+            self.session.execute(
+                update(ai_agent_routes_table)
+                .where(ai_agent_routes_table.c.id == existing["id"])
+                .values(
+                    ai_model_profile_id=profile_id,
+                    max_output_tokens=None,
+                    temperature=None,
+                    updated_at=now,
+                )
+            )
             return str(existing["id"])
         route_id = new_id()
         self.session.execute(
@@ -916,6 +1311,46 @@ class AiRegistryService:
     def _model_by_id(self, model_id: str) -> dict[str, Any] | None:
         row = (
             self.session.execute(select(ai_models_table).where(ai_models_table.c.id == model_id))
+            .mappings()
+            .first()
+        )
+        return dict(row) if row is not None else None
+
+    def _profile_by_id(self, profile_id: str | None) -> dict[str, Any] | None:
+        if profile_id is None:
+            return None
+        row = (
+            self.session.execute(
+                select(ai_model_profiles_table).where(ai_model_profiles_table.c.id == profile_id)
+            )
+            .mappings()
+            .first()
+        )
+        return dict(row) if row is not None else None
+
+    def _profile_by_model_key(self, *, model_id: str, profile_key: str) -> dict[str, Any] | None:
+        row = (
+            self.session.execute(
+                select(ai_model_profiles_table).where(
+                    ai_model_profiles_table.c.ai_model_id == model_id,
+                    ai_model_profiles_table.c.profile_key == profile_key,
+                )
+            )
+            .mappings()
+            .first()
+        )
+        return dict(row) if row is not None else None
+
+    def _default_profile_for_model(self, model_id: str) -> dict[str, Any] | None:
+        row = (
+            self.session.execute(
+                select(ai_model_profiles_table)
+                .where(
+                    ai_model_profiles_table.c.ai_model_id == model_id,
+                    ai_model_profiles_table.c.status == "active",
+                )
+                .order_by(ai_model_profiles_table.c.profile_key)
+            )
             .mappings()
             .first()
         )
@@ -980,15 +1415,33 @@ class AiRegistryService:
         agent_id: str,
         account_id: str,
         model_id: str,
+        profile_id: str | None,
         route_role: str,
     ) -> dict[str, Any] | None:
+        conditions = [
+            ai_agent_routes_table.c.ai_agent_id == agent_id,
+            ai_agent_routes_table.c.ai_provider_account_id == account_id,
+            ai_agent_routes_table.c.route_role == route_role,
+        ]
+        if profile_id is not None:
+            row = (
+                self.session.execute(
+                    select(ai_agent_routes_table).where(
+                        *conditions,
+                        ai_agent_routes_table.c.ai_model_profile_id == profile_id,
+                    )
+                )
+                .mappings()
+                .first()
+            )
+            if row is not None:
+                return dict(row)
         row = (
             self.session.execute(
                 select(ai_agent_routes_table).where(
-                    ai_agent_routes_table.c.ai_agent_id == agent_id,
-                    ai_agent_routes_table.c.ai_provider_account_id == account_id,
+                    *conditions,
                     ai_agent_routes_table.c.ai_model_id == model_id,
-                    ai_agent_routes_table.c.route_role == route_role,
+                    ai_agent_routes_table.c.ai_model_profile_id.is_(None),
                 )
             )
             .mappings()
@@ -1003,11 +1456,13 @@ class AiRegistryService:
                 ai_agent_routes_table.c.ai_agent_id,
                 ai_agent_routes_table.c.ai_provider_account_id,
                 ai_agent_routes_table.c.ai_model_id,
+                ai_agent_routes_table.c.ai_model_profile_id.label("model_profile_id"),
                 ai_agents_table.c.agent_key,
                 ai_agents_table.c.task_type,
                 ai_providers_table.c.provider_key.label("provider"),
                 ai_provider_accounts_table.c.display_name.label("provider_account"),
                 ai_models_table.c.provider_model_name.label("model"),
+                ai_model_profiles_table.c.display_name.label("model_profile"),
                 ai_models_table.c.normalized_model_name,
                 ai_models_table.c.model_type,
                 ai_agent_routes_table.c.route_role,
@@ -1050,6 +1505,10 @@ class AiRegistryService:
                     ai_models_table,
                     ai_agent_routes_table.c.ai_model_id == ai_models_table.c.id,
                 )
+                .outerjoin(
+                    ai_model_profiles_table,
+                    ai_agent_routes_table.c.ai_model_profile_id == ai_model_profiles_table.c.id,
+                )
                 .join(
                     ai_providers_table,
                     ai_models_table.c.ai_provider_id == ai_providers_table.c.id,
@@ -1074,6 +1533,26 @@ def _effective_limit(raw_limit: int, utilization_ratio: float) -> int:
 def _route_selection_from_row(row: dict[str, Any]) -> AiAgentRouteSelection:
     data = dict(row)
     model_metadata = data.pop("model_metadata_json") or {}
+    profile_max_input_tokens = data.pop("profile_max_input_tokens")
+    route_max_input_tokens = data.pop("route_max_input_tokens")
+    profile_max_output_tokens = data.pop("profile_max_output_tokens")
+    route_max_output_tokens = data.pop("route_max_output_tokens")
+    profile_temperature = data.pop("profile_temperature")
+    route_temperature = data.pop("route_temperature")
+    data["max_input_tokens"] = profile_max_input_tokens or route_max_input_tokens
+    data["max_output_tokens"] = profile_max_output_tokens or route_max_output_tokens
+    data["temperature"] = (
+        profile_temperature if profile_temperature is not None else route_temperature
+    )
+    profile_thinking_mode = data.pop("profile_thinking_mode")
+    route_thinking_mode = data.pop("route_thinking_mode")
+    thinking_mode = profile_thinking_mode or route_thinking_mode
+    structured_required = data.pop("profile_structured_output_required")
+    if structured_required is None:
+        structured_required = data.pop("route_structured_output_required")
+    else:
+        data.pop("route_structured_output_required")
+    data["structured_output_required"] = bool(structured_required)
     if not isinstance(model_metadata, dict):
         model_metadata = {}
     data["endpoint_family"] = _optional_string(model_metadata.get("endpoint_family"))
@@ -1082,9 +1561,10 @@ def _route_selection_from_row(row: dict[str, Any]) -> AiAgentRouteSelection:
         [str(value) for value in thinking_values] if isinstance(thinking_values, list) else []
     )
     data["thinking_mode"] = _normalize_thinking_mode(
-        data.get("thinking_mode"),
+        thinking_mode,
         thinking_enabled=bool(data.get("thinking_enabled")),
     )
+    data["thinking_enabled"] = _thinking_enabled_from_mode(data["thinking_mode"])
     return AiAgentRouteSelection(**data)
 
 
@@ -1158,6 +1638,10 @@ def _zai_capability_source_urls(
 
 def _normalize_model(model: str) -> str:
     return model.strip().casefold().replace("_", "-")
+
+
+def _normalize_profile_key(profile_key: str) -> str:
+    return profile_key.strip().casefold().replace("_", "-").replace(" ", "-")
 
 
 def _optional_string(value: Any) -> str | None:

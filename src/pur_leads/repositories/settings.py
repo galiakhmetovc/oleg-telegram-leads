@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import insert, select, update
+from sqlalchemy import delete, insert, select, update
 from sqlalchemy.orm import Session
 
 from pur_leads.core.ids import new_id
@@ -100,6 +100,18 @@ class SettingsRepository:
             statement = statement.where(settings_table.c.scope == scope)
         rows = self.session.execute(statement).mappings().all()
         return [SettingRecord(**dict(row)) for row in rows]
+
+    def delete(
+        self,
+        key: str,
+        scope: str = "global",
+        scope_id: str | None = None,
+    ) -> SettingRecord | None:
+        existing = self.get(key, scope=scope, scope_id=scope_id)
+        if existing is None:
+            return None
+        self.session.execute(delete(settings_table).where(settings_table.c.id == existing.id))
+        return existing
 
     def add_revision(
         self,

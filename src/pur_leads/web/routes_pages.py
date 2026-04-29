@@ -76,12 +76,16 @@ def inbox_page(
                   <a href="/">Лиды</a>
                   <a href="/today">Сегодня</a>
                   <a href="/sources">Источники</a>
+                  <a href="/resources">Ресурсы</a>
                   <a href="/catalog">Каталог</a>
                   <a href="/crm">CRM</a>
+                  <a href="/users">Пользователи</a>
+                  <a href="/settings">Настройки</a>
+                  <a href="/ai-registry">AI-реестр</a>
+                  <a href="/task-executors">Исполнители задач</a>
+                  <a href="/task-types">Задачи</a>
                   <a href="/quality">Качество</a>
                   <a href="/operations">Операции</a>
-                  <a href="/onboarding">Онбординг</a>
-                  <a href="/admin">Админка</a>
                   <button id="logout-button" type="button">Выйти</button>
                 </nav>
               </header>
@@ -132,127 +136,7 @@ def admin_page(
 ) -> Response:
     if not _has_page_session(request, auth_service):
         return RedirectResponse("/login", status_code=303)
-    return HTMLResponse(
-        _page(
-            page="admin",
-            title="Администрирование",
-            main="""
-            <main class="workspace">
-              <header class="topbar">
-                <div>
-                  <span class="eyebrow">PUR Leads</span>
-                  <h1>Администрирование</h1>
-                </div>
-                <nav>
-                  <a href="/">Лиды</a>
-                  <a href="/today">Сегодня</a>
-                  <a href="/sources">Источники</a>
-                  <a href="/catalog">Каталог</a>
-                  <a href="/crm">CRM</a>
-                  <a href="/quality">Качество</a>
-                  <a href="/operations">Операции</a>
-                  <a href="/onboarding">Онбординг</a>
-                  <a href="/admin">Админка</a>
-                  <button id="logout-button" type="button">Выйти</button>
-                </nav>
-              </header>
-              <section class="admin-layout">
-                <section>
-                  <div class="section-head">
-                    <h2>Администраторы</h2>
-                  </div>
-                  <form id="telegram-admin-form" class="inline-form">
-                    <input name="telegram_user_id" placeholder="Telegram ID" required>
-                    <input name="telegram_username" placeholder="Имя пользователя">
-                    <input name="display_name" placeholder="Отображаемое имя">
-                    <button type="submit">Добавить</button>
-                  </form>
-                  <div id="admin-users" class="table-list"></div>
-                </section>
-                <section>
-                  <div class="section-head">
-                    <h2>Юзерботы</h2>
-                  </div>
-                  <form id="userbot-form" class="inline-form">
-                    <input name="display_name" placeholder="Название юзербота" required>
-                    <input name="session_name" placeholder="Имя сессии" required>
-                    <input name="session_path" placeholder="Путь к сессии" required>
-                    <label class="checkbox-line">
-                      <input name="make_default" type="checkbox" checked>
-                      По умолчанию
-                    </label>
-                    <button type="submit">Добавить юзербота</button>
-                  </form>
-                  <div id="userbot-accounts" class="table-list"></div>
-                </section>
-                <section>
-                  <div class="section-head">
-                    <h2>Настройки</h2>
-                  </div>
-                  <form id="setting-form" class="inline-form">
-                    <input name="key" placeholder="Ключ" required>
-                    <input name="value" placeholder="Значение JSON" required>
-                    <select name="value_type">
-                      <option value="bool">bool</option>
-                      <option value="int">int</option>
-                      <option value="float">float</option>
-                      <option value="string">string</option>
-                      <option value="json">json</option>
-                    </select>
-                    <button type="submit">Сохранить</button>
-                  </form>
-                  <div id="settings-list" class="table-list"></div>
-                </section>
-                <section class="ai-admin-section">
-                  <div class="section-head">
-                    <h2>AI-реестр</h2>
-                    <div class="row-actions">
-                      <button id="ai-registry-bootstrap" type="button">Загрузить значения по умолчанию</button>
-                      <button id="ai-registry-refresh" type="button">Обновить</button>
-                    </div>
-                  </div>
-                  <div class="ai-admin-grid">
-                    <section>
-                      <div class="section-head">
-                        <h3>Модели</h3>
-                      </div>
-                      <div id="ai-models" class="table-list"></div>
-                    </section>
-                    <section>
-                      <div class="section-head">
-                        <h3>Маршруты</h3>
-                      </div>
-                      <form id="ai-route-form" class="inline-form">
-                        <select name="agent_key" required></select>
-                        <select name="model_id" required></select>
-                        <select name="account_id" required></select>
-                        <select name="route_role" required>
-                          <option value="primary">Основной</option>
-                          <option value="fallback">Резерв</option>
-                          <option value="shadow">Теневой</option>
-                          <option value="ensemble">Ансамбль</option>
-                          <option value="split">Разделение</option>
-                          <option value="manual_test">Ручной тест</option>
-                        </select>
-                        <input name="priority" type="number" min="0" step="1" value="50" aria-label="Приоритет">
-                        <input name="max_output_tokens" type="number" min="1" step="1"
-                          placeholder="Макс. токены" aria-label="Максимум выходных токенов">
-                        <label class="checkbox-line">
-                          <input name="enabled" type="checkbox" checked>
-                          Включен
-                        </label>
-                        <button type="submit">Сохранить маршрут</button>
-                      </form>
-                      <div id="ai-routes" class="table-list"></div>
-                    </section>
-                  </div>
-                  <div id="ai-registry-status" class="status-line"></div>
-                </section>
-              </section>
-            </main>
-            """,
-        )
-    )
+    return RedirectResponse("/users", status_code=303)
 
 
 @router.get("/onboarding", response_class=HTMLResponse)
@@ -262,61 +146,46 @@ def onboarding_page(
 ) -> Response:
     if not _has_page_session(request, auth_service):
         return RedirectResponse("/login", status_code=303)
+    return RedirectResponse("/resources", status_code=303)
+
+
+@router.get("/resources", response_class=HTMLResponse)
+def resources_page(
+    request: Request,
+    auth_service: WebAuthService = Depends(get_auth_service),
+) -> Response:
+    if not _has_page_session(request, auth_service):
+        return RedirectResponse("/login", status_code=303)
     return HTMLResponse(
         _page(
-            page="onboarding",
-            title="Онбординг",
+            page="resources",
+            title="Ресурсы",
             main="""
-            <main class="workspace onboarding-workspace onboarding-material-shell">
+            <main class="workspace resources-workspace">
               <header class="topbar">
                 <div>
                   <span class="eyebrow">PUR Leads</span>
-                  <h1>Онбординг</h1>
+                  <h1>Ресурсы</h1>
                 </div>
                 <nav>
                   <a href="/">Лиды</a>
                   <a href="/today">Сегодня</a>
                   <a href="/sources">Источники</a>
+                  <a href="/resources">Ресурсы</a>
                   <a href="/catalog">Каталог</a>
                   <a href="/crm">CRM</a>
+                  <a href="/users">Пользователи</a>
+                  <a href="/settings">Настройки</a>
+                  <a href="/ai-registry">AI-реестр</a>
+                  <a href="/task-executors">Исполнители задач</a>
+                  <a href="/task-types">Задачи</a>
                   <a href="/quality">Качество</a>
                   <a href="/operations">Операции</a>
-                  <a href="/onboarding">Онбординг</a>
-                  <a href="/admin">Админка</a>
                   <md-outlined-button id="logout-button" type="button">Выйти</md-outlined-button>
                 </nav>
               </header>
-              <section class="onboarding-layout">
-                <aside class="onboarding-rail" aria-label="Шаги подключения">
-                  <div class="onboarding-product">
-                    <h2>PUR Leads</h2>
-                    <p>
-                      Система читает выбранные Telegram-чаты, находит запросы на оборудование
-                      и услуги, сверяет их с каталогом ПУР и отправляет срочные уведомления
-                      оператору.
-                    </p>
-                    <p>
-                      Онбординг подключает каналы ввода и вывода: бота для уведомлений,
-                      юзербота для чтения чатов и LLM-провайдера для разбора каталога и лидов.
-                    </p>
-                  </div>
-                  <div class="section-head">
-                    <h2>Статус</h2>
-                    <md-icon-button id="onboarding-refresh" type="button" title="Обновить">
-                      <md-icon>refresh</md-icon>
-                    </md-icon-button>
-                  </div>
-                  <md-linear-progress id="onboarding-progress" value="0"></md-linear-progress>
-                  <md-list id="onboarding-status" class="onboarding-steps" aria-live="polite"></md-list>
-                  <div class="onboarding-note">
-                    После смены временного пароля настройте бота, группу уведомлений,
-                    юзербота и LLM-провайдера.
-                    Источники для поиска лидов можно добавить позже в разделе
-                    <a href="/sources">«Источники»</a>.
-                  </div>
-                </aside>
-                <section class="onboarding-main">
-                  <section class="onboarding-resource-surface">
+              <section class="admin-section-layout">
+                <section class="onboarding-resource-surface">
                     <div class="section-head">
                       <div>
                         <h2>Ресурсы системы</h2>
@@ -331,161 +200,489 @@ def onboarding_page(
                     </div>
                     <div id="onboarding-resource-list" class="resource-list" aria-live="polite"></div>
                     <p id="onboarding-resource-status" class="status-line" role="status"></p>
-                  </section>
-                  <dialog id="onboarding-resource-dialog" class="resource-dialog">
-                    <div class="resource-dialog-shell">
-                      <header class="resource-dialog-head">
+                </section>
+                <dialog id="onboarding-resource-dialog" class="resource-dialog">
+                  <div class="resource-dialog-shell">
+                    <header class="resource-dialog-head">
+                      <div>
+                        <h2>Добавить ресурс</h2>
+                        <p class="muted">Выберите тип ресурса и заполните только его настройки.</p>
+                      </div>
+                      <md-icon-button id="onboarding-resource-dialog-close" type="button" title="Закрыть">
+                        <md-icon>close</md-icon>
+                      </md-icon-button>
+                    </header>
+                    <label class="material-select-field">
+                      Тип ресурса
+                      <select id="onboarding-resource-type">
+                        <option value="telegram_bot">Telegram-бот</option>
+                        <option value="telegram_notification_group">Группа уведомлений</option>
+                        <option value="ai_provider_account">LLM-провайдер</option>
+                        <option value="telegram_userbot">Telegram-юзербот</option>
+                      </select>
+                    </label>
+                    <section class="onboarding-panel onboarding-panel-compact resource-form"
+                      data-resource-form="telegram_bot">
+                      <div class="onboarding-panel-head">
+                        <md-icon aria-hidden="true">smart_toy</md-icon>
                         <div>
-                          <h2>Добавить ресурс</h2>
-                          <p class="muted">Выберите тип ресурса и заполните только его настройки.</p>
+                          <h3 class="md-typescale-title-large">Telegram-бот</h3>
+                          <p class="muted">Нужен для входа через Telegram и оперативных уведомлений.</p>
                         </div>
-                        <md-icon-button id="onboarding-resource-dialog-close" type="button" title="Закрыть">
-                          <md-icon>close</md-icon>
-                        </md-icon-button>
-                      </header>
+                      </div>
+                      <form id="onboarding-bot-form" class="material-form">
+                        <md-outlined-text-field name="display_name" label="Название" value="PUR Leads bot">
+                        </md-outlined-text-field>
+                        <md-outlined-text-field name="token" label="Токен BotFather" type="password"
+                          autocomplete="off" required placeholder="123456:ABC...">
+                        </md-outlined-text-field>
+                        <md-filled-button type="submit">
+                          <md-icon slot="icon">send</md-icon>
+                          Проверить и сохранить
+                        </md-filled-button>
+                      </form>
+                      <p id="onboarding-bot-status" class="status-line" role="status"></p>
+                    </section>
+                    <section class="onboarding-panel onboarding-panel-compact resource-form is-hidden"
+                      data-resource-form="telegram_notification_group">
+                      <div class="onboarding-panel-head">
+                        <md-icon aria-hidden="true">forum</md-icon>
+                        <div>
+                          <h3 class="md-typescale-title-large">Группа уведомлений</h3>
+                          <p class="muted">Добавьте бота в группу, отправьте любое сообщение и выберите чат.</p>
+                        </div>
+                      </div>
                       <label class="material-select-field">
-                        Тип ресурса
-                        <select id="onboarding-resource-type">
-                          <option value="telegram_bot">Telegram-бот</option>
-                          <option value="telegram_notification_group">Группа уведомлений</option>
-                          <option value="ai_provider_account">LLM-провайдер</option>
-                          <option value="telegram_userbot">Telegram-юзербот</option>
+                        Бот для проверки групп
+                        <select id="onboarding-group-bot-select" name="bot_id">
+                          <option value="">Сначала сохраните бота</option>
                         </select>
                       </label>
-                      <section class="onboarding-panel onboarding-panel-compact resource-form"
-                        data-resource-form="telegram_bot">
-                        <div class="onboarding-panel-head">
-                          <md-icon aria-hidden="true">smart_toy</md-icon>
-                          <div>
-                            <h3 class="md-typescale-title-large">Telegram-бот</h3>
-                            <p class="muted">Нужен для входа через Telegram и оперативных уведомлений.</p>
-                          </div>
+                      <div class="material-action-row">
+                        <md-filled-button id="onboarding-group-discover" type="button" disabled>
+                          <md-icon slot="icon">refresh</md-icon>
+                          Найти доступные группы
+                        </md-filled-button>
+                      </div>
+                      <p id="onboarding-group-hint" class="status-line">
+                        Сначала сохраните и проверьте токен бота.
+                      </p>
+                      <div id="onboarding-group-candidates" class="table-list"></div>
+                      <p id="onboarding-group-status" class="status-line" role="status"></p>
+                    </section>
+                    <section class="onboarding-panel onboarding-panel-compact resource-form is-hidden"
+                      data-resource-form="ai_provider_account">
+                      <div class="onboarding-panel-head">
+                        <md-icon aria-hidden="true">model_training</md-icon>
+                        <div>
+                          <h3 class="md-typescale-title-large">LLM-провайдер</h3>
+                          <p class="muted">Сейчас доступен Z.AI. Модели и исполнители задач настраиваются в AI-разделах.</p>
                         </div>
-                        <form id="onboarding-bot-form" class="material-form">
-                          <md-outlined-text-field name="display_name" label="Название" value="PUR Leads bot">
-                          </md-outlined-text-field>
-                          <md-outlined-text-field name="token" label="Токен BotFather" type="password"
-                            autocomplete="off" required placeholder="123456:ABC...">
-                          </md-outlined-text-field>
-                          <md-filled-button type="submit">
-                            <md-icon slot="icon">send</md-icon>
-                            Проверить и сохранить
-                          </md-filled-button>
-                        </form>
-                        <p id="onboarding-bot-status" class="status-line" role="status"></p>
-                      </section>
-                      <section class="onboarding-panel onboarding-panel-compact resource-form is-hidden"
-                        data-resource-form="telegram_notification_group">
-                        <div class="onboarding-panel-head">
-                          <md-icon aria-hidden="true">forum</md-icon>
-                          <div>
-                            <h3 class="md-typescale-title-large">Группа уведомлений</h3>
-                            <p class="muted">Добавьте бота в группу, отправьте любое сообщение и выберите чат.</p>
-                          </div>
+                      </div>
+                      <form id="onboarding-llm-form" class="material-form">
+                        <md-outlined-text-field name="display_name" label="Название" value="Z.AI" required>
+                        </md-outlined-text-field>
+                        <md-outlined-text-field name="base_url" label="Base URL"
+                          value="https://api.z.ai/api/coding/paas/v4" required>
+                        </md-outlined-text-field>
+                        <md-outlined-text-field name="api_key" label="Z.AI API key" type="password"
+                          autocomplete="off" required>
+                        </md-outlined-text-field>
+                        <md-filled-button type="submit">
+                          <md-icon slot="icon">sync</md-icon>
+                          Проверить и сохранить
+                        </md-filled-button>
+                      </form>
+                      <p id="onboarding-llm-status" class="status-line" role="status"></p>
+                    </section>
+                    <section class="onboarding-panel onboarding-panel-compact resource-form is-hidden"
+                      data-resource-form="telegram_userbot">
+                      <div class="onboarding-panel-head">
+                        <md-icon aria-hidden="true">person_add</md-icon>
+                        <div>
+                          <h3 class="md-typescale-title-large">Telegram-юзербот</h3>
+                          <p class="muted">Интерактивный вход создает сессию на сервере.</p>
                         </div>
-                        <label class="material-select-field">
-                          Бот для проверки групп
-                          <select id="onboarding-group-bot-select" name="bot_id">
-                            <option value="">Сначала сохраните бота</option>
-                          </select>
+                      </div>
+                      <div class="material-action-row onboarding-link-row">
+                        <md-outlined-button href="https://my.telegram.org/auth?to=apps" target="_blank" rel="noopener">
+                          <md-icon slot="icon">vpn_key</md-icon>
+                          Telegram API
+                        </md-outlined-button>
+                        <md-outlined-button href="https://web.telegram.org/k/" target="_blank" rel="noopener">
+                          <md-icon slot="icon">open_in_new</md-icon>
+                          Telegram Web
+                        </md-outlined-button>
+                      </div>
+                      <form id="onboarding-interactive-start-form" class="material-form">
+                        <md-outlined-text-field name="display_name" label="Название" required
+                          placeholder="Основной юзербот">
+                        </md-outlined-text-field>
+                        <md-outlined-text-field name="session_name" label="Имя сессии" required
+                          placeholder="main">
+                        </md-outlined-text-field>
+                        <md-outlined-text-field name="phone" label="Телефон" required
+                          placeholder="+79990000000">
+                        </md-outlined-text-field>
+                        <md-outlined-text-field name="api_id" label="Telegram API ID" type="number"
+                          min="1" step="1" required>
+                        </md-outlined-text-field>
+                        <md-outlined-text-field name="api_hash" label="Telegram API hash" type="password"
+                          autocomplete="off" required>
+                        </md-outlined-text-field>
+                        <label class="material-checkbox-line">
+                          <md-checkbox name="make_default" checked></md-checkbox>
+                          Использовать по умолчанию
                         </label>
-                        <div class="material-action-row">
-                          <md-filled-button id="onboarding-group-discover" type="button" disabled>
-                            <md-icon slot="icon">refresh</md-icon>
-                            Найти доступные группы
-                          </md-filled-button>
-                        </div>
-                        <p id="onboarding-group-hint" class="status-line">
-                          Сначала сохраните и проверьте токен бота.
-                        </p>
-                        <div id="onboarding-group-candidates" class="table-list"></div>
-                        <p id="onboarding-group-status" class="status-line" role="status"></p>
-                      </section>
-                      <section class="onboarding-panel onboarding-panel-compact resource-form is-hidden"
-                        data-resource-form="ai_provider_account">
-                        <div class="onboarding-panel-head">
-                          <md-icon aria-hidden="true">model_training</md-icon>
-                          <div>
-                            <h3 class="md-typescale-title-large">LLM-провайдер</h3>
-                            <p class="muted">Сейчас доступен Z.AI. Модели и маршруты настраиваются в AI-разделе.</p>
-                          </div>
-                        </div>
-                        <form id="onboarding-llm-form" class="material-form">
-                          <md-outlined-text-field name="display_name" label="Название" value="Z.AI" required>
-                          </md-outlined-text-field>
-                          <md-outlined-text-field name="base_url" label="Base URL"
-                            value="https://api.z.ai/api/coding/paas/v4" required>
-                          </md-outlined-text-field>
-                          <md-outlined-text-field name="api_key" label="Z.AI API key" type="password"
-                            autocomplete="off" required>
-                          </md-outlined-text-field>
-                          <md-filled-button type="submit">
-                            <md-icon slot="icon">sync</md-icon>
-                            Проверить и сохранить
-                          </md-filled-button>
-                        </form>
-                        <p id="onboarding-llm-status" class="status-line" role="status"></p>
-                      </section>
-                      <section class="onboarding-panel onboarding-panel-compact resource-form is-hidden"
-                        data-resource-form="telegram_userbot">
-                        <div class="onboarding-panel-head">
-                          <md-icon aria-hidden="true">person_add</md-icon>
-                          <div>
-                            <h3 class="md-typescale-title-large">Telegram-юзербот</h3>
-                            <p class="muted">Интерактивный вход создает сессию на сервере.</p>
-                          </div>
-                        </div>
-                        <div class="material-action-row onboarding-link-row">
-                          <md-outlined-button href="https://my.telegram.org/auth?to=apps" target="_blank" rel="noopener">
-                            <md-icon slot="icon">vpn_key</md-icon>
-                            Telegram API
-                          </md-outlined-button>
-                          <md-outlined-button href="https://web.telegram.org/k/" target="_blank" rel="noopener">
-                            <md-icon slot="icon">open_in_new</md-icon>
-                            Telegram Web
-                          </md-outlined-button>
-                        </div>
-                        <form id="onboarding-interactive-start-form" class="material-form">
-                          <md-outlined-text-field name="display_name" label="Название" required
-                            placeholder="Основной юзербот">
-                          </md-outlined-text-field>
-                          <md-outlined-text-field name="session_name" label="Имя сессии" required
-                            placeholder="main">
-                          </md-outlined-text-field>
-                          <md-outlined-text-field name="phone" label="Телефон" required
-                            placeholder="+79990000000">
-                          </md-outlined-text-field>
-                          <md-outlined-text-field name="api_id" label="Telegram API ID" type="number"
-                            min="1" step="1" required>
-                          </md-outlined-text-field>
-                          <md-outlined-text-field name="api_hash" label="Telegram API hash" type="password"
-                            autocomplete="off" required>
-                          </md-outlined-text-field>
-                          <label class="material-checkbox-line">
-                            <md-checkbox name="make_default" checked></md-checkbox>
-                            Использовать по умолчанию
-                          </label>
-                          <md-filled-button type="submit">
-                            <md-icon slot="icon">send</md-icon>
-                            Получить код
-                          </md-filled-button>
-                        </form>
-                        <form id="onboarding-interactive-complete-form" class="material-form is-hidden">
-                          <input name="login_id" type="hidden">
-                          <md-outlined-text-field name="code" label="Код Telegram" required inputmode="numeric">
-                          </md-outlined-text-field>
-                          <md-outlined-text-field name="password" label="Пароль 2FA" type="password"
-                            autocomplete="off">
-                          </md-outlined-text-field>
-                          <md-filled-button type="submit">
-                            <md-icon slot="icon">check_circle</md-icon>
-                            Завершить вход
-                          </md-filled-button>
-                        </form>
-                        <p id="onboarding-interactive-status" class="status-line" role="status"></p>
-                      </section>
+                        <md-filled-button type="submit">
+                          <md-icon slot="icon">send</md-icon>
+                          Получить код
+                        </md-filled-button>
+                      </form>
+                      <form id="onboarding-interactive-complete-form" class="material-form is-hidden">
+                        <input name="login_id" type="hidden">
+                        <md-outlined-text-field name="code" label="Код Telegram" required inputmode="numeric">
+                        </md-outlined-text-field>
+                        <md-outlined-text-field name="password" label="Пароль 2FA" type="password"
+                          autocomplete="off">
+                        </md-outlined-text-field>
+                        <md-filled-button type="submit">
+                          <md-icon slot="icon">check_circle</md-icon>
+                          Завершить вход
+                        </md-filled-button>
+                      </form>
+                      <p id="onboarding-interactive-status" class="status-line" role="status"></p>
+                    </section>
+                  </div>
+                </dialog>
+              </section>
+            </main>
+            """,
+        )
+    )
+
+
+@router.get("/users", response_class=HTMLResponse)
+def users_page(
+    request: Request,
+    auth_service: WebAuthService = Depends(get_auth_service),
+) -> Response:
+    if not _has_page_session(request, auth_service):
+        return RedirectResponse("/login", status_code=303)
+    return HTMLResponse(
+        _page(
+            page="users",
+            title="Пользователи",
+            main="""
+            <main class="workspace">
+              <header class="topbar">
+                <div>
+                  <span class="eyebrow">PUR Leads</span>
+                  <h1>Пользователи</h1>
+                </div>
+                <nav>
+                  <a href="/">Лиды</a>
+                  <a href="/today">Сегодня</a>
+                  <a href="/sources">Источники</a>
+                  <a href="/resources">Ресурсы</a>
+                  <a href="/catalog">Каталог</a>
+                  <a href="/crm">CRM</a>
+                  <a href="/users">Пользователи</a>
+                  <a href="/settings">Настройки</a>
+                  <a href="/ai-registry">AI-реестр</a>
+                  <a href="/task-executors">Исполнители задач</a>
+                  <a href="/task-types">Задачи</a>
+                  <a href="/quality">Качество</a>
+                  <a href="/operations">Операции</a>
+                  <button id="logout-button" type="button">Выйти</button>
+                </nav>
+              </header>
+              <section class="admin-section-layout">
+                <section>
+                  <div class="section-head">
+                    <div>
+                      <h2>Администраторы</h2>
+                      <p class="muted">Пока используется одна роль: администратор.</p>
                     </div>
-                  </dialog>
+                  </div>
+                  <form id="telegram-admin-form" class="inline-form">
+                    <input name="telegram_user_id" placeholder="Telegram ID" required>
+                    <input name="telegram_username" placeholder="Имя пользователя">
+                    <input name="display_name" placeholder="Отображаемое имя">
+                    <button type="submit">Добавить администратора</button>
+                  </form>
+                  <div id="admin-users" class="table-list"></div>
+                </section>
+              </section>
+            </main>
+            """,
+        )
+    )
+
+
+@router.get("/settings", response_class=HTMLResponse)
+def settings_page(
+    request: Request,
+    auth_service: WebAuthService = Depends(get_auth_service),
+) -> Response:
+    if not _has_page_session(request, auth_service):
+        return RedirectResponse("/login", status_code=303)
+    return HTMLResponse(
+        _page(
+            page="settings",
+            title="Настройки",
+            main="""
+            <main class="workspace">
+              <header class="topbar">
+                <div>
+                  <span class="eyebrow">PUR Leads</span>
+                  <h1>Настройки</h1>
+                </div>
+                <nav>
+                  <a href="/">Лиды</a>
+                  <a href="/today">Сегодня</a>
+                  <a href="/sources">Источники</a>
+                  <a href="/resources">Ресурсы</a>
+                  <a href="/catalog">Каталог</a>
+                  <a href="/crm">CRM</a>
+                  <a href="/users">Пользователи</a>
+                  <a href="/settings">Настройки</a>
+                  <a href="/ai-registry">AI-реестр</a>
+                  <a href="/task-executors">Исполнители задач</a>
+                  <a href="/task-types">Задачи</a>
+                  <a href="/quality">Качество</a>
+                  <a href="/operations">Операции</a>
+                  <button id="logout-button" type="button">Выйти</button>
+                </nav>
+              </header>
+              <section class="admin-section-layout">
+                <section>
+                  <div class="section-head">
+                    <div>
+                      <h2>Настройки</h2>
+                      <p class="muted">Как настройка влияет на работу видно в каждой строке.</p>
+                    </div>
+                  </div>
+                  <form id="setting-form" class="inline-form settings-form">
+                    <input name="key" placeholder="Ключ" required>
+                    <input name="value" placeholder="Значение JSON" required>
+                    <select name="value_type">
+                      <option value="bool">bool</option>
+                      <option value="int">int</option>
+                      <option value="float">float</option>
+                      <option value="string">string</option>
+                      <option value="json">json</option>
+                    </select>
+                    <button type="submit">Сохранить</button>
+                  </form>
+                  <div id="settings-list" class="table-list"></div>
+                </section>
+              </section>
+            </main>
+            """,
+        )
+    )
+
+
+@router.get("/ai-registry", response_class=HTMLResponse)
+def ai_registry_page(
+    request: Request,
+    auth_service: WebAuthService = Depends(get_auth_service),
+) -> Response:
+    if not _has_page_session(request, auth_service):
+        return RedirectResponse("/login", status_code=303)
+    return HTMLResponse(
+        _page(
+            page="ai-registry",
+            title="AI-реестр",
+            main="""
+            <main class="workspace">
+              <header class="topbar">
+                <div>
+                  <span class="eyebrow">PUR Leads</span>
+                  <h1>AI-реестр</h1>
+                </div>
+                <nav>
+                  <a href="/">Лиды</a>
+                  <a href="/today">Сегодня</a>
+                  <a href="/sources">Источники</a>
+                  <a href="/resources">Ресурсы</a>
+                  <a href="/catalog">Каталог</a>
+                  <a href="/crm">CRM</a>
+                  <a href="/users">Пользователи</a>
+                  <a href="/settings">Настройки</a>
+                  <a href="/ai-registry">AI-реестр</a>
+                  <a href="/task-executors">Исполнители задач</a>
+                  <a href="/task-types">Задачи</a>
+                  <a href="/quality">Качество</a>
+                  <a href="/operations">Операции</a>
+                  <button id="logout-button" type="button">Выйти</button>
+                </nav>
+              </header>
+              <section class="admin-section-layout">
+                <section>
+                  <div class="section-head">
+                    <div>
+                      <h2>Модели</h2>
+                      <p class="muted">Контекстное окно, max output, capabilities и лимиты параллельности.</p>
+                    </div>
+                    <div class="row-actions">
+                      <button id="ai-registry-bootstrap" type="button">Загрузить Z.AI defaults</button>
+                      <button id="ai-registry-refresh" type="button">Обновить</button>
+                    </div>
+                  </div>
+                  <div id="ai-models" class="table-list"></div>
+                  <div class="section-head ai-profile-head">
+                    <div>
+                      <h2>Профили моделей</h2>
+                      <p class="muted">Профиль хранит конкретные параметры запуска модели: лимиты токенов, temperature, thinking и structured output.</p>
+                    </div>
+                  </div>
+                  <form id="ai-profile-form" class="inline-form ai-profile-form">
+                    <select name="model_id" required></select>
+                    <input name="profile_key" placeholder="profile key" required>
+                    <input name="display_name" placeholder="Название профиля" required>
+                    <input name="max_input_tokens" type="number" min="1" step="1" placeholder="Max input">
+                    <input name="max_output_tokens" type="number" min="1" step="1" placeholder="Max output">
+                    <input name="temperature" type="number" min="0" max="2" step="0.1" placeholder="Temperature">
+                    <select name="thinking_mode">
+                      <option value="off">Thinking off</option>
+                      <option value="on">Thinking on</option>
+                    </select>
+                    <label class="checkbox-line">
+                      <input name="structured_output_required" type="checkbox" checked>
+                      Structured output
+                    </label>
+                    <button type="submit">Сохранить профиль</button>
+                  </form>
+                  <div id="ai-model-profiles" class="table-list"></div>
+                  <div id="ai-registry-status" class="status-line"></div>
+                </section>
+              </section>
+            </main>
+            """,
+        )
+    )
+
+
+@router.get("/task-executors", response_class=HTMLResponse)
+def task_executors_page(
+    request: Request,
+    auth_service: WebAuthService = Depends(get_auth_service),
+) -> Response:
+    if not _has_page_session(request, auth_service):
+        return RedirectResponse("/login", status_code=303)
+    return HTMLResponse(
+        _page(
+            page="task-executors",
+            title="Исполнители задач",
+            main="""
+            <main class="workspace">
+              <header class="topbar">
+                <div>
+                  <span class="eyebrow">PUR Leads</span>
+                  <h1>Исполнители задач</h1>
+                </div>
+                <nav>
+                  <a href="/">Лиды</a>
+                  <a href="/today">Сегодня</a>
+                  <a href="/sources">Источники</a>
+                  <a href="/resources">Ресурсы</a>
+                  <a href="/catalog">Каталог</a>
+                  <a href="/crm">CRM</a>
+                  <a href="/users">Пользователи</a>
+                  <a href="/settings">Настройки</a>
+                  <a href="/ai-registry">AI-реестр</a>
+                  <a href="/task-executors">Исполнители задач</a>
+                  <a href="/task-types">Задачи</a>
+                  <a href="/quality">Качество</a>
+                  <a href="/operations">Операции</a>
+                  <button id="logout-button" type="button">Выйти</button>
+                </nav>
+              </header>
+              <section class="admin-section-layout">
+                <section>
+                  <div class="section-head">
+                    <div>
+                      <h2>Связки исполнения</h2>
+                      <p class="muted">Связка: тип задачи + ресурс + профиль модели. Для одной задачи можно включить несколько исполнителей.</p>
+                    </div>
+                    <button id="ai-registry-refresh" type="button">Обновить</button>
+                  </div>
+                  <form id="ai-route-form" class="inline-form executor-form">
+                    <select name="agent_key" required></select>
+                    <select name="profile_id" required></select>
+                    <select name="account_id" required></select>
+                    <select name="route_role" required>
+                      <option value="primary">Основной</option>
+                      <option value="fallback">Резерв</option>
+                      <option value="shadow">Теневой</option>
+                      <option value="ensemble">Ансамбль</option>
+                      <option value="split">Разделение</option>
+                      <option value="manual_test">Ручной тест</option>
+                    </select>
+                    <input name="priority" type="number" min="0" step="1" value="50" aria-label="Приоритет">
+                    <label class="checkbox-line">
+                      <input name="enabled" type="checkbox" checked>
+                      Включен
+                    </label>
+                    <button type="submit">Сохранить исполнителя</button>
+                  </form>
+                  <div id="ai-routes" class="table-list"></div>
+                  <div id="ai-registry-status" class="status-line"></div>
+                </section>
+              </section>
+            </main>
+            """,
+        )
+    )
+
+
+@router.get("/task-types", response_class=HTMLResponse)
+def task_types_page(
+    request: Request,
+    auth_service: WebAuthService = Depends(get_auth_service),
+) -> Response:
+    if not _has_page_session(request, auth_service):
+        return RedirectResponse("/login", status_code=303)
+    return HTMLResponse(
+        _page(
+            page="task-types",
+            title="Задачи",
+            main="""
+            <main class="workspace">
+              <header class="topbar">
+                <div>
+                  <span class="eyebrow">PUR Leads</span>
+                  <h1>Задачи</h1>
+                </div>
+                <nav>
+                  <a href="/">Лиды</a>
+                  <a href="/today">Сегодня</a>
+                  <a href="/sources">Источники</a>
+                  <a href="/resources">Ресурсы</a>
+                  <a href="/catalog">Каталог</a>
+                  <a href="/crm">CRM</a>
+                  <a href="/users">Пользователи</a>
+                  <a href="/settings">Настройки</a>
+                  <a href="/ai-registry">AI-реестр</a>
+                  <a href="/task-executors">Исполнители задач</a>
+                  <a href="/task-types">Задачи</a>
+                  <a href="/quality">Качество</a>
+                  <a href="/operations">Операции</a>
+                  <button id="logout-button" type="button">Выйти</button>
+                </nav>
+              </header>
+              <section class="admin-section-layout">
+                <section>
+                  <div class="section-head">
+                    <div>
+                      <h2>Реестр типов задач</h2>
+                      <p class="muted">poll_monitored_source и другие типы описывают требования к ресурсам и правила параллельности.</p>
+                    </div>
+                    <button id="task-types-refresh" type="button">Обновить</button>
+                  </div>
+                  <div id="task-type-list" class="table-list"></div>
                 </section>
               </section>
             </main>
@@ -516,12 +713,16 @@ def crm_page(
                   <a href="/">Лиды</a>
                   <a href="/today">Сегодня</a>
                   <a href="/sources">Источники</a>
+                  <a href="/resources">Ресурсы</a>
                   <a href="/catalog">Каталог</a>
                   <a href="/crm">CRM</a>
+                  <a href="/users">Пользователи</a>
+                  <a href="/settings">Настройки</a>
+                  <a href="/ai-registry">AI-реестр</a>
+                  <a href="/task-executors">Исполнители задач</a>
+                  <a href="/task-types">Задачи</a>
                   <a href="/quality">Качество</a>
                   <a href="/operations">Операции</a>
-                  <a href="/onboarding">Онбординг</a>
-                  <a href="/admin">Админка</a>
                   <button id="logout-button" type="button">Выйти</button>
                 </nav>
               </header>
@@ -603,12 +804,16 @@ def sources_page(
                   <a href="/">Лиды</a>
                   <a href="/today">Сегодня</a>
                   <a href="/sources">Источники</a>
+                  <a href="/resources">Ресурсы</a>
                   <a href="/catalog">Каталог</a>
                   <a href="/crm">CRM</a>
+                  <a href="/users">Пользователи</a>
+                  <a href="/settings">Настройки</a>
+                  <a href="/ai-registry">AI-реестр</a>
+                  <a href="/task-executors">Исполнители задач</a>
+                  <a href="/task-types">Задачи</a>
                   <a href="/quality">Качество</a>
                   <a href="/operations">Операции</a>
-                  <a href="/onboarding">Онбординг</a>
-                  <a href="/admin">Админка</a>
                   <button id="logout-button" type="button">Выйти</button>
                 </nav>
               </header>
@@ -678,12 +883,16 @@ def catalog_page(
                   <a href="/">Лиды</a>
                   <a href="/today">Сегодня</a>
                   <a href="/sources">Источники</a>
+                  <a href="/resources">Ресурсы</a>
                   <a href="/catalog">Каталог</a>
                   <a href="/crm">CRM</a>
+                  <a href="/users">Пользователи</a>
+                  <a href="/settings">Настройки</a>
+                  <a href="/ai-registry">AI-реестр</a>
+                  <a href="/task-executors">Исполнители задач</a>
+                  <a href="/task-types">Задачи</a>
                   <a href="/quality">Качество</a>
                   <a href="/operations">Операции</a>
-                  <a href="/onboarding">Онбординг</a>
-                  <a href="/admin">Админка</a>
                   <button id="logout-button" type="button">Выйти</button>
                 </nav>
               </header>
@@ -767,12 +976,16 @@ def today_page(
                   <a href="/">Лиды</a>
                   <a href="/today">Сегодня</a>
                   <a href="/sources">Источники</a>
+                  <a href="/resources">Ресурсы</a>
                   <a href="/catalog">Каталог</a>
                   <a href="/crm">CRM</a>
+                  <a href="/users">Пользователи</a>
+                  <a href="/settings">Настройки</a>
+                  <a href="/ai-registry">AI-реестр</a>
+                  <a href="/task-executors">Исполнители задач</a>
+                  <a href="/task-types">Задачи</a>
                   <a href="/quality">Качество</a>
                   <a href="/operations">Операции</a>
-                  <a href="/onboarding">Онбординг</a>
-                  <a href="/admin">Админка</a>
                   <button id="logout-button" type="button">Выйти</button>
                 </nav>
               </header>
@@ -858,12 +1071,16 @@ def operations_page(
                   <a href="/">Лиды</a>
                   <a href="/today">Сегодня</a>
                   <a href="/sources">Источники</a>
+                  <a href="/resources">Ресурсы</a>
                   <a href="/catalog">Каталог</a>
                   <a href="/crm">CRM</a>
+                  <a href="/users">Пользователи</a>
+                  <a href="/settings">Настройки</a>
+                  <a href="/ai-registry">AI-реестр</a>
+                  <a href="/task-executors">Исполнители задач</a>
+                  <a href="/task-types">Задачи</a>
                   <a href="/quality">Качество</a>
                   <a href="/operations">Операции</a>
-                  <a href="/onboarding">Онбординг</a>
-                  <a href="/admin">Админка</a>
                   <button id="logout-button" type="button">Выйти</button>
                 </nav>
               </header>
@@ -956,12 +1173,16 @@ def quality_page(
                   <a href="/">Лиды</a>
                   <a href="/today">Сегодня</a>
                   <a href="/sources">Источники</a>
+                  <a href="/resources">Ресурсы</a>
                   <a href="/catalog">Каталог</a>
                   <a href="/crm">CRM</a>
+                  <a href="/users">Пользователи</a>
+                  <a href="/settings">Настройки</a>
+                  <a href="/ai-registry">AI-реестр</a>
+                  <a href="/task-executors">Исполнители задач</a>
+                  <a href="/task-types">Задачи</a>
                   <a href="/quality">Качество</a>
                   <a href="/operations">Операции</a>
-                  <a href="/onboarding">Онбординг</a>
-                  <a href="/admin">Админка</a>
                   <button id="logout-button" type="button">Выйти</button>
                 </nav>
               </header>

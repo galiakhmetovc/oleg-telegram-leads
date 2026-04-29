@@ -7,6 +7,7 @@ from pur_leads.models.ai import (
     ai_agent_routes_table,
     ai_agents_table,
     ai_model_limits_table,
+    ai_model_profiles_table,
     ai_models_table,
     ai_provider_accounts_table,
     ai_providers_table,
@@ -33,6 +34,7 @@ def test_ai_registry_bootstrap_creates_zai_models_agents_and_multi_model_routes(
             row["agent_key"]: row
             for row in session.execute(select(ai_agents_table)).mappings().all()
         }
+        profiles = session.execute(select(ai_model_profiles_table)).mappings().all()
         routes = session.execute(select(ai_agent_routes_table)).mappings().all()
 
         assert result["provider_key"] == "zai"
@@ -61,6 +63,12 @@ def test_ai_registry_bootstrap_creates_zai_models_agents_and_multi_model_routes(
         assert "catalog_extractor" in agents
         assert "lead_detector" in agents
         assert "ocr_extractor" in agents
+        assert {profile["profile_key"] for profile in profiles} >= {
+            "catalog-primary",
+            "catalog-fallback",
+            "lead-shadow",
+            "ocr-primary",
+        }
         catalog_routes = [
             route for route in routes if route["ai_agent_id"] == agents["catalog_extractor"]["id"]
         ]
@@ -69,6 +77,7 @@ def test_ai_registry_bootstrap_creates_zai_models_agents_and_multi_model_routes(
             models["glm-5.1"]["id"],
             models["glm-4.5-air"]["id"],
         }
+        assert all(route["ai_model_profile_id"] for route in catalog_routes)
 
 
 def test_ai_registry_selects_enabled_routes_by_agent_and_role(tmp_path):
@@ -118,15 +127,24 @@ def test_ai_registry_allows_same_model_route_role_on_different_accounts(tmp_path
             .mappings()
             .one()
         )
+        profile = (
+            session.execute(
+                select(ai_model_profiles_table).where(
+                    ai_model_profiles_table.c.ai_model_id == glm51["id"],
+                    ai_model_profiles_table.c.profile_key == "catalog-primary",
+                )
+            )
+            .mappings()
+            .one()
+        )
 
         route = service.upsert_agent_route(
             agent_key="catalog_extractor",
-            model_id=glm51["id"],
+            profile_id=profile["id"],
             route_role="primary",
             account_id=second_account["id"],
             actor="test",
             priority=15,
-            max_output_tokens=4096,
         )
         selected_routes = service.select_routes(
             agent_key="catalog_extractor",
@@ -134,6 +152,7 @@ def test_ai_registry_allows_same_model_route_role_on_different_accounts(tmp_path
         )
 
         assert route["provider_account"] == "Z.AI secondary"
+        assert route["model_profile"] == "Каталог: основной JSON"
         assert {route.provider_account_id for route in selected_routes} >= {
             first_account["id"],
             second_account["id"],
@@ -199,6 +218,76 @@ def test_ai_registry_bootstrap_does_not_overwrite_operator_model_limits(tmp_path
         service.bootstrap_defaults(actor="test")
 
         assert service.model_concurrency_limits(provider_key="zai")["glm-4.5-flash"] == 7
+
+
+def test_ai_registry_updates_model_context_window_and_preserves_it_on_bootstrap(tmp_path):
+    session_factory = _session_factory(tmp_path)
+    with session_factory() as session:
+        service = AiRegistryService(session)
+        service.bootstrap_defaults(actor="test")
+        glm51 = (
+            session.execute(
+                select(ai_models_table).where(ai_models_table.c.normalized_model_name == "glm-5.1")
+            )
+            .mappings()
+            .one()
+        )
+
+        model = service.update_model_metadata(
+            glm51["id"],
+            actor="test",
+            context_window_tokens=200000,
+            max_output_tokens=128000,
+            status="active",
+        )
+
+        service.bootstrap_defaults(actor="test")
+        stored = (
+            session.execute(select(ai_models_table).where(ai_models_table.c.id == glm51["id"]))
+            .mappings()
+            .one()
+        )
+
+        assert model["context_window_tokens"] == 200000
+        assert model["max_output_tokens"] == 128000
+        assert stored["context_window_tokens"] == 200000
+        assert stored["max_output_tokens"] == 128000
+
+
+def test_ai_registry_updates_model_profile_and_selects_profile_parameters(tmp_path):
+    session_factory = _session_factory(tmp_path)
+    with session_factory() as session:
+        service = AiRegistryService(session)
+        service.bootstrap_defaults(actor="test")
+        profile = (
+            session.execute(
+                select(ai_model_profiles_table).where(
+                    ai_model_profiles_table.c.profile_key == "lead-shadow"
+                )
+            )
+            .mappings()
+            .one()
+        )
+
+        updated = service.update_model_profile(
+            profile["id"],
+            actor="test",
+            display_name="Lead shadow fast",
+            max_input_tokens=12000,
+            max_output_tokens=700,
+            temperature=0.1,
+            thinking_mode="off",
+            structured_output_required=True,
+        )
+        selected = service.select_routes(agent_key="lead_detector", route_role="shadow")
+
+        assert updated["display_name"] == "Lead shadow fast"
+        assert updated["max_input_tokens"] == 12000
+        assert updated["max_output_tokens"] == 700
+        assert selected[0].model_profile_id == profile["id"]
+        assert selected[0].max_output_tokens == 700
+        assert selected[0].temperature == 0.1
+        assert selected[0].thinking_mode == "off"
 
 
 def _session_factory(tmp_path):

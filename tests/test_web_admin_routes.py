@@ -14,6 +14,7 @@ from pur_leads.models.ai import (
     ai_agent_routes_table,
     ai_agents_table,
     ai_model_limits_table,
+    ai_model_profiles_table,
     ai_models_table,
     ai_provider_accounts_table,
     ai_providers_table,
@@ -276,6 +277,9 @@ def test_admin_ai_registry_routes_list_update_limits_and_add_agent_routes(tmp_pa
     airx = next(
         model for model in registry["models"] if model["normalized_model_name"] == "glm-4.5-airx"
     )
+    airx_profile = next(
+        profile for profile in registry["profiles"] if profile["ai_model_id"] == airx["id"]
+    )
     limit_response = client.patch(
         f"/api/admin/ai-model-limits/{flash['limit']['id']}",
         json={"raw_limit": 7, "utilization_ratio": 0.8},
@@ -284,12 +288,10 @@ def test_admin_ai_registry_routes_list_update_limits_and_add_agent_routes(tmp_pa
         "/api/admin/ai-agents/catalog_extractor/routes",
         json={
             "model_id": airx["id"],
+            "profile_id": airx_profile["id"],
             "route_role": "fallback",
             "priority": 30,
-            "max_output_tokens": 2048,
-            "temperature": 0.0,
             "enabled": True,
-            "structured_output_required": True,
         },
     )
     updated_registry = client.get("/api/admin/ai-registry").json()
@@ -303,6 +305,7 @@ def test_admin_ai_registry_routes_list_update_limits_and_add_agent_routes(tmp_pa
         "providers": 0,
         "provider_accounts": 0,
         "models": 0,
+        "model_profiles": 0,
         "model_limits": 0,
         "agents": 0,
         "routes": 0,
@@ -316,6 +319,7 @@ def test_admin_ai_registry_routes_list_update_limits_and_add_agent_routes(tmp_pa
     assert limit_response.json()["limit"]["effective_limit"] == 5
     assert route_response.status_code == 200
     assert route_response.json()["route"]["model"] == "GLM-4.5-AirX"
+    assert route_response.json()["route"]["model_profile_id"] == airx_profile["id"]
     assert route_response.json()["route"]["route_role"] == "fallback"
     assert any(
         route["model"] == "GLM-4.5-AirX" and route["route_role"] == "fallback"
@@ -329,6 +333,79 @@ def test_admin_ai_registry_routes_list_update_limits_and_add_agent_routes(tmp_pa
     assert {"ai_registry.limit_update", "ai_registry.route_upsert"}.issubset(audit_actions)
 
 
+def test_admin_ai_registry_updates_model_context_window_and_lists_task_types(tmp_path):
+    fixture = _setup_admin_app(tmp_path)
+    client = fixture["client"]
+    _login_local(client)
+    client.post("/api/admin/ai-registry/bootstrap-defaults")
+    registry = client.get("/api/admin/ai-registry").json()
+    glm51 = next(
+        model for model in registry["models"] if model["normalized_model_name"] == "glm-5.1"
+    )
+    profile = next(
+        profile for profile in registry["profiles"] if profile["ai_model_id"] == glm51["id"]
+    )
+
+    update_response = client.patch(
+        f"/api/admin/ai-models/{glm51['id']}",
+        json={
+            "context_window_tokens": 200000,
+            "max_output_tokens": 128000,
+            "status": "active",
+        },
+    )
+    bad_response = client.patch(
+        f"/api/admin/ai-models/{glm51['id']}",
+        json={"context_window_tokens": 0},
+    )
+    profile_response = client.patch(
+        f"/api/admin/ai-model-profiles/{profile['id']}",
+        json={
+            "display_name": "Catalog strict JSON",
+            "max_input_tokens": 180000,
+            "max_output_tokens": 64000,
+            "temperature": 0.0,
+            "thinking_mode": "off",
+            "structured_output_required": True,
+            "status": "active",
+        },
+    )
+    task_types_response = client.get("/api/admin/task-types")
+    settings_response = client.get("/api/settings")
+    updated_registry = client.get("/api/admin/ai-registry").json()
+    updated_model = next(
+        model for model in updated_registry["models"] if model["normalized_model_name"] == "glm-5.1"
+    )
+
+    assert update_response.status_code == 200
+    assert update_response.json()["model"]["context_window_tokens"] == 200000
+    assert update_response.json()["model"]["max_output_tokens"] == 128000
+    assert bad_response.status_code == 400
+    assert profile_response.status_code == 200
+    assert profile_response.json()["profile"]["display_name"] == "Catalog strict JSON"
+    assert profile_response.json()["profile"]["max_input_tokens"] == 180000
+    assert updated_model["context_window_tokens"] == 200000
+    assert task_types_response.status_code == 200
+    assert {item["task_type"] for item in task_types_response.json()["items"]} >= {
+        "poll_monitored_source",
+        "extract_catalog_facts",
+        "classify_message_batch",
+        "send_notifications",
+    }
+    worker_setting = next(
+        item for item in settings_response.json()["items"] if item["key"] == "worker_concurrency"
+    )
+    assert worker_setting["description"]
+    assert worker_setting["impact"]
+
+    with fixture["session_factory"]() as session:
+        audit_actions = {
+            row["action"] for row in session.execute(select(audit_log_table)).mappings().all()
+        }
+    assert "ai_registry.model_update" in audit_actions
+    assert "ai_registry.model_profile_update" in audit_actions
+
+
 def _ai_registry_counts(session_factory) -> dict[str, int]:
     with session_factory() as session:
         return {
@@ -337,6 +414,9 @@ def _ai_registry_counts(session_factory) -> dict[str, int]:
                 select(func.count()).select_from(ai_provider_accounts_table)
             ),
             "models": session.scalar(select(func.count()).select_from(ai_models_table)),
+            "model_profiles": session.scalar(
+                select(func.count()).select_from(ai_model_profiles_table)
+            ),
             "model_limits": session.scalar(select(func.count()).select_from(ai_model_limits_table)),
             "agents": session.scalar(select(func.count()).select_from(ai_agents_table)),
             "routes": session.scalar(select(func.count()).select_from(ai_agent_routes_table)),

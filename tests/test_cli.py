@@ -27,6 +27,7 @@ from pur_leads.models.ai import (
     ai_agent_routes_table,
     ai_agents_table,
     ai_model_limits_table,
+    ai_model_profiles_table,
     ai_models_table,
     ai_provider_accounts_table,
     ai_providers_table,
@@ -163,6 +164,9 @@ def test_cli_worker_once_does_not_seed_ai_registry_on_empty_database(tmp_path, c
                 select(func.count()).select_from(ai_provider_accounts_table)
             ),
             "models": session.scalar(select(func.count()).select_from(ai_models_table)),
+            "model_profiles": session.scalar(
+                select(func.count()).select_from(ai_model_profiles_table)
+            ),
             "model_limits": session.scalar(select(func.count()).select_from(ai_model_limits_table)),
             "agents": session.scalar(select(func.count()).select_from(ai_agents_table)),
             "routes": session.scalar(select(func.count()).select_from(ai_agent_routes_table)),
@@ -173,6 +177,7 @@ def test_cli_worker_once_does_not_seed_ai_registry_on_empty_database(tmp_path, c
         "providers": 0,
         "provider_accounts": 0,
         "models": 0,
+        "model_profiles": 0,
         "model_limits": 0,
         "agents": 0,
         "routes": 0,

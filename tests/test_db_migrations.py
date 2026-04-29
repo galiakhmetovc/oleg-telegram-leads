@@ -39,6 +39,7 @@ def test_foundation_migration_creates_core_tables(tmp_path):
         "ai_providers",
         "ai_provider_accounts",
         "ai_models",
+        "ai_model_profiles",
         "ai_model_limits",
         "ai_agents",
         "ai_agent_routes",
