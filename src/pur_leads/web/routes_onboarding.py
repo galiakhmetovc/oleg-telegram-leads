@@ -44,7 +44,7 @@ class BotTokenRequest(BaseModel):
 
 
 class NotificationGroupRequest(BaseModel):
-    bot_id: str = Field(min_length=1)
+    bot_id: str | None = None
     chat_id: str = Field(min_length=1)
     title: str | None = None
     chat_type: str | None = None
@@ -259,10 +259,13 @@ async def configure_notification_group(
     validated: SessionValidationResult = Depends(current_admin),
     session: Session = Depends(get_session),
 ) -> dict[str, Any]:
-    bot = _bot_by_id(session, payload.bot_id)
+    bot_id = payload.bot_id or _first_active_bot_id(session)
+    if not bot_id:
+        raise HTTPException(status_code=400, detail="Telegram bot is not configured")
+    bot = _bot_by_id(session, bot_id)
     if bot is None:
         raise HTTPException(status_code=404, detail="Telegram bot not found")
-    token = _resolve_bot_token(request, session, bot_id=payload.bot_id)
+    token = _resolve_bot_token(request, session, bot_id=bot_id)
     if not token:
         raise HTTPException(status_code=400, detail="Telegram bot token is not configured")
     if payload.send_test:
@@ -278,7 +281,7 @@ async def configure_notification_group(
     actor = _actor(validated)
     group = _upsert_notification_group(
         session,
-        telegram_bot_id=payload.bot_id,
+        telegram_bot_id=bot_id,
         chat_id=payload.chat_id.strip(),
         title=payload.title,
         chat_type=payload.chat_type,
@@ -673,6 +676,7 @@ def _bot_payload(row: dict[str, Any]) -> dict[str, Any]:
         "display_name": row["display_name"],
         "telegram_bot_id": row["telegram_bot_id"],
         "telegram_username": row["telegram_username"],
+        "username": row["telegram_username"],
         "status": row["status"],
         "created_at": row["created_at"],
         "updated_at": row["updated_at"],
@@ -691,6 +695,19 @@ def _bot_by_id(session: Session, bot_id: str) -> dict[str, Any] | None:
         .first()
     )
     return dict(row) if row is not None else None
+
+
+def _first_active_bot_id(session: Session) -> str | None:
+    row = (
+        session.execute(
+            select(telegram_bots_table.c.id)
+            .where(telegram_bots_table.c.status == "active")
+            .order_by(telegram_bots_table.c.created_at.desc())
+        )
+        .mappings()
+        .first()
+    )
+    return str(row["id"]) if row is not None else None
 
 
 def _upsert_telegram_bot(
@@ -724,15 +741,11 @@ def _upsert_telegram_bot(
     }
     if existing is None:
         bot_id = new_id()
-        session.execute(
-            insert(telegram_bots_table).values(id=bot_id, created_at=now, **values)
-        )
+        session.execute(insert(telegram_bots_table).values(id=bot_id, created_at=now, **values))
     else:
         bot_id = str(existing["id"])
         session.execute(
-            update(telegram_bots_table)
-            .where(telegram_bots_table.c.id == bot_id)
-            .values(**values)
+            update(telegram_bots_table).where(telegram_bots_table.c.id == bot_id).values(**values)
         )
     session.commit()
     row = _bot_by_id(session, bot_id)
@@ -749,11 +762,15 @@ def _notification_group_payloads(
         conditions.append(telegram_notification_groups_table.c.telegram_bot_id == bot_id)
     rows = (
         session.execute(
-            select(telegram_notification_groups_table, telegram_bots_table.c.display_name.label("bot_name"))
+            select(
+                telegram_notification_groups_table,
+                telegram_bots_table.c.display_name.label("bot_name"),
+            )
             .select_from(
                 telegram_notification_groups_table.join(
                     telegram_bots_table,
-                    telegram_notification_groups_table.c.telegram_bot_id == telegram_bots_table.c.id,
+                    telegram_notification_groups_table.c.telegram_bot_id
+                    == telegram_bots_table.c.id,
                 )
             )
             .where(*conditions)
@@ -809,7 +826,9 @@ def _upsert_notification_group(
     if message_thread_id is None:
         conditions.append(telegram_notification_groups_table.c.message_thread_id.is_(None))
     else:
-        conditions.append(telegram_notification_groups_table.c.message_thread_id == message_thread_id)
+        conditions.append(
+            telegram_notification_groups_table.c.message_thread_id == message_thread_id
+        )
     existing = (
         session.execute(select(telegram_notification_groups_table).where(*conditions))
         .mappings()
@@ -857,7 +876,8 @@ def _refresh_default_notification_settings(session: Session, *, actor: str) -> N
             .select_from(
                 telegram_notification_groups_table.join(
                     telegram_bots_table,
-                    telegram_notification_groups_table.c.telegram_bot_id == telegram_bots_table.c.id,
+                    telegram_notification_groups_table.c.telegram_bot_id
+                    == telegram_bots_table.c.id,
                 )
             )
             .where(
