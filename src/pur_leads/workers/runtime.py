@@ -78,6 +78,16 @@ class CatalogExtractedFact:
 
 
 @dataclass(frozen=True)
+class CatalogCandidateValidationResult:
+    decision: str
+    confidence: float
+    reason: str | None = None
+    proposed_changes_json: Any = None
+    evidence_json: Any = None
+    raw_output_json: Any = None
+
+
+@dataclass(frozen=True)
 class LeadMessageForClassification:
     source_message_id: str
     monitored_source_id: str
@@ -136,6 +146,21 @@ class CatalogExtractorAdapter(Protocol):
         payload: dict[str, Any],
     ) -> list[CatalogExtractedFact]:
         """Extract catalog facts from a source/chunk scope."""
+
+
+class CatalogCandidateValidatorAdapter(Protocol):
+    model: str
+    model_profile: str | None
+    prompt_version: str
+    last_token_usage_json: dict[str, Any] | None
+
+    async def validate_catalog_candidate(
+        self,
+        *,
+        candidate_id: str,
+        payload: dict[str, Any],
+    ) -> CatalogCandidateValidationResult:
+        """Validate one catalog candidate with a stronger model."""
 
 
 class ExternalPageFetcherAdapter(Protocol):
@@ -206,6 +231,18 @@ class WorkerRuntime:
             now=now,
             lease_seconds=self.lease_seconds,
         )
+        if job is None:
+            _enqueue_idle_quality_validation_if_available(
+                self.session,
+                self.scheduler,
+                self.handlers,
+                now=now,
+            )
+            job = self.scheduler.acquire_next(
+                self.worker_name,
+                now=now,
+                lease_seconds=self.lease_seconds,
+            )
         if job is None:
             return WorkerRunResult(status="idle")
 
@@ -443,6 +480,7 @@ def build_catalog_handler_registry(
     *,
     parser: ArtifactParserAdapter | None = None,
     extractor: CatalogExtractorAdapter | None = None,
+    candidate_validator: CatalogCandidateValidatorAdapter | None = None,
     external_page_fetcher: ExternalPageFetcherAdapter | None = None,
 ) -> dict[str, JobHandler]:
     source_service = CatalogSourceService(session)
@@ -613,11 +651,83 @@ def build_catalog_handler_registry(
             }
         )
 
-    return {
+    async def catalog_candidate_validation(job: SchedulerJobRecord) -> JobHandlerResult:
+        if candidate_validator is None:
+            raise ValueError("catalog_candidate_validation adapter is not configured")
+        payload = job.payload_json or {}
+        candidate_id = payload.get("candidate_id") or job.scope_id
+        if not isinstance(candidate_id, str) or not candidate_id.strip():
+            raise ValueError("catalog_candidate_validation requires payload.candidate_id")
+        result = await candidate_validator.validate_catalog_candidate(
+            candidate_id=candidate_id,
+            payload=payload,
+        )
+        review = candidate_service.record_quality_review(
+            candidate_id=candidate_id,
+            scheduler_job_id=job.id,
+            validator_model=str(payload.get("validator_model") or candidate_validator.model),
+            validator_profile=(
+                str(payload["validator_profile"])
+                if isinstance(payload.get("validator_profile"), str)
+                else candidate_validator.model_profile
+            ),
+            decision=result.decision,
+            confidence=result.confidence,
+            reason=result.reason,
+            proposed_changes_json=result.proposed_changes_json,
+            evidence_json=result.evidence_json,
+            raw_output_json=result.raw_output_json,
+            token_usage_json=candidate_validator.last_token_usage_json,
+            created_by="ai-validator",
+            ai_provider_account_id=_payload_or_attr(
+                payload,
+                "ai_provider_account_id",
+                candidate_validator,
+                "provider_account_id",
+            ),
+            ai_model_id=_payload_or_attr(payload, "ai_model_id", candidate_validator, "model_id"),
+            ai_model_profile_id=_payload_or_attr(
+                payload,
+                "ai_model_profile_id",
+                candidate_validator,
+                "model_profile_id",
+            ),
+            ai_agent_route_id=_payload_or_attr(
+                payload,
+                "ai_agent_route_id",
+                candidate_validator,
+                "agent_route_id",
+            ),
+            validator_provider=_payload_or_attr(
+                payload,
+                "validator_provider",
+                candidate_validator,
+                "validator_provider",
+            ),
+            validator_route_role=_payload_or_attr(
+                payload,
+                "validator_route_role",
+                candidate_validator,
+                "route_role",
+            ),
+            prompt_version=candidate_validator.prompt_version,
+        )
+        return JobHandlerResult(
+            result_summary={
+                "candidate_id": candidate_id,
+                "decision": review.decision,
+                "validator_model": review.validator_model,
+            }
+        )
+
+    handlers: dict[str, JobHandler] = {
         "parse_artifact": parse_artifact,
         "extract_catalog_facts": extract_catalog_facts,
         "fetch_external_page": fetch_external_page,
     }
+    if candidate_validator is not None:
+        handlers["catalog_candidate_validation"] = catalog_candidate_validation
+    return handlers
 
 
 def build_lead_handler_registry(
@@ -1007,6 +1117,41 @@ def _enqueue_due_source_polls(
             checkpoint_before_json={"message_id": row["checkpoint_message_id"]},
             payload_json={"limit": 100, "scheduled_by": "worker_due_poll"},
         )
+
+
+def _enqueue_idle_quality_validation_if_available(
+    session: Session,
+    scheduler: SchedulerService,
+    handlers: Mapping[str, JobHandler],
+    *,
+    now: datetime,
+) -> None:
+    if "catalog_candidate_validation" not in handlers:
+        return
+    settings = SettingsService(session)
+    if not _truthy(settings.get("catalog_quality_idle_validation_enabled")):
+        return
+    if scheduler.has_due_or_running_work_above_priority("low", now=now):
+        return
+    batch_size = _positive_int(settings.get("catalog_quality_idle_batch_size"), default=5)
+    validator_model = settings.get("catalog_quality_validator_model") or "GLM-5.1"
+    validator_profile = settings.get("catalog_quality_validator_profile")
+    statuses = _string_list_setting(
+        settings.get("catalog_quality_validation_statuses"),
+        default=["auto_pending"],
+    )
+    weak_models = _string_list_setting(
+        settings.get("catalog_quality_weak_source_models"),
+        default=["GLM-4.5-Flash", "GLM-4.5-Air"],
+    )
+    CatalogCandidateService(session).enqueue_idle_quality_validation_jobs(
+        validator_model=str(validator_model),
+        validator_profile=str(validator_profile) if validator_profile else None,
+        batch_size=batch_size,
+        statuses=statuses,
+        weak_models=weak_models,
+        run_after_at=now,
+    )
 
 
 def _has_active_poll_job(session: Session, source_id: str) -> bool:
@@ -1427,6 +1572,31 @@ def _positive_int(value: Any, *, default: int) -> int:
     if parsed <= 0:
         return default
     return parsed
+
+
+def _optional_payload_string(payload: dict[str, Any], key: str) -> str | None:
+    value = payload.get(key)
+    return value.strip() if isinstance(value, str) and value.strip() else None
+
+
+def _payload_or_attr(
+    payload: dict[str, Any],
+    payload_key: str,
+    obj: Any,
+    attr_name: str,
+) -> str | None:
+    value = _optional_payload_string(payload, payload_key)
+    if value is not None:
+        return value
+    attr_value = getattr(obj, attr_name, None)
+    return attr_value.strip() if isinstance(attr_value, str) and attr_value.strip() else None
+
+
+def _string_list_setting(value: Any, *, default: list[str]) -> list[str]:
+    if not isinstance(value, list):
+        return default
+    strings = [item.strip() for item in value if isinstance(item, str) and item.strip()]
+    return strings or default
 
 
 def _truthy(value: Any) -> bool:

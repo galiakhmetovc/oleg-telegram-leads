@@ -18,6 +18,7 @@ from pur_leads.integrations.ai.zai_client import ZaiChatCompletionClient
 from pur_leads.integrations.catalog.external_page import HttpExternalPageFetcher
 from pur_leads.integrations.catalog.heuristic_extractor import HeuristicCatalogExtractor
 from pur_leads.integrations.catalog.llm_extractor import LlmCatalogExtractor
+from pur_leads.integrations.catalog.llm_validator import LlmCatalogCandidateValidator
 from pur_leads.integrations.documents.pdf_parser import PdfArtifactParser
 from pur_leads.integrations.leads.fuzzy_classifier import FuzzyCatalogLeadClassifier
 from pur_leads.integrations.leads.llm_shadow_classifier import LlmLeadShadowClassifier
@@ -240,6 +241,11 @@ def _build_worker_handlers(
             session,
             parser=PdfArtifactParser(),
             extractor=_build_catalog_extractor(session, settings, worker_name=worker_name),
+            candidate_validator=_build_catalog_candidate_validator(
+                session,
+                settings,
+                worker_name=worker_name,
+            ),
             external_page_fetcher=_build_external_page_fetcher(session),
         )
     )
@@ -437,6 +443,52 @@ def _build_catalog_llm_extractor_for_route(
         fallback_extractor=fallback_extractor,
         fallback_on_rate_limit=fallback_on_rate_limit,
         fallback_on_error=fallback_on_error,
+    )
+
+
+def _build_catalog_candidate_validator(session, settings, *, worker_name: str):
+    settings_service = SettingsService(session)
+    if not bool(settings_service.get("catalog_quality_idle_validation_enabled")):
+        return None
+    route = _select_ai_route(
+        session,
+        agent_key="catalog_candidate_validator",
+        route_role="primary",
+    )
+    api_key = _zai_api_key_for_route(session, settings, route)
+    if route is None or route.provider != "zai" or not api_key:
+        return None
+    return LlmCatalogCandidateValidator(
+        client=ZaiChatCompletionClient(
+            api_key=api_key,
+            base_url=route.base_url,
+            timeout_seconds=_llm_request_timeout_seconds(
+                settings_service,
+                task_type="catalog_quality_validation",
+                model=route.model,
+                default=settings.catalog_llm_timeout_seconds,
+            ),
+            connect_timeout_seconds=_llm_connect_timeout_seconds(settings_service),
+            concurrency_limiter=_build_ai_model_concurrency_limiter(
+                session,
+                worker_name=worker_name,
+            ),
+            provider_account_id=route.provider_account_id,
+            thinking_type=_zai_thinking_type_for_route(route),
+            response_format=_zai_response_format_for_route(route),
+            worker_name=worker_name,
+        ),
+        model=route.model,
+        model_profile=route.model_profile,
+        session=session,
+        temperature=float(route.temperature if route.temperature is not None else 0.0),
+        max_tokens=int(route.max_output_tokens or 2048),
+        validator_provider=route.provider,
+        provider_account_id=route.provider_account_id,
+        model_id=route.model_id,
+        model_profile_id=route.model_profile_id,
+        agent_route_id=route.route_id,
+        route_role=route.route_role,
     )
 
 

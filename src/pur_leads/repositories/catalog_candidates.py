@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import func, insert, select, update
+from sqlalchemy import case, func, insert, select, update
 from sqlalchemy.orm import Session
 
 from pur_leads.core.ids import new_id
@@ -15,6 +15,7 @@ from pur_leads.models.catalog import (
     catalog_candidate_facts_table,
     catalog_candidates_table,
     catalog_evidence_table,
+    catalog_quality_reviews_table,
     extracted_facts_table,
     extraction_runs_table,
     parsed_chunks_table,
@@ -75,6 +76,32 @@ class CatalogCandidateRecord:
     created_by: str
     created_at: datetime
     updated_at: datetime
+
+
+@dataclass(frozen=True)
+class CatalogQualityReviewRecord:
+    id: str
+    catalog_candidate_id: str
+    scheduler_job_id: str | None
+    ai_provider_account_id: str | None
+    ai_model_id: str | None
+    ai_model_profile_id: str | None
+    ai_agent_route_id: str | None
+    validator_provider: str | None
+    validator_model: str
+    validator_profile: str | None
+    validator_route_role: str | None
+    prompt_version: str | None
+    decision: str
+    confidence: float
+    reason: str | None
+    proposed_changes_json: Any
+    evidence_json: Any
+    raw_output_json: Any
+    token_usage_json: Any
+    status: str
+    created_by: str
+    created_at: datetime
 
 
 class CatalogCandidateRepository:
@@ -190,6 +217,106 @@ class CatalogCandidateRepository:
             .all()
         )
         return [CatalogCandidateRecord(**dict(row)) for row in rows]
+
+    def list_candidates_for_quality_review(
+        self,
+        *,
+        validator_model: str,
+        validator_profile: str | None,
+        statuses: list[str],
+        weak_models: list[str],
+        limit: int,
+    ) -> list[CatalogCandidateRecord]:
+        normalized_weak_models = {model.casefold() for model in weak_models}
+        weak_model_rank = case(
+            (
+                func.lower(extraction_runs_table.c.model).in_(normalized_weak_models),
+                0,
+            ),
+            else_=1,
+        )
+        review_profile_filter = (
+            catalog_quality_reviews_table.c.validator_profile.is_(None)
+            if validator_profile is None
+            else catalog_quality_reviews_table.c.validator_profile == validator_profile
+        )
+        candidate_ids = (
+            self.session.execute(
+                select(catalog_candidates_table.c.id)
+                .select_from(
+                    catalog_candidates_table.join(
+                        catalog_candidate_facts_table,
+                        catalog_candidate_facts_table.c.catalog_candidate_id
+                        == catalog_candidates_table.c.id,
+                    )
+                    .join(
+                        extracted_facts_table,
+                        extracted_facts_table.c.id
+                        == catalog_candidate_facts_table.c.extracted_fact_id,
+                    )
+                    .join(
+                        extraction_runs_table,
+                        extraction_runs_table.c.id == extracted_facts_table.c.extraction_run_id,
+                    )
+                    .outerjoin(
+                        catalog_quality_reviews_table,
+                        (
+                            catalog_quality_reviews_table.c.catalog_candidate_id
+                            == catalog_candidates_table.c.id
+                        )
+                        & (catalog_quality_reviews_table.c.validator_model == validator_model)
+                        & review_profile_filter
+                        & (catalog_quality_reviews_table.c.status == "completed"),
+                    )
+                )
+                .where(
+                    catalog_candidates_table.c.status.in_(statuses),
+                    catalog_quality_reviews_table.c.id.is_(None),
+                )
+                .group_by(catalog_candidates_table.c.id)
+                .order_by(
+                    func.min(weak_model_rank),
+                    catalog_candidates_table.c.confidence.asc(),
+                    catalog_candidates_table.c.created_at.asc(),
+                )
+                .limit(max(0, int(limit)))
+            )
+            .scalars()
+            .all()
+        )
+        if not candidate_ids:
+            return []
+        rows = (
+            self.session.execute(
+                select(catalog_candidates_table)
+                .where(catalog_candidates_table.c.id.in_(candidate_ids))
+                .order_by(catalog_candidates_table.c.created_at.asc())
+            )
+            .mappings()
+            .all()
+        )
+        by_id = {row["id"]: CatalogCandidateRecord(**dict(row)) for row in rows}
+        return [by_id[candidate_id] for candidate_id in candidate_ids if candidate_id in by_id]
+
+    def create_quality_review(self, **values) -> CatalogQualityReviewRecord:  # type: ignore[no-untyped-def]
+        review_id = new_id()
+        self.session.execute(insert(catalog_quality_reviews_table).values(id=review_id, **values))
+        review = self.get_quality_review(review_id)
+        if review is None:
+            raise KeyError(review_id)
+        return review
+
+    def get_quality_review(self, review_id: str) -> CatalogQualityReviewRecord | None:
+        row = (
+            self.session.execute(
+                select(catalog_quality_reviews_table).where(
+                    catalog_quality_reviews_table.c.id == review_id
+                )
+            )
+            .mappings()
+            .first()
+        )
+        return CatalogQualityReviewRecord(**dict(row)) if row is not None else None
 
     def list_candidate_evidence_details(self, candidate_id: str) -> list[dict[str, Any]]:
         artifact_id = func.coalesce(

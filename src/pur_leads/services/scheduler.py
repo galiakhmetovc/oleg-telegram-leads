@@ -109,6 +109,17 @@ class SchedulerService:
             self.session.rollback()
         return None
 
+    def has_due_or_running_work_above_priority(
+        self,
+        priority: str,
+        *,
+        now: datetime | None = None,
+    ) -> bool:
+        return self.repository.has_due_or_running_work_above_priority(
+            priority,
+            now or utc_now(),
+        )
+
     def recover_expired_leases(self, now: datetime | None = None) -> int:
         recovered = self.repository.recover_expired_leases(now or utc_now())
         self.session.commit()

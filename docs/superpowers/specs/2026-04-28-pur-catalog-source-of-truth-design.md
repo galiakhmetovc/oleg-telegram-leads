@@ -115,6 +115,7 @@ Scheduler job types must map to task definitions. The task definition tells the 
 | `parse_artifact` | bulk | `worker`, `local_parser` | bounded by local parser pool |
 | `ocr_artifact` | bulk | `worker`, `ocr.document` | bounded by selected OCR model pool |
 | `extract_catalog_facts` | bulk or normal | `worker`, `llm.text.fast` or `llm.text.strong` | routed by catalog agent route |
+| `catalog_candidate_validation` | idle | `worker`, `llm.text.strong` | runs only when realtime/normal work is not due or running |
 | `classify_message_batch` | realtime | `worker`, optional `llm.text.fast` for shadow | lead fuzzy path is local, LLM shadow uses AI pool |
 | `send_notifications` | realtime | `worker`, `telegram.notify` | bounded per bot/group route |
 | `generate_contact_reasons` | normal | `worker`, `llm.text.fast` or local | routed by CRM agent route when enabled |
@@ -187,6 +188,40 @@ Initial default policy:
 - avoid preemption in the first implementation by keeping jobs bounded and short.
 
 Future policy can support preemption or dynamic throttling, but the first implementation only needs short leases, frequent scheduling, and clear priority ordering.
+
+### Idle Quality Pass
+
+When the runtime has no due or running `realtime`, `normal`, or `bulk` work, it may create low-priority `catalog_candidate_validation` jobs. These jobs keep strong language models useful while the system is otherwise idle.
+
+The first idle quality pass validates existing catalog candidates rather than reparsing the whole channel:
+
+- select `catalog_candidates` in configurable statuses, initially `auto_pending`;
+- prefer candidates produced by weaker or fast models, lower-confidence candidates, older candidates, offers, lead phrases, and facts with limited evidence;
+- skip candidates that already have a review from the same validator model/profile unless the operator requests a forced recheck;
+- enqueue bounded jobs with idempotency key `catalog-quality-review:{candidate_id}:{validator_model}:{validator_profile}`;
+- run through the normal AI registry route for `catalog_candidate_validator`, initially `GLM-5.1` with a structured-output profile;
+- store the validator decision separately from the catalog candidate so the strong model never silently rewrites the operational catalog.
+
+The validator receives the candidate, normalized value, linked extracted facts, source chunks, evidence quotes, and nearby catalog context when available. It must return strict structured JSON:
+
+```json
+{
+  "decision": "confirm | revise | reject | merge | needs_human",
+  "confidence": 0.0,
+  "reason": "short operator-readable reason",
+  "proposed_changes": {},
+  "evidence_quotes": []
+}
+```
+
+Initial behavior is conservative:
+
+- `confirm`, `revise`, `reject`, `merge`, and `needs_human` are written to `catalog_quality_reviews`;
+- candidate status is not changed automatically;
+- the web UI shows the latest strong-model review next to the candidate;
+- future settings may allow auto-apply for high-confidence `confirm`/`reject`, but only after the operator explicitly enables it.
+
+Idle quality jobs are not preempted mid-request in the first implementation. Instead, they are kept small and new idle jobs are created only after the scheduler confirms that no higher-priority work is due or running. If new lead or ingest work appears, it wins the next scheduler acquisition.
 
 ### Observability
 

@@ -85,6 +85,24 @@ TASK_DEFINITIONS: tuple[dict[str, Any], ...] = (
         "status": "active",
     },
     {
+        "task_type": "catalog_candidate_validation",
+        "display_name": "Фоновая проверка кандидатов каталога",
+        "workload_class": "idle",
+        "required_capabilities": ["worker", "llm.text.strong"],
+        "parallelism_rule": (
+            "Запускается только когда нет due/running realtime, normal или bulk задач; "
+            "использует исполнителя catalog_candidate_validator."
+        ),
+        "default_priority": 90,
+        "config_keys": [
+            "catalog_quality_idle_validation_enabled",
+            "catalog_quality_idle_batch_size",
+            "catalog_quality_validator_model",
+            "catalog_quality_validator_profile",
+        ],
+        "status": "active",
+    },
+    {
         "task_type": "send_notifications",
         "display_name": "Отправка уведомлений",
         "workload_class": "realtime",

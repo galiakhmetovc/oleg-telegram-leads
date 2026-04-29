@@ -129,6 +129,12 @@ AGENT_SEED: tuple[dict[str, Any], ...] = (
         "task_type": "ocr",
         "default_strategy": "primary_fallback",
     },
+    {
+        "agent_key": "catalog_candidate_validator",
+        "display_name": "Catalog candidate validator",
+        "task_type": "catalog_quality_validation",
+        "default_strategy": "idle_quality_pass",
+    },
 )
 
 ROUTE_SEED: tuple[dict[str, Any], ...] = (
@@ -183,6 +189,19 @@ ROUTE_SEED: tuple[dict[str, Any], ...] = (
         "temperature": 0.0,
         "thinking_mode": "off",
         "structured_output_required": False,
+    },
+    {
+        "agent_key": "catalog_candidate_validator",
+        "model": "GLM-5.1",
+        "profile_key": "catalog-validator-strong",
+        "profile_display_name": "Каталог: сильная проверка",
+        "route_role": "primary",
+        "priority": 10,
+        "max_input_tokens": None,
+        "max_output_tokens": 2048,
+        "temperature": 0.0,
+        "thinking_mode": "enabled",
+        "structured_output_required": True,
     },
 )
 

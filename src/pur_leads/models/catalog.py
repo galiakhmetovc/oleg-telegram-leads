@@ -146,6 +146,33 @@ catalog_candidate_facts_table = Table(
     Column("created_at", DateTime(timezone=True), nullable=False),
 )
 
+catalog_quality_reviews_table = Table(
+    "catalog_quality_reviews",
+    metadata,
+    Column("id", String(36), primary_key=True),
+    Column("catalog_candidate_id", String(36), nullable=False),
+    Column("scheduler_job_id", String(36), nullable=True),
+    Column("ai_provider_account_id", String(36), nullable=True),
+    Column("ai_model_id", String(36), nullable=True),
+    Column("ai_model_profile_id", String(36), nullable=True),
+    Column("ai_agent_route_id", String(36), nullable=True),
+    Column("validator_provider", String(64), nullable=True),
+    Column("validator_model", String(160), nullable=False),
+    Column("validator_profile", String(120), nullable=True),
+    Column("validator_route_role", String(64), nullable=True),
+    Column("prompt_version", String(80), nullable=True),
+    Column("decision", String(32), nullable=False),
+    Column("confidence", Float, nullable=False),
+    Column("reason", Text, nullable=True),
+    Column("proposed_changes_json", JSON, nullable=True),
+    Column("evidence_json", JSON, nullable=True),
+    Column("raw_output_json", JSON, nullable=True),
+    Column("token_usage_json", JSON, nullable=True),
+    Column("status", String(32), nullable=False),
+    Column("created_by", String(160), nullable=False),
+    Column("created_at", DateTime(timezone=True), nullable=False),
+)
+
 catalog_categories_table = Table(
     "catalog_categories",
     metadata,

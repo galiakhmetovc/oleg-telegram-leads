@@ -8,11 +8,13 @@ from pur_leads.models.catalog import (
     catalog_candidate_facts_table,
     catalog_candidates_table,
     catalog_evidence_table,
+    catalog_quality_reviews_table,
     extracted_facts_table,
     extraction_runs_table,
 )
 from pur_leads.services.catalog_candidates import CatalogCandidateService
 from pur_leads.services.catalog_sources import CatalogSourceService
+from pur_leads.models.scheduler import scheduler_jobs_table
 
 
 @pytest.fixture
@@ -155,3 +157,98 @@ def test_candidate_status_policy_marks_low_confidence_and_offers(candidate_sessi
     assert review_offer.status == "needs_review"
     assert auto_offer.status == "auto_pending"
     assert session.execute(select(extracted_facts_table)).mappings().all()
+
+
+def test_idle_quality_validation_enqueue_selects_unreviewed_auto_pending_candidate(
+    candidate_session,
+):
+    session, source, chunk = candidate_session
+    service = CatalogCandidateService(session)
+    run = service.start_extraction_run(
+        run_type="catalog_extraction",
+        extractor_version="test-extractor",
+        model="GLM-4.5-Flash",
+    )
+    fact = service.create_extracted_fact(
+        extraction_run_id=run.id,
+        fact_type="product",
+        canonical_name="Dahua Hero A1",
+        value_json={"item_type": "product", "terms": ["Hero A1"]},
+        confidence=0.91,
+        source_id=source.id,
+        chunk_id=chunk.id,
+    )
+    candidate = service.create_or_update_candidate_from_fact(
+        fact.id,
+        candidate_type="item",
+        proposed_action="create",
+        evidence_quote="Dahua Hero A1 Wi-Fi camera",
+        created_by="system",
+    )
+
+    jobs = service.enqueue_idle_quality_validation_jobs(
+        validator_model="GLM-5.1",
+        validator_profile="catalog-validator-strong",
+        batch_size=5,
+    )
+
+    queued = session.execute(select(scheduler_jobs_table)).mappings().one()
+    assert [job.scope_id for job in jobs] == [candidate.id]
+    assert queued["job_type"] == "catalog_candidate_validation"
+    assert queued["priority"] == "low"
+    assert queued["scope_id"] == candidate.id
+    assert queued["payload_json"]["candidate_id"] == candidate.id
+    assert queued["payload_json"]["validator_model"] == "GLM-5.1"
+    assert queued["idempotency_key"] == (
+        f"catalog-quality-review:{candidate.id}:GLM-5.1:catalog-validator-strong"
+    )
+
+
+def test_idle_quality_validation_enqueue_skips_existing_model_profile_review(
+    candidate_session,
+):
+    session, source, chunk = candidate_session
+    service = CatalogCandidateService(session)
+    run = service.start_extraction_run(
+        run_type="catalog_extraction",
+        extractor_version="test-extractor",
+        model="GLM-4.5-Flash",
+    )
+    fact = service.create_extracted_fact(
+        extraction_run_id=run.id,
+        fact_type="product",
+        canonical_name="Dahua Hero A1",
+        value_json={"item_type": "product", "terms": ["Hero A1"]},
+        confidence=0.91,
+        source_id=source.id,
+        chunk_id=chunk.id,
+    )
+    candidate = service.create_or_update_candidate_from_fact(
+        fact.id,
+        candidate_type="item",
+        evidence_quote="Dahua Hero A1 Wi-Fi camera",
+    )
+    service.record_quality_review(
+        candidate_id=candidate.id,
+        validator_model="GLM-5.1",
+        validator_profile="catalog-validator-strong",
+        decision="confirm",
+        confidence=0.95,
+        reason="Supported by source",
+        proposed_changes_json={},
+        evidence_json={"quotes": ["Dahua Hero A1"]},
+        raw_output_json={"decision": "confirm"},
+        created_by="test",
+    )
+
+    jobs = service.enqueue_idle_quality_validation_jobs(
+        validator_model="GLM-5.1",
+        validator_profile="catalog-validator-strong",
+        batch_size=5,
+    )
+
+    assert jobs == []
+    assert (
+        session.execute(select(catalog_quality_reviews_table)).mappings().one()["decision"]
+        == "confirm"
+    )

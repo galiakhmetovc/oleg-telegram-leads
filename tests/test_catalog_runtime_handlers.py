@@ -22,6 +22,7 @@ from pur_leads.models.audit import operational_events_table
 from pur_leads.models.catalog import (
     artifacts_table,
     catalog_candidates_table,
+    catalog_quality_reviews_table,
     classifier_snapshot_entries_table,
     classifier_versions_table,
     extraction_runs_table,
@@ -29,11 +30,13 @@ from pur_leads.models.catalog import (
 )
 from pur_leads.models.scheduler import scheduler_jobs_table
 from pur_leads.models.telegram_sources import source_messages_table
+from pur_leads.services.catalog_candidates import CatalogCandidateService
 from pur_leads.services.catalog_sources import CatalogSourceService
 from pur_leads.services.scheduler import SchedulerService
 from pur_leads.services.telegram_sources import TelegramSourceService
 from pur_leads.workers.runtime import (
     CatalogExtractedFact,
+    CatalogCandidateValidationResult,
     FetchedExternalPage,
     ParsedArtifact,
     WorkerRuntime,
@@ -89,6 +92,23 @@ class FakeExternalPageFetcher:
             text="Dahua Hero A1 и умные реле для дома",
             status_code=200,
             content_type="text/html; charset=utf-8",
+        )
+
+
+class FakeCandidateValidator:
+    model = "GLM-5.1"
+    model_profile = "catalog-validator-strong"
+    prompt_version = "catalog-candidate-validation-v1"
+    last_token_usage_json = {"total_tokens": 321}
+
+    async def validate_catalog_candidate(self, *, candidate_id: str, payload: dict):
+        return CatalogCandidateValidationResult(
+            decision="confirm",
+            confidence=0.96,
+            reason=f"{candidate_id} is supported by evidence",
+            proposed_changes_json={},
+            evidence_json={"quotes": ["Dahua Hero A1"]},
+            raw_output_json={"decision": "confirm"},
         )
 
 
@@ -277,6 +297,99 @@ async def test_fetch_external_page_handler_stores_page_chunk_and_extract_job(run
     assert chunks[0]["parser_name"] == "external-page-text"
     assert extract_job["payload_json"]["source_id"] == chunks[0]["source_id"]
     assert extract_job["payload_json"]["chunk_id"] == chunks[0]["id"]
+
+
+@pytest.mark.asyncio
+async def test_catalog_candidate_validation_handler_stores_quality_review(runtime_session):
+    candidate = _create_catalog_candidate(runtime_session)
+    job = SchedulerService(runtime_session).enqueue(
+        job_type="catalog_candidate_validation",
+        priority="low",
+        scope_type="parser",
+        scope_id=candidate.id,
+        payload_json={
+            "candidate_id": candidate.id,
+            "validator_model": "GLM-5.1",
+            "validator_profile": "catalog-validator-strong",
+        },
+    )
+    runtime = WorkerRuntime(
+        runtime_session,
+        handlers=build_catalog_handler_registry(
+            runtime_session,
+            candidate_validator=FakeCandidateValidator(),
+        ),
+    )
+
+    result = await runtime.run_once()
+
+    stored = SchedulerService(runtime_session).repository.get(job.id)
+    review = runtime_session.execute(select(catalog_quality_reviews_table)).mappings().one()
+    assert stored is not None
+    assert result.status == "succeeded"
+    assert stored.result_summary_json == {
+        "candidate_id": candidate.id,
+        "decision": "confirm",
+        "validator_model": "GLM-5.1",
+    }
+    assert review["catalog_candidate_id"] == candidate.id
+    assert review["scheduler_job_id"] == job.id
+    assert review["validator_model"] == "GLM-5.1"
+    assert review["validator_profile"] == "catalog-validator-strong"
+    assert review["decision"] == "confirm"
+    assert review["confidence"] == 0.96
+    assert review["token_usage_json"] == {"total_tokens": 321}
+
+
+@pytest.mark.asyncio
+async def test_worker_enqueues_idle_quality_validation_only_without_active_normal_work(
+    runtime_session,
+):
+    candidate = _create_catalog_candidate(runtime_session)
+    normal_job = SchedulerService(runtime_session).enqueue(
+        job_type="parse_artifact",
+        priority="normal",
+        scope_type="parser",
+        payload_json={"source_id": "source"},
+    )
+    runtime = WorkerRuntime(
+        runtime_session,
+        handlers=build_catalog_handler_registry(
+            runtime_session,
+            candidate_validator=FakeCandidateValidator(),
+        ),
+    )
+
+    first = await runtime.run_once()
+
+    assert first.status == "failed"
+    assert SchedulerService(runtime_session).repository.get(normal_job.id).last_error == (
+        "parse_artifact adapter is not configured"
+    )
+    assert (
+        runtime_session.execute(
+            select(scheduler_jobs_table).where(
+                scheduler_jobs_table.c.job_type == "catalog_candidate_validation"
+            )
+        )
+        .mappings()
+        .all()
+        == []
+    )
+
+    second = await runtime.run_once()
+
+    quality_job = (
+        runtime_session.execute(
+            select(scheduler_jobs_table).where(
+                scheduler_jobs_table.c.job_type == "catalog_candidate_validation"
+            )
+        )
+        .mappings()
+        .one()
+    )
+    assert second.status == "succeeded"
+    assert quality_job["scope_id"] == candidate.id
 
 
 @pytest.mark.asyncio
@@ -528,6 +641,41 @@ def _create_download_scope(runtime_session):
     )
     runtime_session.commit()
     return telegram_source, raw_source, source_message_id
+
+
+def _create_catalog_candidate(runtime_session):
+    source = CatalogSourceService(runtime_session).upsert_source(
+        source_type="manual_text",
+        origin="manual",
+        external_id=f"candidate-{new_id()}",
+        raw_text="Dahua Hero A1 Wi-Fi camera",
+    )
+    chunk = CatalogSourceService(runtime_session).replace_parsed_chunks(
+        source.id,
+        chunks=["Dahua Hero A1 Wi-Fi camera"],
+        parser_name="test",
+        parser_version="1",
+    )[0]
+    service = CatalogCandidateService(runtime_session)
+    run = service.start_extraction_run(
+        run_type="catalog_extraction",
+        extractor_version="test-extractor",
+        model="GLM-4.5-Flash",
+    )
+    fact = service.create_extracted_fact(
+        extraction_run_id=run.id,
+        fact_type="product",
+        canonical_name="Dahua Hero A1",
+        value_json={"item_type": "product", "terms": ["Hero A1"]},
+        confidence=0.91,
+        source_id=source.id,
+        chunk_id=chunk.id,
+    )
+    return service.create_or_update_candidate_from_fact(
+        fact.id,
+        candidate_type="item",
+        evidence_quote="Dahua Hero A1 Wi-Fi camera",
+    )
 
 
 def _resolved_source() -> ResolvedTelegramSource:

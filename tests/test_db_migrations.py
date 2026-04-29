@@ -35,6 +35,7 @@ def test_foundation_migration_creates_core_tables(tmp_path):
         "evaluation_cases",
         "evaluation_runs",
         "evaluation_results",
+        "catalog_quality_reviews",
         "quality_metric_snapshots",
         "ai_providers",
         "ai_provider_accounts",

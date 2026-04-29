@@ -215,6 +215,28 @@ class SchedulerRepository:
         jobs = [job for job in jobs if job.run_after_at <= self._to_aware_utc(now)]
         return sorted(jobs, key=lambda job: (PRIORITY_ORDER[job.priority], job.created_at))
 
+    def has_due_or_running_work_above_priority(self, priority: str, now: datetime) -> bool:
+        threshold = PRIORITY_ORDER[priority]
+        current_time = self._to_aware_utc(now)
+        rows = (
+            self.session.execute(
+                select(scheduler_jobs_table).where(
+                    scheduler_jobs_table.c.status.in_(("queued", "running"))
+                )
+            )
+            .mappings()
+            .all()
+        )
+        for row in rows:
+            job = self._record_from_row(row)
+            if PRIORITY_ORDER[job.priority] >= threshold:
+                continue
+            if job.status == "running":
+                return True
+            if job.run_after_at <= current_time:
+                return True
+        return False
+
     def has_running_userbot_job(self, userbot_account_id: str, now: datetime) -> bool:
         rows = (
             self.session.execute(

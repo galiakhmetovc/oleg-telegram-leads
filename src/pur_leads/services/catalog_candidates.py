@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Any
 
 from sqlalchemy.orm import Session
@@ -12,12 +13,14 @@ from pur_leads.core.time import utc_now
 from pur_leads.repositories.catalog_candidates import (
     CatalogCandidateRecord,
     CatalogCandidateRepository,
+    CatalogQualityReviewRecord,
     ExtractedFactRecord,
     ExtractionRunRecord,
 )
 from pur_leads.services.audit import AuditService
 
 PROMOTABLE_CANDIDATE_TYPES = {"item", "lead_phrase", "negative_phrase"}
+QUALITY_REVIEW_DECISIONS = {"confirm", "revise", "reject", "merge", "needs_human"}
 
 LOW_CONFIDENCE_THRESHOLD = 0.6
 
@@ -61,6 +64,118 @@ class CatalogCandidateService:
             candidate=candidate,
             evidence=self.repository.list_candidate_evidence_details(candidate_id),
         )
+
+    def enqueue_idle_quality_validation_jobs(
+        self,
+        *,
+        validator_model: str,
+        validator_profile: str | None,
+        batch_size: int,
+        statuses: list[str] | None = None,
+        weak_models: list[str] | None = None,
+        run_after_at: datetime | None = None,
+    ):
+        from pur_leads.services.scheduler import SchedulerService
+
+        normalized_statuses = statuses or ["auto_pending"]
+        candidates = self.repository.list_candidates_for_quality_review(
+            validator_model=validator_model,
+            validator_profile=validator_profile,
+            statuses=normalized_statuses,
+            weak_models=weak_models or ["GLM-4.5-Flash", "GLM-4.5-Air"],
+            limit=max(0, int(batch_size)),
+        )
+        scheduler = SchedulerService(self.session)
+        jobs = []
+        for candidate in candidates:
+            profile_key = validator_profile or "default"
+            jobs.append(
+                scheduler.enqueue(
+                    job_type="catalog_candidate_validation",
+                    priority="low",
+                    scope_type="parser",
+                    scope_id=candidate.id,
+                    idempotency_key=(
+                        f"catalog-quality-review:{candidate.id}:{validator_model}:{profile_key}"
+                    ),
+                    payload_json={
+                        "candidate_id": candidate.id,
+                        "validator_model": validator_model,
+                        "validator_profile": validator_profile,
+                    },
+                    run_after_at=run_after_at,
+                    max_attempts=2,
+                )
+            )
+        return jobs
+
+    def record_quality_review(
+        self,
+        *,
+        candidate_id: str,
+        validator_model: str,
+        decision: str,
+        confidence: float,
+        created_by: str,
+        validator_profile: str | None = None,
+        scheduler_job_id: str | None = None,
+        ai_provider_account_id: str | None = None,
+        ai_model_id: str | None = None,
+        ai_model_profile_id: str | None = None,
+        ai_agent_route_id: str | None = None,
+        validator_provider: str | None = None,
+        validator_route_role: str | None = None,
+        prompt_version: str | None = None,
+        reason: str | None = None,
+        proposed_changes_json: Any = None,
+        evidence_json: Any = None,
+        raw_output_json: Any = None,
+        token_usage_json: Any = None,
+    ) -> CatalogQualityReviewRecord:
+        if self.repository.get_candidate(candidate_id) is None:
+            raise KeyError(candidate_id)
+        normalized_decision = decision.strip().casefold()
+        if normalized_decision not in QUALITY_REVIEW_DECISIONS:
+            raise ValueError(f"Unsupported quality review decision: {decision}")
+        review = self.repository.create_quality_review(
+            catalog_candidate_id=candidate_id,
+            scheduler_job_id=scheduler_job_id,
+            ai_provider_account_id=ai_provider_account_id,
+            ai_model_id=ai_model_id,
+            ai_model_profile_id=ai_model_profile_id,
+            ai_agent_route_id=ai_agent_route_id,
+            validator_provider=validator_provider,
+            validator_model=validator_model,
+            validator_profile=validator_profile,
+            validator_route_role=validator_route_role,
+            prompt_version=prompt_version,
+            decision=normalized_decision,
+            confidence=max(0.0, min(1.0, float(confidence))),
+            reason=reason,
+            proposed_changes_json=proposed_changes_json,
+            evidence_json=evidence_json,
+            raw_output_json=raw_output_json,
+            token_usage_json=token_usage_json,
+            status="completed",
+            created_by=created_by,
+            created_at=utc_now(),
+        )
+        self.audit.record_change(
+            actor=created_by,
+            action="catalog_candidate.quality_review",
+            entity_type="catalog_candidate",
+            entity_id=candidate_id,
+            old_value_json=None,
+            new_value_json={
+                "review_id": review.id,
+                "validator_model": validator_model,
+                "validator_profile": validator_profile,
+                "decision": review.decision,
+                "confidence": review.confidence,
+            },
+        )
+        self.session.commit()
+        return review
 
     def update_candidate(
         self,
