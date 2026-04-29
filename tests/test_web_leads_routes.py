@@ -30,6 +30,7 @@ def test_leads_api_requires_auth_and_returns_queue_detail_with_filters(tmp_path)
     _login(client)
 
     response = client.get("/api/leads", params={"auto_pending": "true", "operator_issues": "true"})
+    limited_response = client.get("/api/leads", params={"limit": "1"})
     detail_response = client.get(f"/api/leads/{fixture['cluster_id']}")
 
     assert response.status_code == 200
@@ -38,6 +39,8 @@ def test_leads_api_requires_auth_and_returns_queue_detail_with_filters(tmp_path)
     assert rows[0]["primary_message"]["text"] == "нужна камера на дачу"
     assert rows[0]["has_auto_pending"] is True
     assert rows[0]["category"]["name"] == "Video"
+    assert limited_response.status_code == 200
+    assert len(limited_response.json()["items"]) == 1
     assert detail_response.status_code == 200
     detail = detail_response.json()
     assert detail["cluster"]["cluster_id"] == fixture["cluster_id"]

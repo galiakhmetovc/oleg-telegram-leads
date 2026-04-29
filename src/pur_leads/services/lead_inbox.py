@@ -34,6 +34,7 @@ class LeadInboxFilters:
     auto_pending: bool | None = None
     operator_issues: bool | None = None
     min_confidence: float | None = None
+    limit: int = 20
 
 
 @dataclass(frozen=True)
@@ -89,6 +90,7 @@ class LeadInboxService:
             query = query.where(lead_clusters_table.c.category_id == filters.category_id)
         if filters.min_confidence is not None:
             query = query.where(lead_clusters_table.c.confidence_max >= filters.min_confidence)
+        query = query.limit(_limit(filters.limit))
 
         cluster_rows = self.session.execute(query).mappings().all()
         rows = [self._queue_row(dict(row)) for row in cluster_rows]
@@ -487,6 +489,10 @@ def _public_match_payload(row: dict[str, Any]) -> dict[str, Any]:
 def _message_text(row: dict[str, Any]) -> str | None:
     parts = [part for part in (row.get("text"), row.get("caption")) if part]
     return "\n".join(parts) if parts else None
+
+
+def _limit(value: int) -> int:
+    return min(max(value, 1), 20)
 
 
 def _unique_dicts(values: list[dict[str, Any]], *, key: str) -> list[dict[str, Any]]:

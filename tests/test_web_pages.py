@@ -156,6 +156,7 @@ def test_workspace_and_admin_pages_are_protected_and_render_shells(tmp_path):
     assert "/api/operations/extraction-runs" in js_response.text
     assert "/api/operations/backups" in js_response.text
     assert "/api/today" in js_response.text
+    assert 'limit: "20"' in js_response.text
     assert "loadCatalogCandidateDetail" in js_response.text
     assert "initOperations" in js_response.text
     assert "initQuality" in js_response.text

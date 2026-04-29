@@ -89,7 +89,7 @@ function initInbox() {
 }
 
 async function loadLeads(state) {
-  const params = new URLSearchParams();
+  const params = new URLSearchParams({ limit: "20" });
   const form = document.querySelector("#lead-filters");
   if (form) {
     const data = new FormData(form);

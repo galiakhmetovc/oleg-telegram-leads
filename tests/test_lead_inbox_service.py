@@ -17,7 +17,7 @@ from pur_leads.models.catalog import (
 )
 from pur_leads.models.leads import feedback_events_table, lead_clusters_table
 from pur_leads.models.telegram_sources import monitored_sources_table, source_messages_table
-from pur_leads.services.lead_inbox import LeadInboxFilters, LeadInboxService
+from pur_leads.services.lead_inbox import LeadInboxFilters, LeadInboxService, _limit
 from pur_leads.services.leads import LeadDetectionResult, LeadMatchInput, LeadService
 
 
@@ -184,6 +184,64 @@ def test_list_cluster_queue_filters_status_source_category_retro_maybe_and_confi
     )
 
     assert [row.cluster_id for row in rows] == [maybe_cluster_id]
+
+
+def test_list_cluster_queue_limits_latest_rows_before_expensive_row_mapping(inbox_session):
+    session = inbox_session["session"]
+    first_cluster_id = _record_cluster(
+        session,
+        source_id=inbox_session["source_id"],
+        classifier_version_id=inbox_session["classifier_version_id"],
+        snapshot_entry_id=inbox_session["camera_snapshot_id"],
+        category_id=inbox_session["camera_category_id"],
+        item_id=inbox_session["camera_item_id"],
+        term_id=inbox_session["camera_term_id"],
+        telegram_message_id=210,
+        sender_id="sender-1",
+        text="нужна камера первая",
+        message_date=datetime(2026, 4, 28, 10, 0, 0),
+        confidence=0.91,
+    )
+    second_cluster_id = _record_cluster(
+        session,
+        source_id=inbox_session["source_id"],
+        classifier_version_id=inbox_session["classifier_version_id"],
+        snapshot_entry_id=inbox_session["camera_snapshot_id"],
+        category_id=inbox_session["camera_category_id"],
+        item_id=inbox_session["camera_item_id"],
+        term_id=inbox_session["camera_term_id"],
+        telegram_message_id=211,
+        sender_id="sender-2",
+        text="нужна камера вторая",
+        message_date=datetime(2026, 4, 28, 11, 0, 0),
+        confidence=0.91,
+    )
+    third_cluster_id = _record_cluster(
+        session,
+        source_id=inbox_session["source_id"],
+        classifier_version_id=inbox_session["classifier_version_id"],
+        snapshot_entry_id=inbox_session["camera_snapshot_id"],
+        category_id=inbox_session["camera_category_id"],
+        item_id=inbox_session["camera_item_id"],
+        term_id=inbox_session["camera_term_id"],
+        telegram_message_id=212,
+        sender_id="sender-3",
+        text="нужна камера третья",
+        message_date=datetime(2026, 4, 28, 12, 0, 0),
+        confidence=0.91,
+    )
+    session.commit()
+
+    rows = LeadInboxService(session).list_cluster_queue(LeadInboxFilters(limit=2))
+
+    assert [row.cluster_id for row in rows] == [third_cluster_id, second_cluster_id]
+    assert first_cluster_id not in {row.cluster_id for row in rows}
+
+
+def test_lead_inbox_limit_caps_large_client_requests():
+    assert _limit(0) == 1
+    assert _limit(20) == 20
+    assert _limit(100) == 20
 
 
 def test_get_cluster_detail_returns_timeline_events_matches_and_feedback(inbox_session):
