@@ -9,7 +9,7 @@ def test_sqlite_engine_enables_required_pragmas(tmp_path):
 
     with engine.connect() as connection:
         assert connection.exec_driver_sql("PRAGMA foreign_keys").scalar_one() == 1
-        assert connection.exec_driver_sql("PRAGMA busy_timeout").scalar_one() == 5000
+        assert connection.exec_driver_sql("PRAGMA busy_timeout").scalar_one() == 30000
         assert connection.exec_driver_sql("PRAGMA journal_mode").scalar_one().lower() == "wal"
 
 
