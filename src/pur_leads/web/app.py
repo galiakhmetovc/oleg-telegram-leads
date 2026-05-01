@@ -29,6 +29,7 @@ from pur_leads.web.routes_auth import router as auth_router
 from pur_leads.web.routes_catalog import router as catalog_router
 from pur_leads.web.routes_crm import router as crm_router
 from pur_leads.web.routes_health import router as health_router
+from pur_leads.web.routes_interest_contexts import router as interest_contexts_router
 from pur_leads.web.routes_leads import router as leads_router
 from pur_leads.web.routes_onboarding import router as onboarding_router
 from pur_leads.web.routes_operations import router as operations_router
@@ -131,6 +132,7 @@ def create_app(
     app.mount("/static", StaticFiles(directory=static_path), name="static")
     app.include_router(health_router)
     app.include_router(auth_router)
+    app.include_router(interest_contexts_router)
     app.include_router(leads_router)
     app.include_router(onboarding_router)
     app.include_router(crm_router)

@@ -5,6 +5,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
 
+from pur_leads.services.interest_contexts import InterestContextService
 from pur_leads.services.web_auth import AuthError, WebAuthService
 from pur_leads.web.dependencies import get_auth_service
 
@@ -62,6 +63,8 @@ def inbox_page(
 ) -> Response:
     if not _has_page_session(request, auth_service):
         return RedirectResponse("/login", status_code=303)
+    if not InterestContextService(auth_service.session).has_active_or_draft_context():
+        return RedirectResponse("/interest-contexts", status_code=303)
     return HTMLResponse(
         _page(
             page="leads-inbox",
@@ -75,6 +78,7 @@ def inbox_page(
                 </div>
                 <nav>
                   <a href="/">Лиды</a>
+                  <a href="/interest-contexts">Интересы</a>
                   <a href="/today">Сегодня</a>
                   <a href="/sources">Источники</a>
                   <a href="/resources">Ресурсы</a>
@@ -149,6 +153,201 @@ def onboarding_page(
     if not _has_page_session(request, auth_service):
         return RedirectResponse("/login", status_code=303)
     return RedirectResponse("/resources", status_code=303)
+
+
+@router.get("/interest-contexts", response_class=HTMLResponse)
+def interest_contexts_page(
+    request: Request,
+    auth_service: WebAuthService = Depends(get_auth_service),
+) -> Response:
+    if not _has_page_session(request, auth_service):
+        return RedirectResponse("/login", status_code=303)
+    return HTMLResponse(
+        _page(
+            page="interest-contexts",
+            title="Ядро интересов",
+            main="""
+            <main class="workspace resources-workspace">
+              <header class="topbar">
+                <div>
+                  <span class="eyebrow">PUR Leads</span>
+                  <h1>Ядро интересов</h1>
+                </div>
+                <nav>
+                  <a href="/">Лиды</a>
+                  <a href="/interest-contexts">Интересы</a>
+                  <a href="/today">Сегодня</a>
+                  <a href="/sources">Источники</a>
+                  <a href="/resources">Ресурсы</a>
+                  <a href="/catalog">Каталог</a>
+                  <a href="/crm">CRM</a>
+                  <a href="/users">Пользователи</a>
+                  <a href="/settings">Настройки</a>
+                  <a href="/ai-registry">AI-реестр</a>
+                  <a href="/task-executors">Исполнители задач</a>
+                  <a href="/task-types">Задачи</a>
+                  <a href="/quality">Качество</a>
+                  <a href="/artifacts">Артефакты</a>
+                  <a href="/operations">Операции</a>
+                  <md-outlined-button id="logout-button" type="button">Выйти</md-outlined-button>
+                </nav>
+              </header>
+              <section class="interest-context-layout">
+                <aside class="queue-pane" aria-label="Контексты интересов">
+                  <div class="section-head">
+                    <div>
+                      <h2>Контексты</h2>
+                      <p class="muted">Отдельное ядро знаний о том, что пользователю интересно искать и улучшать.</p>
+                    </div>
+                    <md-outlined-button id="interest-context-refresh" type="button">
+                      <md-icon slot="icon">refresh</md-icon>
+                      Обновить
+                    </md-outlined-button>
+                  </div>
+                  <form id="interest-context-create-form" class="material-form single-column-form">
+                    <md-outlined-text-field name="name" label="Название" required
+                      placeholder="Например, ПУР умный дом">
+                    </md-outlined-text-field>
+                    <md-outlined-text-field name="description" label="Описание" type="textarea"
+                      placeholder="Какие интересы, задачи и источники сюда входят">
+                    </md-outlined-text-field>
+                    <md-filled-button type="submit">
+                      <md-icon slot="icon">add</md-icon>
+                      Создать
+                    </md-filled-button>
+                  </form>
+                  <div id="interest-context-list" class="queue-list" aria-live="polite"></div>
+                  <p id="interest-context-status" class="status-line" role="status"></p>
+                </aside>
+                <section class="detail-pane interest-context-detail-pane" aria-live="polite">
+                  <header class="detail-header">
+                    <div>
+                      <h2 id="interest-context-detail-title">Выберите контекст</h2>
+                      <p id="interest-context-detail-description" class="muted">
+                        Сначала создайте ядро интересов, затем добавьте Telegram-канал или архив.
+                      </p>
+                    </div>
+                    <div class="badges" id="interest-context-detail-badges"></div>
+                  </header>
+                  <section class="detail-section">
+                    <h3>Telegram-ссылка</h3>
+                    <p class="muted">
+                      Источник ставится на raw-выгрузку: JSON/JSONL/parquet без AI, лидов и уведомлений.
+                    </p>
+                    <form id="interest-context-telegram-source-form" class="material-form interest-source-form">
+                      <md-outlined-text-field name="input_ref" label="Ссылка или @username" required
+                        placeholder="https://t.me/purmaster">
+                      </md-outlined-text-field>
+                      <label class="material-select-field">
+                        Диапазон
+                        <select name="range_mode">
+                          <option value="from_beginning">С самого начала</option>
+                          <option value="recent_days">За N дней</option>
+                          <option value="since_date">С даты</option>
+                          <option value="from_message">С сообщения</option>
+                          <option value="after_message">После сообщения</option>
+                          <option value="since_checkpoint">С последнего чекпоинта</option>
+                          <option value="from_now">С текущего момента</option>
+                        </select>
+                      </label>
+                      <md-outlined-text-field name="recent_days" label="Дней назад" type="number" value="180">
+                      </md-outlined-text-field>
+                      <md-outlined-text-field name="message_id" label="ID сообщения" type="number">
+                      </md-outlined-text-field>
+                      <md-outlined-text-field name="since_date" label="Дата начала" type="datetime-local">
+                      </md-outlined-text-field>
+                      <md-outlined-text-field name="batch_size" label="Размер пачки" type="number" value="1000">
+                      </md-outlined-text-field>
+                      <md-outlined-text-field name="max_messages" label="Максимум сообщений" type="number">
+                      </md-outlined-text-field>
+                      <label class="material-checkbox-line">
+                        <input name="media_enabled" type="checkbox">
+                        Скачать вложения
+                      </label>
+                      <label class="material-checkbox-line">
+                        <input name="media_types" type="checkbox" value="document" checked>
+                        Документы
+                      </label>
+                      <md-outlined-text-field name="max_media_size_bytes" label="Лимит файла, байт" type="number">
+                      </md-outlined-text-field>
+                      <label class="material-checkbox-line">
+                        <input name="check_access" type="checkbox">
+                        Проверить доступ
+                      </label>
+                      <label class="material-checkbox-line">
+                        <input name="enqueue_raw_export" type="checkbox" checked>
+                        Поставить raw-выгрузку в очередь
+                      </label>
+                      <md-filled-button type="submit">
+                        <md-icon slot="icon">send</md-icon>
+                        Добавить источник
+                      </md-filled-button>
+                    </form>
+                  </section>
+                  <section class="detail-section">
+                    <h3>Архив Telegram Desktop</h3>
+                    <p class="muted">
+                      Пользователь может сам выгрузить чат в Telegram Desktop, заархивировать папку и загрузить сюда.
+                    </p>
+                    <form id="interest-context-telegram-archive-form" class="material-form interest-source-form">
+                      <md-outlined-text-field name="display_name" label="Название архива"
+                        placeholder="Экспорт Telegram">
+                      </md-outlined-text-field>
+                      <label class="material-file-field">
+                        ZIP-архив
+                        <input name="file" type="file" accept=".zip,application/zip" required>
+                      </label>
+                      <label class="material-checkbox-line">
+                        <input name="sync_source_messages" type="checkbox">
+                        Синхронизировать сообщения в рабочую таблицу
+                      </label>
+                      <md-filled-button type="submit">
+                        <md-icon slot="icon">upload_file</md-icon>
+                        Загрузить архив
+                      </md-filled-button>
+                    </form>
+                    <div id="interest-context-upload-progress" class="upload-progress is-hidden">
+                      <md-linear-progress id="interest-context-upload-progress-bar" value="0"></md-linear-progress>
+                      <span id="interest-context-upload-progress-label">0%</span>
+                    </div>
+                    <p id="interest-context-upload-status" class="status-line" role="status"></p>
+                  </section>
+                  <section class="detail-section">
+                    <div class="section-head">
+                      <h3>Источники и raw-артефакты</h3>
+                      <md-filled-tonal-button id="interest-context-build-draft" type="button">
+                        Собрать черновик
+                      </md-filled-tonal-button>
+                    </div>
+                    <div id="interest-context-source-list" class="resource-list" aria-live="polite"></div>
+                  </section>
+                </section>
+                <aside class="side-pane operations-signals" aria-label="Следующие шаги">
+                  <section>
+                    <h2>Текущий этап</h2>
+                    <p class="muted">
+                      Собираем воспроизводимые сырые данные. Автоматическая обработка, лиды и уведомления здесь не запускаются.
+                    </p>
+                  </section>
+                  <section>
+                    <h2>После загрузки</h2>
+                    <div class="table-list">
+                      <div class="table-row">
+                        <div><strong>Проверка raw/parquet</strong><p class="muted">Открыть артефакты и убедиться, что данные полные.</p></div>
+                        <span>ручной шаг</span>
+                      </div>
+                      <div class="table-row">
+                        <div><strong>Подготовка знаний</strong><p class="muted">Запустить нормализацию, поиск сущностей и черновик каталога.</p></div>
+                        <span>следующий этап</span>
+                      </div>
+                    </div>
+                  </section>
+                </aside>
+              </section>
+            </main>
+            """,
+        )
+    )
 
 
 @router.get("/resources", response_class=HTMLResponse)

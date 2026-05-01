@@ -78,6 +78,7 @@ class TelegramDesktopArchiveImportService:
         *,
         input_ref: str | None = None,
         purpose: str = "lead_monitoring",
+        interest_context_id: str | None = None,
         added_by: str = "system",
         sync_source_messages: bool = False,
         source: MonitoredSourceRecord | None = None,
@@ -89,6 +90,7 @@ class TelegramDesktopArchiveImportService:
             payload,
             input_ref=input_ref,
             purpose=purpose,
+            interest_context_id=interest_context_id,
             added_by=added_by,
         )
         source_kind = _source_kind(payload, fallback=source.source_kind)
@@ -232,6 +234,7 @@ class TelegramDesktopArchiveImportService:
         *,
         input_ref: str | None,
         purpose: str,
+        interest_context_id: str | None,
         added_by: str,
     ) -> MonitoredSourceRecord:
         source_ref = input_ref or f"telegram-desktop://{payload.get('id') or new_id()}"
@@ -240,6 +243,7 @@ class TelegramDesktopArchiveImportService:
             source_ref,
             added_by=added_by,
             purpose=purpose,
+            interest_context_id=interest_context_id,
             start_mode="from_beginning",
         )
         updated = service.repository.update(

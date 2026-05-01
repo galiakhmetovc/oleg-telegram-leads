@@ -75,6 +75,7 @@ def test_foundation_migration_creates_core_tables(tmp_path):
         "trace_spans",
         "trace_span_events",
         "trace_span_links",
+        "interest_contexts",
     }.issubset(tables)
 
 
@@ -91,7 +92,7 @@ def test_catalog_quality_review_migration_handles_partial_table_from_concurrent_
 
     with engine.connect() as connection:
         assert connection.execute(text("select version_num from alembic_version")).scalar_one() == (
-            "0028_trace_foundation"
+            "0029_interest_contexts"
         )
         scheduler_sql = connection.execute(
             text("select sql from sqlite_master where type='table' and name='scheduler_jobs'")

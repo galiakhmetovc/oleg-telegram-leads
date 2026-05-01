@@ -72,6 +72,7 @@ def test_workspace_admin_sections_are_protected_and_render_shells(tmp_path):
 
     workspace_denied = client.get("/", follow_redirects=False)
     crm_denied = client.get("/crm", follow_redirects=False)
+    interest_contexts_denied = client.get("/interest-contexts", follow_redirects=False)
     sources_denied = client.get("/sources", follow_redirects=False)
     resources_denied = client.get("/resources", follow_redirects=False)
     users_denied = client.get("/users", follow_redirects=False)
@@ -85,6 +86,11 @@ def test_workspace_admin_sections_are_protected_and_render_shells(tmp_path):
     operations_denied = client.get("/operations", follow_redirects=False)
     quality_denied = client.get("/quality", follow_redirects=False)
     _login(client)
+    empty_home_redirect = client.get("/", follow_redirects=False)
+    create_context_response = client.post(
+        "/api/interest-contexts",
+        json={"name": "Тестовый контекст"},
+    )
     workspace_response = client.get("/")
     crm_response = client.get("/crm")
     sources_response = client.get("/sources")
@@ -107,6 +113,8 @@ def test_workspace_admin_sections_are_protected_and_render_shells(tmp_path):
     assert workspace_denied.headers["location"] == "/login"
     assert crm_denied.status_code == 303
     assert crm_denied.headers["location"] == "/login"
+    assert interest_contexts_denied.status_code == 303
+    assert interest_contexts_denied.headers["location"] == "/login"
     assert sources_denied.status_code == 303
     assert sources_denied.headers["location"] == "/login"
     assert resources_denied.status_code == 303
@@ -131,8 +139,12 @@ def test_workspace_admin_sections_are_protected_and_render_shells(tmp_path):
     assert operations_denied.headers["location"] == "/login"
     assert quality_denied.status_code == 303
     assert quality_denied.headers["location"] == "/login"
+    assert empty_home_redirect.status_code == 303
+    assert empty_home_redirect.headers["location"] == "/interest-contexts"
+    assert create_context_response.status_code == 200
     assert workspace_response.status_code == 200
     assert 'data-page="leads-inbox"' in workspace_response.text
+    assert '<a href="/interest-contexts">Интересы</a>' in workspace_response.text
     assert '<a href="/today">Сегодня</a>' in workspace_response.text
     assert '<a href="/sources">Источники</a>' in workspace_response.text
     assert '<a href="/resources">Ресурсы</a>' in workspace_response.text
@@ -178,6 +190,12 @@ def test_workspace_admin_sections_are_protected_and_render_shells(tmp_path):
     assert 'id="onboarding-llm-model-form"' not in resources_response.text
     assert "https://web.telegram.org/k/" in resources_response.text
     assert "https://my.telegram.org/auth?to=apps" in resources_response.text
+    interest_contexts_response = client.get("/interest-contexts")
+    assert interest_contexts_response.status_code == 200
+    assert 'data-page="interest-contexts"' in interest_contexts_response.text
+    assert 'id="interest-context-create-form"' in interest_contexts_response.text
+    assert 'id="interest-context-telegram-source-form"' in interest_contexts_response.text
+    assert 'id="interest-context-telegram-archive-form"' in interest_contexts_response.text
     assert users_response.status_code == 200
     assert 'data-page="users"' in users_response.text
     assert 'id="telegram-admin-form"' in users_response.text

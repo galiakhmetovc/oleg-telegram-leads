@@ -1192,6 +1192,31 @@ md-text-button {
   min-height: 0;
 }
 
+.interest-context-layout {
+  display: grid;
+  grid-template-columns: minmax(300px, 360px) minmax(520px, 1fr) minmax(260px, 320px);
+  min-height: 0;
+}
+
+.interest-context-layout .queue-pane,
+.interest-context-layout .detail-pane,
+.interest-context-layout .side-pane {
+  min-width: 0;
+}
+
+.interest-context-detail-pane {
+  overflow: auto;
+}
+
+.single-column-form,
+.interest-source-form {
+  grid-template-columns: 1fr;
+}
+
+.interest-source-form {
+  align-items: stretch;
+}
+
 .operations-shell {
   min-height: 0;
   display: grid;

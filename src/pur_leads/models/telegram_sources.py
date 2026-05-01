@@ -72,6 +72,7 @@ monitored_sources_table = Table(
     Column("invite_link_hash", String(128), nullable=True),
     Column("input_ref", String(512), nullable=False),
     Column("source_purpose", String(32), nullable=False),
+    Column("interest_context_id", String(36), nullable=True),
     Column("assigned_userbot_account_id", String(36), nullable=True),
     Column("priority", String(32), nullable=False),
     Column("status", String(64), nullable=False),

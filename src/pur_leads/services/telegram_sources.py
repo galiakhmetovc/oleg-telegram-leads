@@ -73,6 +73,7 @@ class TelegramSourceService:
         *,
         added_by: str,
         purpose: str = "lead_monitoring",
+        interest_context_id: str | None = None,
         start_mode: str | None = None,
         start_recent_days: int | None = None,
     ) -> MonitoredSourceRecord:
@@ -105,6 +106,7 @@ class TelegramSourceService:
             invite_link_hash=parsed.invite_link_hash,
             input_ref=parsed.input_ref,
             source_purpose=purpose,
+            interest_context_id=interest_context_id,
             assigned_userbot_account_id=default_userbot.id if default_userbot else None,
             priority="normal",
             status="draft",
@@ -140,6 +142,7 @@ class TelegramSourceService:
             new_value_json={
                 "input_ref": source.input_ref,
                 "purpose": source.source_purpose,
+                "interest_context_id": source.interest_context_id,
                 "status": source.status,
                 "assigned_userbot_account_id": source.assigned_userbot_account_id,
             },
@@ -452,6 +455,8 @@ def _purpose_flags(purpose: str) -> tuple[bool, bool]:
         return False, True
     if purpose == "both":
         return True, True
+    if purpose == "interest_context_seed":
+        return False, False
     raise ValueError(f"Unsupported source purpose: {purpose}")
 
 

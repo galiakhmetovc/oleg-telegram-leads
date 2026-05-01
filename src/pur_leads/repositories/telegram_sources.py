@@ -29,6 +29,7 @@ class MonitoredSourceRecord:
     invite_link_hash: str | None
     input_ref: str
     source_purpose: str
+    interest_context_id: str | None
     assigned_userbot_account_id: str | None
     priority: str
     status: str
@@ -117,6 +118,21 @@ class TelegramSourceRepository:
                 select(monitored_sources_table).order_by(
                     monitored_sources_table.c.created_at.desc()
                 )
+            )
+            .mappings()
+            .all()
+        )
+        return [MonitoredSourceRecord(**dict(row)) for row in rows]
+
+    def list_sources_for_interest_context(
+        self,
+        interest_context_id: str,
+    ) -> list[MonitoredSourceRecord]:
+        rows = (
+            self.session.execute(
+                select(monitored_sources_table)
+                .where(monitored_sources_table.c.interest_context_id == interest_context_id)
+                .order_by(monitored_sources_table.c.created_at.desc())
             )
             .mappings()
             .all()

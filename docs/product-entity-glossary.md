@@ -594,7 +594,7 @@ Source settings:
 - from beginning / from date / recent days / from message / checkpoint;
 - media download policy;
 - max media size;
-- purpose: catalog ingestion, lead monitoring, or both.
+- purpose: interest-context seed, catalog ingestion, lead monitoring, or both.
 Task/Run:
 - export telegram raw;
 - parse documents;
@@ -622,6 +622,21 @@ Important distinction:
 ```text
 The userbot is a Connection.
 The Telegram channel/chat is a Data Source.
+```
+
+Current first-flow implementation:
+
+```text
+The operator creates an Interest Context in /interest-contexts.
+Then the operator adds the Telegram channel/chat as an interest-context seed.
+The system creates a monitored Telegram source with:
+- source_purpose = interest_context_seed;
+- lead_detection_enabled = false;
+- catalog_ingestion_enabled = false.
+
+If raw export is enabled, the system queues export_telegram_raw and writes
+JSON/JSONL/Parquet artifacts. No AI, catalog mutation, lead creation, or
+notification is triggered by this first intake step.
 ```
 
 ### Example 3: Telegram Bot And Notification Group

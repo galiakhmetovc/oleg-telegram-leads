@@ -52,7 +52,7 @@ the operator workspace.
 
 Core application:
 
-- Alembic foundation through migration `0028_trace_foundation`.
+- Alembic foundation through migration `0029_interest_contexts`.
 - Postgres is now the target operational database. SQLite remains a temporary
   local/test fallback and artifact format while production cutover is in progress. The
   storage decision is documented in `docs/superpowers/specs/2026-05-01-postgres-and-otel-storage-design.md`.
@@ -63,6 +63,10 @@ Core application:
   `/api/operations/backups/database`: Postgres uses `pg_dump`/`pg_restore
   --list`, SQLite uses the existing consistent backup fallback.
 - FastAPI web app with bootstrap local admin, Telegram-admin account support, resources, settings, AI registry, task executors, quality, operations, sources, catalog, CRM, leads, and artifacts pages.
+- `/interest-contexts` is the first product scenario for forming a user's
+  Interest Context before lead detection. A logged-in empty installation
+  redirects from `/` to this screen so the operator first creates the context
+  and adds evidence sources.
 - Material Web assets are vendored locally; custom CSS is used for layout and product composition.
 - Every web request now receives an OpenTelemetry-compatible trace context
   (`trace_id`, `span_id`, `request_id`). Authentication binds the trace to the
@@ -74,6 +78,12 @@ Core application:
 
 Telegram source and raw acquisition:
 
+- An Interest Context can accept Telegram sources in two reusable raw-only ways:
+  a Telegram channel/chat link or a user-uploaded Telegram Desktop zip archive.
+  These sources use `source_purpose = interest_context_seed`, with lead
+  detection and catalog ingestion disabled. They collect raw data and artifacts
+  only; analysis, catalog mutation, leads, and notifications remain manual
+  follow-up steps.
 - Sources can be created through the web UI and can use `from_now`, `recent_days`, `from_message`, and `from_beginning`.
 - `export_telegram_raw` job type exists for explicit reusable history acquisition.
 - Telethon-based raw export writes one reusable acquisition run to:
@@ -94,6 +104,9 @@ Telegram source and raw acquisition:
   `telegram_raw_export_runs.metadata_json`. The web form shows upload progress;
   later analysis stages remain manual unless the operator explicitly selects the
   canonical-message sync option.
+- `/interest-contexts` reuses the same Telegram Desktop archive importer and
+  raw export model, but stores the source under a specific Interest Context and
+  records the trace in `telegram_raw_export_runs.metadata_json.interest_context`.
 
 Chat analytics pipeline:
 
@@ -192,6 +205,9 @@ Observability and operations:
 
 - Raw Telegram acquisition was made reusable: one Telethon read can be replayed through Parquet, text normalization, artifacts, FTS, Chroma, entity extraction, lead-candidate research, and later AI stages.
 - Telegram Desktop zip import was added as an alternate ingestion source for user-exported chat history.
+- Interest Context intake was added: a user can create a context, attach a
+  Telegram link or Telegram Desktop export, and stop after raw/parquet
+  artifact creation for manual verification.
 - Stage 5.1 rule-based entity ranking was added to clean and prioritize noisy POS entities before LLM.
 - Stage 5.2 canonical entity enrichment was added with persistent registry context between LLM calls, preventing independent requests from inventing duplicate canonical names silently.
 - Review-only lead candidate discovery and LLM arbitration were added to inspect lead quality without creating live leads.

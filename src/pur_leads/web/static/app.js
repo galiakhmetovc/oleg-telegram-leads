@@ -107,6 +107,7 @@ const LABELS = {
   hoa_tsn: "ТСЖ / ТСН",
   in_work: "в работе",
   interested: "интересуется",
+  interest_context_seed: "ядро интересов",
   item: "сущность",
   lead: "лид",
   lead_phrase: "признак запроса",
@@ -222,6 +223,7 @@ document.addEventListener("DOMContentLoaded", () => {
   if (page === "admin") initAdmin();
   if (page === "onboarding") initOnboarding();
   if (page === "resources") initResources();
+  if (page === "interest-contexts") initInterestContexts();
   if (page === "users") initUsersPage();
   if (page === "settings") initSettingsPage();
   if (page === "ai-registry") initAiRegistryPage();
@@ -3700,6 +3702,316 @@ function initOnboarding() {
 
 function initResources() {
   initOnboarding();
+}
+
+function initInterestContexts() {
+  const state = { items: [], selectedId: null, detail: null };
+  document
+    .querySelector("#interest-context-refresh")
+    ?.addEventListener("click", () => loadInterestContexts(state));
+  document
+    .querySelector("#interest-context-create-form")
+    ?.addEventListener("submit", (event) => createInterestContext(event, state));
+  document
+    .querySelector("#interest-context-telegram-source-form")
+    ?.addEventListener("submit", (event) => addInterestContextTelegramSource(event, state));
+  document
+    .querySelector("#interest-context-telegram-archive-form")
+    ?.addEventListener("submit", (event) => uploadInterestContextTelegramArchive(event, state));
+  document
+    .querySelector("#interest-context-build-draft")
+    ?.addEventListener("click", () => buildInterestContextDraft(state));
+  setInterestContextFormsEnabled(false);
+  loadInterestContexts(state);
+}
+
+async function loadInterestContexts(state) {
+  const target = document.querySelector("#interest-context-list");
+  try {
+    const payload = await api("/api/interest-contexts");
+    state.items = payload.items || [];
+    const selectedStillVisible = state.items.some((item) => item.id === state.selectedId);
+    state.selectedId = selectedStillVisible ? state.selectedId : state.items[0]?.id || null;
+    renderInterestContextList(state);
+    if (state.selectedId) {
+      await loadInterestContextDetail(state.selectedId, state);
+    } else {
+      state.detail = null;
+      renderInterestContextEmptyDetail();
+    }
+  } catch (error) {
+    if (target) target.innerHTML = `<div class="empty-state">${escapeHtml(error.message)}</div>`;
+  }
+}
+
+function renderInterestContextList(state) {
+  const target = document.querySelector("#interest-context-list");
+  if (!target) return;
+  if (!state.items.length) {
+    target.innerHTML = '<div class="empty-state">Контекстов пока нет</div>';
+    return;
+  }
+  target.innerHTML = state.items
+    .map((context) => {
+      const active = context.id === state.selectedId ? "is-active" : "";
+      return `<button class="queue-item ${active}" type="button" data-id="${escapeHtml(context.id)}">
+        <strong>${escapeHtml(context.name)}</strong>
+        <span class="muted">${escapeHtml(context.description || "без описания")}</span>
+        <span class="queue-meta">${badge(label(context.status || "draft"))}${badge(time(context.updated_at) || "новый")}</span>
+      </button>`;
+    })
+    .join("");
+  target.querySelectorAll(".queue-item").forEach((button) => {
+    button.addEventListener("click", async () => {
+      state.selectedId = button.dataset.id;
+      renderInterestContextList(state);
+      await loadInterestContextDetail(state.selectedId, state);
+    });
+  });
+}
+
+async function loadInterestContextDetail(contextId, state) {
+  const detail = await api(`/api/interest-contexts/${encodeURIComponent(contextId)}`);
+  state.detail = detail;
+  renderInterestContextDetail(detail);
+}
+
+function renderInterestContextEmptyDetail() {
+  setInterestContextFormsEnabled(false);
+  const title = document.querySelector("#interest-context-detail-title");
+  const description = document.querySelector("#interest-context-detail-description");
+  const badges = document.querySelector("#interest-context-detail-badges");
+  const sources = document.querySelector("#interest-context-source-list");
+  if (title) title.textContent = "Выберите контекст";
+  if (description) {
+    description.textContent = "Сначала создайте ядро интересов, затем добавьте Telegram-канал или архив.";
+  }
+  if (badges) badges.innerHTML = "";
+  if (sources) sources.innerHTML = '<div class="empty-state">Источников пока нет</div>';
+}
+
+function renderInterestContextDetail(detail) {
+  const context = detail.context || {};
+  const title = document.querySelector("#interest-context-detail-title");
+  const description = document.querySelector("#interest-context-detail-description");
+  const badges = document.querySelector("#interest-context-detail-badges");
+  const sources = document.querySelector("#interest-context-source-list");
+  setInterestContextFormsEnabled(Boolean(context.id));
+  if (title) title.textContent = context.name || "Ядро интересов";
+  if (description) description.textContent = context.description || "Описание не задано";
+  if (badges) {
+    badges.innerHTML = `${badge(label(context.status || "draft"))}${badge(`обновлено ${time(context.updated_at) || "сейчас"}`)}`;
+  }
+  if (!sources) return;
+  const sourceRows = detail.sources || [];
+  if (!sourceRows.length) {
+    sources.innerHTML = '<div class="empty-state">Добавьте Telegram-ссылку или архив</div>';
+    return;
+  }
+  sources.innerHTML = sourceRows
+    .map((source) => {
+      const rawRun = source.latest_raw_export_run || null;
+      const titleText = source.title || source.username || source.input_ref || source.id;
+      const rawText = rawRun
+        ? `${rawRun.message_count || 0} сообщений / ${rawRun.attachment_count || 0} вложений`
+        : "raw-артефакты еще не созданы";
+      return `<div class="resource-row">
+        <div class="resource-kind">
+          <md-icon aria-hidden="true">${rawRun ? "archive" : "database"}</md-icon>
+          <span>${escapeHtml(label(source.source_kind || "telegram"))}</span>
+        </div>
+        <div class="resource-primary">
+          <strong>${escapeHtml(titleText)}</strong>
+          <p class="muted">${escapeHtml(source.input_ref || "")}</p>
+          <p class="muted">${escapeHtml(rawText)}</p>
+        </div>
+        <div>
+          ${badge(label(source.status || "draft"), sourceStatusClass(source.status))}
+          ${rawRun ? badge(label(rawRun.status || "unknown"), rawRun.status === "failed" ? "is-danger" : "") : ""}
+        </div>
+        <div class="resource-actions">
+          <md-outlined-button type="button" onclick="window.location.assign('/artifacts')">
+            Артефакты
+          </md-outlined-button>
+        </div>
+      </div>`;
+    })
+    .join("");
+}
+
+async function createInterestContext(event, state) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const status = document.querySelector("#interest-context-status");
+  try {
+    const payload = await api("/api/interest-contexts", {
+      method: "POST",
+      body: JSON.stringify({
+        name: formValue(form, "name"),
+        description: formValue(form, "description") || null,
+      }),
+    });
+    form.reset();
+    state.selectedId = payload.context?.id || null;
+    if (status) status.textContent = "Контекст создан";
+    await loadInterestContexts(state);
+  } catch (error) {
+    if (status) status.textContent = error.message;
+  }
+}
+
+async function addInterestContextTelegramSource(event, state) {
+  event.preventDefault();
+  const status = document.querySelector("#interest-context-status");
+  if (!state.selectedId) {
+    if (status) status.textContent = "Сначала выберите контекст";
+    return;
+  }
+  const form = event.currentTarget;
+  const data = new FormData(form);
+  const numberOrNull = (name) => {
+    const value = Number.parseInt(data.get(name), 10);
+    return Number.isNaN(value) ? null : value;
+  };
+  const mediaTypes = data.getAll("media_types");
+  try {
+    const payload = await api(
+      `/api/interest-contexts/${encodeURIComponent(state.selectedId)}/telegram-source`,
+      {
+        method: "POST",
+        body: JSON.stringify({
+          input_ref: formValue(form, "input_ref"),
+          range_mode: data.get("range_mode") || "from_beginning",
+          recent_days: numberOrNull("recent_days"),
+          message_id: numberOrNull("message_id"),
+          since_date: formValue(form, "since_date") || null,
+          batch_size: numberOrNull("batch_size") || 1000,
+          max_messages: numberOrNull("max_messages"),
+          media_enabled: data.get("media_enabled") === "on",
+          media_types: mediaTypes.length ? mediaTypes : ["document"],
+          max_media_size_bytes: numberOrNull("max_media_size_bytes"),
+          check_access: data.get("check_access") === "on",
+          enqueue_raw_export: data.get("enqueue_raw_export") === "on",
+        }),
+      }
+    );
+    form.reset();
+    form.querySelector('[name="media_types"][value="document"]').checked = true;
+    form.querySelector('[name="enqueue_raw_export"]').checked = true;
+    if (status) {
+      status.textContent = payload.raw_export_job
+        ? "Источник добавлен, raw-выгрузка поставлена в очередь"
+        : "Источник добавлен";
+    }
+    await loadInterestContexts(state);
+  } catch (error) {
+    if (status) status.textContent = error.message;
+  }
+}
+
+async function uploadInterestContextTelegramArchive(event, state) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const status = document.querySelector("#interest-context-upload-status");
+  const submitButton = form.querySelector('md-filled-button[type="submit"]');
+  const fileInput = form.querySelector('input[name="file"]');
+  if (!state.selectedId) {
+    if (status) status.textContent = "Сначала выберите контекст";
+    return;
+  }
+  if (!fileInput?.files?.[0]) {
+    if (status) status.textContent = "Выберите zip-архив Telegram Desktop.";
+    return;
+  }
+  const data = new FormData(form);
+  data.set(
+    "sync_source_messages",
+    form.querySelector('[name="sync_source_messages"]')?.checked ? "true" : "false"
+  );
+  try {
+    setInterestContextUploadProgress({ visible: true, value: 0, label: "0%" });
+    if (submitButton) submitButton.disabled = true;
+    if (status) status.textContent = "Загружаю архив...";
+    const payload = await uploadFormData(
+      `/api/interest-contexts/${encodeURIComponent(state.selectedId)}/telegram-archive`,
+      data,
+      {
+        onProgress: (value) => {
+          const percent = Math.round(value * 100);
+          setInterestContextUploadProgress({ visible: true, value, label: `${percent}%` });
+          if (status) status.textContent = `Загрузка архива: ${percent}%`;
+        },
+        onProcessing: () => {
+          setInterestContextUploadProgress({
+            visible: true,
+            indeterminate: true,
+            label: "обработка",
+          });
+          if (status) status.textContent = "Архив получен. Создаю raw/parquet артефакты...";
+        },
+      }
+    );
+    form.reset();
+    if (status) {
+      status.textContent = `Архив загружен. Сообщений: ${payload.result?.message_count || 0}`;
+    }
+    await loadInterestContexts(state);
+  } catch (error) {
+    if (status) status.textContent = error.message;
+  } finally {
+    if (submitButton) submitButton.disabled = false;
+    setInterestContextUploadProgress({ visible: false, value: 0, label: "0%" });
+  }
+}
+
+function setInterestContextUploadProgress({ visible, value = 0, label = "", indeterminate = false }) {
+  const container = document.querySelector("#interest-context-upload-progress");
+  const progress = document.querySelector("#interest-context-upload-progress-bar");
+  const labelTarget = document.querySelector("#interest-context-upload-progress-label");
+  if (!container || !progress) return;
+  container.classList.toggle("is-hidden", !visible);
+  if (indeterminate) {
+    progress.setAttribute("indeterminate", "");
+    progress.removeAttribute("value");
+  } else {
+    progress.removeAttribute("indeterminate");
+    progress.value = Math.max(0, Math.min(1, value));
+    progress.setAttribute("value", String(progress.value));
+  }
+  if (labelTarget) labelTarget.textContent = label;
+}
+
+async function buildInterestContextDraft(state) {
+  const status = document.querySelector("#interest-context-status");
+  if (!state.selectedId) {
+    if (status) status.textContent = "Сначала выберите контекст";
+    return;
+  }
+  try {
+    const payload = await api(`/api/interest-contexts/${encodeURIComponent(state.selectedId)}/draft`, {
+      method: "POST",
+      body: JSON.stringify({}),
+    });
+    if (status) status.textContent = payload.message || "Готово";
+  } catch (error) {
+    if (status) status.textContent = error.message;
+  }
+}
+
+function setInterestContextFormsEnabled(enabled) {
+  ["#interest-context-telegram-source-form", "#interest-context-telegram-archive-form"].forEach(
+    (selector) => {
+      document
+        .querySelectorAll(
+          `${selector} input, ${selector} select, ${selector} md-outlined-text-field, ${selector} md-filled-button`
+        )
+        .forEach((field) => {
+          field.disabled = !enabled;
+        });
+    }
+  );
+  const draftButton = document.querySelector("#interest-context-build-draft");
+  if (draftButton) draftButton.disabled = !enabled;
 }
 
 function openOnboardingResourceDialog(event) {
