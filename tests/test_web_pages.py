@@ -37,7 +37,8 @@ def test_login_page_and_static_assets_are_served(tmp_path):
     assert "Noto+Sans" in login_response.text
     assert "Roboto" not in login_response.text
     assert "Material+Symbols+Outlined" in login_response.text
-    assert "icon_names=add,check_circle,close,forum,model_training" in login_response.text
+    assert "icon_names=add,article,check_circle,close,database,description,folder" in login_response.text
+    assert "forum,model_training" in login_response.text
     assert 'type="module" src="/static/vendor/material-web.js"' in login_response.text
     assert css_response.status_code == 200
     assert "grid-template-columns" in css_response.text
@@ -78,6 +79,7 @@ def test_workspace_admin_sections_are_protected_and_render_shells(tmp_path):
     task_types_denied = client.get("/task-types", follow_redirects=False)
     catalog_denied = client.get("/catalog", follow_redirects=False)
     today_denied = client.get("/today", follow_redirects=False)
+    artifacts_denied = client.get("/artifacts", follow_redirects=False)
     operations_denied = client.get("/operations", follow_redirects=False)
     quality_denied = client.get("/quality", follow_redirects=False)
     _login(client)
@@ -94,6 +96,7 @@ def test_workspace_admin_sections_are_protected_and_render_shells(tmp_path):
     onboarding_redirect = client.get("/onboarding", follow_redirects=False)
     catalog_response = client.get("/catalog")
     today_response = client.get("/today")
+    artifacts_response = client.get("/artifacts")
     operations_response = client.get("/operations")
     quality_response = client.get("/quality")
     js_response = client.get("/static/app.js")
@@ -120,6 +123,8 @@ def test_workspace_admin_sections_are_protected_and_render_shells(tmp_path):
     assert catalog_denied.headers["location"] == "/login"
     assert today_denied.status_code == 303
     assert today_denied.headers["location"] == "/login"
+    assert artifacts_denied.status_code == 303
+    assert artifacts_denied.headers["location"] == "/login"
     assert operations_denied.status_code == 303
     assert operations_denied.headers["location"] == "/login"
     assert quality_denied.status_code == 303
@@ -137,6 +142,7 @@ def test_workspace_admin_sections_are_protected_and_render_shells(tmp_path):
     assert '<a href="/task-executors">Исполнители задач</a>' in workspace_response.text
     assert '<a href="/task-types">Задачи</a>' in workspace_response.text
     assert '<a href="/quality">Качество</a>' in workspace_response.text
+    assert '<a href="/artifacts">Артефакты</a>' in workspace_response.text
     assert '<a href="/operations">Операции</a>' in workspace_response.text
     assert '<a href="/onboarding">Онбординг</a>' not in workspace_response.text
     assert '<a href="/admin">Админка</a>' not in workspace_response.text
@@ -216,6 +222,40 @@ def test_workspace_admin_sections_are_protected_and_render_shells(tmp_path):
     assert 'id="source-detail"' in sources_response.text
     assert catalog_response.status_code == 200
     assert 'data-page="catalog"' in catalog_response.text
+    assert 'id="catalog-item-form"' in catalog_response.text
+    assert 'id="catalog-item-list"' in catalog_response.text
+    assert 'id="catalog-item-detail"' in catalog_response.text
+    assert 'id="catalog-snapshot-rebuild"' in catalog_response.text
+    assert "Ручной каталог" in catalog_response.text
+    assert "Канонические сущности, термины, признаки и условия." in catalog_response.text
+    assert '<option value="item">Сущности</option>' in catalog_response.text
+    assert "Что это за сущность, когда она релевантна и как ее распознавать" in (
+        catalog_response.text
+    )
+    assert "Каноническое имя: коротко, конкретно и без лишних слов." in catalog_response.text
+    assert "Тип определяет роль сущности в базе знаний и влияет на будущие промпты." in (
+        catalog_response.text
+    )
+    assert "Сырой текст, ссылка или пример сохраняются как источник для обучения и аудита." in (
+        catalog_response.text
+    )
+    assert "Автоизвлечение запускает AI-разбор только после сохранения сырого источника." in (
+        catalog_response.text
+    )
+    assert "Пример: Камеры Dahua" in catalog_response.text
+    assert "Порядок работы: источник → кандидат → подтверждение → снапшот → совпадение в чате." in (
+        catalog_response.text
+    )
+    assert "Ключевые слова дают fuzzy match, признаки запроса повышают уверенность, исключающие признаки снижают ее." in (
+        catalog_response.text
+    )
+    assert "Что продаем" not in catalog_response.text
+    assert "Канонические товары, услуги, термины и офферы." not in catalog_response.text
+    assert "AI-кандидаты" in catalog_response.text
+    assert "Сырой ингест" in catalog_response.text
+    assert 'id="catalog-raw-summary"' in catalog_response.text
+    assert 'id="catalog-raw-message-list"' in catalog_response.text
+    assert 'id="catalog-raw-message-detail"' in catalog_response.text
     assert 'id="catalog-candidate-list"' in catalog_response.text
     assert 'id="catalog-candidate-detail"' in catalog_response.text
     assert 'id="catalog-filters"' in catalog_response.text
@@ -233,6 +273,12 @@ def test_workspace_admin_sections_are_protected_and_render_shells(tmp_path):
     assert 'id="today-support-cases"' in today_response.text
     assert 'id="today-catalog-candidates"' in today_response.text
     assert 'id="today-operational-issues"' in today_response.text
+    assert artifacts_response.status_code == 200
+    assert 'data-page="artifacts"' in artifacts_response.text
+    assert 'id="artifact-summary"' in artifacts_response.text
+    assert 'id="artifact-filters"' in artifacts_response.text
+    assert 'id="artifact-list"' in artifacts_response.text
+    assert 'id="artifact-detail"' in artifacts_response.text
     assert operations_response.status_code == 200
     assert 'data-page="operations"' in operations_response.text
     assert 'id="operations-summary"' in operations_response.text
@@ -265,8 +311,27 @@ def test_workspace_admin_sections_are_protected_and_render_shells(tmp_path):
     assert "/api/onboarding/userbots/interactive/start" in js_response.text
     assert "/api/onboarding/userbots/interactive/complete" in js_response.text
     assert "/api/catalog/candidates" in js_response.text
+    assert "/api/catalog/items" in js_response.text
+    assert "/api/catalog/raw-ingest" in js_response.text
+    assert "/api/catalog/snapshots/rebuild" in js_response.text
+    assert "loadCatalogRawIngest" in js_response.text
+    assert "submitCatalogItem" in js_response.text
+    assert "Условия и действия" in js_response.text
+    assert "Статус определяет, участвует ли сущность в текущем источнике истины." in (
+        js_response.text
+    )
+    assert "Вес: насколько сильно термин влияет на fuzzy match и будущие правила." in (
+        js_response.text
+    )
+    assert "JSON-данные должны оставаться валидным JSON." in js_response.text
+    assert "Параметры: срок, цена, доступность, ограничение или другое уточнение." in (
+        js_response.text
+    )
+    assert "Офферов нет" not in js_response.text
+    assert "Цена/условия" not in js_response.text
     assert "оценочный кейс" in js_response.text
     assert "/api/operations/summary" in js_response.text
+    assert "/api/artifacts" in js_response.text
     assert "/api/quality/summary" in js_response.text
     assert "/api/operations/extraction-runs" in js_response.text
     assert "/api/operations/backups" in js_response.text
@@ -275,6 +340,7 @@ def test_workspace_admin_sections_are_protected_and_render_shells(tmp_path):
     assert "offset: String(state.offset)" in js_response.text
     assert "loadCatalogCandidateDetail" in js_response.text
     assert "initOperations" in js_response.text
+    assert "initArtifacts" in js_response.text
     assert "initQuality" in js_response.text
     assert "initToday" in js_response.text
     assert "initResources" in js_response.text

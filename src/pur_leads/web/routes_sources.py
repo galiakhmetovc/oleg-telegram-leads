@@ -28,11 +28,29 @@ class SourceCreateRequest(BaseModel):
     input_ref: str
     purpose: str = "lead_monitoring"
     check_access: bool = True
+    start_mode: str | None = None
     start_recent_days: int | None = None
 
 
 class SourcePreviewRequest(BaseModel):
     limit: int = 20
+
+
+class SourceRawIngestRequest(BaseModel):
+    limit: int = 100
+
+
+class SourceRawExportRequest(BaseModel):
+    range_mode: str = "source_start"
+    recent_days: int | None = None
+    message_id: int | None = None
+    since_date: str | None = None
+    batch_size: int = 1000
+    max_messages: int | None = None
+    media_enabled: bool = False
+    media_types: list[str] = ["document"]
+    max_media_size_bytes: int | None = None
+    canonicalize: bool = True
 
 
 class SourceCheckpointRequest(BaseModel):
@@ -63,6 +81,7 @@ def create_source(
             payload.input_ref,
             purpose=payload.purpose,
             added_by=actor,
+            start_mode=payload.start_mode,
             start_recent_days=payload.start_recent_days,
         )
         access_job = (
@@ -126,6 +145,59 @@ def request_preview(
     except ActivationRequiresPreview as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return {"job": _job_payload(job)}
+
+
+@router.post("/sources/{source_id}/raw-ingest")
+def request_raw_ingest(
+    source_id: str,
+    payload: SourceRawIngestRequest,
+    validated: SessionValidationResult = Depends(current_admin),
+    session: Session = Depends(get_session),
+) -> dict[str, Any]:
+    try:
+        source, job = TelegramSourceService(session).request_raw_ingest(
+            source_id,
+            actor=_actor(validated),
+            limit=payload.limit,
+        )
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Source not found") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"source": _source_payload(source), "raw_ingest_job": _job_payload(job)}
+
+
+@router.post("/sources/{source_id}/raw-export")
+def request_raw_export(
+    source_id: str,
+    payload: SourceRawExportRequest,
+    validated: SessionValidationResult = Depends(current_admin),
+    session: Session = Depends(get_session),
+) -> dict[str, Any]:
+    try:
+        source, job = TelegramSourceService(session).request_raw_export(
+            source_id,
+            actor=_actor(validated),
+            range_config={
+                "mode": payload.range_mode,
+                "recent_days": payload.recent_days,
+                "message_id": payload.message_id,
+                "since_date": payload.since_date,
+                "batch_size": payload.batch_size,
+                "max_messages": payload.max_messages,
+            },
+            media_config={
+                "enabled": payload.media_enabled,
+                "types": payload.media_types,
+                "max_file_size_bytes": payload.max_media_size_bytes,
+            },
+            canonicalize=payload.canonicalize,
+        )
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Source not found") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"source": _source_payload(source), "raw_export_job": _job_payload(job)}
 
 
 @router.post("/sources/{source_id}/activate")

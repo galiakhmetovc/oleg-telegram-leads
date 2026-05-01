@@ -33,7 +33,20 @@ class PdfArtifactParser:
         if not isinstance(local_path, str) or not local_path:
             raise ValueError("pdf parser requires payload.local_path")
 
-        reader = self.reader_factory(local_path)
+        path = Path(local_path)
+        file_name = payload.get("file_name")
+        mime_type = payload.get("mime_type")
+        if _is_text_document(path, file_name=file_name, mime_type=mime_type):
+            chunks = _chunk_text(_read_text_document(path))
+            return ParsedArtifact(
+                source_id=source_id,
+                artifact_id=artifact_id,
+                chunks=chunks,
+                parser_name="plain-text",
+                parser_version="1",
+            )
+
+        reader = self.reader_factory(path)
         chunks = [
             normalized
             for page in getattr(reader, "pages", [])
@@ -54,3 +67,54 @@ def _normalize_page_text(value: str | None) -> str | None:
     lines = [line.strip() for line in value.splitlines()]
     normalized = "\n".join(line for line in lines if line)
     return normalized or None
+
+
+def _is_text_document(
+    path: Path,
+    *,
+    file_name: Any,
+    mime_type: Any,
+) -> bool:
+    if isinstance(mime_type, str):
+        normalized_mime = mime_type.casefold().split(";", 1)[0].strip()
+        if normalized_mime.startswith("text/"):
+            return True
+        if normalized_mime in {
+            "application/json",
+            "application/xml",
+            "application/csv",
+            "text/csv",
+        }:
+            return True
+    candidate = str(file_name or path.name).casefold()
+    return candidate.endswith((".txt", ".md", ".csv", ".json", ".xml", ".html", ".htm"))
+
+
+def _read_text_document(path: Path) -> str:
+    data = path.read_bytes()
+    for encoding in ("utf-8-sig", "utf-8", "cp1251"):
+        try:
+            return data.decode(encoding)
+        except UnicodeDecodeError:
+            continue
+    return data.decode("utf-8", errors="replace")
+
+
+def _chunk_text(value: str, *, max_chars: int = 8000) -> list[str]:
+    normalized = "\n".join(line.rstrip() for line in value.replace("\r\n", "\n").split("\n"))
+    normalized = normalized.strip()
+    if not normalized:
+        return []
+    paragraphs = [part.strip() for part in normalized.split("\n\n") if part.strip()]
+    chunks: list[str] = []
+    current = ""
+    for paragraph in paragraphs or [normalized]:
+        separator = "\n\n" if current else ""
+        if current and len(current) + len(separator) + len(paragraph) > max_chars:
+            chunks.append(current)
+            current = paragraph
+            continue
+        current = f"{current}{separator}{paragraph}" if current else paragraph
+    if current:
+        chunks.append(current)
+    return chunks

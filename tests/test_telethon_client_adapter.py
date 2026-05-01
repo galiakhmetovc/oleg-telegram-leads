@@ -1,4 +1,5 @@
 from datetime import UTC, datetime
+import base64
 from pathlib import Path
 from typing import Any
 
@@ -85,6 +86,62 @@ async def test_telethon_client_fetches_preview_and_batches_after_checkpoint():
 
 
 @pytest.mark.asyncio
+async def test_telethon_client_preserves_maximum_json_safe_raw_message_metadata():
+    fake = FakeTelethonClient(
+        entity=FakeEntity(id=-1002, username="chat", title="Chat", megagroup=True),
+        messages=[
+            _message(
+                45,
+                text="raw",
+                sender_id=10,
+                sender_name="Sender",
+                has_media=True,
+                reply_to_message_id=44,
+            )
+        ],
+    )
+    fake.messages[0].binary_payload = b"\x00\x01raw"
+    fake.messages[0].edit_date = datetime(2026, 4, 28, 12, 30, tzinfo=UTC)
+    fake.messages[0].chat = fake.entity
+    fake.messages[0].media = FakeSerializable("MessageMediaPhoto", {"photo_id": 777})
+    fake.messages[0].reply_to = FakeSerializable("MessageReplyHeader", {"reply_to_msg_id": 44})
+    fake.messages[0].fwd_from = FakeSerializable("MessageFwdHeader", {"from_name": "Forwarded"})
+    client = TelethonTelegramClient(
+        session_path="/secure/userbot.session",
+        api_id=123,
+        api_hash="hash",
+        client_factory=lambda *args, **kwargs: fake,
+    )
+    source = ResolvedTelegramSource(
+        input_ref="@chat",
+        source_kind="telegram_supergroup",
+        telegram_id="-1002",
+        username="chat",
+        title="Chat",
+    )
+
+    preview = await client.fetch_preview_messages(source, limit=1)
+
+    raw = preview[0].raw_metadata_json
+    assert raw["post"] is False
+    assert raw["views"] is None
+    assert raw["telethon"]["message"]["id"] == 45
+    assert raw["telethon"]["message"]["message"] == "raw"
+    assert raw["telethon"]["message"]["binary_payload"] == {
+        "__type": "bytes",
+        "encoding": "base64",
+        "data": base64.b64encode(b"\x00\x01raw").decode("ascii"),
+    }
+    assert raw["telethon"]["message"]["edit_date"] == "2026-04-28T12:30:00+00:00"
+    assert raw["telethon"]["sender"]["first_name"] == "Sender"
+    assert raw["telethon"]["chat"]["title"] == "Chat"
+    assert raw["telethon"]["media"]["_"] == "MessageMediaPhoto"
+    assert raw["telethon"]["document"] is None
+    assert raw["telethon"]["reply_to"]["_"] == "MessageReplyHeader"
+    assert raw["telethon"]["fwd_from"]["_"] == "MessageFwdHeader"
+
+
+@pytest.mark.asyncio
 async def test_telethon_client_fetches_batch_after_date_for_recent_backfill():
     after_date = datetime(2025, 10, 28, tzinfo=UTC)
     fake = FakeTelethonClient(
@@ -121,6 +178,100 @@ async def test_telethon_client_fetches_batch_after_date_for_recent_backfill():
         "reverse": True,
         "wait_time": 2,
     }
+
+
+@pytest.mark.asyncio
+async def test_telethon_client_iterates_configured_export_range_in_batches():
+    fake = FakeTelethonClient(
+        entity=FakeEntity(id=-1002, username="chat", title="Chat", megagroup=True),
+        messages=[
+            _message(41, text="first"),
+            _message(42, text="second"),
+            _message(43, text="third"),
+        ],
+    )
+    client = TelethonTelegramClient(
+        session_path="/secure/userbot.session",
+        api_id=123,
+        api_hash="hash",
+        get_history_wait_seconds=2,
+        client_factory=lambda *args, **kwargs: fake,
+    )
+    source = ResolvedTelegramSource(
+        input_ref="@chat",
+        source_kind="telegram_supergroup",
+        telegram_id="-1002",
+        username="chat",
+        title="Chat",
+    )
+
+    batches = [
+        [message.telegram_message_id for message in batch]
+        async for batch in client.iter_message_batches(
+            source,
+            after_message_id=40,
+            limit=3,
+            batch_size=2,
+        )
+    ]
+
+    assert batches == [[41, 42], [43]]
+    assert fake.iter_calls[0] == {
+        "entity": fake.entity,
+        "limit": 3,
+        "min_id": 40,
+        "reverse": True,
+        "wait_time": 2,
+    }
+
+
+@pytest.mark.asyncio
+async def test_telethon_client_downloads_media_with_type_and_size_policy(tmp_path):
+    fake = FakeTelethonClient(
+        entity=FakeEntity(id=-1002, username="chat", title="Chat", megagroup=True),
+        messages=[
+            _document_message(
+                54,
+                file_name="catalog.pdf",
+                mime_type="application/pdf",
+                size=99,
+            )
+        ],
+    )
+    client = TelethonTelegramClient(
+        session_path="/secure/userbot.session",
+        api_id=123,
+        api_hash="hash",
+        client_factory=lambda *args, **kwargs: fake,
+    )
+    source = ResolvedTelegramSource(
+        input_ref="@chat",
+        source_kind="telegram_supergroup",
+        telegram_id="-1002",
+        username="chat",
+        title="Chat",
+    )
+
+    too_large = await client.download_message_media(
+        source,
+        message_id=54,
+        destination_dir=tmp_path / "too-large",
+        allowed_media_types=["document"],
+        max_file_size_bytes=10,
+    )
+    downloaded = await client.download_message_media(
+        source,
+        message_id=54,
+        destination_dir=tmp_path / "ok",
+        allowed_media_types=["document"],
+        max_file_size_bytes=100,
+    )
+
+    assert too_large.status == "skipped"
+    assert too_large.skip_reason == "file_too_large"
+    assert downloaded.status == "downloaded"
+    assert downloaded.media_type == "document"
+    assert downloaded.local_path == str(tmp_path / "ok" / "catalog.pdf")
 
 
 @pytest.mark.asyncio
@@ -377,6 +528,15 @@ class FakeSender:
         self.username = None
         self.title = None
 
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "_": "User",
+            "first_name": self.first_name,
+            "last_name": self.last_name,
+            "username": self.username,
+            "title": self.title,
+        }
+
 
 class FakeDocument:
     def __init__(
@@ -397,18 +557,40 @@ class FakeDocument:
         self.mime_type = mime_type
         self.size = size
 
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "_": "Document",
+            "attributes": [attribute.to_dict() for attribute in self.attributes],
+            "mime_type": self.mime_type,
+            "size": self.size,
+        }
+
 
 class FakeDocumentAttributeFilename:
     def __init__(self, file_name: str) -> None:
         self.file_name = file_name
 
+    def to_dict(self) -> dict[str, Any]:
+        return {"_": "DocumentAttributeFilename", "file_name": self.file_name}
+
 
 class FakeDocumentAttributeVideo:
-    pass
+    def to_dict(self) -> dict[str, Any]:
+        return {"_": "DocumentAttributeVideo"}
 
 
 class FakeDocumentAttributeAudio:
-    pass
+    def to_dict(self) -> dict[str, Any]:
+        return {"_": "DocumentAttributeAudio"}
+
+
+class FakeSerializable:
+    def __init__(self, type_name: str, values: dict[str, Any]) -> None:
+        self.type_name = type_name
+        self.values = values
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"_": self.type_name, **self.values}
 
 
 class FakeMessage:
@@ -436,6 +618,26 @@ class FakeMessage:
         self.grouped_id = None
         self.post = False
         self.views = None
+        self.edit_date = None
+        self.binary_payload = None
+        self.chat = None
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "_": "Message",
+            "id": self.id,
+            "date": self.date,
+            "message": self.message,
+            "sender_id": self.sender_id,
+            "media": self.media,
+            "reply_to": self.reply_to,
+            "fwd_from": self.fwd_from,
+            "grouped_id": self.grouped_id,
+            "post": self.post,
+            "views": self.views,
+            "edit_date": self.edit_date,
+            "binary_payload": self.binary_payload,
+        }
 
 
 def _message(

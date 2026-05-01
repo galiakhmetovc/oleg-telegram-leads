@@ -14,6 +14,7 @@ from pur_leads.core.config import load_settings
 from pur_leads.db.engine import create_sqlite_engine
 from pur_leads.db.migrations import upgrade_database
 from pur_leads.db.session import create_session_factory
+from pur_leads.integrations.ai.chat import AiChatCompletion
 from pur_leads.integrations.ai.zai_client import ZaiChatCompletionClient
 from pur_leads.integrations.catalog.external_page import HttpExternalPageFetcher
 from pur_leads.integrations.catalog.heuristic_extractor import HeuristicCatalogExtractor
@@ -33,8 +34,31 @@ from pur_leads.integrations.telegram.types import (
 )
 from pur_leads.services.ai_concurrency import AiModelConcurrencyService
 from pur_leads.services.ai_registry import AiAgentRouteSelection, AiRegistryService
+from pur_leads.services.catalog_raw_archive import CatalogRawArchiveService
+from pur_leads.services.entity_enrichment import (
+    EntityEnrichmentService,
+    LlmEntityEnricher,
+    RuleBasedEntityEnricher,
+)
 from pur_leads.services.secrets import SecretRefService
 from pur_leads.services.settings import SettingsService
+from pur_leads.services.telegram_aggregated_stats import TelegramAggregatedStatsService
+from pur_leads.services.telegram_artifact_texts import TelegramArtifactTextExtractionService
+from pur_leads.services.telegram_chroma_index import TelegramChromaIndexService
+from pur_leads.services.telegram_desktop_import import TelegramDesktopArchiveImportService
+from pur_leads.services.telegram_eda import TelegramEdaService
+from pur_leads.services.telegram_entity_extraction import TelegramEntityExtractionService
+from pur_leads.services.telegram_entity_ranking import TelegramEntityRankingService
+from pur_leads.services.telegram_feature_enrichment import TelegramFeatureEnrichmentService
+from pur_leads.services.telegram_fts_index import TelegramFtsIndexService
+from pur_leads.services.telegram_lead_candidate_discovery import (
+    TelegramLeadCandidateDiscoveryService,
+)
+from pur_leads.services.telegram_lead_candidate_llm_arbitration import (
+    TelegramLeadCandidateLlmArbitrationService,
+)
+from pur_leads.services.telegram_text_normalization import TelegramTextNormalizationService
+from pur_leads.services.telegram_search import TelegramSearchService
 from pur_leads.services.userbots import UserbotAccountService
 from pur_leads.workers.runtime import (
     WorkerRunResult,
@@ -70,6 +94,134 @@ def build_parser() -> argparse.ArgumentParser:
     settings_set.add_argument("key")
     settings_set.add_argument("json_value")
     settings_set.set_defaults(handler=_settings_set)
+
+    archive_parser = subcommands.add_parser("archive")
+    archive_commands = archive_parser.add_subparsers(required=True)
+    archive_catalog_raw = archive_commands.add_parser("catalog-raw")
+    archive_catalog_raw.add_argument("--archive-root", type=Path, default=None)
+    archive_catalog_raw.add_argument("--monitored-source-id", default=None)
+    archive_catalog_raw.set_defaults(handler=_archive_catalog_raw)
+
+    import_parser = subcommands.add_parser("import")
+    import_commands = import_parser.add_subparsers(required=True)
+    import_telegram_desktop = import_commands.add_parser("telegram-desktop-archive")
+    import_telegram_desktop.add_argument("--archive-path", type=Path, required=True)
+    import_telegram_desktop.add_argument("--input-ref", default=None)
+    import_telegram_desktop.add_argument(
+        "--purpose",
+        choices=("lead_monitoring", "catalog_ingestion", "both"),
+        default="lead_monitoring",
+    )
+    import_telegram_desktop.add_argument("--raw-root", type=Path, default=None)
+    import_telegram_desktop.add_argument("--added-by", default="cli")
+    import_telegram_desktop.add_argument("--no-source-messages", action="store_true")
+    import_telegram_desktop.set_defaults(handler=_import_telegram_desktop_archive)
+
+    analyze_parser = subcommands.add_parser("analyze")
+    analyze_commands = analyze_parser.add_subparsers(required=True)
+    analyze_telegram_eda = analyze_commands.add_parser("telegram-eda")
+    analyze_telegram_eda.add_argument("--raw-export-run-id", required=True)
+    analyze_telegram_eda.set_defaults(handler=_analyze_telegram_eda)
+    analyze_telegram_texts = analyze_commands.add_parser("telegram-texts")
+    analyze_telegram_texts.add_argument("--raw-export-run-id", required=True)
+    analyze_telegram_texts.add_argument("--processed-root", type=Path, default=None)
+    analyze_telegram_texts.set_defaults(handler=_analyze_telegram_texts)
+    analyze_telegram_artifacts = analyze_commands.add_parser("telegram-artifacts")
+    analyze_telegram_artifacts.add_argument("--raw-export-run-id", required=True)
+    analyze_telegram_artifacts.add_argument("--processed-root", type=Path, default=None)
+    analyze_telegram_artifacts.add_argument("--no-external-pages", action="store_true")
+    analyze_telegram_artifacts.add_argument("--no-documents", action="store_true")
+    analyze_telegram_artifacts.set_defaults(handler=_analyze_telegram_artifacts)
+    analyze_telegram_features = analyze_commands.add_parser("telegram-features")
+    analyze_telegram_features.add_argument("--raw-export-run-id", required=True)
+    analyze_telegram_features.add_argument("--processed-root", type=Path, default=None)
+    analyze_telegram_features.set_defaults(handler=_analyze_telegram_features)
+    analyze_telegram_stats = analyze_commands.add_parser("telegram-stats")
+    analyze_telegram_stats.add_argument("--raw-export-run-id", required=True)
+    analyze_telegram_stats.add_argument("--enriched-root", type=Path, default=None)
+    analyze_telegram_stats.set_defaults(handler=_analyze_telegram_stats)
+    analyze_telegram_entities = analyze_commands.add_parser("telegram-entities")
+    analyze_telegram_entities.add_argument("--raw-export-run-id", required=True)
+    analyze_telegram_entities.add_argument("--enriched-root", type=Path, default=None)
+    analyze_telegram_entities.set_defaults(handler=_analyze_telegram_entities)
+    analyze_telegram_entity_ranking = analyze_commands.add_parser("telegram-entity-ranking")
+    analyze_telegram_entity_ranking.add_argument("--raw-export-run-id", required=True)
+    analyze_telegram_entity_ranking.add_argument("--enriched-root", type=Path, default=None)
+    analyze_telegram_entity_ranking.set_defaults(handler=_analyze_telegram_entity_ranking)
+    analyze_telegram_entity_enrichment = analyze_commands.add_parser(
+        "telegram-entity-enrichment"
+    )
+    analyze_telegram_entity_enrichment.add_argument("--raw-export-run-id", required=True)
+    analyze_telegram_entity_enrichment.add_argument("--limit", type=int, default=50)
+    analyze_telegram_entity_enrichment.add_argument(
+        "--mode",
+        choices=("auto", "llm", "rule_based"),
+        default="auto",
+    )
+    analyze_telegram_entity_enrichment.add_argument("--provider", default=None)
+    analyze_telegram_entity_enrichment.add_argument("--model", default=None)
+    analyze_telegram_entity_enrichment.add_argument("--model-profile", default=None)
+    analyze_telegram_entity_enrichment.add_argument("--base-url", default=None)
+    analyze_telegram_entity_enrichment.add_argument("--temperature", type=float, default=0.0)
+    analyze_telegram_entity_enrichment.add_argument("--max-tokens", type=int, default=2048)
+    analyze_telegram_entity_enrichment.set_defaults(
+        handler=_analyze_telegram_entity_enrichment
+    )
+    analyze_telegram_chroma = analyze_commands.add_parser("telegram-chroma")
+    analyze_telegram_chroma.add_argument("--raw-export-run-id", required=True)
+    analyze_telegram_chroma.add_argument("--texts-parquet-path", type=Path, default=None)
+    analyze_telegram_chroma.add_argument("--chroma-root", type=Path, default=None)
+    analyze_telegram_chroma.add_argument("--collection-name", default="telegram_texts")
+    analyze_telegram_chroma.add_argument("--embedding-profile", default="rubert_tiny2_v1")
+    analyze_telegram_chroma.add_argument("--embedding-dimensions", type=int, default=384)
+    analyze_telegram_chroma.add_argument("--batch-size", type=int, default=500)
+    analyze_telegram_chroma.set_defaults(handler=_analyze_telegram_chroma)
+    analyze_telegram_fts = analyze_commands.add_parser("telegram-fts")
+    analyze_telegram_fts.add_argument("--raw-export-run-id", required=True)
+    analyze_telegram_fts.add_argument("--texts-parquet-path", type=Path, default=None)
+    analyze_telegram_fts.add_argument("--search-root", type=Path, default=None)
+    analyze_telegram_fts.set_defaults(handler=_analyze_telegram_fts)
+    analyze_telegram_lead_candidates = analyze_commands.add_parser("telegram-lead-candidates")
+    analyze_telegram_lead_candidates.add_argument("--raw-export-run-id", required=True)
+    analyze_telegram_lead_candidates.add_argument("--output-root", type=Path, default=None)
+    analyze_telegram_lead_candidates.add_argument("--limit", type=int, default=200)
+    analyze_telegram_lead_candidates.add_argument("--min-score", type=float, default=0.6)
+    analyze_telegram_lead_candidates.add_argument("--batch-size", type=int, default=5000)
+    analyze_telegram_lead_candidates.set_defaults(handler=_analyze_telegram_lead_candidates)
+    analyze_telegram_lead_candidate_llm = analyze_commands.add_parser(
+        "telegram-lead-candidate-llm"
+    )
+    analyze_telegram_lead_candidate_llm.add_argument("--raw-export-run-id", required=True)
+    analyze_telegram_lead_candidate_llm.add_argument("--candidates-json-path", type=Path, default=None)
+    analyze_telegram_lead_candidate_llm.add_argument("--output-root", type=Path, default=None)
+    analyze_telegram_lead_candidate_llm.add_argument("--limit", type=int, default=100)
+    analyze_telegram_lead_candidate_llm.add_argument("--provider", default=None)
+    analyze_telegram_lead_candidate_llm.add_argument("--model", default=None)
+    analyze_telegram_lead_candidate_llm.add_argument("--model-profile", default=None)
+    analyze_telegram_lead_candidate_llm.add_argument("--base-url", default=None)
+    analyze_telegram_lead_candidate_llm.add_argument("--temperature", type=float, default=None)
+    analyze_telegram_lead_candidate_llm.add_argument("--max-tokens", type=int, default=None)
+    analyze_telegram_lead_candidate_llm.add_argument("--context-window", type=int, default=2)
+    analyze_telegram_lead_candidate_llm.add_argument("--thread-context-limit", type=int, default=8)
+    analyze_telegram_lead_candidate_llm.add_argument("--dry-run", action="store_true")
+    analyze_telegram_lead_candidate_llm.set_defaults(
+        handler=_analyze_telegram_lead_candidate_llm
+    )
+
+    search_parser = subcommands.add_parser("search")
+    search_commands = search_parser.add_subparsers(required=True)
+    search_telegram = search_commands.add_parser("telegram")
+    search_telegram.add_argument("--raw-export-run-id", required=True)
+    search_telegram.add_argument("--query", required=True)
+    search_telegram.add_argument("--limit", type=int, default=10)
+    search_telegram.add_argument("--fts-limit", type=int, default=None)
+    search_telegram.add_argument("--chroma-limit", type=int, default=None)
+    search_telegram.add_argument("--search-root", type=Path, default=None)
+    search_telegram.add_argument("--chroma-root", type=Path, default=None)
+    search_telegram.add_argument("--embedding-profile", default=None)
+    search_telegram.add_argument("--embedding-dimensions", type=int, default=384)
+    search_telegram.add_argument("--no-chroma", action="store_true")
+    search_telegram.set_defaults(handler=_search_telegram)
 
     worker_parser = subcommands.add_parser("worker")
     worker_commands = worker_parser.add_subparsers(required=True)
@@ -113,6 +265,383 @@ def _settings_set(args: argparse.Namespace) -> None:
             reason="cli settings set",
         )
     print(f"{args.key} updated")
+
+
+def _archive_catalog_raw(args: argparse.Namespace) -> None:
+    _ensure_database_upgraded(args)
+    settings = load_settings()
+    archive_root = args.archive_root or settings.archive_storage_path
+    with _session_from_args(args) as session:
+        result = CatalogRawArchiveService(session, archive_root=archive_root).write_stage0_archive(
+            monitored_source_id=args.monitored_source_id,
+        )
+    print(json.dumps(result.as_jsonable(), ensure_ascii=False, sort_keys=True))
+
+
+def _import_telegram_desktop_archive(args: argparse.Namespace) -> None:
+    _ensure_database_upgraded(args)
+    settings = load_settings()
+    raw_root = args.raw_root or settings.raw_export_storage_path
+    with _session_from_args(args) as session:
+        result = TelegramDesktopArchiveImportService(
+            session,
+            raw_root=raw_root,
+        ).import_archive(
+            args.archive_path,
+            input_ref=args.input_ref,
+            purpose=args.purpose,
+            added_by=args.added_by,
+            sync_source_messages=not args.no_source_messages,
+        )
+    print(json.dumps(result.as_jsonable(), ensure_ascii=False, sort_keys=True))
+
+
+def _analyze_telegram_eda(args: argparse.Namespace) -> None:
+    _ensure_database_upgraded(args)
+    with _session_from_args(args) as session:
+        summary = TelegramEdaService(session).write_summary(args.raw_export_run_id)
+    print(
+        json.dumps(
+            {
+                "raw_export_run_id": summary.raw_export_run_id,
+                "report_path": str(summary.report_path),
+                "recommended_decision": summary.recommended_decision,
+                "metrics": summary.metrics,
+                "warning_codes": [warning["code"] for warning in summary.warnings],
+            },
+            ensure_ascii=False,
+            sort_keys=True,
+        )
+    )
+
+
+def _analyze_telegram_texts(args: argparse.Namespace) -> None:
+    _ensure_database_upgraded(args)
+    settings = load_settings()
+    processed_root = args.processed_root or settings.processed_storage_path
+    with _session_from_args(args) as session:
+        result = TelegramTextNormalizationService(
+            session,
+            processed_root=processed_root,
+        ).write_texts(args.raw_export_run_id)
+    print(
+        json.dumps(
+            {
+                "raw_export_run_id": result.raw_export_run_id,
+                "texts_parquet_path": str(result.texts_parquet_path),
+                "summary_path": str(result.summary_path),
+                "metrics": result.metrics,
+            },
+            ensure_ascii=False,
+            sort_keys=True,
+        )
+    )
+
+
+def _analyze_telegram_artifacts(args: argparse.Namespace) -> None:
+    _ensure_database_upgraded(args)
+    settings = load_settings()
+    processed_root = args.processed_root or settings.processed_storage_path
+    with _session_from_args(args) as session:
+        settings_service = SettingsService(session)
+        external_fetch_timeout = float(
+            settings_service.get("external_page_fetch_timeout_seconds") or 600
+        )
+        document_parse_timeout = float(
+            settings_service.get("document_parse_timeout_seconds") or 600
+        )
+        result = TelegramArtifactTextExtractionService(
+            session,
+            processed_root=processed_root,
+            external_page_fetcher=HttpExternalPageFetcher(
+                timeout_seconds=external_fetch_timeout,
+                max_bytes=int(settings_service.get("external_page_max_bytes") or 1_048_576),
+            ),
+            fetch_external_pages=not args.no_external_pages,
+            parse_documents=not args.no_documents,
+            external_fetch_concurrency=int(
+                settings_service.get("external_page_fetch_concurrency") or 4
+            ),
+            document_parse_concurrency=int(settings_service.get("document_parse_concurrency") or 4),
+            external_fetch_timeout_seconds=external_fetch_timeout,
+            document_parse_timeout_seconds=document_parse_timeout,
+        ).write_texts(args.raw_export_run_id)
+    print(
+        json.dumps(
+            {
+                "raw_export_run_id": result.raw_export_run_id,
+                "texts_parquet_path": str(result.texts_parquet_path),
+                "summary_path": str(result.summary_path),
+                "metrics": result.metrics,
+            },
+            ensure_ascii=False,
+            sort_keys=True,
+        )
+    )
+
+
+def _analyze_telegram_features(args: argparse.Namespace) -> None:
+    _ensure_database_upgraded(args)
+    settings = load_settings()
+    processed_root = args.processed_root or settings.processed_storage_path
+    with _session_from_args(args) as session:
+        result = TelegramFeatureEnrichmentService(
+            session,
+            processed_root=processed_root,
+        ).write_features(args.raw_export_run_id)
+    print(
+        json.dumps(
+            {
+                "raw_export_run_id": result.raw_export_run_id,
+                "features_parquet_path": str(result.features_parquet_path),
+                "summary_path": str(result.summary_path),
+                "metrics": result.metrics,
+            },
+            ensure_ascii=False,
+            sort_keys=True,
+        )
+    )
+
+
+def _analyze_telegram_stats(args: argparse.Namespace) -> None:
+    _ensure_database_upgraded(args)
+    settings = load_settings()
+    enriched_root = args.enriched_root or settings.enriched_storage_path
+    with _session_from_args(args) as session:
+        result = TelegramAggregatedStatsService(
+            session,
+            enriched_root=enriched_root,
+        ).write_stats(args.raw_export_run_id)
+    print(
+        json.dumps(
+            {
+                "raw_export_run_id": result.raw_export_run_id,
+                "summary_path": str(result.summary_path),
+                "ngrams_path": str(result.ngrams_path),
+                "entity_candidates_path": str(result.entity_candidates_path),
+                "url_summary_path": str(result.url_summary_path),
+                "source_quality_path": str(result.source_quality_path),
+                "metrics": result.metrics,
+            },
+            ensure_ascii=False,
+            sort_keys=True,
+        )
+    )
+
+
+def _analyze_telegram_entities(args: argparse.Namespace) -> None:
+    _ensure_database_upgraded(args)
+    settings = load_settings()
+    enriched_root = args.enriched_root or settings.enriched_storage_path
+    with _session_from_args(args) as session:
+        result = TelegramEntityExtractionService(
+            session,
+            enriched_root=enriched_root,
+        ).write_entities(args.raw_export_run_id)
+    print(
+        json.dumps(
+            {
+                "raw_export_run_id": result.raw_export_run_id,
+                "entities_parquet_path": str(result.entities_parquet_path),
+                "entity_groups_path": str(result.entity_groups_path),
+                "resolution_candidates_path": str(result.resolution_candidates_path),
+                "summary_path": str(result.summary_path),
+                "metrics": result.metrics,
+            },
+            ensure_ascii=False,
+            sort_keys=True,
+        )
+    )
+
+
+def _analyze_telegram_entity_ranking(args: argparse.Namespace) -> None:
+    _ensure_database_upgraded(args)
+    settings = load_settings()
+    enriched_root = args.enriched_root or settings.enriched_storage_path
+    with _session_from_args(args) as session:
+        result = TelegramEntityRankingService(
+            session,
+            enriched_root=enriched_root,
+        ).write_rankings(args.raw_export_run_id)
+    print(
+        json.dumps(
+            {
+                "raw_export_run_id": result.raw_export_run_id,
+                "ranked_entities_parquet_path": str(result.ranked_entities_parquet_path),
+                "ranked_entities_json_path": str(result.ranked_entities_json_path),
+                "noise_report_path": str(result.noise_report_path),
+                "summary_path": str(result.summary_path),
+                "metrics": result.metrics,
+            },
+            ensure_ascii=False,
+            sort_keys=True,
+        )
+    )
+
+
+def _analyze_telegram_entity_enrichment(args: argparse.Namespace) -> None:
+    _ensure_database_upgraded(args)
+    settings = load_settings()
+    with _session_from_args(args) as session:
+        settings_service = SettingsService(session)
+        provider = args.provider or str(settings_service.get("catalog_llm_provider") or "zai")
+        model = args.model or str(settings_service.get("catalog_llm_model") or "GLM-4-Plus")
+        model_profile = args.model_profile
+        client, client_mode = _build_entity_enricher(
+            session,
+            settings,
+            args,
+            provider=provider,
+            model=model,
+        )
+        result = EntityEnrichmentService(session).write_enrichment(
+            args.raw_export_run_id,
+            client=client,
+            limit=args.limit,
+            provider=provider,
+            model=model,
+            model_profile=model_profile,
+        )
+    print(
+        json.dumps(
+            {
+                "raw_export_run_id": result.raw_export_run_id,
+                "run_id": result.run_id,
+                "ranked_entities_path": str(result.ranked_entities_path),
+                "provider": provider,
+                "model": model,
+                "model_profile": model_profile,
+                "mode": client_mode,
+                "metrics": result.metrics,
+            },
+            ensure_ascii=False,
+            sort_keys=True,
+        )
+    )
+
+
+def _analyze_telegram_chroma(args: argparse.Namespace) -> None:
+    _ensure_database_upgraded(args)
+    settings = load_settings()
+    chroma_root = args.chroma_root or settings.chroma_storage_path
+    with _session_from_args(args) as session:
+        result = TelegramChromaIndexService(
+            session,
+            chroma_root=chroma_root,
+        ).write_index(
+            args.raw_export_run_id,
+            texts_parquet_path=args.texts_parquet_path,
+            collection_name=args.collection_name,
+            embedding_profile=args.embedding_profile,
+            embedding_dimensions=args.embedding_dimensions,
+            batch_size=args.batch_size,
+        )
+    print(
+        json.dumps(
+            {
+                "raw_export_run_id": result.raw_export_run_id,
+                "chroma_path": str(result.chroma_path),
+                "collection_name": result.collection_name,
+                "summary_path": str(result.summary_path),
+                "metrics": result.metrics,
+            },
+            ensure_ascii=False,
+            sort_keys=True,
+        )
+    )
+
+
+def _analyze_telegram_fts(args: argparse.Namespace) -> None:
+    _ensure_database_upgraded(args)
+    settings = load_settings()
+    search_root = args.search_root or settings.search_storage_path
+    with _session_from_args(args) as session:
+        result = TelegramFtsIndexService(
+            session,
+            search_root=search_root,
+        ).write_index(
+            args.raw_export_run_id,
+            texts_parquet_path=args.texts_parquet_path,
+        )
+    print(
+        json.dumps(
+            {
+                "raw_export_run_id": result.raw_export_run_id,
+                "search_db_path": str(result.search_db_path),
+                "summary_path": str(result.summary_path),
+                "metrics": result.metrics,
+            },
+            ensure_ascii=False,
+            sort_keys=True,
+        )
+    )
+
+
+def _analyze_telegram_lead_candidates(args: argparse.Namespace) -> None:
+    _ensure_database_upgraded(args)
+    settings = load_settings()
+    output_root = args.output_root or settings.enriched_storage_path
+    with _session_from_args(args) as session:
+        result = TelegramLeadCandidateDiscoveryService(
+            session,
+            output_root=output_root,
+        ).write_candidates(
+            args.raw_export_run_id,
+            limit=args.limit,
+            min_score=args.min_score,
+            batch_size=args.batch_size,
+        )
+    print(json.dumps(result.as_jsonable(), ensure_ascii=False, sort_keys=True))
+
+
+def _analyze_telegram_lead_candidate_llm(args: argparse.Namespace) -> None:
+    _ensure_database_upgraded(args)
+    settings = load_settings()
+    output_root = args.output_root or settings.enriched_storage_path
+    with _session_from_args(args) as session:
+        client, provider, model, model_profile, temperature, max_tokens = (
+            _build_lead_candidate_arbitration_client(session, settings, args)
+        )
+        result = TelegramLeadCandidateLlmArbitrationService(
+            session,
+            output_root=output_root,
+        ).write_arbitration(
+            args.raw_export_run_id,
+            client=client,
+            provider=provider,
+            model=model,
+            model_profile=model_profile,
+            candidates_json_path=args.candidates_json_path,
+            limit=args.limit,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            context_window=args.context_window,
+            thread_context_limit=args.thread_context_limit,
+        )
+    print(json.dumps(result.as_jsonable(), ensure_ascii=False, sort_keys=True))
+
+
+def _search_telegram(args: argparse.Namespace) -> None:
+    _ensure_database_upgraded(args)
+    settings = load_settings()
+    search_root = args.search_root or settings.search_storage_path
+    chroma_root = args.chroma_root or settings.chroma_storage_path
+    with _session_from_args(args) as session:
+        payload = TelegramSearchService(
+            session,
+            search_root=search_root,
+            chroma_root=chroma_root,
+        ).query(
+            args.raw_export_run_id,
+            query_text=args.query,
+            limit=args.limit,
+            fts_limit=args.fts_limit,
+            chroma_limit=args.chroma_limit,
+            include_chroma=not args.no_chroma,
+            embedding_profile=args.embedding_profile,
+            embedding_dimensions=args.embedding_dimensions,
+        )
+    print(json.dumps(payload, ensure_ascii=False, sort_keys=True))
 
 
 def _worker_once(args: argparse.Namespace) -> None:
@@ -266,6 +795,7 @@ def _build_worker_handlers(
             session,
             telegram_client if telegram_client is not None else _build_telegram_client(session),
             artifact_storage_path=settings.artifact_storage_path,
+            raw_export_storage_path=settings.raw_export_storage_path,
         )
     )
     return handlers
@@ -562,6 +1092,150 @@ def _build_lead_shadow_classifier(session, settings, *, worker_name: str):
     )
 
 
+def _build_entity_enricher(
+    session,
+    settings,
+    args: argparse.Namespace,
+    *,
+    provider: str,
+    model: str,
+):
+    if args.mode == "rule_based":
+        return RuleBasedEntityEnricher(), "rule_based"
+    settings_service = SettingsService(session)
+    api_key = _zai_api_key(session, settings)
+    if provider != "zai" or not api_key:
+        if args.mode == "llm":
+            raise ValueError("entity enrichment LLM mode requires configured Z.AI API key")
+        return RuleBasedEntityEnricher(), "rule_based"
+    base_url = args.base_url or str(
+        settings_service.get("catalog_llm_base_url") or settings.catalog_llm_base_url
+    )
+    return (
+        LlmEntityEnricher(
+            client=ZaiChatCompletionClient(
+                api_key=api_key,
+                base_url=base_url,
+                timeout_seconds=_llm_request_timeout_seconds(
+                    settings_service,
+                    task_type="entity_enrichment",
+                    model=model,
+                    default=settings.catalog_llm_timeout_seconds,
+                ),
+                connect_timeout_seconds=_llm_connect_timeout_seconds(settings_service),
+                concurrency_limiter=_build_ai_model_concurrency_limiter(
+                    session,
+                    worker_name="cli-entity-enrichment",
+                ),
+                provider_account_id=None,
+                thinking_type=None,
+                response_format={"type": "json_object"},
+                worker_name="cli-entity-enrichment",
+            ),
+            model=model,
+            temperature=float(args.temperature),
+            max_tokens=int(args.max_tokens),
+        ),
+        "llm",
+    )
+
+
+def _build_lead_candidate_arbitration_client(session, settings, args: argparse.Namespace):
+    settings_service = SettingsService(session)
+    route = _select_ai_route(session, agent_key="lead_candidate_arbitrator", route_role="primary")
+    if route is None:
+        route = _select_ai_route(session, agent_key="lead_detector", route_role="shadow")
+    provider = str(
+        args.provider
+        or _setting_or_route_provider(
+            settings_service,
+            "lead_candidate_arbitration_provider",
+            route,
+        )
+    )
+    model = str(
+        args.model
+        or _setting_or_env_or_default(
+            settings_service,
+            "lead_candidate_arbitration_model",
+            env_names=("PUR_LEAD_CANDIDATE_ARBITRATION_MODEL",),
+            env_value=os.getenv("PUR_LEAD_CANDIDATE_ARBITRATION_MODEL"),
+            default=route.model if route is not None else "GLM-5.1",
+        )
+    )
+    model_profile = args.model_profile or (route.model_profile if route is not None else None)
+    temperature = float(
+        args.temperature
+        if args.temperature is not None
+        else _setting_or_default(
+            settings_service,
+            "lead_candidate_arbitration_temperature",
+            route.temperature if route is not None and route.temperature is not None else 0.0,
+        )
+    )
+    max_tokens = int(
+        args.max_tokens
+        if args.max_tokens is not None
+        else _setting_or_default(
+            settings_service,
+            "lead_candidate_arbitration_max_tokens",
+            route.max_output_tokens if route is not None and route.max_output_tokens else 2048,
+        )
+    )
+    if args.dry_run:
+        return (
+            _DryRunLeadCandidateArbitrationClient(),
+            "dry_run",
+            model,
+            model_profile,
+            temperature,
+            max_tokens,
+        )
+    if provider != "zai":
+        raise ValueError("lead candidate LLM arbitration currently supports provider=zai")
+    api_key = _zai_api_key_for_route(session, settings, route)
+    if not api_key:
+        raise ValueError("lead candidate LLM arbitration requires configured Z.AI API key")
+    base_url = str(
+        args.base_url
+        or _setting_or_env_or_default(
+            settings_service,
+            "lead_candidate_arbitration_base_url",
+            env_names=("PUR_LEAD_CANDIDATE_ARBITRATION_BASE_URL",),
+            env_value=os.getenv("PUR_LEAD_CANDIDATE_ARBITRATION_BASE_URL"),
+            default=(
+                route.base_url if route is not None else settings.lead_llm_shadow_base_url
+            ),
+        )
+    )
+    return (
+        ZaiChatCompletionClient(
+            api_key=api_key,
+            base_url=base_url,
+            timeout_seconds=_llm_request_timeout_seconds(
+                settings_service,
+                task_type="lead_candidate_arbitration",
+                model=model,
+                default=settings.lead_llm_shadow_timeout_seconds,
+            ),
+            connect_timeout_seconds=_llm_connect_timeout_seconds(settings_service),
+            concurrency_limiter=_build_ai_model_concurrency_limiter(
+                session,
+                worker_name="cli-lead-candidate-arbitration",
+            ),
+            provider_account_id=route.provider_account_id if route is not None else None,
+            thinking_type=_zai_thinking_type_for_route(route),
+            response_format={"type": "json_object"},
+            worker_name="cli-lead-candidate-arbitration",
+        ),
+        provider,
+        model,
+        model_profile,
+        temperature,
+        max_tokens,
+    )
+
+
 def _build_ai_model_concurrency_limiter(session, *, worker_name: str):
     settings_service = SettingsService(session)
     if not bool(settings_service.get("ai_model_concurrency_enabled")):
@@ -846,6 +1520,28 @@ class _UnconfiguredTelegramClient:
         destination_dir: str | Path,
     ) -> TelegramDocumentDownload:
         raise ValueError("telegram client is not configured")
+
+
+class _DryRunLeadCandidateArbitrationClient:
+    async def complete(self, *, messages, model, temperature, max_tokens):  # noqa: ANN001
+        return AiChatCompletion(
+            content=json.dumps(
+                {
+                    "decision": "maybe",
+                    "confidence": 0.0,
+                    "need_operator": True,
+                    "why": "Dry run: prompt was generated but no LLM request was sent.",
+                    "matched_need": "",
+                    "relevant_catalog_items": [],
+                    "false_positive_reason": None,
+                },
+                ensure_ascii=False,
+            ),
+            model=model,
+            request_id="dry-run",
+            usage={},
+            raw_response={},
+        )
 
 
 def _infer_value_type(value) -> str:  # type: ignore[no-untyped-def]

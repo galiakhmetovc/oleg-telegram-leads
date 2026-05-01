@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 from dataclasses import dataclass
 from typing import Any
 from urllib.parse import urlparse
@@ -72,15 +73,27 @@ class TelegramSourceService:
         *,
         added_by: str,
         purpose: str = "lead_monitoring",
+        start_mode: str | None = None,
         start_recent_days: int | None = None,
     ) -> MonitoredSourceRecord:
         if start_recent_days is not None and start_recent_days <= 0:
             raise ValueError("start_recent_days must be positive")
+        if start_mode is not None and start_mode not in {
+            "from_now",
+            "recent_days",
+            "from_beginning",
+        }:
+            raise ValueError("start_mode must be from_now, recent_days, or from_beginning")
+        if start_mode == "recent_days" and start_recent_days is None:
+            raise ValueError("start_recent_days is required for recent_days")
+        if start_mode == "from_beginning" and start_recent_days is not None:
+            raise ValueError("start_recent_days cannot be used with from_beginning")
         parsed = parse_source_input(input_ref, purpose)
         now = utc_now()
         lead_enabled, catalog_enabled = _purpose_flags(purpose)
         default_userbot = UserbotAccountService(self.session).select_default_userbot()
-        start_mode = _start_mode(
+        resolved_start_mode = _start_mode(
+            explicit_start_mode=start_mode,
             start_recent_days=start_recent_days,
             start_message_id=parsed.start_message_id,
         )
@@ -98,7 +111,7 @@ class TelegramSourceService:
             lead_detection_enabled=lead_enabled,
             catalog_ingestion_enabled=catalog_enabled,
             phase_enabled=True,
-            start_mode=start_mode,
+            start_mode=resolved_start_mode,
             start_message_id=parsed.start_message_id,
             start_recent_limit=None,
             start_recent_days=start_recent_days,
@@ -177,6 +190,90 @@ class TelegramSourceService:
             idempotency_key=f"source:{source.id}:preview",
             payload_json={"limit": limit, "requested_by": actor},
         )
+
+    def request_raw_ingest(
+        self,
+        source_id: str,
+        *,
+        actor: str,
+        limit: int = 100,
+    ) -> tuple[MonitoredSourceRecord, SchedulerJobRecord]:
+        if limit <= 0:
+            raise ValueError("limit must be positive")
+        source = self._require(source_id)
+        job = self.scheduler.enqueue(
+            job_type="ingest_telegram_raw",
+            scope_type="telegram_source",
+            scope_id=source.id,
+            userbot_account_id=source.assigned_userbot_account_id,
+            monitored_source_id=source.id,
+            idempotency_key=f"source:{source.id}:raw-ingest",
+            checkpoint_before_json={"message_id": source.checkpoint_message_id},
+            payload_json={
+                "limit": min(limit, 1000),
+                "mode": "raw_only",
+                "requested_by": actor,
+                "enqueue_classification": False,
+            },
+        )
+        self.audit.record_change(
+            actor=actor,
+            action="monitored_source.raw_ingest_request",
+            entity_type="monitored_source",
+            entity_id=source.id,
+            old_value_json={"checkpoint_message_id": source.checkpoint_message_id},
+            new_value_json={"job_id": job.id, "limit": min(limit, 1000)},
+        )
+        self.session.commit()
+        refreshed = self.repository.get(source.id)
+        if refreshed is None:
+            raise KeyError(source.id)
+        return refreshed, job
+
+    def request_raw_export(
+        self,
+        source_id: str,
+        *,
+        actor: str,
+        range_config: dict[str, Any],
+        media_config: dict[str, Any],
+        canonicalize: bool = True,
+    ) -> tuple[MonitoredSourceRecord, SchedulerJobRecord]:
+        source = self._require(source_id)
+        payload = {
+            "requested_by": actor,
+            "range": _normalize_export_range(range_config),
+            "media": _normalize_media_config(media_config),
+            "canonicalize": bool(canonicalize),
+            "enqueue_classification": False,
+        }
+        payload_hash = hashlib.sha256(
+            json.dumps(payload, sort_keys=True, ensure_ascii=False).encode("utf-8")
+        ).hexdigest()[:16]
+        job = self.scheduler.enqueue(
+            job_type="export_telegram_raw",
+            scope_type="telegram_source",
+            priority="high",
+            scope_id=source.id,
+            userbot_account_id=source.assigned_userbot_account_id,
+            monitored_source_id=source.id,
+            idempotency_key=f"source:{source.id}:raw-export:{payload_hash}",
+            checkpoint_before_json={"message_id": source.checkpoint_message_id},
+            payload_json=payload,
+        )
+        self.audit.record_change(
+            actor=actor,
+            action="monitored_source.raw_export_request",
+            entity_type="monitored_source",
+            entity_id=source.id,
+            old_value_json={"checkpoint_message_id": source.checkpoint_message_id},
+            new_value_json={"job_id": job.id, **payload},
+        )
+        self.session.commit()
+        refreshed = self.repository.get(source.id)
+        if refreshed is None:
+            raise KeyError(source.id)
+        return refreshed, job
 
     def activate_from_web(
         self,
@@ -327,11 +424,18 @@ def parse_source_input(input_ref: str, purpose: str) -> ParsedSourceInput:
     return ParsedSourceInput(input_ref=normalized, username=None, source_kind="telegram_supergroup")
 
 
-def _start_mode(*, start_recent_days: int | None, start_message_id: int | None) -> str:
+def _start_mode(
+    *,
+    explicit_start_mode: str | None,
+    start_recent_days: int | None,
+    start_message_id: int | None,
+) -> str:
     if start_recent_days is not None:
         return "recent_days"
     if start_message_id is not None:
         return "from_message"
+    if explicit_start_mode == "from_beginning":
+        return "from_beginning"
     return "from_now"
 
 
@@ -349,3 +453,62 @@ def _purpose_flags(purpose: str) -> tuple[bool, bool]:
     if purpose == "both":
         return True, True
     raise ValueError(f"Unsupported source purpose: {purpose}")
+
+
+def _normalize_export_range(value: dict[str, Any]) -> dict[str, Any]:
+    mode = str(value.get("mode") or "source_start")
+    allowed_modes = {
+        "source_start",
+        "from_beginning",
+        "recent_days",
+        "since_date",
+        "from_message",
+        "after_message",
+        "since_checkpoint",
+        "from_now",
+    }
+    if mode not in allowed_modes:
+        raise ValueError(f"Unsupported raw export range mode: {mode}")
+    batch_size = int(value.get("batch_size") or 1000)
+    if batch_size <= 0:
+        raise ValueError("batch_size must be positive")
+    max_messages = value.get("max_messages")
+    if max_messages is not None and int(max_messages) <= 0:
+        raise ValueError("max_messages must be positive")
+    recent_days = value.get("recent_days")
+    if mode == "recent_days" and (recent_days is None or int(recent_days) <= 0):
+        raise ValueError("recent_days must be positive for recent_days range")
+    message_id = value.get("message_id")
+    if mode in {"from_message", "after_message"} and (message_id is None or int(message_id) <= 0):
+        raise ValueError("message_id must be positive for message-based range")
+    since_date = value.get("since_date")
+    if mode == "since_date" and not since_date:
+        raise ValueError("since_date is required for since_date range")
+    return {
+        "mode": mode,
+        "recent_days": int(recent_days) if recent_days is not None else None,
+        "message_id": int(message_id) if message_id is not None else None,
+        "since_date": str(since_date) if since_date is not None else None,
+        "batch_size": min(batch_size, 5000),
+        "max_messages": int(max_messages) if max_messages is not None else None,
+    }
+
+
+def _normalize_media_config(value: dict[str, Any]) -> dict[str, Any]:
+    enabled = bool(value.get("enabled", False))
+    raw_types = value.get("types") or ["document"]
+    if not isinstance(raw_types, list):
+        raise ValueError("media types must be a list")
+    allowed_types = {"document", "photo", "video", "audio", "other"}
+    media_types = [str(item) for item in raw_types]
+    unknown_types = sorted(set(media_types) - allowed_types)
+    if unknown_types:
+        raise ValueError(f"Unsupported media types: {', '.join(unknown_types)}")
+    max_size = value.get("max_file_size_bytes")
+    if max_size is not None and int(max_size) <= 0:
+        raise ValueError("max_file_size_bytes must be positive")
+    return {
+        "enabled": enabled,
+        "types": media_types,
+        "max_file_size_bytes": int(max_size) if max_size is not None else None,
+    }

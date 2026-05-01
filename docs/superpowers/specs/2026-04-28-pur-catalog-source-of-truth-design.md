@@ -2,11 +2,17 @@
 
 Date: 2026-04-28
 
+Current implementation status is maintained in `docs/README.md`. This document
+is the full target product/design spec and intentionally contains planned
+capabilities that may not be implemented yet.
+
 ## Goal
 
-Build a durable source-of-truth layer for PUR lead detection.
+Build a durable source-of-truth layer for PUR request interpretation and lead detection.
 
-The system must continuously read the PUR Telegram channel, parse messages and documents, extract products/services/terms/offers into SQLite, use those catalog facts immediately for lead detection, and let Oleg correct the system through a web interface. Telegram remains an information channel, not the main working UI.
+The system must continuously read the PUR Telegram channel, parse messages and documents, extract catalog entities, terms, request signals, exclusions, conditions, actions, prices, availability facts, and support topics into SQLite, use those catalog facts immediately for request interpretation and lead detection, and let Oleg correct the system through a web interface. Telegram remains an information channel, not the main working UI.
+
+The catalog is not only a sales catalog. It is the operational knowledge base that explains what the system should recognize, why it matters, when it is relevant, and when it should be ignored.
 
 ## Core Decisions
 
@@ -54,6 +60,11 @@ The system must continuously read the PUR Telegram channel, parse messages and d
 - Embeddings/semantic matching are designed into the schema but disabled initially.
 - Retention is based on time and hot database size. Large/old data is archived and rotated, not simply deleted.
 - Local archive storage is the first phase. S3-compatible storage is represented in the schema and planned for a later phase.
+- Telegram ingest is a general chat analytics layer before it is a catalog or lead layer. The canonical design is documented in `docs/superpowers/specs/2026-04-30-continuous-telegram-ingest-chat-analytics-design.md`.
+- `poll_monitored_source` is the only runtime path that reads Telegram history. One-shot raw Telegram ingest jobs must not become a second read path.
+- Raw chat data is stored hot in SQLite for operations and materialized to `parquet_zstd` for archive, analytics, "ask your chat", retro research, and index rebuilds.
+- POS-tagged normalization, entity extraction, thread reconstruction, FTS/search, QA detection, and knowledge synthesis are staged consumers of raw messages. Catalog extraction and lead detection consume those layers rather than bypassing them.
+- Catalog evidence is source-agnostic: channels, chats, private correspondence, employee/internal messages, manual uploads, pasted text, external pages, and documents can all feed raw evidence. The source-agnostic catalog ingest plan is documented in `docs/superpowers/plans/2026-04-30-source-agnostic-catalog-ingest-plan.md`.
 
 ## Resource Orchestration And Capacity Planning
 
@@ -453,10 +464,24 @@ Initial z.ai model concurrency seed, from the operator-provided limit table:
 
 ## Data Flow
 
+Chat analytics source layer:
+
+```text
+Telegram live/backfill
+  -> poll_monitored_source
+  -> source_messages
+  -> SQLite FTS5 / thread context / source metrics
+  -> parquet_zstd raw archive
+  -> normalization + POS + features + entities + topics + QA
+  -> ask-your-chat / retro research / catalog extraction / lead detection
+```
+
 ```text
 @purmaster
   -> telegram source sync
-  -> raw sources
+  -> source_messages
+  -> chat analytics source layer
+  -> raw catalog sources
   -> artifact downloader
   -> document/page parser
   -> parsed chunks
@@ -866,6 +891,39 @@ Purpose:
 - Keep operational visibility inside the product, not only in text log files.
 - Support debugging without exposing secrets or excessive personal data.
 - Link related events across scheduler jobs, provider calls, source sync, and notifications.
+
+### Artifact Visibility UI
+
+The product must expose generated pipeline artifacts in the authenticated web UI.
+
+Required behavior:
+
+- Admin page `/artifacts` lists raw export files, stage output files, indexes, traces, and discovered files inside registered artifact directories.
+- API surface:
+  - `GET /api/artifacts`;
+  - `GET /api/artifacts/{artifact_id}`.
+- The inventory is built from:
+  - explicit `telegram_raw_export_runs` path columns;
+  - recursive `metadata_json` path keys ending in `_path`, `_paths`, or `.path`;
+  - bounded filesystem discovery under existing directory artifacts.
+- Each artifact row shows source, stage, kind, existence, size, modified time, and discovery source.
+- Discovery source values are:
+  - `telegram_raw_export_runs`;
+  - `metadata_json`;
+  - `filesystem_discovery`.
+- The detail view previews supported files without requiring SSH:
+  - JSON and JSONL, including parsed JSONL records;
+  - Parquet schema, row groups, and sample rows;
+  - SQLite table names, row counts, and sample rows;
+  - text files and directory listings.
+- Large files are not fully loaded for preview. The service uses bounded reads and small table samples.
+- Binary files without safe preview support are listed with metadata and marked as preview unavailable.
+
+This page is part of observability and auditability. It is not a separate runtime path and does not replace stage metadata, structured events, or job runs.
+
+Current operations runbook:
+
+- `docs/operations/artifacts-and-production.md`.
 
 ### `ai_usage_events`
 

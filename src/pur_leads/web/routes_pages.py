@@ -85,6 +85,7 @@ def inbox_page(
                   <a href="/task-executors">Исполнители задач</a>
                   <a href="/task-types">Задачи</a>
                   <a href="/quality">Качество</a>
+                  <a href="/artifacts">Артефакты</a>
                   <a href="/operations">Операции</a>
                   <button id="logout-button" type="button">Выйти</button>
                 </nav>
@@ -180,6 +181,7 @@ def resources_page(
                   <a href="/task-executors">Исполнители задач</a>
                   <a href="/task-types">Задачи</a>
                   <a href="/quality">Качество</a>
+                  <a href="/artifacts">Артефакты</a>
                   <a href="/operations">Операции</a>
                   <md-outlined-button id="logout-button" type="button">Выйти</md-outlined-button>
                 </nav>
@@ -362,6 +364,89 @@ def resources_page(
     )
 
 
+@router.get("/artifacts", response_class=HTMLResponse)
+def artifacts_page(
+    request: Request,
+    auth_service: WebAuthService = Depends(get_auth_service),
+) -> Response:
+    if not _has_page_session(request, auth_service):
+        return RedirectResponse("/login", status_code=303)
+    return HTMLResponse(
+        _page(
+            page="artifacts",
+            title="Артефакты",
+            main="""
+            <main class="workspace resources-workspace">
+              <header class="topbar">
+                <div>
+                  <span class="eyebrow">PUR Leads</span>
+                  <h1>Артефакты</h1>
+                </div>
+                <nav>
+                  <a href="/">Лиды</a>
+                  <a href="/today">Сегодня</a>
+                  <a href="/sources">Источники</a>
+                  <a href="/resources">Ресурсы</a>
+                  <a href="/catalog">Каталог</a>
+                  <a href="/crm">CRM</a>
+                  <a href="/users">Пользователи</a>
+                  <a href="/settings">Настройки</a>
+                  <a href="/ai-registry">AI-реестр</a>
+                  <a href="/task-executors">Исполнители задач</a>
+                  <a href="/task-types">Задачи</a>
+                  <a href="/quality">Качество</a>
+                  <a href="/artifacts">Артефакты</a>
+                  <a href="/operations">Операции</a>
+                  <md-outlined-button id="logout-button" type="button">Выйти</md-outlined-button>
+                </nav>
+              </header>
+              <section class="admin-section-layout artifacts-shell">
+                <section class="onboarding-resource-surface">
+                  <div class="section-head">
+                    <div>
+                      <h2>Артефакты пайплайна</h2>
+                      <p class="muted">
+                        Файлы из raw export и metadata этапов: JSON, JSONL, Parquet, SQLite,
+                        Chroma и LLM trace.
+                      </p>
+                    </div>
+                    <md-filled-button id="artifacts-refresh" type="button">
+                      <md-icon slot="icon">refresh</md-icon>
+                      Обновить
+                    </md-filled-button>
+                  </div>
+                  <section id="artifact-summary" class="operations-summary" aria-live="polite">
+                    <div class="empty-state">Загружаются артефакты</div>
+                  </section>
+                  <form id="artifact-filters" class="inline-form artifact-filters">
+                    <input name="q" placeholder="Поиск по пути, этапу или источнику">
+                    <select name="stage" aria-label="Этап">
+                      <option value="">Все этапы</option>
+                    </select>
+                    <select name="kind" aria-label="Тип файла">
+                      <option value="">Все типы</option>
+                    </select>
+                    <select name="exists" aria-label="Наличие">
+                      <option value="">Все</option>
+                      <option value="true">Существует</option>
+                      <option value="false">Нет файла</option>
+                    </select>
+                  </form>
+                  <div class="artifacts-layout">
+                    <div id="artifact-list" class="resource-list" aria-live="polite"></div>
+                    <section id="artifact-detail" class="detail-pane" aria-live="polite">
+                      <div class="empty-state">Выберите артефакт</div>
+                    </section>
+                  </div>
+                  <p id="artifact-status" class="status-line" role="status"></p>
+                </section>
+              </section>
+            </main>
+            """,
+        )
+    )
+
+
 @router.get("/users", response_class=HTMLResponse)
 def users_page(
     request: Request,
@@ -393,6 +478,7 @@ def users_page(
                   <a href="/task-executors">Исполнители задач</a>
                   <a href="/task-types">Задачи</a>
                   <a href="/quality">Качество</a>
+                  <a href="/artifacts">Артефакты</a>
                   <a href="/operations">Операции</a>
                   <button id="logout-button" type="button">Выйти</button>
                 </nav>
@@ -451,6 +537,7 @@ def settings_page(
                   <a href="/task-executors">Исполнители задач</a>
                   <a href="/task-types">Задачи</a>
                   <a href="/quality">Качество</a>
+                  <a href="/artifacts">Артефакты</a>
                   <a href="/operations">Операции</a>
                   <button id="logout-button" type="button">Выйти</button>
                 </nav>
@@ -515,6 +602,7 @@ def ai_registry_page(
                   <a href="/task-executors">Исполнители задач</a>
                   <a href="/task-types">Задачи</a>
                   <a href="/quality">Качество</a>
+                  <a href="/artifacts">Артефакты</a>
                   <a href="/operations">Операции</a>
                   <button id="logout-button" type="button">Выйти</button>
                 </nav>
@@ -596,6 +684,7 @@ def task_executors_page(
                   <a href="/task-executors">Исполнители задач</a>
                   <a href="/task-types">Задачи</a>
                   <a href="/quality">Качество</a>
+                  <a href="/artifacts">Артефакты</a>
                   <a href="/operations">Операции</a>
                   <button id="logout-button" type="button">Выйти</button>
                 </nav>
@@ -669,6 +758,7 @@ def task_types_page(
                   <a href="/task-executors">Исполнители задач</a>
                   <a href="/task-types">Задачи</a>
                   <a href="/quality">Качество</a>
+                  <a href="/artifacts">Артефакты</a>
                   <a href="/operations">Операции</a>
                   <button id="logout-button" type="button">Выйти</button>
                 </nav>
@@ -722,6 +812,7 @@ def crm_page(
                   <a href="/task-executors">Исполнители задач</a>
                   <a href="/task-types">Задачи</a>
                   <a href="/quality">Качество</a>
+                  <a href="/artifacts">Артефакты</a>
                   <a href="/operations">Операции</a>
                   <button id="logout-button" type="button">Выйти</button>
                 </nav>
@@ -813,6 +904,7 @@ def sources_page(
                   <a href="/task-executors">Исполнители задач</a>
                   <a href="/task-types">Задачи</a>
                   <a href="/quality">Качество</a>
+                  <a href="/artifacts">Артефакты</a>
                   <a href="/operations">Операции</a>
                   <button id="logout-button" type="button">Выйти</button>
                 </nav>
@@ -843,8 +935,16 @@ def sources_page(
                       </select>
                     </label>
                     <label>
+                      Исторический старт
+                      <select name="start_mode">
+                        <option value="from_now">С текущего момента</option>
+                        <option value="recent_days">За последние N дней</option>
+                        <option value="from_beginning">С самого начала</option>
+                      </select>
+                    </label>
+                    <label>
                       Дней назад
-                      <input name="start_recent_days" type="number" min="1" placeholder="пусто = с текущего момента">
+                      <input name="start_recent_days" type="number" min="1" placeholder="только для режима За последние N дней">
                     </label>
                     <label class="checkbox-line">
                       <input name="check_access" type="checkbox" checked>
@@ -892,62 +992,219 @@ def catalog_page(
                   <a href="/task-executors">Исполнители задач</a>
                   <a href="/task-types">Задачи</a>
                   <a href="/quality">Качество</a>
+                  <a href="/artifacts">Артефакты</a>
                   <a href="/operations">Операции</a>
                   <button id="logout-button" type="button">Выйти</button>
                 </nav>
               </header>
-              <section class="catalog-layout">
-                <aside class="queue-pane" aria-label="Кандидаты каталога">
+              <section class="catalog-layout catalog-editor-layout">
+                <aside class="queue-pane" aria-label="Ручной каталог">
                   <div class="section-head">
-                    <h2>Кандидаты</h2>
-                    <button id="catalog-refresh" type="button">Обновить</button>
+                    <div>
+                      <h2>Ручной каталог</h2>
+                      <p class="muted">Канонические сущности, термины, признаки и условия.</p>
+                    </div>
+                    <div class="catalog-toolbar">
+                      <button id="catalog-item-dialog-open" type="button">
+                        <md-icon>add</md-icon>
+                        Добавить
+                      </button>
+                      <button id="catalog-snapshot-rebuild" class="secondary-button" type="button">
+                        <md-icon>refresh</md-icon>
+                        Снапшот
+                      </button>
+                    </div>
                   </div>
-                  <form id="catalog-filters" class="filter-grid">
-                    <select name="status" aria-label="Статус">
-                      <option value="auto_pending">Автодобавлено</option>
-                      <option value="needs_review">На проверке</option>
-                      <option value="approved">Подтверждено</option>
-                      <option value="rejected">Отклонено</option>
-                      <option value="">Все статусы</option>
-                    </select>
-                    <select name="candidate_type" aria-label="Тип">
-                      <option value="">Все типы</option>
-                      <option value="item">Товары/услуги</option>
-                      <option value="offer">Предложения</option>
-                      <option value="lead_phrase">Лид-фразы</option>
-                      <option value="negative_phrase">Негативные фразы</option>
-                    </select>
-                  </form>
-                  <form id="manual-input-form" class="manual-input-form">
-                    <h2>Ручной ввод</h2>
-                    <select name="input_type" aria-label="Тип ручного ввода">
-                      <option value="catalog_note">Заметка каталога</option>
-                      <option value="lead_example">Пример лида</option>
-                      <option value="non_lead_example">Пример не-лида</option>
-                      <option value="maybe_example">Пример maybe</option>
-                      <option value="telegram_link">Ссылка Telegram</option>
-                      <option value="manual_text">Ручной текст</option>
-                    </select>
-                    <textarea name="text" rows="4" placeholder="Текст"></textarea>
-                    <input name="url" type="url" placeholder="https://t.me/...">
-                    <input name="evidence_note" placeholder="Комментарий к источнику">
-                    <label class="checkbox-line">
-                      <input name="auto_extract" type="checkbox" checked>
-                      Автоизвлечение
-                    </label>
-                    <button type="submit">Отправить</button>
-                    <p id="manual-input-status" class="status-line" role="status"></p>
-                  </form>
-                  <div id="catalog-candidate-list" class="queue-list" aria-live="polite"></div>
+                  <label class="catalog-search">
+                    Поиск
+                    <input id="catalog-item-search" type="search" placeholder="Название, модель, категория">
+                    <small class="field-help">Фильтрует только видимый список сущностей. На источник истины и правила распознавания не влияет.</small>
+                  </label>
+                  <p id="catalog-item-status" class="status-line" role="status"></p>
+                  <div id="catalog-item-list" class="queue-list" aria-live="polite"></div>
+                  <details class="catalog-raw-source">
+                    <summary>Сырой источник</summary>
+                    <form id="manual-input-form" class="manual-input-form">
+                      <p class="muted">Сохраняет необработанный пример. AI-разбор запускается только если включить автоизвлечение.</p>
+                      <label>Тип источника
+                        <select name="input_type" aria-label="Тип ручного ввода">
+                          <option value="catalog_note">Заметка каталога</option>
+                          <option value="lead_example">Пример лида</option>
+                          <option value="non_lead_example">Пример не-лида</option>
+                          <option value="maybe_example">Пример maybe</option>
+                          <option value="telegram_link">Ссылка Telegram</option>
+                          <option value="manual_text">Ручной текст</option>
+                        </select>
+                        <small class="field-help">Выбирает, как система будет трактовать материал: как факт каталога, пример решения по лиду или ссылку на сообщение.</small>
+                      </label>
+                      <label>Текст
+                        <textarea name="text" rows="4" placeholder="Текст"></textarea>
+                        <small class="field-help">Сырой текст, ссылка или пример сохраняются как источник для обучения и аудита. Пишите как есть, без попытки сразу привести к JSON.</small>
+                      </label>
+                      <label>URL
+                        <input name="url" type="url" placeholder="https://t.me/...">
+                        <small class="field-help">Ссылка на Telegram-сообщение, Telegraph или другой источник. Если это Telegram-ссылка, система выделит чат и номер сообщения.</small>
+                      </label>
+                      <label>Комментарий
+                        <input name="evidence_note" placeholder="Комментарий к источнику">
+                        <small class="field-help">Коротко объясните, почему источник важен: например, кто дал пример, что в нем нужно учесть или почему это не лид.</small>
+                      </label>
+                      <label class="checkbox-line">
+                        <input name="auto_extract" type="checkbox">
+                        Автоизвлечение
+                      </label>
+                      <small class="field-help">Автоизвлечение запускает AI-разбор только после сохранения сырого источника. Для спорных материалов лучше оставить выключенным и разобрать вручную.</small>
+                      <button type="submit">Сохранить источник</button>
+                      <p id="manual-input-status" class="status-line" role="status"></p>
+                    </form>
+                  </details>
                 </aside>
-                <section id="catalog-candidate-detail" class="detail-pane" aria-live="polite">
-                  <div class="empty-state">Выберите кандидата</div>
-                  <form id="catalog-edit-form" class="catalog-edit-form" hidden>
-                    <label>Название<input id="catalog-name-input" name="canonical_name"></label>
-                    <label>JSON-данные<textarea id="catalog-value-json" name="normalized_value"></textarea></label>
-                  </form>
+                <section class="detail-pane catalog-detail-stack">
+                  <section id="catalog-item-detail" class="detail-section" aria-live="polite">
+                    <div class="empty-state">Выберите позицию каталога или добавьте новую</div>
+                  </section>
+                  <section class="detail-section catalog-raw-ingest-section">
+                    <div class="section-head">
+                      <div>
+                        <h2>Сырой ингест</h2>
+                        <p class="muted">Что уже получено из источников каталога до AI-разбора.</p>
+                      </div>
+                      <button id="catalog-raw-refresh" type="button">Обновить</button>
+                    </div>
+                    <div id="catalog-raw-summary" aria-live="polite">
+                      <div class="empty-state">Загружается сырой ингест</div>
+                    </div>
+                    <div class="catalog-raw-ingest-grid">
+                      <section>
+                        <h3>Сообщения</h3>
+                        <div id="catalog-raw-message-list" class="table-list" aria-live="polite"></div>
+                      </section>
+                      <section>
+                        <h3>Деталь</h3>
+                        <div id="catalog-raw-message-detail" aria-live="polite">
+                          <div class="empty-state">Выберите сообщение</div>
+                        </div>
+                      </section>
+                    </div>
+                  </section>
+                  <section class="detail-section">
+                    <div class="section-head">
+                      <div>
+                        <h2>AI-кандидаты</h2>
+                        <p class="muted">Предложения из LLM не меняют каталог без подтверждения.</p>
+                      </div>
+                      <button id="catalog-refresh" type="button">Обновить</button>
+                    </div>
+                    <form id="catalog-filters" class="filter-grid">
+                      <select name="status" aria-label="Статус">
+                        <option value="auto_pending">Автодобавлено</option>
+                        <option value="needs_review">На проверке</option>
+                        <option value="approved">Подтверждено</option>
+                        <option value="rejected">Отклонено</option>
+                        <option value="">Все статусы</option>
+                      </select>
+                      <select name="candidate_type" aria-label="Тип">
+                        <option value="">Все типы</option>
+                        <option value="item">Сущности</option>
+                        <option value="offer">Условия</option>
+                        <option value="lead_phrase">Признаки запроса</option>
+                        <option value="negative_phrase">Исключающие признаки</option>
+                      </select>
+                    </form>
+                    <div id="catalog-candidate-list" class="queue-list" aria-live="polite"></div>
+                    <section id="catalog-candidate-detail" aria-live="polite">
+                      <div class="empty-state">Выберите AI-кандидата</div>
+                      <form id="catalog-edit-form" class="catalog-edit-form" hidden>
+                        <label>Название<input id="catalog-name-input" name="canonical_name"></label>
+                        <label>JSON-данные<textarea id="catalog-value-json" name="normalized_value"></textarea></label>
+                      </form>
+                    </section>
+                  </section>
                 </section>
               </section>
+              <dialog id="catalog-item-dialog" class="resource-dialog catalog-item-dialog">
+                <div class="resource-dialog-shell">
+                  <header class="resource-dialog-head">
+                    <div>
+                      <h2>Добавить сущность каталога</h2>
+                      <p class="muted">Создает каноническое знание. AI-кандидаты должны приходить сюда только после проверки.</p>
+                    </div>
+                    <button id="catalog-item-dialog-close" class="secondary-button icon-button" type="button" title="Закрыть">
+                      <md-icon>close</md-icon>
+                    </button>
+                  </header>
+                  <details class="catalog-example" open>
+                    <summary>Пример: Камеры Dahua</summary>
+                    <p>Порядок работы: источник → кандидат → подтверждение → снапшот → совпадение в чате.</p>
+                    <dl>
+                      <div><dt>Название</dt><dd>Камеры Dahua — оператор видит это имя в карточке совпадения.</dd></div>
+                      <div><dt>Тип</dt><dd>Предмет — система понимает, что это объект знания, а не действие или исключение.</dd></div>
+                      <div><dt>Категория</dt><dd>video_surveillance — группирует камеры, монтаж и связанные запросы.</dd></div>
+                      <div><dt>Ключевые слова</dt><dd>dahua, hero a1, wi-fi камера — дают fuzzy match по словам и моделям.</dd></div>
+                      <div><dt>Признаки запроса</dt><dd>нужна камера на дачу, смотреть с телефона — повышают уверенность, что нужна помощь.</dd></div>
+                      <div><dt>Исключающие признаки</dt><dd>продам камеру, просто обзор — снижают уверенность или убирают ложный лид.</dd></div>
+                      <div><dt>Условия/действия</dt><dd>Подбор камеры; параметры: бюджет, наличие, монтаж — помогают оператору понять следующий шаг.</dd></div>
+                    </dl>
+                    <p>Ключевые слова дают fuzzy match, признаки запроса повышают уверенность, исключающие признаки снижают ее.</p>
+                  </details>
+                  <form id="catalog-item-form" class="catalog-edit-form catalog-create-form">
+                    <div class="catalog-form-grid">
+                      <label>Название
+                        <input name="name" required placeholder="Например: Камеры Dahua, гарантия, монтаж, проблема доступа">
+                        <small class="field-help">Каноническое имя: коротко, конкретно и без лишних слов. Оно будет видно оператору и попадет в снапшот распознавания.</small>
+                      </label>
+                      <label>Тип
+                        <select name="item_type">
+                          <option value="product">Предмет</option>
+                          <option value="service">Действие/сервис</option>
+                          <option value="bundle">Набор</option>
+                          <option value="solution">Сценарий/решение</option>
+                          <option value="brand">Бренд</option>
+                          <option value="model">Модель</option>
+                        </select>
+                        <small class="field-help">Тип определяет роль сущности в базе знаний и влияет на будущие промпты. Если сомневаетесь, выбирайте сценарий/решение.</small>
+                      </label>
+                      <label>Категория
+                        <input name="category_slug" placeholder="video_surveillance">
+                        <small class="field-help">Стабильный slug группы знаний: латиница, цифры и подчеркивания. Помогает объединять похожие сущности и строить отчеты.</small>
+                      </label>
+                      <label>Условие/действие
+                        <input name="offer_title" placeholder="Подбор, консультация, ограничение">
+                        <small class="field-help">Необязательное уточнение: что можно сделать, предложить, проверить или ограничить для этой сущности.</small>
+                      </label>
+                      <label>Параметры
+                        <input name="offer_price_text" placeholder="срок, стоимость, доступность, исключение">
+                        <small class="field-help">Параметры: срок, цена, доступность, ограничение или другое уточнение. Поле не обязано быть ценой.</small>
+                      </label>
+                    </div>
+                    <label>Описание
+                      <textarea name="description" rows="3" placeholder="Что это за сущность, когда она релевантна и как ее распознавать"></textarea>
+                      <small class="field-help">Опишите смысл для оператора и AI: какие запросы сюда относятся, какие не относятся, какие нюансы важны.</small>
+                    </label>
+                    <div class="catalog-form-grid catalog-form-grid-three">
+                      <label>Ключевые слова
+                        <textarea name="terms" rows="5" placeholder="Один термин на строку"></textarea>
+                        <small class="field-help">Слова, модели, бренды, синонимы и разговорные названия. Они помогают fuzzy match найти связь даже без AI.</small>
+                      </label>
+                      <label>Признаки запроса
+                        <textarea name="lead_phrases" rows="5" placeholder="Один признак на строку"></textarea>
+                        <small class="field-help">Фразы, по которым видно намерение, проблему или потребность. Пишите естественным языком, как люди говорят в чатах.</small>
+                      </label>
+                      <label>Исключающие признаки
+                        <textarea name="negative_phrases" rows="5" placeholder="Один признак на строку"></textarea>
+                        <small class="field-help">Фразы, которые должны снижать уверенность: обсуждение без намерения, чужая реклама, несовместимый сценарий или явно не наш случай.</small>
+                      </label>
+                    </div>
+                    <label>Источник/заметка
+                      <textarea name="evidence_quote" rows="3" placeholder="Почему это есть в каталоге"></textarea>
+                      <small class="field-help">Доказательство для аудита: ссылка, цитата, пояснение Олега или причина ручного добавления.</small>
+                    </label>
+                    <div class="source-action-bar">
+                      <button type="submit">Добавить в каталог</button>
+                    </div>
+                  </form>
+                </div>
+              </dialog>
             </main>
             """,
         )
@@ -985,6 +1242,7 @@ def today_page(
                   <a href="/task-executors">Исполнители задач</a>
                   <a href="/task-types">Задачи</a>
                   <a href="/quality">Качество</a>
+                  <a href="/artifacts">Артефакты</a>
                   <a href="/operations">Операции</a>
                   <button id="logout-button" type="button">Выйти</button>
                 </nav>
@@ -1080,6 +1338,7 @@ def operations_page(
                   <a href="/task-executors">Исполнители задач</a>
                   <a href="/task-types">Задачи</a>
                   <a href="/quality">Качество</a>
+                  <a href="/artifacts">Артефакты</a>
                   <a href="/operations">Операции</a>
                   <button id="logout-button" type="button">Выйти</button>
                 </nav>
@@ -1182,6 +1441,7 @@ def quality_page(
                   <a href="/task-executors">Исполнители задач</a>
                   <a href="/task-types">Задачи</a>
                   <a href="/quality">Качество</a>
+                  <a href="/artifacts">Артефакты</a>
                   <a href="/operations">Операции</a>
                   <button id="logout-button" type="button">Выйти</button>
                 </nav>
@@ -1249,7 +1509,7 @@ def _page(*, page: str, title: str, main: str) -> str:
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans:wght@400;500;600;700&amp;display=swap">
-  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined&amp;icon_names=add,check_circle,close,forum,model_training,open_in_new,person,person_add,radio_button_unchecked,refresh,send,settings,smart_toy,upload_file,vpn_key&amp;display=block">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined&amp;icon_names=add,article,check_circle,close,database,description,folder,forum,model_training,open_in_new,person,person_add,radio_button_unchecked,refresh,send,settings,smart_toy,storage,table_chart,upload_file,vpn_key&amp;display=block">
   <link rel="stylesheet" href="/static/app.css">
 </head>
 <body data-page="{page}">

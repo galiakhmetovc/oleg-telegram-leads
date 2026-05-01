@@ -135,6 +135,34 @@ source_preview_messages_table = Table(
     Column("created_at", DateTime(timezone=True), nullable=False),
 )
 
+telegram_raw_export_runs_table = Table(
+    "telegram_raw_export_runs",
+    metadata,
+    Column("id", String(36), primary_key=True),
+    Column("monitored_source_id", String(36), nullable=False),
+    Column("source_ref", String(512), nullable=False),
+    Column("source_kind", String(64), nullable=False),
+    Column("telegram_id", String(80), nullable=True),
+    Column("username", String(160), nullable=True),
+    Column("title", String(255), nullable=True),
+    Column("export_format", String(64), nullable=False),
+    Column("output_dir", String(1024), nullable=False),
+    Column("result_json_path", String(1024), nullable=False),
+    Column("messages_jsonl_path", String(1024), nullable=False),
+    Column("attachments_jsonl_path", String(1024), nullable=False),
+    Column("messages_parquet_path", String(1024), nullable=False),
+    Column("attachments_parquet_path", String(1024), nullable=False),
+    Column("manifest_path", String(1024), nullable=False),
+    Column("message_count", Integer, nullable=False),
+    Column("attachment_count", Integer, nullable=False),
+    Column("status", String(32), nullable=False),
+    Column("error", Text, nullable=True),
+    Column("started_at", DateTime(timezone=True), nullable=False),
+    Column("finished_at", DateTime(timezone=True), nullable=True),
+    Column("metadata_json", JSON, nullable=True),
+    Column("created_at", DateTime(timezone=True), nullable=False),
+)
+
 source_messages_table = Table(
     "source_messages",
     metadata,

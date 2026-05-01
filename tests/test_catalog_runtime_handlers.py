@@ -33,6 +33,7 @@ from pur_leads.models.telegram_sources import source_messages_table
 from pur_leads.services.catalog_candidates import CatalogCandidateService
 from pur_leads.services.catalog_sources import CatalogSourceService
 from pur_leads.services.scheduler import SchedulerService
+from pur_leads.services.settings import SettingsService
 from pur_leads.services.telegram_sources import TelegramSourceService
 from pur_leads.workers.runtime import (
     CatalogExtractedFact,
@@ -123,7 +124,7 @@ def runtime_session(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_parse_artifact_handler_stores_chunks(runtime_session):
+async def test_parse_artifact_handler_stores_chunks_without_auto_extract(runtime_session):
     source = CatalogSourceService(runtime_session).upsert_source(
         source_type="manual_text",
         origin="manual",
@@ -155,6 +156,47 @@ async def test_parse_artifact_handler_stores_chunks(runtime_session):
     assert stored.status == "succeeded"
     assert stored.result_summary_json == {"chunk_count": 2, "parser_name": "fake-parser"}
     assert [chunk["text"] for chunk in chunks] == ["Dahua Hero A1", "Wi-Fi camera for dacha"]
+    extract_jobs = runtime_session.execute(
+        select(scheduler_jobs_table).where(
+            scheduler_jobs_table.c.job_type == "extract_catalog_facts"
+        )
+    ).all()
+    assert extract_jobs == []
+
+
+@pytest.mark.asyncio
+async def test_parse_artifact_handler_can_auto_enqueue_extract_when_enabled(runtime_session):
+    SettingsService(runtime_session).set(
+        "catalog_auto_extract_after_ingest_enabled",
+        True,
+        value_type="bool",
+        updated_by="test",
+    )
+    source = CatalogSourceService(runtime_session).upsert_source(
+        source_type="manual_text",
+        origin="manual",
+        external_id="parse-source-auto",
+        raw_text="raw",
+    )
+    artifact = CatalogSourceService(runtime_session).record_artifact(
+        source.id,
+        artifact_type="document",
+        file_name="catalog.pdf",
+        download_status="downloaded",
+    )
+    SchedulerService(runtime_session).enqueue(
+        job_type="parse_artifact",
+        scope_type="parser",
+        payload_json={"source_id": source.id, "artifact_id": artifact.id},
+    )
+    runtime = WorkerRuntime(
+        runtime_session,
+        handlers=build_catalog_handler_registry(runtime_session, parser=FakeParser()),
+    )
+
+    result = await runtime.run_once()
+
+    chunks = runtime_session.execute(select(parsed_chunks_table)).mappings().all()
     extract_jobs = (
         runtime_session.execute(
             select(scheduler_jobs_table)
@@ -164,6 +206,7 @@ async def test_parse_artifact_handler_stores_chunks(runtime_session):
         .mappings()
         .all()
     )
+    assert result.status == "succeeded"
     assert [job["payload_json"]["chunk_id"] for job in extract_jobs] == [
         chunk["id"] for chunk in chunks
     ]
@@ -250,7 +293,9 @@ async def test_extract_catalog_facts_handler_stores_llm_metadata_and_rebuilds_sn
 
 
 @pytest.mark.asyncio
-async def test_fetch_external_page_handler_stores_page_chunk_and_extract_job(runtime_session):
+async def test_fetch_external_page_handler_stores_page_chunk_without_auto_extract(
+    runtime_session,
+):
     parent_source = CatalogSourceService(runtime_session).upsert_source(
         source_type="telegram_message",
         origin="telegram:purmaster",
@@ -277,15 +322,11 @@ async def test_fetch_external_page_handler_stores_page_chunk_and_extract_job(run
 
     stored = SchedulerService(runtime_session).repository.get(job.id)
     chunks = runtime_session.execute(select(parsed_chunks_table)).mappings().all()
-    extract_job = (
-        runtime_session.execute(
-            select(scheduler_jobs_table).where(
-                scheduler_jobs_table.c.job_type == "extract_catalog_facts"
-            )
+    extract_jobs = runtime_session.execute(
+        select(scheduler_jobs_table).where(
+            scheduler_jobs_table.c.job_type == "extract_catalog_facts"
         )
-        .mappings()
-        .one()
-    )
+    ).all()
     assert stored is not None
     assert result.status == "succeeded"
     assert stored.result_summary_json == {
@@ -295,8 +336,7 @@ async def test_fetch_external_page_handler_stores_page_chunk_and_extract_job(run
     }
     assert chunks[0]["text"] == "Dahua Hero A1 и умные реле для дома"
     assert chunks[0]["parser_name"] == "external-page-text"
-    assert extract_job["payload_json"]["source_id"] == chunks[0]["source_id"]
-    assert extract_job["payload_json"]["chunk_id"] == chunks[0]["id"]
+    assert extract_jobs == []
 
 
 @pytest.mark.asyncio
@@ -508,6 +548,7 @@ async def test_download_artifact_handler_records_downloaded_document(runtime_ses
     assert parse_job["payload_json"]["source_id"] == raw_source.id
     assert parse_job["payload_json"]["artifact_id"] == artifact["id"]
     assert parse_job["payload_json"]["local_path"] == artifact["local_path"]
+    assert parse_job["priority"] == "high"
 
 
 @pytest.mark.asyncio

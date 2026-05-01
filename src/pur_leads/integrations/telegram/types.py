@@ -54,6 +54,18 @@ class TelegramDocumentDownload:
 
 
 @dataclass(frozen=True)
+class TelegramMediaDownload:
+    status: str
+    media_type: str | None
+    file_name: str | None
+    mime_type: str | None
+    file_size: int | None
+    local_path: str | None
+    skip_reason: str | None = None
+    error: str | None = None
+
+
+@dataclass(frozen=True)
 class MessageContext:
     target_message_id: int
     reply_messages: list[TelegramMessage]

@@ -31,11 +31,14 @@ const time = (value) => {
 const badge = (label, className = "") =>
   `<span class="badge ${className}">${escapeHtml(label)}</span>`;
 
+const catalogHelp = (value) => `<small class="field-help">${escapeHtml(value)}</small>`;
+
 const LABELS = {
   active: "активен",
   admin: "администратор",
   access_denied: "доступ запрещен",
   approved: "подтверждено",
+  audio: "аудио",
   auto_pending: "автодобавлено",
   both: "оба сценария",
   catalog: "каталог",
@@ -44,21 +47,28 @@ const LABELS = {
   completed: "завершено",
   company: "компания",
   critical: "критично",
+  deprecated: "устарело",
   disabled: "отключен",
+  document: "документы",
   draft: "черновик",
   ensemble: "ансамбль",
   error: "ошибка",
+  expired: "истекло",
   failed: "ошибка",
   fallback: "резерв",
+  from_beginning: "с самого начала",
+  from_message: "с сообщения",
+  from_now: "с текущего момента",
+  after_message: "после сообщения",
   family: "семья",
   flood_wait: "лимит Telegram",
   high: "высокий",
   hoa_tsn: "ТСЖ / ТСН",
   in_work: "в работе",
   interested: "интересуется",
-  item: "товар/услуга",
+  item: "сущность",
   lead: "лид",
-  lead_phrase: "лид-фраза",
+  lead_phrase: "признак запроса",
   lead_monitoring: "поиск лидов",
   leads: "лиды",
   language_model: "языковая модель",
@@ -67,27 +77,39 @@ const LABELS = {
   manual_test: "ручной тест",
   maybe: "возможно",
   muted: "скрыто",
-  negative_phrase: "негативная фраза",
+  negative_phrase: "исключающий признак",
   new: "новый",
   needs_review: "на проверке",
   none: "нет",
   normal: "обычный",
   not_lead: "не лид",
   open: "открыто",
-  offer: "предложение",
+  offer: "условие",
+  other: "другое",
   paused: "пауза",
   pending: "ожидает",
   person: "человек",
-  product: "товар",
+  price: "параметр",
+  product: "предмет",
+  promotion: "временное условие",
+  photo: "фото",
   preview_ready: "превью готово",
   primary: "основной",
   queued: "в очереди",
+  recent_days: "за N дней",
+  recent_limit: "последние N сообщений",
+  since_checkpoint: "с последнего чекпоинта",
+  since_date: "с даты",
+  source_start: "как настроен источник",
   rejected: "отклонено",
   residential_complex: "жилой комплекс",
   running: "выполняется",
+  service: "действие/сервис",
+  service_price: "условие сервиса",
   shadow: "теневой",
   split: "разделение",
   snoozed: "отложено",
+  solution: "сценарий/решение",
   succeeded: "успешно",
   suppressed: "подавлено",
   telegram: "Telegram",
@@ -95,10 +117,25 @@ const LABELS = {
   telegram_supergroup: "Telegram-супергруппа",
   telegram_channel: "Telegram-канал",
   text: "текст",
+  terms: "условия",
   unknown: "неизвестно",
   urgent: "срочно",
   verified: "проверено",
+  video: "видео",
   warning: "предупреждение",
+  raw_export: "сырой экспорт",
+  lead_candidate_discovery: "кандидаты лидов",
+  lead_candidate_llm_arbitration: "LLM-арбитраж лидов",
+  telegram_lead_candidate_llm_arbitration: "LLM-арбитраж лидов",
+  telegram_lead_candidate_discovery: "кандидаты лидов",
+  json: "JSON",
+  jsonl: "JSONL",
+  parquet: "Parquet",
+  sqlite: "SQLite",
+  directory: "папка",
+  filesystem_discovery: "найдено на диске",
+  metadata_json: "metadata запуска",
+  telegram_raw_export_runs: "raw export run",
 };
 
 const label = (value, fallback = "") => LABELS[value] || text(value, fallback);
@@ -139,6 +176,7 @@ document.addEventListener("DOMContentLoaded", () => {
   if (page === "crm") initCrm();
   if (page === "today") initToday();
   if (page === "operations") initOperations();
+  if (page === "artifacts") initArtifacts();
   if (page === "quality") initQuality();
   if (page === "admin") initAdmin();
   if (page === "onboarding") initOnboarding();
@@ -750,6 +788,7 @@ function renderSourceDetail(detail, state) {
       <h3>Конфигурация</h3>
       <div class="detail-meta">
         ${badge(`назначение ${label(source.source_purpose || "н/д")}`)}
+        ${badge(`старт ${label(source.start_mode || "from_now")}`)}
         ${badge(`опрос ${source.poll_interval_seconds || 0}s`)}
         ${badge(`чекпоинт ${source.checkpoint_message_id || "нет"}`)}
         ${badge(`превью ${source.preview_message_count || 0}`)}
@@ -776,6 +815,7 @@ function renderSourceDetail(detail, state) {
         <button type="submit">Сбросить чекпоинт</button>
       </form>
     </section>
+    ${renderRawExportForm(source)}
     ${sourceSection("Превью сообщений", detail.preview_messages, renderPreviewMessage)}
     ${sourceSection("Проверки доступа", detail.access_checks, renderAccessCheck)}
     ${sourceSection("Задачи", detail.jobs, renderSourceJob)}
@@ -788,6 +828,79 @@ function renderSourceDetail(detail, state) {
   target.querySelector("#source-checkpoint-form")?.addEventListener("submit", (event) =>
     resetSourceCheckpoint(event, source.id, state)
   );
+  target.querySelector("#source-raw-export-form")?.addEventListener("submit", (event) =>
+    requestRawExport(event, source.id, state)
+  );
+}
+
+function renderRawExportForm(source) {
+  return `<section class="detail-section">
+    <h3>Raw-выгрузка Telegram</h3>
+    <p class="muted">Скачивает сообщения один раз в JSON/JSONL/parquet и создает canonical rows без AI-обработки.</p>
+    <form id="source-raw-export-form" class="raw-export-form">
+      <div class="catalog-form-grid">
+        <label>Диапазон
+          <select name="range_mode">
+            ${[
+              "source_start",
+              "since_checkpoint",
+              "recent_days",
+              "since_date",
+              "from_message",
+              "after_message",
+              "from_beginning",
+              "from_now",
+            ]
+              .map(
+                (mode) =>
+                  `<option value="${mode}" ${
+                    mode === "source_start" ? "selected" : ""
+                  }>${escapeHtml(label(mode))}</option>`
+              )
+              .join("")}
+          </select>
+          ${catalogHelp("source_start берет старт из настройки источника; since_checkpoint безопасно пропускает запуск, если чекпоинта нет.")}
+        </label>
+        <label>Дней назад
+          <input name="recent_days" type="number" min="1" value="${
+            source.start_recent_days || 180
+          }">
+          ${catalogHelp("Используется только для диапазона 'за N дней'.")}
+        </label>
+        <label>ID сообщения
+          <input name="message_id" type="number" min="1" placeholder="например 716254">
+          ${catalogHelp("Используется для 'с сообщения' и 'после сообщения'.")}
+        </label>
+        <label>Дата начала
+          <input name="since_date" type="datetime-local">
+          ${catalogHelp("Используется только для диапазона 'с даты'.")}
+        </label>
+        <label>Размер пачки
+          <input name="batch_size" type="number" min="1" max="5000" value="1000">
+          ${catalogHelp("Сколько сообщений читать за одну пачку Telethon.")}
+        </label>
+        <label>Максимум сообщений
+          <input name="max_messages" type="number" min="1" placeholder="без лимита">
+          ${catalogHelp("Пусто означает читать весь выбранный диапазон.")}
+        </label>
+      </div>
+      <div class="source-action-bar raw-export-media">
+        <label><input name="media_enabled" type="checkbox"> скачивать медиа</label>
+        ${["document", "photo", "video", "audio", "other"]
+          .map(
+            (type) =>
+              `<label><input name="media_types" type="checkbox" value="${type}" ${
+                type === "document" ? "checked" : ""
+              }> ${escapeHtml(label(type))}</label>`
+          )
+          .join("")}
+        <label>Лимит файла, байт
+          <input class="compact-input" name="max_media_size_bytes" type="number" min="1" placeholder="нет">
+        </label>
+      </div>
+      <button type="submit">Поставить raw-выгрузку в очередь</button>
+    </form>
+  </section>`;
 }
 
 function sourceSection(title, rows, renderer) {
@@ -873,6 +986,7 @@ async function createSource(event, state) {
   const form = event.currentTarget;
   const status = document.querySelector("#source-status");
   const data = new FormData(form);
+  const startMode = data.get("start_mode") || "from_now";
   const startRecentDays = Number.parseInt(data.get("start_recent_days"), 10);
   try {
     const payload = await api("/api/sources", {
@@ -881,7 +995,9 @@ async function createSource(event, state) {
         input_ref: data.get("input_ref"),
         purpose: data.get("purpose"),
         check_access: data.get("check_access") === "on",
-        start_recent_days: Number.isNaN(startRecentDays) ? null : startRecentDays,
+        start_mode: startMode,
+        start_recent_days:
+          startMode === "recent_days" && !Number.isNaN(startRecentDays) ? startRecentDays : null,
       }),
     });
     form.reset();
@@ -916,6 +1032,38 @@ async function sourceAction(sourceId, action, state) {
   }
 }
 
+async function requestRawExport(event, sourceId, state) {
+  event.preventDefault();
+  const status = document.querySelector("#source-status");
+  const data = new FormData(event.currentTarget);
+  const numberOrNull = (name) => {
+    const value = Number.parseInt(data.get(name), 10);
+    return Number.isNaN(value) ? null : value;
+  };
+  const mediaTypes = data.getAll("media_types");
+  try {
+    await api(`/api/sources/${sourceId}/raw-export`, {
+      method: "POST",
+      body: JSON.stringify({
+        range_mode: data.get("range_mode") || "source_start",
+        recent_days: numberOrNull("recent_days"),
+        message_id: numberOrNull("message_id"),
+        since_date: data.get("since_date") || null,
+        batch_size: numberOrNull("batch_size") || 1000,
+        max_messages: numberOrNull("max_messages"),
+        media_enabled: data.get("media_enabled") === "on",
+        media_types: mediaTypes.length ? mediaTypes : ["document"],
+        max_media_size_bytes: numberOrNull("max_media_size_bytes"),
+        canonicalize: true,
+      }),
+    });
+    if (status) status.textContent = "Raw-выгрузка поставлена в очередь";
+    await loadSources(state);
+  } catch (error) {
+    if (status) status.textContent = error.message;
+  }
+}
+
 async function resetSourceCheckpoint(event, sourceId, state) {
   event.preventDefault();
   const status = document.querySelector("#source-status");
@@ -943,17 +1091,649 @@ function sourceStatusClass(status) {
 }
 
 function initCatalog() {
-  const state = { items: [], selectedId: null, detail: null };
+  const itemState = { items: [], selectedId: null, detail: null, search: "" };
+  const candidateState = { items: [], selectedId: null, detail: null };
+  const rawState = { items: [], selectedId: null, detail: null, payload: null };
+  const createDialog = document.querySelector("#catalog-item-dialog");
+  document.querySelector("#catalog-item-form")?.addEventListener("submit", (event) =>
+    submitCatalogItem(event, itemState)
+  );
+  document.querySelector("#catalog-item-dialog-open")?.addEventListener("click", () => {
+    createDialog?.showModal();
+    createDialog?.querySelector('[name="name"]')?.focus();
+  });
+  document.querySelector("#catalog-item-dialog-close")?.addEventListener("click", () =>
+    createDialog?.close()
+  );
+  createDialog?.addEventListener("click", (event) => {
+    if (event.target === createDialog) createDialog.close();
+  });
+  document.querySelector("#catalog-item-search")?.addEventListener("input", (event) => {
+    itemState.search = event.currentTarget.value || "";
+    renderCatalogItemList(itemState);
+  });
+  document.querySelector("#catalog-snapshot-rebuild")?.addEventListener("click", () =>
+    rebuildCatalogSnapshot(itemState)
+  );
   document.querySelector("#catalog-refresh")?.addEventListener("click", () =>
-    loadCatalogCandidates(state)
+    loadCatalogCandidates(candidateState)
+  );
+  document.querySelector("#catalog-raw-refresh")?.addEventListener("click", () =>
+    loadCatalogRawIngest(rawState)
   );
   document.querySelector("#catalog-filters")?.addEventListener("change", () =>
-    loadCatalogCandidates(state)
+    loadCatalogCandidates(candidateState)
   );
   document.querySelector("#manual-input-form")?.addEventListener("submit", (event) =>
-    submitManualInput(event, state)
+    submitManualInput(event, candidateState)
   );
-  loadCatalogCandidates(state);
+  loadCatalogItems(itemState);
+  loadCatalogRawIngest(rawState);
+  loadCatalogCandidates(candidateState);
+}
+
+async function loadCatalogItems(state) {
+  const payload = await api("/api/catalog/items?limit=200");
+  state.items = payload.items || [];
+  const selectedStillVisible = state.items.some((item) => item.id === state.selectedId);
+  state.selectedId = selectedStillVisible ? state.selectedId : state.items[0]?.id || null;
+  state.detail = null;
+  renderCatalogItemList(state);
+  if (state.selectedId) {
+    await loadCatalogItemDetail(state, state.selectedId);
+  } else {
+    renderCatalogItemDetail(state);
+  }
+}
+
+async function loadCatalogItemDetail(state, itemId) {
+  const target = document.querySelector("#catalog-item-detail");
+  if (target) target.innerHTML = `<div class="empty-state">Загружается сущность каталога</div>`;
+  const payload = await api(`/api/catalog/items/${itemId}`);
+  if (state.selectedId !== itemId) return;
+  state.detail = payload;
+  const index = state.items.findIndex((item) => item.id === payload.item.id);
+  if (index >= 0) state.items[index] = payload.item;
+  renderCatalogItemList(state);
+  renderCatalogItemDetail(state);
+}
+
+function renderCatalogItemList(state) {
+  const target = document.querySelector("#catalog-item-list");
+  if (!target) return;
+  if (!state.items.length) {
+    target.innerHTML = `<div class="empty-state">Каталог пока пуст</div>`;
+    return;
+  }
+  const query = text(state.search).trim().toLowerCase();
+  const visibleItems = query
+    ? state.items.filter((item) =>
+        [item.name, item.canonical_name, item.item_type, item.status]
+          .map((value) => text(value).toLowerCase())
+          .some((value) => value.includes(query))
+      )
+    : state.items;
+  if (!visibleItems.length) {
+    target.innerHTML = `<div class="empty-state">Ничего не найдено</div>`;
+    return;
+  }
+  target.innerHTML = visibleItems
+    .map((item) => {
+      const active = item.id === state.selectedId ? "is-active" : "";
+      return `<button class="queue-item ${active}" type="button" data-id="${item.id}">
+        <strong>${escapeHtml(item.name)}</strong>
+        <span class="muted">${escapeHtml(label(item.item_type))}</span>
+        <span class="queue-meta">
+          ${badge(label(item.status), catalogStatusClass(item.status))}
+          ${badge(Math.round((item.confidence || 0) * 100) + "%")}
+        </span>
+      </button>`;
+    })
+    .join("");
+  target.querySelectorAll(".queue-item").forEach((button) => {
+    button.addEventListener("click", () => {
+      state.selectedId = button.dataset.id;
+      state.detail = null;
+      renderCatalogItemList(state);
+      loadCatalogItemDetail(state, state.selectedId);
+    });
+  });
+}
+
+function renderCatalogItemDetail(state) {
+  const target = document.querySelector("#catalog-item-detail");
+  if (!target) return;
+  const detail = state.detail;
+  if (!detail?.item) {
+    target.innerHTML = `<div class="empty-state">Выберите сущность каталога или добавьте новую</div>`;
+    return;
+  }
+  const item = detail.item;
+  const terms = detail.terms || [];
+  const offers = detail.offers || [];
+  const evidence = detail.evidence || [];
+  target.innerHTML = `<div class="detail-grid">
+    <header class="detail-header">
+      <div>
+        <h2>${escapeHtml(item.name)}</h2>
+        <p class="muted">${escapeHtml(item.id)}</p>
+      </div>
+      <div class="badges">
+        ${badge(label(item.status), catalogStatusClass(item.status))}
+        ${badge(label(item.item_type))}
+      </div>
+    </header>
+    <section class="detail-section">
+      <h3>Редактирование</h3>
+      <form id="catalog-item-edit-form" class="catalog-edit-form">
+        <div class="catalog-form-grid">
+          <label>Название
+            <input name="name" value="${escapeHtml(item.name)}" required>
+            ${catalogHelp("Каноническое имя: коротко, конкретно и без лишних слов. Оно будет видно оператору и попадет в снапшот распознавания.")}
+          </label>
+          <label>Тип
+            <select name="item_type">
+              ${["product", "service", "bundle", "solution", "brand", "model"]
+                .map(
+                  (type) =>
+                    `<option value="${type}" ${item.item_type === type ? "selected" : ""}>${escapeHtml(
+                      label(type)
+                    )}</option>`
+                )
+                .join("")}
+            </select>
+            ${catalogHelp("Тип определяет роль сущности в базе знаний: предмет, действие, сценарий, бренд или модель.")}
+          </label>
+          <label>Статус
+            <select name="status">
+              ${["approved", "needs_review", "auto_pending", "muted", "deprecated", "expired"]
+                .map(
+                  (status) =>
+                    `<option value="${status}" ${item.status === status ? "selected" : ""}>${escapeHtml(
+                      label(status)
+                    )}</option>`
+                )
+                .join("")}
+            </select>
+            ${catalogHelp("Статус определяет, участвует ли сущность в текущем источнике истины. approved и auto_pending активны, deprecated лучше не использовать для новых совпадений.")}
+          </label>
+        </div>
+        <label>Описание
+          <textarea name="description" rows="4">${escapeHtml(item.description || "")}</textarea>
+          ${catalogHelp("Описание объясняет смысл сущности, границы применимости, исключения и важные нюансы для оператора и AI.")}
+        </label>
+        <div class="source-action-bar">
+          <button type="submit">Сохранить</button>
+          <button type="button" data-catalog-item-archive="${escapeHtml(item.id)}">Архивировать</button>
+        </div>
+      </form>
+    </section>
+    <section class="detail-section">
+      <h3>Термины</h3>
+      <form id="catalog-term-form" class="inline-form">
+        <label>Термин
+          <input name="term" placeholder="Термин" required>
+          ${catalogHelp("Слово, модель, синоним, бренд или фраза, которая связывает сообщение с этой сущностью.")}
+        </label>
+        <label>Тип термина
+          <select name="term_type">
+            <option value="keyword">Ключевое слово</option>
+            <option value="alias">Синоним</option>
+            <option value="lead_phrase">Признак запроса</option>
+            <option value="negative_phrase">Исключающий признак</option>
+            <option value="brand">Бренд</option>
+            <option value="model">Модель</option>
+            <option value="problem_phrase">Проблема</option>
+          </select>
+          ${catalogHelp("Тип помогает отличить нейтральные ключевые слова от признаков запроса и исключающих признаков.")}
+        </label>
+        <label>Вес
+          <input name="weight" type="number" min="0" max="5" step="0.1" value="1">
+          ${catalogHelp("Вес: насколько сильно термин влияет на fuzzy match и будущие правила. 1 — обычный сигнал, больше 1 — сильнее.")}
+        </label>
+        <button type="submit">Добавить</button>
+      </form>
+      <div class="table-list">${renderCatalogTerms(terms)}</div>
+    </section>
+    <section class="detail-section">
+      <h3>Условия и действия</h3>
+      <form id="catalog-offer-form" class="inline-form">
+        <label>Название
+          <input name="title" placeholder="Название" required>
+          ${catalogHelp("Короткое название условия, действия, ограничения или параметра, связанного с сущностью.")}
+        </label>
+        <label>Параметры
+          <input name="price_text" placeholder="Параметры">
+          ${catalogHelp("Параметры: срок, цена, доступность, ограничение или другое уточнение. Поле не обязано быть ценой.")}
+        </label>
+        <label>Тип
+          <select name="offer_type">
+            <option value="price">Параметр</option>
+            <option value="service_price">Сервисное условие</option>
+            <option value="bundle_price">Условие набора</option>
+            <option value="promotion">Временное условие</option>
+            <option value="terms">Условия</option>
+          </select>
+          ${catalogHelp("Тип показывает, это постоянный параметр, сервисное действие, временное условие или правило применения.")}
+        </label>
+        <button type="submit">Добавить</button>
+      </form>
+      <div class="table-list">${renderCatalogOffers(offers)}</div>
+    </section>
+    <section class="detail-section">
+      <h3>Источники</h3>
+      ${renderManualCatalogEvidence(evidence)}
+    </section>
+    <p id="catalog-item-detail-status" class="status-line" role="status"></p>
+  </div>`;
+  target.querySelector("#catalog-item-edit-form")?.addEventListener("submit", (event) =>
+    saveCatalogItemEdit(event, item.id, state)
+  );
+  target.querySelector("#catalog-term-form")?.addEventListener("submit", (event) =>
+    addCatalogTerm(event, item.id, state)
+  );
+  target.querySelector("#catalog-offer-form")?.addEventListener("submit", (event) =>
+    addCatalogOffer(event, item.id, state)
+  );
+  target.querySelector("[data-catalog-item-archive]")?.addEventListener("click", () =>
+    archiveCatalogItem(item.id, state)
+  );
+  target.querySelectorAll("[data-catalog-term-archive]").forEach((button) => {
+    button.addEventListener("click", () => archiveCatalogTerm(button.dataset.catalogTermArchive, state));
+  });
+  target.querySelectorAll("[data-catalog-offer-archive]").forEach((button) => {
+    button.addEventListener("click", () => archiveCatalogOffer(button.dataset.catalogOfferArchive, state));
+  });
+}
+
+function renderCatalogTerms(terms) {
+  if (!terms.length) return `<div class="empty-state">Терминов нет</div>`;
+  return terms
+    .map(
+      (term) => `<div class="table-row">
+        <div>
+          <strong>${escapeHtml(term.term)}</strong>
+          <p class="muted">${escapeHtml(label(term.term_type))} · вес ${escapeHtml(term.weight)}</p>
+        </div>
+        <div class="source-action-bar">
+          ${badge(label(term.status), catalogStatusClass(term.status))}
+          <button type="button" data-catalog-term-archive="${escapeHtml(term.id)}">Архив</button>
+        </div>
+      </div>`
+    )
+    .join("");
+}
+
+function renderCatalogOffers(offers) {
+  if (!offers.length) return `<div class="empty-state">Условий нет</div>`;
+  return offers
+    .map(
+      (offer) => `<div class="table-row">
+        <div>
+          <strong>${escapeHtml(offer.title)}</strong>
+          <p class="muted">${escapeHtml([label(offer.offer_type), offer.price_text].filter(Boolean).join(" · "))}</p>
+        </div>
+        <div class="source-action-bar">
+          ${badge(label(offer.status), catalogStatusClass(offer.status))}
+          <button type="button" data-catalog-offer-archive="${escapeHtml(offer.id)}">Архив</button>
+        </div>
+      </div>`
+    )
+    .join("");
+}
+
+function renderManualCatalogEvidence(evidence) {
+  if (!evidence.length) return `<div class="empty-state">Источников нет</div>`;
+  return `<div class="evidence-list">${evidence
+    .map(
+      (item) => `<article class="evidence-item">
+        <div class="evidence-source">
+          <strong>${escapeHtml(label(item.evidence_type))}</strong>
+          ${item.confidence ? badge(Math.round(item.confidence * 100) + "%") : ""}
+        </div>
+        ${item.quote ? `<blockquote>${escapeHtml(item.quote)}</blockquote>` : ""}
+        ${item.source_id ? `<p class="muted">source_id ${escapeHtml(item.source_id)}</p>` : ""}
+      </article>`
+    )
+    .join("")}</div>`;
+}
+
+async function submitCatalogItem(event, state) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const status = document.querySelector("#catalog-item-status");
+  const data = new FormData(form);
+  const name = text(data.get("name")).trim();
+  const terms = [
+    ...catalogTermLines(data.get("terms"), "keyword"),
+    ...catalogTermLines(data.get("lead_phrases"), "lead_phrase"),
+    ...catalogTermLines(data.get("negative_phrases"), "negative_phrase"),
+  ];
+  const offerTitle = text(data.get("offer_title")).trim();
+  const offerPriceText = text(data.get("offer_price_text")).trim();
+  const evidenceQuote = text(data.get("evidence_quote")).trim();
+  const body = {
+    name,
+    item_type: data.get("item_type") || "product",
+    category_slug: text(data.get("category_slug")).trim() || null,
+    description: text(data.get("description")).trim() || null,
+    terms,
+    offers:
+      offerTitle || offerPriceText
+        ? [{ title: offerTitle || name, price_text: offerPriceText || null, offer_type: "price" }]
+        : [],
+    evidence: evidenceQuote
+      ? { quote: evidenceQuote, source_text: evidenceQuote, evidence_type: "manual_note" }
+      : null,
+  };
+  try {
+    const payload = await api("/api/catalog/items", {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+    form.reset();
+    document.querySelector("#catalog-item-dialog")?.close();
+    state.selectedId = payload.item.id;
+    if (status) status.textContent = "Позиция добавлена";
+    await loadCatalogItems(state);
+  } catch (error) {
+    if (status) status.textContent = error.message;
+  }
+}
+
+function catalogTermLines(value, termType) {
+  return text(value)
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((term) => ({ term, term_type: termType }));
+}
+
+async function saveCatalogItemEdit(event, itemId, state) {
+  event.preventDefault();
+  const status = document.querySelector("#catalog-item-detail-status");
+  const data = new FormData(event.currentTarget);
+  try {
+    const payload = await api(`/api/catalog/items/${itemId}`, {
+      method: "PATCH",
+      body: JSON.stringify({
+        name: data.get("name"),
+        item_type: data.get("item_type"),
+        description: data.get("description") || null,
+        status: data.get("status"),
+      }),
+    });
+    state.detail = payload;
+    if (status) status.textContent = "Сохранено";
+    await loadCatalogItems(state);
+  } catch (error) {
+    if (status) status.textContent = error.message;
+  }
+}
+
+async function addCatalogTerm(event, itemId, state) {
+  event.preventDefault();
+  const status = document.querySelector("#catalog-item-detail-status");
+  const data = new FormData(event.currentTarget);
+  try {
+    await api(`/api/catalog/items/${itemId}/terms`, {
+      method: "POST",
+      body: JSON.stringify({
+        term: data.get("term"),
+        term_type: data.get("term_type"),
+        weight: Number(data.get("weight") || 1),
+      }),
+    });
+    state.selectedId = itemId;
+    await loadCatalogItemDetail(state, itemId);
+  } catch (error) {
+    if (status) status.textContent = error.message;
+  }
+}
+
+async function addCatalogOffer(event, itemId, state) {
+  event.preventDefault();
+  const status = document.querySelector("#catalog-item-detail-status");
+  const data = new FormData(event.currentTarget);
+  try {
+    await api(`/api/catalog/items/${itemId}/offers`, {
+      method: "POST",
+      body: JSON.stringify({
+        title: data.get("title"),
+        price_text: data.get("price_text") || null,
+        offer_type: data.get("offer_type") || "price",
+      }),
+    });
+    state.selectedId = itemId;
+    await loadCatalogItemDetail(state, itemId);
+  } catch (error) {
+    if (status) status.textContent = error.message;
+  }
+}
+
+async function archiveCatalogItem(itemId, state) {
+  const status = document.querySelector("#catalog-item-detail-status");
+  try {
+    await api(`/api/catalog/items/${itemId}`, {
+      method: "DELETE",
+      body: JSON.stringify({ reason: "manual archive" }),
+    });
+    await loadCatalogItems(state);
+  } catch (error) {
+    if (status) status.textContent = error.message;
+  }
+}
+
+async function archiveCatalogTerm(termId, state) {
+  const status = document.querySelector("#catalog-item-detail-status");
+  try {
+    await api(`/api/catalog/terms/${termId}`, {
+      method: "DELETE",
+      body: JSON.stringify({ reason: "manual archive" }),
+    });
+    await loadCatalogItemDetail(state, state.selectedId);
+  } catch (error) {
+    if (status) status.textContent = error.message;
+  }
+}
+
+async function archiveCatalogOffer(offerId, state) {
+  const status = document.querySelector("#catalog-item-detail-status");
+  try {
+    await api(`/api/catalog/offers/${offerId}`, {
+      method: "DELETE",
+      body: JSON.stringify({ reason: "manual archive" }),
+    });
+    await loadCatalogItemDetail(state, state.selectedId);
+  } catch (error) {
+    if (status) status.textContent = error.message;
+  }
+}
+
+async function rebuildCatalogSnapshot(state) {
+  const status = document.querySelector("#catalog-item-status");
+  try {
+    const payload = await api("/api/catalog/snapshots/rebuild", {
+      method: "POST",
+      body: JSON.stringify({ reason: "manual catalog editor" }),
+    });
+    if (status) status.textContent = `Снапшот v${payload.classifier_snapshot.version} собран`;
+    await loadCatalogItems(state);
+  } catch (error) {
+    if (status) status.textContent = error.message;
+  }
+}
+
+async function loadCatalogRawIngest(state) {
+  const target = document.querySelector("#catalog-raw-message-list");
+  if (target) target.innerHTML = `<div class="empty-state">Загружается сырой ингест</div>`;
+  const payload = await api("/api/catalog/raw-ingest?limit=50");
+  state.payload = payload;
+  state.items = payload.messages || [];
+  const selectedStillVisible = state.items.some((item) => item.id === state.selectedId);
+  state.selectedId = selectedStillVisible ? state.selectedId : state.items[0]?.id || null;
+  state.detail = null;
+  renderCatalogRawSummary(payload);
+  renderCatalogRawMessages(state);
+  if (state.selectedId) {
+    await loadCatalogRawMessageDetail(state, state.selectedId);
+  } else {
+    renderCatalogRawMessageDetail(state);
+  }
+}
+
+function renderCatalogRawSummary(payload) {
+  const target = document.querySelector("#catalog-raw-summary");
+  if (!target) return;
+  const summary = payload?.summary || {};
+  target.innerHTML = `<div class="ops-metric-row catalog-raw-metrics">
+    ${renderOpsMetric("Источники", summary.catalog_sources || 0, "каналы каталога")}
+    ${renderOpsMetric("Сообщения", summary.messages || 0, "получено из Telegram")}
+    ${renderOpsMetric("Raw sources", summary.mirrored_sources || 0, "зеркало источников")}
+    ${renderOpsMetric("Документы", summary.artifacts || 0, "скачанные файлы")}
+    ${renderOpsMetric("Фрагменты", summary.parsed_chunks || 0, "готово к AI")}
+    ${renderOpsMetric("Задачи", summary.pending_jobs || 0, "в очереди", summary.pending_jobs ? "is-warn" : "")}
+  </div>`;
+}
+
+function renderCatalogRawMessages(state) {
+  const target = document.querySelector("#catalog-raw-message-list");
+  if (!target) return;
+  if (!state.items.length) {
+    target.innerHTML = `<div class="empty-state">Сообщений каталога пока нет</div>`;
+    return;
+  }
+  target.innerHTML = state.items
+    .map((item) => {
+      const active = item.id === state.selectedId ? "is-active" : "";
+      const raw = item.raw_source || {};
+      const badges = [
+        item.has_media ? badge("медиа") : "",
+        raw.chunk_count ? badge(`фрагментов ${raw.chunk_count}`) : "",
+        raw.artifact_count ? badge(`документов ${raw.artifact_count}`) : "",
+        item.pending_jobs?.length ? badge(`задач ${item.pending_jobs.length}`, "is-warn") : "",
+      ]
+        .filter(Boolean)
+        .join("");
+      return `<button class="table-row catalog-raw-message ${active}" type="button" data-raw-message-id="${escapeHtml(item.id)}">
+        <div>
+          <strong>${escapeHtml(shortText(item.text_excerpt || "Сообщение без текста", 180))}</strong>
+          <p class="muted">${escapeHtml([raw.origin, raw.external_id || item.telegram_message_id, time(item.message_date)].filter(Boolean).join(" / "))}</p>
+          <div class="queue-meta">${badges}</div>
+        </div>
+        <span>${escapeHtml(item.telegram_message_id)}</span>
+      </button>`;
+    })
+    .join("");
+  target.querySelectorAll("[data-raw-message-id]").forEach((button) => {
+    button.addEventListener("click", () => {
+      state.selectedId = button.dataset.rawMessageId;
+      state.detail = null;
+      renderCatalogRawMessages(state);
+      loadCatalogRawMessageDetail(state, state.selectedId);
+    });
+  });
+}
+
+async function loadCatalogRawMessageDetail(state, messageId) {
+  const target = document.querySelector("#catalog-raw-message-detail");
+  if (target) target.innerHTML = `<div class="empty-state">Загружается сообщение</div>`;
+  const payload = await api(`/api/catalog/raw-ingest/messages/${messageId}`);
+  if (state.selectedId !== messageId) return;
+  state.detail = payload;
+  renderCatalogRawMessageDetail(state);
+}
+
+function renderCatalogRawMessageDetail(state) {
+  const target = document.querySelector("#catalog-raw-message-detail");
+  if (!target) return;
+  const detail = state.detail;
+  if (!detail?.message) {
+    target.innerHTML = `<div class="empty-state">Выберите сообщение</div>`;
+    return;
+  }
+  const message = detail.message;
+  const rawSource = detail.raw_source || {};
+  const artifacts = detail.artifacts || [];
+  const chunks = detail.chunks || [];
+  const jobs = detail.jobs || [];
+  target.innerHTML = `<div class="catalog-raw-detail">
+    <header class="detail-header">
+      <div>
+        <h3>Сообщение ${escapeHtml(message.telegram_message_id)}</h3>
+        <p class="muted">${escapeHtml(time(message.message_date))}</p>
+      </div>
+      <div class="badges">
+        ${message.has_media ? badge("медиа") : ""}
+        ${badge(label(message.classification_status || "unknown"))}
+      </div>
+    </header>
+    <div class="source-action-bar">
+      ${message.message_url ? `<a href="${escapeHtml(message.message_url)}" target="_blank" rel="noreferrer">Открыть в Telegram</a>` : ""}
+      ${rawSource.id ? badge(`source ${rawSource.external_id || rawSource.id}`) : ""}
+    </div>
+    <section>
+      <h4>Raw text</h4>
+      <pre class="json-block catalog-raw-text">${escapeHtml(rawSource.raw_text || message.text_excerpt || "")}</pre>
+    </section>
+    <section>
+      <h4>Фрагменты</h4>
+      ${renderCatalogRawChunks(chunks)}
+    </section>
+    <section>
+      <h4>Документы</h4>
+      ${renderCatalogRawArtifacts(artifacts)}
+    </section>
+    <section>
+      <h4>Задачи</h4>
+      ${renderCatalogRawJobs(jobs)}
+    </section>
+  </div>`;
+}
+
+function renderCatalogRawChunks(chunks) {
+  if (!chunks.length) return `<div class="empty-state">Фрагментов нет</div>`;
+  return `<div class="table-list">${chunks
+    .map(
+      (chunk) => `<div class="table-row">
+        <div>
+          <strong>Фрагмент ${escapeHtml(chunk.chunk_index)}</strong>
+          <p class="muted">${escapeHtml([chunk.parser_name, chunk.parser_version, `токенов ${chunk.token_estimate}`].filter(Boolean).join(" / "))}</p>
+          <pre class="json-block catalog-raw-chunk">${escapeHtml(chunk.text || "")}</pre>
+        </div>
+      </div>`
+    )
+    .join("")}</div>`;
+}
+
+function renderCatalogRawArtifacts(artifacts) {
+  if (!artifacts.length) return `<div class="empty-state">Документов нет</div>`;
+  return `<div class="table-list">${artifacts
+    .map(
+      (artifact) => `<div class="table-row">
+        <div>
+          <strong>${escapeHtml(artifact.file_name || artifact.artifact_type)}</strong>
+          <p class="muted">${escapeHtml([artifact.mime_type, formatBytes(artifact.file_size), artifact.local_path].filter(Boolean).join(" / "))}</p>
+        </div>
+        <span>${badge(label(artifact.download_status || "unknown"), operationsStatusClass(artifact.download_status))}</span>
+      </div>`
+    )
+    .join("")}</div>`;
+}
+
+function renderCatalogRawJobs(jobs) {
+  if (!jobs.length) return `<div class="empty-state">Задач нет</div>`;
+  return `<div class="table-list">${jobs
+    .map(
+      (job) => `<div class="table-row">
+        <div>
+          <strong>${escapeHtml(job.job_type)}</strong>
+          <p class="muted">${escapeHtml(job.last_error || time(job.run_after_at) || job.id)}</p>
+        </div>
+        <span>${badge(label(job.status || "unknown"), operationsStatusClass(job.status))}</span>
+      </div>`
+    )
+    .join("")}</div>`;
 }
 
 async function loadCatalogCandidates(state) {
@@ -1074,14 +1854,17 @@ function renderCatalogCandidateDetail(state) {
       <form id="catalog-edit-form" class="catalog-edit-form">
         <label>Название
           <input id="catalog-name-input" name="canonical_name" value="${escapeHtml(item.canonical_name)}">
+          ${catalogHelp("Название кандидата после AI-разбора. Исправьте его до канонического вида перед подтверждением.")}
         </label>
         <label>JSON-данные
           <textarea id="catalog-value-json" name="normalized_value" rows="12">${escapeHtml(
             JSON.stringify(value, null, 2)
           )}</textarea>
+          ${catalogHelp("JSON-данные должны оставаться валидным JSON. Здесь лежит нормализованное значение кандидата: тип, категория, термины, описание и параметры.")}
         </label>
         <label>Причина
           <input name="reason" placeholder="Необязательная заметка">
+          ${catalogHelp("Заметка попадет в аудит и поможет понять, почему кандидат был изменен, подтвержден или отклонен.")}
         </label>
         <div class="source-action-bar">
           <button type="submit">Сохранить изменения</button>
@@ -1192,7 +1975,7 @@ async function submitManualInput(event, state) {
       body: JSON.stringify(body),
     });
     form.reset();
-    form.querySelector('input[name="auto_extract"]').checked = true;
+    form.querySelector('input[name="auto_extract"]').checked = false;
     if (status) {
       const queued = payload.queued_jobs?.length || 0;
       const snapshot = payload.classifier_snapshot ? `снапшот v${payload.classifier_snapshot.version}` : "";
@@ -1416,6 +2199,289 @@ function operationsJsonSection(title, value) {
     <h3>${escapeHtml(title)}</h3>
     <pre class="json-block">${escapeHtml(JSON.stringify(value, null, 2))}</pre>
   </section>`;
+}
+
+function initArtifacts() {
+  const state = { items: [], selectedId: null };
+  document.querySelector("#artifacts-refresh")?.addEventListener("click", () =>
+    loadArtifacts(state)
+  );
+  document.querySelector("#artifact-filters")?.addEventListener("change", () =>
+    loadArtifacts(state, { resetSelection: true })
+  );
+  document.querySelector("#artifact-filters")?.addEventListener("input", () =>
+    loadArtifacts(state, { resetSelection: true })
+  );
+  loadArtifacts(state);
+}
+
+async function loadArtifacts(state, options = {}) {
+  const status = document.querySelector("#artifact-status");
+  if (status) status.textContent = "";
+  try {
+    const params = artifactFilterParams();
+    const payload = await api(`/api/artifacts${params ? `?${params}` : ""}`);
+    state.items = payload.items || [];
+    if (options.resetSelection) state.selectedId = null;
+    const selectedStillVisible = state.items.some((item) => item.id === state.selectedId);
+    state.selectedId = selectedStillVisible ? state.selectedId : state.items[0]?.id || null;
+    renderArtifactSummary(payload.summary || {});
+    populateArtifactFilters(payload);
+    renderArtifactList(state);
+    if (state.selectedId) {
+      await loadArtifactDetail(state.selectedId);
+    } else {
+      const detail = document.querySelector("#artifact-detail");
+      if (detail) detail.innerHTML = `<div class="empty-state">Артефактов нет</div>`;
+    }
+  } catch (error) {
+    if (status) status.textContent = error.message;
+  }
+}
+
+function artifactFilterParams() {
+  const form = document.querySelector("#artifact-filters");
+  if (!form) return "";
+  const params = new URLSearchParams({ limit: "1000" });
+  const data = new FormData(form);
+  for (const [key, value] of data.entries()) {
+    if (value) params.set(key, value);
+  }
+  return params.toString();
+}
+
+function populateArtifactFilters(payload) {
+  const form = document.querySelector("#artifact-filters");
+  if (!form) return;
+  fillSelectOptions(form.querySelector('[name="stage"]'), payload.stages || [], "Все этапы");
+  fillSelectOptions(form.querySelector('[name="kind"]'), payload.kinds || [], "Все типы");
+}
+
+function fillSelectOptions(select, values, emptyLabel) {
+  if (!select) return;
+  const selected = select.value;
+  const options = [`<option value="">${escapeHtml(emptyLabel)}</option>`]
+    .concat(
+      values.map(
+        (value) => `<option value="${escapeHtml(value)}">${escapeHtml(label(value, value))}</option>`
+      )
+    )
+    .join("");
+  select.innerHTML = options;
+  if ([...select.options].some((option) => option.value === selected)) select.value = selected;
+}
+
+function renderArtifactSummary(summary) {
+  const target = document.querySelector("#artifact-summary");
+  if (!target) return;
+  target.innerHTML = `<div class="ops-metric-row">
+    ${renderOpsMetric("Запуски", summary.run_count || 0, "raw export runs")}
+    ${renderOpsMetric("Артефакты", summary.artifact_count || 0, "все найденные пути")}
+    ${renderOpsMetric("На диске", summary.existing_count || 0, "файлы и папки")}
+    ${renderOpsMetric(
+      "Нет файла",
+      summary.missing_count || 0,
+      "путь есть в metadata",
+      summary.missing_count ? "is-danger" : ""
+    )}
+    ${renderOpsMetric(
+      "Размер",
+      formatBytes(summary.total_file_size_bytes || 0),
+      "без рекурсивного подсчета папок"
+    )}
+  </div>`;
+}
+
+function renderArtifactList(state) {
+  const target = document.querySelector("#artifact-list");
+  if (!target) return;
+  if (!state.items.length) {
+    target.innerHTML = `<div class="empty-state">Артефактов нет</div>`;
+    return;
+  }
+  target.innerHTML = state.items
+    .map((artifact) => {
+      const active = artifact.id === state.selectedId ? "is-active" : "";
+      const existsClass = artifact.exists ? "" : "is-danger";
+      return `<button class="resource-row artifact-row ${active}" type="button" data-id="${artifact.id}">
+        <div class="resource-kind">
+          <md-icon aria-hidden="true">${artifactIcon(artifact.kind)}</md-icon>
+          <span>${escapeHtml(label(artifact.kind, artifact.kind))}</span>
+        </div>
+        <div class="resource-primary">
+          <strong>${escapeHtml(artifact.key)}</strong>
+          <p class="muted">${escapeHtml(artifact.path)}</p>
+        </div>
+        <div>${badge(label(artifact.stage, artifact.stage))}</div>
+        <div class="resource-actions">
+          ${badge(artifact.exists ? "на диске" : "нет файла", existsClass)}
+          ${badge(label(artifact.metadata_json?.source, artifact.metadata_json?.source || "source"))}
+          ${badge(formatBytes(artifact.size_bytes || 0))}
+        </div>
+      </button>`;
+    })
+    .join("");
+  target.querySelectorAll(".artifact-row").forEach((button) => {
+    button.addEventListener("click", async () => {
+      state.selectedId = button.dataset.id;
+      renderArtifactList(state);
+      await loadArtifactDetail(state.selectedId);
+    });
+  });
+}
+
+async function loadArtifactDetail(artifactId) {
+  const payload = await api(`/api/artifacts/${encodeURIComponent(artifactId)}`);
+  renderArtifactDetail(payload);
+}
+
+function renderArtifactDetail(payload) {
+  const target = document.querySelector("#artifact-detail");
+  if (!target) return;
+  const artifact = payload.artifact || {};
+  const preview = payload.preview || {};
+  target.innerHTML = `<div class="detail-grid">
+    <header class="detail-header">
+      <div>
+        <h2>${escapeHtml(artifact.key || "Артефакт")}</h2>
+        <p class="muted">${escapeHtml(artifact.path || "")}</p>
+      </div>
+      <div class="badges">
+        ${badge(label(artifact.kind || "file"))}
+        ${badge(label(artifact.stage || "unknown"))}
+        ${badge(artifact.exists ? "на диске" : "нет файла", artifact.exists ? "" : "is-danger")}
+      </div>
+    </header>
+    <section class="detail-section">
+      <h3>Источник</h3>
+      <div class="detail-meta">
+        ${badge(`run ${artifact.raw_export_run_id || "н/д"}`)}
+        ${badge(artifact.title || artifact.username || artifact.source_ref || "источник")}
+        ${badge(`создан ${time(artifact.run_created_at) || "н/д"}`)}
+        ${badge(`изменен ${time(artifact.modified_at) || "н/д"}`)}
+        ${badge(label(artifact.metadata_json?.source, artifact.metadata_json?.source || "source"))}
+        ${badge(formatBytes(artifact.size_bytes || 0))}
+      </div>
+    </section>
+    ${operationsJsonSection("Metadata", artifact.metadata_json || {})}
+    ${renderArtifactPreview(preview)}
+  </div>`;
+}
+
+function renderArtifactPreview(preview) {
+  if (!preview.available) {
+    return `<section class="detail-section">
+      <h3>Содержимое</h3>
+      <div class="empty-state">${escapeHtml(preview.reason || "Предпросмотр недоступен")}</div>
+    </section>`;
+  }
+  if (preview.kind === "parquet") {
+    return `<section class="detail-section">
+      <h3>Parquet</h3>
+      <div class="detail-meta">
+        ${badge(`${preview.row_count || 0} строк`)}
+        ${badge(`${preview.row_group_count || 0} row groups`)}
+        ${badge(`${(preview.columns || []).length} колонок`)}
+      </div>
+      ${renderArtifactSchema(preview.columns || [])}
+      ${renderArtifactRows(preview.rows || [], (preview.columns || []).map((column) => column.name))}
+      ${preview.truncated ? '<p class="muted">Показаны первые строки файла.</p>' : ""}
+    </section>`;
+  }
+  if (preview.kind === "sqlite") {
+    return `<section class="detail-section">
+      <h3>SQLite</h3>
+      ${renderArtifactSqliteTables(preview.tables || [])}
+      ${renderArtifactRows(preview.sample?.rows || [], preview.sample?.columns || [], preview.sample?.table)}
+      ${preview.truncated ? '<p class="muted">Показаны первые таблицы базы.</p>' : ""}
+    </section>`;
+  }
+  if (preview.kind === "jsonl" && (preview.records || []).length) {
+    return `<section class="detail-section">
+      <h3>JSONL</h3>
+      <div class="detail-meta">${badge(`${preview.records_previewed || 0} записей в предпросмотре`)}</div>
+      ${renderArtifactRows(preview.records || [], Object.keys(preview.records?.[0] || {}), "Первые записи")}
+      <pre class="json-block artifact-preview">${escapeHtml(preview.text || "")}</pre>
+      ${preview.truncated ? '<p class="muted">Показано начало файла, полный файл больше лимита предпросмотра.</p>' : ""}
+    </section>`;
+  }
+  return `<section class="detail-section">
+    <h3>Содержимое</h3>
+    <pre class="json-block artifact-preview">${escapeHtml(preview.text || "")}</pre>
+    ${preview.truncated ? '<p class="muted">Показано начало файла, полный файл больше лимита предпросмотра.</p>' : ""}
+  </section>`;
+}
+
+function renderArtifactSchema(columns) {
+  if (!columns.length) return `<div class="empty-state">Schema не найдена</div>`;
+  return `<div class="artifact-table-wrap">
+    <table class="artifact-table">
+      <thead><tr><th>Колонка</th><th>Тип</th></tr></thead>
+      <tbody>${columns
+        .map(
+          (column) => `<tr>
+            <td>${escapeHtml(column.name)}</td>
+            <td>${escapeHtml(column.type)}</td>
+          </tr>`
+        )
+        .join("")}</tbody>
+    </table>
+  </div>`;
+}
+
+function renderArtifactSqliteTables(tables) {
+  if (!tables.length) return `<div class="empty-state">Таблицы не найдены</div>`;
+  return `<div class="artifact-table-wrap">
+    <table class="artifact-table">
+      <thead><tr><th>Таблица</th><th>Строк</th></tr></thead>
+      <tbody>${tables
+        .map(
+          (table) => `<tr>
+            <td>${escapeHtml(table.name)}</td>
+            <td>${escapeHtml(text(table.row_count, "н/д"))}</td>
+          </tr>`
+        )
+        .join("")}</tbody>
+    </table>
+  </div>`;
+}
+
+function renderArtifactRows(rows, columns, title = "Первые строки") {
+  if (!rows.length) return `<div class="empty-state">Строки для предпросмотра не найдены</div>`;
+  const visibleColumns = columns.filter(Boolean).slice(0, 12);
+  const resolvedColumns = visibleColumns.length ? visibleColumns : Object.keys(rows[0] || {}).slice(0, 12);
+  return `<div>
+    <h4>${escapeHtml(title)}</h4>
+    <div class="artifact-table-wrap">
+      <table class="artifact-table">
+        <thead><tr>${resolvedColumns.map((column) => `<th>${escapeHtml(column)}</th>`).join("")}</tr></thead>
+        <tbody>${rows
+          .map(
+            (row) => `<tr>${resolvedColumns
+              .map((column) => `<td>${escapeHtml(formatArtifactCell(row[column]))}</td>`)
+              .join("")}</tr>`
+          )
+          .join("")}</tbody>
+      </table>
+    </div>
+  </div>`;
+}
+
+function formatArtifactCell(value) {
+  if (value === null || value === undefined) return "";
+  if (typeof value === "object") return JSON.stringify(value);
+  return text(value);
+}
+
+function artifactIcon(kind) {
+  const icons = {
+    directory: "folder",
+    json: "description",
+    jsonl: "article",
+    parquet: "table_chart",
+    sqlite: "database",
+  };
+  return icons[kind] || "storage";
 }
 
 function renderOperationRun(run) {

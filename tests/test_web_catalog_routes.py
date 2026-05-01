@@ -8,6 +8,8 @@ from pur_leads.models.audit import audit_log_table
 from pur_leads.models.catalog import (
     catalog_candidates_table,
     catalog_items_table,
+    catalog_offers_table,
+    catalog_terms_table,
     classifier_examples_table,
     classifier_versions_table,
     manual_inputs_table,
@@ -16,8 +18,11 @@ from pur_leads.models.catalog import (
 )
 from pur_leads.models.evaluation import evaluation_cases_table, evaluation_datasets_table
 from pur_leads.models.scheduler import scheduler_jobs_table
+from pur_leads.models.telegram_sources import source_messages_table
 from pur_leads.services.catalog_candidates import CatalogCandidateService
 from pur_leads.services.catalog_sources import CatalogSourceService
+from pur_leads.services.scheduler import SchedulerService
+from pur_leads.services.telegram_sources import TelegramSourceService
 from pur_leads.services.web_auth import WebAuthService
 from pur_leads.web.app import create_app
 
@@ -55,6 +60,76 @@ def test_catalog_candidate_routes_list_and_approve_item(tmp_path):
     assert candidate["status"] == "approved"
     assert item["canonical_name"] == "Видеонаблюдение"
     assert "catalog_candidate.review" in audit_actions
+
+
+def test_manual_catalog_item_routes_create_edit_archive_and_rebuild_snapshot(tmp_path):
+    fixture = _setup_catalog_app(tmp_path)
+    client = fixture["client"]
+
+    denied_response = client.get("/api/catalog/items")
+    _login(client)
+    create_response = client.post(
+        "/api/catalog/items",
+        json={
+            "name": "Домофоны Bas-IP",
+            "item_type": "product",
+            "category_slug": "intercom",
+            "description": "Черные минималистичные домофоны",
+            "terms": [
+                {"term": "bas-ip", "term_type": "alias"},
+                {"term": "нужен черный домофон", "term_type": "lead_phrase"},
+            ],
+            "offers": [{"title": "Подбор домофона", "price_text": "по запросу"}],
+            "evidence": {
+                "quote": "Нужен минималистичный черный домофон",
+                "source_text": "Нужен минималистичный черный домофон",
+                "source_url": "https://t.me/chat_mila_kolpakova/716254",
+            },
+        },
+    )
+    item_id = create_response.json()["item"]["id"]
+    term_id = create_response.json()["terms"][0]["id"]
+    offer_id = create_response.json()["offers"][0]["id"]
+    list_response = client.get("/api/catalog/items")
+    detail_response = client.get(f"/api/catalog/items/{item_id}")
+    edit_response = client.patch(
+        f"/api/catalog/items/{item_id}",
+        json={"name": "Домофоны Bas-IP для проектов", "description": "Обновлено вручную"},
+    )
+    archive_term_response = client.delete(f"/api/catalog/terms/{term_id}")
+    archive_offer_response = client.delete(f"/api/catalog/offers/{offer_id}")
+    snapshot_response = client.post(
+        "/api/catalog/snapshots/rebuild",
+        json={"reason": "manual baseline"},
+    )
+
+    assert denied_response.status_code == 401
+    assert create_response.status_code == 200
+    assert create_response.json()["item"]["status"] == "approved"
+    assert list_response.status_code == 200
+    assert list_response.json()["items"][0]["name"] == "Домофоны Bas-IP"
+    assert detail_response.status_code == 200
+    assert detail_response.json()["terms"][0]["term"] == "bas-ip"
+    assert detail_response.json()["offers"][0]["title"] == "Подбор домофона"
+    assert detail_response.json()["evidence"][0]["quote"] == "Нужен минималистичный черный домофон"
+    assert edit_response.status_code == 200
+    assert edit_response.json()["item"]["name"] == "Домофоны Bas-IP для проектов"
+    assert archive_term_response.status_code == 200
+    assert archive_term_response.json()["term"]["status"] == "deprecated"
+    assert archive_offer_response.status_code == 200
+    assert archive_offer_response.json()["offer"]["status"] == "expired"
+    assert snapshot_response.status_code == 200
+    assert snapshot_response.json()["classifier_snapshot"]["version"] == 1
+
+    with fixture["session_factory"]() as session:
+        assert session.execute(select(catalog_items_table)).mappings().one()["status"] == "approved"
+        assert session.execute(select(catalog_terms_table)).mappings().all()[0]["status"] == (
+            "deprecated"
+        )
+        assert session.execute(select(catalog_offers_table)).mappings().one()["status"] == (
+            "expired"
+        )
+        assert session.execute(select(classifier_versions_table)).mappings().one()["version"] == 1
 
 
 def test_catalog_candidate_routes_reject_candidate_without_promotion(tmp_path):
@@ -140,7 +215,7 @@ def test_catalog_candidate_routes_edit_candidate_before_approval(tmp_path):
     assert "catalog_candidate.review" in audit_actions
 
 
-def test_manual_catalog_input_creates_source_chunk_and_extraction_job(tmp_path):
+def test_manual_catalog_input_saves_raw_source_without_automatic_extraction_job(tmp_path):
     fixture = _setup_catalog_app(tmp_path)
     client = fixture["client"]
 
@@ -164,21 +239,63 @@ def test_manual_catalog_input_creates_source_chunk_and_extraction_job(tmp_path):
     payload = response.json()
     assert payload["manual_input"]["input_type"] == "catalog_note"
     assert payload["source"]["source_type"] == "manual_text"
-    assert len(payload["queued_jobs"]) == 1
+    assert payload["queued_jobs"] == []
     with fixture["session_factory"]() as session:
         manual_input = session.execute(select(manual_inputs_table)).mappings().one()
         source = session.execute(select(sources_table)).mappings().one()
-        chunk = session.execute(select(parsed_chunks_table)).mappings().one()
-        job = session.execute(select(scheduler_jobs_table)).mappings().one()
+        chunks = session.execute(select(parsed_chunks_table)).mappings().all()
+        jobs = session.execute(select(scheduler_jobs_table)).mappings().all()
     assert manual_input["processing_status"] == "processed"
     assert source["raw_text"] == "Dahua Hero A1 - поворотная Wi-Fi камера для дома"
-    assert chunk["source_id"] == source["id"]
-    assert chunk["text"] == "Dahua Hero A1 - поворотная Wi-Fi камера для дома"
-    assert job["job_type"] == "extract_catalog_facts"
-    assert job["priority"] == "low"
-    assert job["payload_json"]["source_id"] == source["id"]
-    assert job["payload_json"]["chunk_id"] == chunk["id"]
-    assert job["payload_json"]["manual_input_id"] == manual_input["id"]
+    assert chunks == []
+    assert jobs == []
+
+
+def test_catalog_raw_ingest_routes_show_received_messages_artifacts_and_chunks(tmp_path):
+    fixture = _setup_catalog_app(tmp_path)
+    client = fixture["client"]
+    source_message_id = _create_raw_catalog_ingest_sample(fixture["session_factory"])
+
+    denied_response = client.get("/api/catalog/raw-ingest")
+    _login(client)
+    list_response = client.get("/api/catalog/raw-ingest")
+    detail_response = client.get(f"/api/catalog/raw-ingest/messages/{source_message_id}")
+
+    assert denied_response.status_code == 401
+    assert list_response.status_code == 200
+    payload = list_response.json()
+    assert payload["summary"] == {
+        "catalog_sources": 1,
+        "messages": 1,
+        "mirrored_sources": 1,
+        "artifacts": 1,
+        "parsed_chunks": 2,
+        "pending_jobs": 1,
+    }
+    assert payload["sources"][0]["message_count"] == 1
+    assert payload["sources"][0]["raw_source_count"] == 1
+    assert payload["sources"][0]["chunk_count"] == 2
+    assert payload["sources"][0]["artifact_count"] == 1
+    assert payload["sources"][0]["pending_job_count"] == 1
+    assert payload["messages"][0]["id"] == source_message_id
+    assert payload["messages"][0]["telegram_message_id"] == 41
+    assert payload["messages"][0]["text_excerpt"] == "Dahua Hero A1 camera PDF catalog"
+    assert payload["messages"][0]["raw_source"]["origin"] == "telegram:purmaster"
+    assert payload["messages"][0]["raw_source"]["chunk_count"] == 2
+    assert payload["messages"][0]["raw_source"]["artifact_count"] == 1
+    assert payload["messages"][0]["pending_jobs"][0]["job_type"] == "download_artifact"
+
+    assert detail_response.status_code == 200
+    detail = detail_response.json()
+    assert detail["message"]["id"] == source_message_id
+    assert detail["message"]["message_url"] == "https://t.me/purmaster/41"
+    assert detail["monitored_source"]["input_ref"] == "https://t.me/purmaster"
+    assert detail["raw_source"]["raw_text"] == "Dahua Hero A1 camera PDF catalog"
+    assert detail["artifacts"][0]["file_name"] == "catalog.pdf"
+    assert [chunk["chunk_index"] for chunk in detail["chunks"]] == [0, 1]
+    assert detail["chunks"][0]["text"] == "Dahua Hero A1 camera"
+    assert detail["jobs"][0]["job_type"] == "download_artifact"
+    assert detail["jobs"][0]["status"] == "queued"
 
 
 def test_manual_lead_example_creates_classifier_example_snapshot_and_evaluation_case(tmp_path):
@@ -321,6 +438,97 @@ def _create_item_candidate(session_factory) -> str:
             created_by="system",
         )
         return candidate.id
+
+
+def _create_raw_catalog_ingest_sample(session_factory) -> str:
+    with session_factory() as session:
+        telegram_source = TelegramSourceService(session).create_draft(
+            "https://t.me/purmaster",
+            purpose="catalog_ingestion",
+            added_by="admin",
+        )
+        telegram_source = TelegramSourceService(session).activate(
+            telegram_source.id,
+            actor="admin",
+        )
+        raw_source = CatalogSourceService(session).upsert_source(
+            source_type="telegram_message",
+            origin="telegram:purmaster",
+            external_id="41",
+            raw_text="Dahua Hero A1 camera PDF catalog",
+            url="https://t.me/purmaster/41",
+            title="purmaster #41",
+            metadata_json={
+                "monitored_source_id": telegram_source.id,
+                "telegram_message_id": 41,
+                "source_purpose": "catalog_ingestion",
+            },
+        )
+        CatalogSourceService(session).replace_parsed_chunks(
+            raw_source.id,
+            chunks=["Dahua Hero A1 camera", "PDF catalog"],
+            parser_name="telegram-message-text",
+            parser_version="1",
+        )
+        CatalogSourceService(session).record_artifact(
+            raw_source.id,
+            artifact_type="document",
+            file_name="catalog.pdf",
+            mime_type="application/pdf",
+            file_size=1234,
+            local_path="/tmp/catalog.pdf",
+            download_status="downloaded",
+        )
+        source_message_id = "source-message-41"
+        session.execute(
+            source_messages_table.insert().values(
+                id=source_message_id,
+                monitored_source_id=telegram_source.id,
+                raw_source_id=raw_source.id,
+                telegram_message_id=41,
+                sender_id="oleg",
+                message_date=raw_source.published_at or raw_source.created_at,
+                text="Dahua Hero A1 camera",
+                caption="PDF catalog",
+                normalized_text="Dahua Hero A1 camera PDF catalog",
+                has_media=True,
+                media_metadata_json={
+                    "type": "MessageMediaDocument",
+                    "document": {
+                        "file_name": "catalog.pdf",
+                        "mime_type": "application/pdf",
+                        "file_size": 1234,
+                        "downloadable": True,
+                    },
+                },
+                reply_to_message_id=None,
+                thread_id=None,
+                forward_metadata_json=None,
+                raw_metadata_json={},
+                fetched_at=raw_source.created_at,
+                classification_status="unclassified",
+                archive_pointer_id=None,
+                is_archived_stub=False,
+                text_archived=False,
+                caption_archived=False,
+                metadata_archived=False,
+                created_at=raw_source.created_at,
+                updated_at=raw_source.created_at,
+            )
+        )
+        SchedulerService(session).enqueue(
+            job_type="download_artifact",
+            scope_type="telegram_source",
+            scope_id=telegram_source.id,
+            monitored_source_id=telegram_source.id,
+            source_message_id=source_message_id,
+            idempotency_key=f"telegram-document:{source_message_id}",
+            payload_json={
+                "source_id": raw_source.id,
+                "telegram_message_id": 41,
+            },
+        )
+        return source_message_id
 
 
 def _setup_catalog_app(tmp_path):

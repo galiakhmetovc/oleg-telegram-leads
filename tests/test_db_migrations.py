@@ -49,6 +49,12 @@ def test_foundation_migration_creates_core_tables(tmp_path):
         "ai_runs",
         "ai_run_outputs",
         "ai_model_concurrency_leases",
+        "telegram_raw_export_runs",
+        "canonical_entities",
+        "canonical_entity_aliases",
+        "entity_enrichment_runs",
+        "entity_enrichment_results",
+        "canonical_merge_candidates",
     }.issubset(tables)
 
 
@@ -65,10 +71,11 @@ def test_catalog_quality_review_migration_handles_partial_table_from_concurrent_
 
     with engine.connect() as connection:
         assert connection.execute(text("select version_num from alembic_version")).scalar_one() == (
-            "0022_catalog_quality_reviews"
+            "0026_entity_enrichment_registry"
         )
         scheduler_sql = connection.execute(
             text("select sql from sqlite_master where type='table' and name='scheduler_jobs'")
         ).scalar_one()
     assert "catalog_candidate_validation" in scheduler_sql
+    assert "export_telegram_raw" in scheduler_sql
     assert "_alembic_tmp_scheduler_jobs" not in set(inspect(engine).get_table_names())

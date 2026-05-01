@@ -1,7 +1,12 @@
 from datetime import UTC, datetime
+import json
+from pathlib import Path
 from typing import Any
+import zipfile
 
 import pytest
+import pyarrow as pa
+import pyarrow.parquet as pq
 from sqlalchemy import func
 from sqlalchemy import insert
 from sqlalchemy import inspect
@@ -17,7 +22,11 @@ from pur_leads.db.migrations import upgrade_database
 from pur_leads.db.session import create_session_factory
 from pur_leads.integrations.ai.chat import AiChatCompletion
 from pur_leads.integrations.ai.zai_client import AiProviderError
-from pur_leads.integrations.telegram.types import ResolvedTelegramSource, SourceAccessResult
+from pur_leads.integrations.telegram.types import (
+    ResolvedTelegramSource,
+    SourceAccessResult,
+    TelegramMessage,
+)
 from pur_leads.models.audit import operational_events_table
 from pur_leads.models.catalog import (
     catalog_candidates_table,
@@ -34,18 +43,24 @@ from pur_leads.models.ai import (
     ai_providers_table,
 )
 from pur_leads.models.evaluation import decision_records_table
+from pur_leads.models.entity_enrichment import canonical_entities_table
 from pur_leads.models.leads import lead_clusters_table, lead_events_table
 from pur_leads.models.telegram_sources import (
     monitored_sources_table,
     source_access_checks_table,
     source_messages_table,
+    telegram_raw_export_runs_table,
 )
 from pur_leads.services.catalog_sources import CatalogSourceService
 from pur_leads.services.ai_registry import AiRegistryService
 from pur_leads.services.scheduler import SchedulerService
 from pur_leads.services.secrets import SecretRefService
 from pur_leads.services.settings import SettingsService
+from pur_leads.services.telegram_chroma_index import TelegramChromaIndexService
+from pur_leads.services.telegram_fts_index import TelegramFtsIndexService
+from pur_leads.services.telegram_raw_export import TelegramRawExportService
 from pur_leads.services.telegram_sources import TelegramSourceService
+from pur_leads.services.telegram_text_normalization import TelegramTextNormalizationService
 from pur_leads.services.userbots import UserbotAccountService
 from pur_leads.workers.runtime import ParsedArtifact
 
@@ -69,6 +84,871 @@ def test_cli_settings_set_and_list(tmp_path, capsys):
 
     output = capsys.readouterr().out
     assert "telegram_worker_count=2" in output
+
+
+def test_cli_import_telegram_desktop_archive_writes_raw_export(tmp_path, capsys):
+    db_path = tmp_path / "cli.db"
+    archive_path = _write_cli_desktop_archive(tmp_path)
+
+    main(
+        [
+            "--database-path",
+            str(db_path),
+            "import",
+            "telegram-desktop-archive",
+            "--archive-path",
+            str(archive_path),
+            "--input-ref",
+            "https://t.me/chat_mila_kolpakova",
+            "--purpose",
+            "lead_monitoring",
+            "--raw-root",
+            str(tmp_path / "raw"),
+        ]
+    )
+
+    output = json.loads(capsys.readouterr().out)
+    assert output["message_count"] == 1
+    assert output["created_source_messages"] == 1
+    assert Path(output["messages_parquet_path"]).exists()
+
+    engine = create_sqlite_engine(db_path)
+    session_factory = create_session_factory(engine)
+    with session_factory() as session:
+        assert session.execute(select(func.count()).select_from(source_messages_table)).scalar_one() == 1
+        run = session.execute(select(telegram_raw_export_runs_table)).mappings().one()
+        assert run["export_format"] == "telegram_desktop_json_v1"
+
+
+def test_cli_analyze_telegram_eda_writes_report(tmp_path, capsys):
+    db_path = tmp_path / "cli.db"
+    engine = create_sqlite_engine(db_path)
+    upgrade_database(engine)
+    session_factory = create_session_factory(engine)
+    with session_factory() as session:
+        source = TelegramSourceService(session).create_draft(
+            "https://t.me/purmaster",
+            added_by="admin",
+            purpose="catalog_ingestion",
+            start_mode="from_beginning",
+        )
+        export = TelegramRawExportService(session, raw_root=tmp_path / "raw").write_export(
+            source=source,
+            resolved_source=ResolvedTelegramSource(
+                input_ref="https://t.me/purmaster",
+                source_kind="telegram_channel",
+                telegram_id="-10042",
+                username="purmaster",
+                title="ПУР",
+            ),
+            messages=[
+                TelegramMessage(
+                    monitored_source_ref="https://t.me/purmaster",
+                    telegram_message_id=1,
+                    message_date=datetime(2026, 1, 31, 10, 15, 0, tzinfo=UTC),
+                    sender_id="channel-1",
+                    sender_display="ПУР",
+                    text="Каталог",
+                    caption=None,
+                    has_media=False,
+                    media_metadata_json=None,
+                    reply_to_message_id=None,
+                    thread_id=None,
+                    forward_metadata_json=None,
+                    raw_metadata_json={},
+                ),
+            ],
+        )
+
+    main(
+        [
+            "--database-path",
+            str(db_path),
+            "analyze",
+            "telegram-eda",
+            "--raw-export-run-id",
+            export.run_id,
+        ]
+    )
+
+    output = json.loads(capsys.readouterr().out)
+    assert output["raw_export_run_id"] == export.run_id
+    assert output["metrics"]["total_messages"] == 1
+    assert output["recommended_decision"] == "go_with_warnings"
+    assert Path(output["report_path"]).exists()
+
+
+def test_cli_analyze_telegram_texts_writes_normalized_parquet(tmp_path, capsys):
+    db_path = tmp_path / "cli.db"
+    engine = create_sqlite_engine(db_path)
+    upgrade_database(engine)
+    session_factory = create_session_factory(engine)
+    with session_factory() as session:
+        source = TelegramSourceService(session).create_draft(
+            "https://t.me/purmaster",
+            added_by="admin",
+            purpose="catalog_ingestion",
+            start_mode="from_beginning",
+        )
+        export = TelegramRawExportService(session, raw_root=tmp_path / "raw").write_export(
+            source=source,
+            resolved_source=ResolvedTelegramSource(
+                input_ref="https://t.me/purmaster",
+                source_kind="telegram_channel",
+                telegram_id="-10042",
+                username="purmaster",
+                title="ПУР",
+            ),
+            messages=[
+                TelegramMessage(
+                    monitored_source_ref="https://t.me/purmaster",
+                    telegram_message_id=1,
+                    message_date=datetime(2026, 1, 31, 10, 15, 0, tzinfo=UTC),
+                    sender_id="channel-1",
+                    sender_display="ПУР",
+                    text="Умный дом",
+                    caption=None,
+                    has_media=False,
+                    media_metadata_json=None,
+                    reply_to_message_id=None,
+                    thread_id=None,
+                    forward_metadata_json=None,
+                    raw_metadata_json={},
+                )
+            ],
+        )
+
+    processed_root = tmp_path / "processed"
+    main(
+        [
+            "--database-path",
+            str(db_path),
+            "analyze",
+            "telegram-texts",
+            "--raw-export-run-id",
+            export.run_id,
+            "--processed-root",
+            str(processed_root),
+        ]
+    )
+
+    output = json.loads(capsys.readouterr().out)
+    assert output["raw_export_run_id"] == export.run_id
+    assert output["metrics"]["total_messages"] == 1
+    assert output["metrics"]["rows_with_text"] == 1
+    assert Path(output["texts_parquet_path"]).exists()
+    assert Path(output["summary_path"]).exists()
+
+
+def test_cli_analyze_telegram_artifacts_writes_artifact_texts(tmp_path, capsys):
+    db_path = tmp_path / "cli.db"
+    engine = create_sqlite_engine(db_path)
+    upgrade_database(engine)
+    session_factory = create_session_factory(engine)
+    document_path = tmp_path / "catalog.txt"
+    document_path.write_text("Датчики протечки и реле защиты", encoding="utf-8")
+    with session_factory() as session:
+        source = TelegramSourceService(session).create_draft(
+            "https://t.me/purmaster",
+            added_by="admin",
+            purpose="catalog_ingestion",
+            start_mode="from_beginning",
+        )
+        export = TelegramRawExportService(session, raw_root=tmp_path / "raw").write_export(
+            source=source,
+            resolved_source=ResolvedTelegramSource(
+                input_ref="https://t.me/purmaster",
+                source_kind="telegram_channel",
+                telegram_id="-10042",
+                username="purmaster",
+                title="ПУР",
+            ),
+            messages=[
+                TelegramMessage(
+                    monitored_source_ref="https://t.me/purmaster",
+                    telegram_message_id=1,
+                    message_date=datetime(2026, 1, 31, 10, 15, 0, tzinfo=UTC),
+                    sender_id="channel-1",
+                    sender_display="ПУР",
+                    text="Документ каталога",
+                    caption=None,
+                    has_media=True,
+                    media_metadata_json={
+                        "type": "MessageMediaDocument",
+                        "document": {
+                            "file_name": "catalog.txt",
+                            "mime_type": "text/plain",
+                            "file_size": document_path.stat().st_size,
+                            "downloadable": True,
+                        },
+                        "raw_export_download": {
+                            "status": "downloaded",
+                            "local_path": str(document_path),
+                        },
+                    },
+                    reply_to_message_id=None,
+                    thread_id=None,
+                    forward_metadata_json=None,
+                    raw_metadata_json={},
+                )
+            ],
+        )
+
+    main(
+        [
+            "--database-path",
+            str(db_path),
+            "analyze",
+            "telegram-artifacts",
+            "--raw-export-run-id",
+            export.run_id,
+            "--processed-root",
+            str(tmp_path / "processed"),
+            "--no-external-pages",
+        ]
+    )
+
+    output = json.loads(capsys.readouterr().out)
+    assert output["raw_export_run_id"] == export.run_id
+    assert output["metrics"]["candidate_documents"] == 1
+    assert output["metrics"]["rows_with_text"] == 1
+    assert output["metrics"]["document_parse_timeout_seconds"] == 600.0
+    assert output["metrics"]["external_fetch_timeout_seconds"] == 600.0
+    assert Path(output["texts_parquet_path"]).exists()
+    assert Path(output["summary_path"]).exists()
+
+
+def test_cli_analyze_telegram_features_writes_feature_parquet(tmp_path, capsys):
+    db_path = tmp_path / "cli.db"
+    export = _write_cli_feature_export(db_path, tmp_path)
+
+    main(
+        [
+            "--database-path",
+            str(db_path),
+            "analyze",
+            "telegram-texts",
+            "--raw-export-run-id",
+            export.run_id,
+            "--processed-root",
+            str(tmp_path / "processed"),
+        ]
+    )
+    capsys.readouterr()
+
+    main(
+        [
+            "--database-path",
+            str(db_path),
+            "analyze",
+            "telegram-features",
+            "--raw-export-run-id",
+            export.run_id,
+            "--processed-root",
+            str(tmp_path / "processed"),
+        ]
+    )
+
+    output = json.loads(capsys.readouterr().out)
+    assert output["raw_export_run_id"] == export.run_id
+    assert output["metrics"]["total_rows"] == 1
+    assert output["metrics"]["rows_with_price"] == 1
+    assert Path(output["features_parquet_path"]).exists()
+    assert Path(output["summary_path"]).exists()
+
+
+def test_cli_analyze_telegram_stats_writes_reports(tmp_path, capsys):
+    db_path = tmp_path / "cli.db"
+    export = _write_cli_feature_export(db_path, tmp_path)
+
+    main(
+        [
+            "--database-path",
+            str(db_path),
+            "analyze",
+            "telegram-texts",
+            "--raw-export-run-id",
+            export.run_id,
+            "--processed-root",
+            str(tmp_path / "processed"),
+        ]
+    )
+    capsys.readouterr()
+    main(
+        [
+            "--database-path",
+            str(db_path),
+            "analyze",
+            "telegram-features",
+            "--raw-export-run-id",
+            export.run_id,
+            "--processed-root",
+            str(tmp_path / "processed"),
+        ]
+    )
+    capsys.readouterr()
+
+    main(
+        [
+            "--database-path",
+            str(db_path),
+            "analyze",
+            "telegram-stats",
+            "--raw-export-run-id",
+            export.run_id,
+            "--enriched-root",
+            str(tmp_path / "enriched"),
+        ]
+    )
+
+    output = json.loads(capsys.readouterr().out)
+    assert output["raw_export_run_id"] == export.run_id
+    assert output["metrics"]["total_rows"] == 1
+    assert Path(output["summary_path"]).exists()
+    assert Path(output["ngrams_path"]).exists()
+    assert Path(output["entity_candidates_path"]).exists()
+
+
+def test_cli_analyze_telegram_entities_writes_entity_artifacts(tmp_path, capsys):
+    db_path = tmp_path / "cli.db"
+    export = _write_cli_feature_export(db_path, tmp_path)
+
+    main(
+        [
+            "--database-path",
+            str(db_path),
+            "analyze",
+            "telegram-texts",
+            "--raw-export-run-id",
+            export.run_id,
+            "--processed-root",
+            str(tmp_path / "processed"),
+        ]
+    )
+    capsys.readouterr()
+    main(
+        [
+            "--database-path",
+            str(db_path),
+            "analyze",
+            "telegram-features",
+            "--raw-export-run-id",
+            export.run_id,
+            "--processed-root",
+            str(tmp_path / "processed"),
+        ]
+    )
+    capsys.readouterr()
+
+    main(
+        [
+            "--database-path",
+            str(db_path),
+            "analyze",
+            "telegram-entities",
+            "--raw-export-run-id",
+            export.run_id,
+            "--enriched-root",
+            str(tmp_path / "enriched"),
+        ]
+    )
+
+    output = json.loads(capsys.readouterr().out)
+    assert output["raw_export_run_id"] == export.run_id
+    assert output["metrics"]["entity_rows"] >= 1
+    assert Path(output["entities_parquet_path"]).exists()
+    assert Path(output["entity_groups_path"]).exists()
+    assert Path(output["resolution_candidates_path"]).exists()
+    assert Path(output["summary_path"]).exists()
+
+
+def test_cli_analyze_telegram_entity_ranking_writes_ranked_artifacts(tmp_path, capsys):
+    db_path = tmp_path / "cli.db"
+    export = _write_cli_feature_export(db_path, tmp_path)
+
+    main(
+        [
+            "--database-path",
+            str(db_path),
+            "analyze",
+            "telegram-texts",
+            "--raw-export-run-id",
+            export.run_id,
+            "--processed-root",
+            str(tmp_path / "processed"),
+        ]
+    )
+    capsys.readouterr()
+    main(
+        [
+            "--database-path",
+            str(db_path),
+            "analyze",
+            "telegram-features",
+            "--raw-export-run-id",
+            export.run_id,
+            "--processed-root",
+            str(tmp_path / "processed"),
+        ]
+    )
+    capsys.readouterr()
+    main(
+        [
+            "--database-path",
+            str(db_path),
+            "analyze",
+            "telegram-entities",
+            "--raw-export-run-id",
+            export.run_id,
+            "--enriched-root",
+            str(tmp_path / "enriched"),
+        ]
+    )
+    capsys.readouterr()
+
+    main(
+        [
+            "--database-path",
+            str(db_path),
+            "analyze",
+            "telegram-entity-ranking",
+            "--raw-export-run-id",
+            export.run_id,
+            "--enriched-root",
+            str(tmp_path / "enriched"),
+        ]
+    )
+
+    output = json.loads(capsys.readouterr().out)
+    assert output["raw_export_run_id"] == export.run_id
+    assert output["metrics"]["ranked_entity_rows"] >= 1
+    assert Path(output["ranked_entities_parquet_path"]).exists()
+    assert Path(output["ranked_entities_json_path"]).exists()
+    assert Path(output["noise_report_path"]).exists()
+    assert Path(output["summary_path"]).exists()
+
+
+def test_cli_analyze_telegram_entity_enrichment_updates_registry(tmp_path, capsys):
+    db_path = tmp_path / "cli.db"
+    export = _write_cli_feature_export(db_path, tmp_path)
+
+    main(
+        [
+            "--database-path",
+            str(db_path),
+            "analyze",
+            "telegram-texts",
+            "--raw-export-run-id",
+            export.run_id,
+            "--processed-root",
+            str(tmp_path / "processed"),
+        ]
+    )
+    capsys.readouterr()
+    main(
+        [
+            "--database-path",
+            str(db_path),
+            "analyze",
+            "telegram-features",
+            "--raw-export-run-id",
+            export.run_id,
+            "--processed-root",
+            str(tmp_path / "processed"),
+        ]
+    )
+    capsys.readouterr()
+    main(
+        [
+            "--database-path",
+            str(db_path),
+            "analyze",
+            "telegram-entities",
+            "--raw-export-run-id",
+            export.run_id,
+            "--enriched-root",
+            str(tmp_path / "enriched"),
+        ]
+    )
+    capsys.readouterr()
+    main(
+        [
+            "--database-path",
+            str(db_path),
+            "analyze",
+            "telegram-entity-ranking",
+            "--raw-export-run-id",
+            export.run_id,
+            "--enriched-root",
+            str(tmp_path / "enriched"),
+        ]
+    )
+    capsys.readouterr()
+    with create_session_factory(create_sqlite_engine(db_path))() as session:
+        run = (
+            session.execute(
+                select(telegram_raw_export_runs_table).where(
+                    telegram_raw_export_runs_table.c.id == export.run_id
+                )
+            )
+            .mappings()
+            .one()
+        )
+        ranked_path = Path(run["metadata_json"]["entity_ranking"]["ranked_entities_parquet_path"])
+        ranked_table = pq.read_table(ranked_path)
+        rows = ranked_table.to_pylist()
+        rows[0]["score"] = 0.5
+        rows[0]["ranking_status"] = "review_candidate"
+        pq.write_table(pa.Table.from_pylist(rows, schema=ranked_table.schema), ranked_path)
+
+    main(
+        [
+            "--database-path",
+            str(db_path),
+            "analyze",
+            "telegram-entity-enrichment",
+            "--raw-export-run-id",
+            export.run_id,
+            "--limit",
+            "10",
+            "--mode",
+            "rule_based",
+            "--provider",
+            "zai",
+            "--model",
+            "GLM-5.1",
+            "--model-profile",
+            "catalog-strong",
+        ]
+    )
+
+    output = json.loads(capsys.readouterr().out)
+    assert output["raw_export_run_id"] == export.run_id
+    assert output["metrics"]["processed_entities"] >= 1
+    assert output["provider"] == "zai"
+    assert output["model"] == "GLM-5.1"
+    with create_session_factory(create_sqlite_engine(db_path))() as session:
+        assert session.execute(select(canonical_entities_table)).mappings().first() is not None
+
+
+def test_cli_analyze_telegram_chroma_indexes_normalized_texts(tmp_path, capsys):
+    db_path = tmp_path / "cli.db"
+    engine = create_sqlite_engine(db_path)
+    upgrade_database(engine)
+    session_factory = create_session_factory(engine)
+    with session_factory() as session:
+        source = TelegramSourceService(session).create_draft(
+            "https://t.me/purmaster",
+            added_by="admin",
+            purpose="catalog_ingestion",
+            start_mode="from_beginning",
+        )
+        export = TelegramRawExportService(session, raw_root=tmp_path / "raw").write_export(
+            source=source,
+            resolved_source=ResolvedTelegramSource(
+                input_ref="https://t.me/purmaster",
+                source_kind="telegram_channel",
+                telegram_id="-10042",
+                username="purmaster",
+                title="ПУР",
+            ),
+            messages=[
+                TelegramMessage(
+                    monitored_source_ref="https://t.me/purmaster",
+                    telegram_message_id=1,
+                    message_date=datetime(2026, 1, 31, 10, 15, 0, tzinfo=UTC),
+                    sender_id="channel-1",
+                    sender_display="ПУР",
+                    text="Умная камера",
+                    caption=None,
+                    has_media=False,
+                    media_metadata_json=None,
+                    reply_to_message_id=None,
+                    thread_id=None,
+                    forward_metadata_json=None,
+                    raw_metadata_json={},
+                )
+            ],
+        )
+        TelegramTextNormalizationService(
+            session,
+            processed_root=tmp_path / "processed",
+        ).write_texts(export.run_id)
+
+    main(
+        [
+            "--database-path",
+            str(db_path),
+            "analyze",
+            "telegram-chroma",
+            "--raw-export-run-id",
+            export.run_id,
+            "--chroma-root",
+            str(tmp_path / "chroma"),
+            "--embedding-profile",
+            "local_hashing_v1",
+        ]
+    )
+
+    output = json.loads(capsys.readouterr().out)
+    assert output["raw_export_run_id"] == export.run_id
+    assert output["collection_name"] == "telegram_texts"
+    assert output["metrics"]["indexed_documents"] == 1
+    assert Path(output["chroma_path"]).exists()
+    assert Path(output["summary_path"]).exists()
+
+
+def test_cli_analyze_telegram_fts_indexes_normalized_texts(tmp_path, capsys):
+    db_path = tmp_path / "cli.db"
+    engine = create_sqlite_engine(db_path)
+    upgrade_database(engine)
+    session_factory = create_session_factory(engine)
+    with session_factory() as session:
+        source = TelegramSourceService(session).create_draft(
+            "https://t.me/purmaster",
+            added_by="admin",
+            purpose="catalog_ingestion",
+            start_mode="from_beginning",
+        )
+        export = TelegramRawExportService(session, raw_root=tmp_path / "raw").write_export(
+            source=source,
+            resolved_source=ResolvedTelegramSource(
+                input_ref="https://t.me/purmaster",
+                source_kind="telegram_channel",
+                telegram_id="-10042",
+                username="purmaster",
+                title="ПУР",
+            ),
+            messages=[
+                TelegramMessage(
+                    monitored_source_ref="https://t.me/purmaster",
+                    telegram_message_id=1,
+                    message_date=datetime(2026, 1, 31, 10, 15, 0, tzinfo=UTC),
+                    sender_id="channel-1",
+                    sender_display="ПУР",
+                    text="Отдаю пылесос",
+                    caption=None,
+                    has_media=False,
+                    media_metadata_json=None,
+                    reply_to_message_id=None,
+                    thread_id=None,
+                    forward_metadata_json=None,
+                    raw_metadata_json={},
+                )
+            ],
+        )
+        TelegramTextNormalizationService(
+            session,
+            processed_root=tmp_path / "processed",
+        ).write_texts(export.run_id)
+
+    main(
+        [
+            "--database-path",
+            str(db_path),
+            "analyze",
+            "telegram-fts",
+            "--raw-export-run-id",
+            export.run_id,
+            "--search-root",
+            str(tmp_path / "search"),
+        ]
+    )
+
+    output = json.loads(capsys.readouterr().out)
+    assert output["raw_export_run_id"] == export.run_id
+    assert output["metrics"]["indexed_documents"] == 1
+    assert Path(output["search_db_path"]).exists()
+    assert Path(output["summary_path"]).exists()
+
+
+def test_cli_analyze_telegram_lead_candidates_writes_review_artifacts(tmp_path, capsys):
+    db_path = tmp_path / "cli.db"
+    export = _write_cli_lead_candidate_export(db_path, tmp_path)
+    engine = create_sqlite_engine(db_path)
+    session_factory = create_session_factory(engine)
+    with session_factory() as session:
+        TelegramTextNormalizationService(
+            session,
+            processed_root=tmp_path / "processed",
+        ).write_texts(export.run_id)
+        TelegramFtsIndexService(session, search_root=tmp_path / "search").write_index(
+            export.run_id
+        )
+
+    main(
+        [
+            "--database-path",
+            str(db_path),
+            "analyze",
+            "telegram-lead-candidates",
+            "--raw-export-run-id",
+            export.run_id,
+            "--output-root",
+            str(tmp_path / "lead-candidates"),
+            "--limit",
+            "5",
+        ]
+    )
+
+    output = json.loads(capsys.readouterr().out)
+    assert output["raw_export_run_id"] == export.run_id
+    assert output["metrics"]["candidate_count"] == 1
+    assert Path(output["candidates_json_path"]).exists()
+
+
+def test_cli_analyze_telegram_lead_candidate_llm_writes_arbitration_artifacts(
+    tmp_path, capsys, monkeypatch
+):
+    db_path = tmp_path / "cli.db"
+    export = _write_cli_lead_candidate_export(db_path, tmp_path)
+    engine = create_sqlite_engine(db_path)
+    session_factory = create_session_factory(engine)
+    with session_factory() as session:
+        TelegramTextNormalizationService(
+            session,
+            processed_root=tmp_path / "processed",
+        ).write_texts(export.run_id)
+        TelegramFtsIndexService(session, search_root=tmp_path / "search").write_index(
+            export.run_id
+        )
+
+    main(
+        [
+            "--database-path",
+            str(db_path),
+            "analyze",
+            "telegram-lead-candidates",
+            "--raw-export-run-id",
+            export.run_id,
+            "--output-root",
+            str(tmp_path / "lead-candidates"),
+            "--limit",
+            "5",
+        ]
+    )
+    capsys.readouterr()
+
+    monkeypatch.setenv("PUR_ZAI_API_KEY", "zai-secret")
+    monkeypatch.setattr("pur_leads.cli.ZaiChatCompletionClient", FakeZaiChatCompletionClient)
+    FakeZaiChatCompletionClient.instances.clear()
+    main(
+        [
+            "--database-path",
+            str(db_path),
+            "analyze",
+            "telegram-lead-candidate-llm",
+            "--raw-export-run-id",
+            export.run_id,
+            "--output-root",
+            str(tmp_path / "arbitration"),
+            "--limit",
+            "1",
+            "--model",
+            "GLM-5.1",
+        ]
+    )
+
+    output = json.loads(capsys.readouterr().out)
+    assert output["raw_export_run_id"] == export.run_id
+    assert output["metrics"]["processed_candidates"] == 1
+    assert output["metrics"]["lead_count"] == 1
+    assert Path(output["arbitration_json_path"]).exists()
+    assert Path(output["traces_jsonl_path"]).exists()
+    assert FakeZaiChatCompletionClient.instances[0].kwargs["response_format"] == {
+        "type": "json_object"
+    }
+
+
+def test_cli_search_telegram_merges_indexes(tmp_path, capsys):
+    db_path = tmp_path / "cli.db"
+    engine = create_sqlite_engine(db_path)
+    upgrade_database(engine)
+    session_factory = create_session_factory(engine)
+    with session_factory() as session:
+        source = TelegramSourceService(session).create_draft(
+            "https://t.me/purmaster",
+            added_by="admin",
+            purpose="catalog_ingestion",
+            start_mode="from_beginning",
+        )
+        export = TelegramRawExportService(session, raw_root=tmp_path / "raw").write_export(
+            source=source,
+            resolved_source=ResolvedTelegramSource(
+                input_ref="https://t.me/purmaster",
+                source_kind="telegram_channel",
+                telegram_id="-10042",
+                username="purmaster",
+                title="ПУР",
+            ),
+            messages=[
+                TelegramMessage(
+                    monitored_source_ref="https://t.me/purmaster",
+                    telegram_message_id=1,
+                    message_date=datetime(2026, 1, 31, 10, 15, 0, tzinfo=UTC),
+                    sender_id="channel-1",
+                    sender_display="ПУР",
+                    text="Ищу камеру для дома",
+                    caption=None,
+                    has_media=False,
+                    media_metadata_json=None,
+                    reply_to_message_id=None,
+                    thread_id=None,
+                    forward_metadata_json=None,
+                    raw_metadata_json={},
+                ),
+                TelegramMessage(
+                    monitored_source_ref="https://t.me/purmaster",
+                    telegram_message_id=2,
+                    message_date=datetime(2026, 1, 31, 10, 16, 0, tzinfo=UTC),
+                    sender_id="channel-1",
+                    sender_display="ПУР",
+                    text="Dahua Hero A1 Wi-Fi камера подходит",
+                    caption=None,
+                    has_media=False,
+                    media_metadata_json=None,
+                    reply_to_message_id=1,
+                    thread_id=None,
+                    forward_metadata_json=None,
+                    raw_metadata_json={},
+                ),
+            ],
+        )
+        TelegramTextNormalizationService(
+            session,
+            processed_root=tmp_path / "processed",
+        ).write_texts(export.run_id)
+        TelegramFtsIndexService(session, search_root=tmp_path / "search").write_index(export.run_id)
+        TelegramChromaIndexService(session, chroma_root=tmp_path / "chroma").write_index(
+            export.run_id,
+            embedding_profile="local_hashing_v1",
+        )
+
+    main(
+        [
+            "--database-path",
+            str(db_path),
+            "search",
+            "telegram",
+            "--raw-export-run-id",
+            export.run_id,
+            "--query",
+            "dahua камера",
+            "--search-root",
+            str(tmp_path / "search"),
+            "--chroma-root",
+            str(tmp_path / "chroma"),
+            "--embedding-profile",
+            "local_hashing_v1",
+        ]
+    )
+
+    output = json.loads(capsys.readouterr().out)
+    assert output["query_text"] == "dahua камера"
+    assert output["results"][0]["message_url"].startswith("https://t.me/purmaster/")
+    assert output["groups"][0]["thread_key"] == "1"
+    assert output["rag_context"][0]["citation"] == "[1]"
+    assert output["metrics"]["merged_results"] == len(output["results"])
 
 
 def test_cli_ai_model_concurrency_limiter_uses_registry_limits_without_override(tmp_path):
@@ -878,6 +1758,128 @@ def test_cli_web_uses_database_path_and_bootstrap_env(tmp_path, monkeypatch):
     assert login_response.status_code == 200
 
 
+def _write_cli_feature_export(db_path: Path, tmp_path: Path):
+    engine = create_sqlite_engine(db_path)
+    upgrade_database(engine)
+    session_factory = create_session_factory(engine)
+    with session_factory() as session:
+        source = TelegramSourceService(session).create_draft(
+            "https://t.me/purmaster",
+            added_by="admin",
+            purpose="catalog_ingestion",
+            start_mode="from_beginning",
+        )
+        return TelegramRawExportService(session, raw_root=tmp_path / "raw").write_export(
+            source=source,
+            resolved_source=ResolvedTelegramSource(
+                input_ref="https://t.me/purmaster",
+                source_kind="telegram_channel",
+                telegram_id="-10042",
+                username="purmaster",
+                title="ПУР",
+            ),
+            messages=[
+                TelegramMessage(
+                    monitored_source_ref="https://t.me/purmaster",
+                    telegram_message_id=1,
+                    message_date=datetime(2026, 1, 31, 10, 15, 0, tzinfo=UTC),
+                    sender_id="channel-1",
+                    sender_display="ПУР",
+                    text="Камера Dahua Hero A1 стоит 10000р",
+                    caption=None,
+                    has_media=False,
+                    media_metadata_json=None,
+                    reply_to_message_id=None,
+                    thread_id=None,
+                    forward_metadata_json=None,
+                    raw_metadata_json={},
+                )
+            ],
+        )
+
+
+def _write_cli_lead_candidate_export(db_path: Path, tmp_path: Path):
+    engine = create_sqlite_engine(db_path)
+    upgrade_database(engine)
+    session_factory = create_session_factory(engine)
+    with session_factory() as session:
+        source = TelegramSourceService(session).create_draft(
+            "https://t.me/chat_mila_kolpakova",
+            added_by="admin",
+            purpose="lead_monitoring",
+            start_mode="from_beginning",
+        )
+        return TelegramRawExportService(session, raw_root=tmp_path / "raw").write_export(
+            source=source,
+            resolved_source=ResolvedTelegramSource(
+                input_ref="https://t.me/chat_mila_kolpakova",
+                source_kind="telegram_supergroup",
+                telegram_id="-10042",
+                username="chat_mila_kolpakova",
+                title="Чат лидов",
+            ),
+            messages=[
+                TelegramMessage(
+                    monitored_source_ref="https://t.me/chat_mila_kolpakova",
+                    telegram_message_id=1,
+                    message_date=datetime(2026, 1, 31, 10, 15, 0, tzinfo=UTC),
+                    sender_id="user-1",
+                    sender_display="Анна",
+                    text="Нужна камера Dahua для квартиры",
+                    caption=None,
+                    has_media=False,
+                    media_metadata_json=None,
+                    reply_to_message_id=None,
+                    thread_id=None,
+                    forward_metadata_json=None,
+                    raw_metadata_json={},
+                ),
+                TelegramMessage(
+                    monitored_source_ref="https://t.me/chat_mila_kolpakova",
+                    telegram_message_id=2,
+                    message_date=datetime(2026, 1, 31, 10, 16, 0, tzinfo=UTC),
+                    sender_id="user-2",
+                    sender_display="Олег",
+                    text="Камерный дом и спокойный двор",
+                    caption=None,
+                    has_media=False,
+                    media_metadata_json=None,
+                    reply_to_message_id=None,
+                    thread_id=None,
+                    forward_metadata_json=None,
+                    raw_metadata_json={},
+                ),
+            ],
+        )
+
+
+def _write_cli_desktop_archive(tmp_path: Path) -> Path:
+    archive_path = tmp_path / "ChatExport.zip"
+    payload = {
+        "name": "Чат лидов",
+        "type": "public_supergroup",
+        "id": 1292716582,
+        "messages": [
+            {
+                "id": 101,
+                "type": "message",
+                "date": "2026-04-30T13:00:00",
+                "date_unixtime": "1777543200",
+                "from": "Анна",
+                "from_id": "user1",
+                "text": "Нужна камера Dahua",
+                "text_entities": [],
+            }
+        ],
+    }
+    with zipfile.ZipFile(archive_path, "w") as archive:
+        archive.writestr(
+            "ChatExport_2026-04-30/result.json",
+            json.dumps(payload, ensure_ascii=False),
+        )
+    return archive_path
+
+
 def _insert_monitored_source(session) -> str:
     row_id = new_id()
     now = utc_now()
@@ -1048,7 +2050,19 @@ class FakeZaiChatCompletionClient:
                 "max_tokens": max_tokens,
             }
         )
-        if any("lead-detection evaluator" in _message_content(message) for message in messages):
+        if any("operator-assist lead arbitrator" in _message_content(message) for message in messages):
+            content = """
+            {
+              "decision": "lead",
+              "confidence": 0.88,
+              "need_operator": true,
+              "why": "User asks for equipment selection",
+              "matched_need": "нужна камера",
+              "relevant_catalog_items": [],
+              "false_positive_reason": null
+            }
+            """
+        elif any("lead-detection evaluator" in _message_content(message) for message in messages):
             content = """
             {
               "items": [

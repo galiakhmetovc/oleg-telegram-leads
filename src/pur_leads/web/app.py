@@ -14,6 +14,7 @@ from pur_leads.db.migrations import upgrade_database
 from pur_leads.db.session import create_session_factory
 from pur_leads.services.web_auth import WebAuthService
 from pur_leads.web.routes_admin import router as admin_router
+from pur_leads.web.routes_artifacts import router as artifacts_router
 from pur_leads.web.routes_auth import router as auth_router
 from pur_leads.web.routes_catalog import router as catalog_router
 from pur_leads.web.routes_crm import router as crm_router
@@ -113,6 +114,7 @@ def create_app(
     app.include_router(sources_router)
     app.include_router(today_router)
     app.include_router(operations_router)
+    app.include_router(artifacts_router)
     app.include_router(quality_router)
     app.include_router(admin_router)
     app.include_router(pages_router)

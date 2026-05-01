@@ -9,15 +9,17 @@ from urllib.parse import urlparse
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.encoders import jsonable_encoder
 from pydantic import BaseModel
-from sqlalchemy import insert, or_, select
+from sqlalchemy import desc, insert, or_, select
 from sqlalchemy.orm import Session
 
 from pur_leads.core.ids import new_id
 from pur_leads.core.time import utc_now
-from pur_leads.models.catalog import classifier_examples_table
+from pur_leads.models.catalog import classifier_examples_table, classifier_versions_table
 from pur_leads.models.telegram_sources import monitored_sources_table, source_messages_table
 from pur_leads.repositories.catalog_candidates import CatalogCandidateRecord
 from pur_leads.services.catalog_candidates import CatalogCandidateService
+from pur_leads.services.catalog_editor import CatalogEditorService
+from pur_leads.services.catalog_raw_ingest import CatalogRawIngestService
 from pur_leads.services.catalog_sources import CatalogSourceService
 from pur_leads.services.classifier_snapshots import ClassifierSnapshotService
 from pur_leads.services.evaluation import EvaluationService
@@ -60,6 +62,63 @@ class CandidateUpdateRequest(BaseModel):
     reason: str | None = None
 
 
+class CatalogTermInput(BaseModel):
+    term: str
+    term_type: str = "alias"
+    language: str = "ru"
+    weight: float = 1.0
+
+
+class CatalogOfferInput(BaseModel):
+    title: str
+    offer_type: str = "price"
+    description: str | None = None
+    price_amount: float | None = None
+    currency: str | None = None
+    price_text: str | None = None
+    terms_json: Any = None
+    ttl_days: int | None = None
+    ttl_source: str = "manual"
+
+
+class CatalogEvidenceInput(BaseModel):
+    entity_type: str | None = None
+    entity_id: str | None = None
+    quote: str | None = None
+    source_text: str | None = None
+    source_url: str | None = None
+    source_id: str | None = None
+    chunk_id: str | None = None
+    artifact_id: str | None = None
+    page_number: int | None = None
+    location_json: dict[str, Any] | None = None
+    evidence_type: str = "manual_note"
+    confidence: float | None = None
+
+
+class CatalogItemCreateRequest(BaseModel):
+    name: str
+    item_type: str = "product"
+    category_slug: str | None = None
+    description: str | None = None
+    terms: list[CatalogTermInput] | None = None
+    offers: list[CatalogOfferInput] | None = None
+    evidence: CatalogEvidenceInput | None = None
+
+
+class CatalogItemUpdateRequest(BaseModel):
+    name: str | None = None
+    item_type: str | None = None
+    category_slug: str | None = None
+    description: str | None = None
+    status: str | None = None
+    reason: str | None = None
+
+
+class CatalogSnapshotRebuildRequest(BaseModel):
+    reason: str | None = None
+
+
 class ManualInputRequest(BaseModel):
     input_type: str
     text: str | None = None
@@ -68,7 +127,274 @@ class ManualInputRequest(BaseModel):
     message_id: int | None = None
     evidence_note: str | None = None
     metadata_json: dict[str, Any] | None = None
-    auto_extract: bool = True
+    auto_extract: bool = False
+
+
+@router.get("/items")
+def list_catalog_items(
+    status: str | None = None,
+    limit: int = Query(default=100, ge=1, le=500),
+    _validated: SessionValidationResult = Depends(current_admin),
+    session: Session = Depends(get_session),
+) -> dict[str, Any]:
+    items = CatalogEditorService(session).list_items(status=status, limit=limit)
+    return {"items": [_item_payload(item) for item in items]}
+
+
+@router.post("/items")
+def create_catalog_item(
+    payload: CatalogItemCreateRequest,
+    validated: SessionValidationResult = Depends(current_admin),
+    session: Session = Depends(get_session),
+) -> dict[str, Any]:
+    service = CatalogEditorService(session)
+    try:
+        item = service.create_item(
+            actor=_actor(validated),
+            name=payload.name,
+            item_type=payload.item_type,
+            category_slug=payload.category_slug,
+            description=payload.description,
+            terms=[term.model_dump() for term in payload.terms or []],
+            offers=[offer.model_dump() for offer in payload.offers or []],
+            evidence=payload.evidence.model_dump() if payload.evidence else None,
+        )
+        detail = service.get_item_detail(item.id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return _manual_item_detail_payload(detail)
+
+
+@router.get("/items/{item_id}")
+def get_catalog_item(
+    item_id: str,
+    _validated: SessionValidationResult = Depends(current_admin),
+    session: Session = Depends(get_session),
+) -> dict[str, Any]:
+    try:
+        detail = CatalogEditorService(session).get_item_detail(item_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Catalog item not found") from exc
+    return _manual_item_detail_payload(detail)
+
+
+@router.patch("/items/{item_id}")
+def update_catalog_item(
+    item_id: str,
+    payload: CatalogItemUpdateRequest,
+    validated: SessionValidationResult = Depends(current_admin),
+    session: Session = Depends(get_session),
+) -> dict[str, Any]:
+    service = CatalogEditorService(session)
+    try:
+        service.update_item(
+            item_id,
+            actor=_actor(validated),
+            name=payload.name,
+            item_type=payload.item_type,
+            category_slug=payload.category_slug,
+            description=payload.description,
+            status=payload.status,
+        )
+        detail = service.get_item_detail(item_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Catalog item not found") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return _manual_item_detail_payload(detail)
+
+
+@router.delete("/items/{item_id}")
+def archive_catalog_item(
+    item_id: str,
+    payload: CatalogSnapshotRebuildRequest | None = None,
+    validated: SessionValidationResult = Depends(current_admin),
+    session: Session = Depends(get_session),
+) -> dict[str, Any]:
+    try:
+        item = CatalogEditorService(session).archive_item(
+            item_id,
+            actor=_actor(validated),
+            reason=payload.reason if payload else None,
+        )
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Catalog item not found") from exc
+    return {"item": _item_payload(item)}
+
+
+@router.post("/items/{item_id}/terms")
+def create_catalog_term(
+    item_id: str,
+    payload: CatalogTermInput,
+    validated: SessionValidationResult = Depends(current_admin),
+    session: Session = Depends(get_session),
+) -> dict[str, Any]:
+    try:
+        term = CatalogEditorService(session).add_term(
+            item_id,
+            actor=_actor(validated),
+            term=payload.term,
+            term_type=payload.term_type,
+            language=payload.language,
+            weight=payload.weight,
+        )
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Catalog item not found") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"term": _term_payload(term)}
+
+
+@router.patch("/terms/{term_id}")
+def update_catalog_term(
+    term_id: str,
+    payload: CatalogTermInput,
+    validated: SessionValidationResult = Depends(current_admin),
+    session: Session = Depends(get_session),
+) -> dict[str, Any]:
+    try:
+        term = CatalogEditorService(session).update_term(
+            term_id,
+            actor=_actor(validated),
+            term=payload.term,
+            term_type=payload.term_type,
+            weight=payload.weight,
+        )
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Catalog term not found") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"term": _term_payload(term)}
+
+
+@router.delete("/terms/{term_id}")
+def archive_catalog_term(
+    term_id: str,
+    payload: CatalogSnapshotRebuildRequest | None = None,
+    validated: SessionValidationResult = Depends(current_admin),
+    session: Session = Depends(get_session),
+) -> dict[str, Any]:
+    try:
+        term = CatalogEditorService(session).archive_term(
+            term_id,
+            actor=_actor(validated),
+            reason=payload.reason if payload else None,
+        )
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Catalog term not found") from exc
+    return {"term": _term_payload(term)}
+
+
+@router.post("/items/{item_id}/offers")
+def create_catalog_offer(
+    item_id: str,
+    payload: CatalogOfferInput,
+    validated: SessionValidationResult = Depends(current_admin),
+    session: Session = Depends(get_session),
+) -> dict[str, Any]:
+    try:
+        offer = CatalogEditorService(session).add_offer(
+            item_id,
+            actor=_actor(validated),
+            **payload.model_dump(),
+        )
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Catalog item not found") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"offer": _offer_payload(offer)}
+
+
+@router.patch("/offers/{offer_id}")
+def update_catalog_offer(
+    offer_id: str,
+    payload: CatalogOfferInput,
+    validated: SessionValidationResult = Depends(current_admin),
+    session: Session = Depends(get_session),
+) -> dict[str, Any]:
+    try:
+        offer = CatalogEditorService(session).update_offer(
+            offer_id,
+            actor=_actor(validated),
+            title=payload.title,
+            price_text=payload.price_text,
+            description=payload.description,
+        )
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Catalog offer not found") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"offer": _offer_payload(offer)}
+
+
+@router.delete("/offers/{offer_id}")
+def archive_catalog_offer(
+    offer_id: str,
+    payload: CatalogSnapshotRebuildRequest | None = None,
+    validated: SessionValidationResult = Depends(current_admin),
+    session: Session = Depends(get_session),
+) -> dict[str, Any]:
+    try:
+        offer = CatalogEditorService(session).archive_offer(
+            offer_id,
+            actor=_actor(validated),
+            reason=payload.reason if payload else None,
+        )
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Catalog offer not found") from exc
+    return {"offer": _offer_payload(offer)}
+
+
+@router.post("/snapshots/rebuild")
+def rebuild_catalog_snapshot(
+    payload: CatalogSnapshotRebuildRequest,
+    validated: SessionValidationResult = Depends(current_admin),
+    session: Session = Depends(get_session),
+) -> dict[str, Any]:
+    snapshot = CatalogEditorService(session).rebuild_classifier_snapshot(
+        actor=_actor(validated),
+        reason=payload.reason,
+    )
+    return {"classifier_snapshot": jsonable_encoder(asdict(snapshot))}
+
+
+@router.get("/snapshots/latest")
+def latest_catalog_snapshot(
+    _validated: SessionValidationResult = Depends(current_admin),
+    session: Session = Depends(get_session),
+) -> dict[str, Any]:
+    row = (
+        session.execute(
+            select(classifier_versions_table).order_by(desc(classifier_versions_table.c.version))
+        )
+        .mappings()
+        .first()
+    )
+    return {"classifier_snapshot": jsonable_encoder(dict(row)) if row is not None else None}
+
+
+@router.get("/raw-ingest")
+def list_raw_ingest(
+    source_id: str | None = None,
+    limit: int = Query(default=50, ge=1, le=200),
+    _validated: SessionValidationResult = Depends(current_admin),
+    session: Session = Depends(get_session),
+) -> dict[str, Any]:
+    payload = CatalogRawIngestService(session).list_overview(source_id=source_id, limit=limit)
+    return jsonable_encoder(payload)
+
+
+@router.get("/raw-ingest/messages/{source_message_id}")
+def get_raw_ingest_message(
+    source_message_id: str,
+    _validated: SessionValidationResult = Depends(current_admin),
+    session: Session = Depends(get_session),
+) -> dict[str, Any]:
+    try:
+        payload = CatalogRawIngestService(session).get_message_detail(source_message_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Source message not found") from exc
+    return jsonable_encoder(payload)
 
 
 @router.get("/candidates")
@@ -287,6 +613,28 @@ def _candidate_payload(candidate: CatalogCandidateRecord) -> dict[str, Any]:
     payload = jsonable_encoder(asdict(candidate))
     payload["normalized_value"] = payload.pop("normalized_value_json")
     return payload
+
+
+def _item_payload(item: Any) -> dict[str, Any]:
+    return jsonable_encoder(asdict(item))
+
+
+def _term_payload(term: Any) -> dict[str, Any]:
+    return jsonable_encoder(asdict(term))
+
+
+def _offer_payload(offer: Any) -> dict[str, Any]:
+    return jsonable_encoder(asdict(offer))
+
+
+def _manual_item_detail_payload(detail: Any) -> dict[str, Any]:
+    return {
+        "item": _item_payload(detail.item),
+        "terms": [_term_payload(term) for term in detail.terms],
+        "offers": [_offer_payload(offer) for offer in detail.offers],
+        "attributes": jsonable_encoder(detail.attributes),
+        "evidence": jsonable_encoder(detail.evidence),
+    }
 
 
 def _candidate_detail_payload(detail: Any) -> dict[str, Any]:

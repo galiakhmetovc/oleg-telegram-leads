@@ -96,6 +96,21 @@ def test_create_draft_can_start_from_recent_days(source_service):
     assert source.checkpoint_message_id is None
 
 
+def test_create_draft_can_start_from_beginning(source_service):
+    service, _session = source_service
+
+    source = service.create_draft(
+        "https://t.me/purmaster",
+        purpose="catalog_ingestion",
+        added_by="admin",
+        start_mode="from_beginning",
+    )
+
+    assert source.start_mode == "from_beginning"
+    assert source.checkpoint_message_id is None
+    assert source.start_recent_days is None
+
+
 def test_status_transitions_to_active(source_service):
     service, _session = source_service
     source = service.create_draft("@example_chat", added_by="admin")
@@ -208,6 +223,23 @@ def test_activate_from_web_from_now_uses_latest_preview_as_checkpoint(source_ser
     assert activated.checkpoint_message_id == 10
     assert activated.checkpoint_date is not None
     assert poll_job.checkpoint_before_json == {"message_id": 10}
+
+
+def test_activate_from_web_from_beginning_keeps_empty_checkpoint(source_service):
+    service, session = source_service
+    source = service.create_draft(
+        "https://t.me/purmaster",
+        purpose="catalog_ingestion",
+        added_by="admin",
+        start_mode="from_beginning",
+    )
+    service.set_status(source.id, "preview_ready", actor="system")
+    _insert_preview_message(session, source.id)
+
+    activated, poll_job = service.activate_from_web(source.id, actor="admin")
+
+    assert activated.checkpoint_message_id is None
+    assert poll_job.checkpoint_before_json == {"message_id": None}
 
 
 def _insert_preview_message(session, source_id: str) -> None:

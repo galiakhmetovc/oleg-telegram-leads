@@ -49,6 +49,28 @@ def test_source_routes_require_auth_create_and_return_detail(tmp_path):
     assert [job["job_type"] for job in detail_response.json()["jobs"]] == ["check_source_access"]
 
 
+def test_source_routes_allow_catalog_source_from_beginning(tmp_path):
+    fixture = _setup_app(tmp_path)
+    client = fixture["client"]
+    _login(client)
+
+    create_response = client.post(
+        "/api/sources",
+        json={
+            "input_ref": "https://t.me/purmaster",
+            "purpose": "catalog_ingestion",
+            "start_mode": "from_beginning",
+            "check_access": False,
+        },
+    )
+
+    assert create_response.status_code == 200
+    assert create_response.json()["source"]["username"] == "purmaster"
+    assert create_response.json()["source"]["start_mode"] == "from_beginning"
+    assert create_response.json()["source"]["checkpoint_message_id"] is None
+    assert create_response.json()["access_job"] is None
+
+
 def test_source_detail_explains_public_read_without_join(tmp_path):
     fixture = _setup_app(tmp_path)
     client = fixture["client"]
@@ -137,6 +159,91 @@ def test_source_action_routes_preview_activate_pause_and_reset_checkpoint(tmp_pa
         "fetch_source_preview",
         "poll_monitored_source",
     ]
+
+
+def test_source_raw_ingest_enqueues_one_shot_job_without_activating_source(tmp_path):
+    fixture = _setup_app(tmp_path)
+    client = fixture["client"]
+    _login(client)
+    with fixture["session_factory"]() as session:
+        source = TelegramSourceService(session).create_draft(
+            "https://t.me/purmaster",
+            purpose="catalog_ingestion",
+            added_by="admin",
+        )
+
+    response = client.post(f"/api/sources/{source.id}/raw-ingest", json={"limit": 50})
+    detail_response = client.get(f"/api/sources/{source.id}")
+
+    assert response.status_code == 200
+    assert response.json()["source"]["status"] == "draft"
+    assert response.json()["raw_ingest_job"]["job_type"] == "ingest_telegram_raw"
+    assert response.json()["raw_ingest_job"]["payload_json"] == {
+        "limit": 50,
+        "mode": "raw_only",
+        "requested_by": "admin",
+        "enqueue_classification": False,
+    }
+    assert detail_response.json()["jobs"][0]["job_type"] == "ingest_telegram_raw"
+    with fixture["session_factory"]() as session:
+        source_row = session.execute(select(monitored_sources_table)).mappings().one()
+        job = session.execute(select(scheduler_jobs_table)).mappings().one()
+    assert source_row["status"] == "draft"
+    assert source_row["checkpoint_message_id"] is None
+    assert job["status"] == "queued"
+    assert job["idempotency_key"] == f"source:{source.id}:raw-ingest"
+
+
+def test_source_raw_export_route_enqueues_configured_export_job(tmp_path):
+    fixture = _setup_app(tmp_path)
+    client = fixture["client"]
+    _login(client)
+    with fixture["session_factory"]() as session:
+        source = TelegramSourceService(session).create_draft(
+            "https://t.me/purmaster",
+            purpose="catalog_ingestion",
+            added_by="admin",
+            start_mode="from_beginning",
+        )
+
+    response = client.post(
+        f"/api/sources/{source.id}/raw-export",
+        json={
+            "range_mode": "recent_days",
+            "recent_days": 180,
+            "batch_size": 500,
+            "max_messages": 1200,
+            "media_enabled": True,
+            "media_types": ["document", "photo"],
+            "max_media_size_bytes": 10485760,
+        },
+    )
+
+    assert response.status_code == 200
+    job = response.json()["raw_export_job"]
+    assert job["job_type"] == "export_telegram_raw"
+    assert job["payload_json"] == {
+        "requested_by": "admin",
+        "range": {
+            "mode": "recent_days",
+            "recent_days": 180,
+            "message_id": None,
+            "since_date": None,
+            "batch_size": 500,
+            "max_messages": 1200,
+        },
+        "media": {
+            "enabled": True,
+            "types": ["document", "photo"],
+            "max_file_size_bytes": 10485760,
+        },
+        "canonicalize": True,
+        "enqueue_classification": False,
+    }
+    with fixture["session_factory"]() as session:
+        stored_job = session.execute(select(scheduler_jobs_table)).mappings().one()
+    assert stored_job["status"] == "queued"
+    assert stored_job["idempotency_key"].startswith(f"source:{source.id}:raw-export:")
 
 
 def _setup_app(tmp_path):

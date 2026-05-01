@@ -11,6 +11,11 @@ sessions/
 data/
 artifacts/
 vault/
+output/
+
+# Local agent/tool outputs
+.playwright-cli/
+.superpowers/
 
 # Python
 __pycache__/

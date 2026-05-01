@@ -373,9 +373,14 @@ def build_telegram_handler_registry(
     client: TelegramClientPort,
     *,
     artifact_storage_path: str | Path | None = None,
+    raw_export_storage_path: str | Path | None = None,
 ) -> dict[str, JobHandler]:
     access_worker = TelegramAccessWorker(session, client)
-    polling_worker = TelegramPollingWorker(session, client)
+    polling_worker = TelegramPollingWorker(
+        session,
+        client,
+        raw_export_root=raw_export_storage_path or "./data/raw",
+    )
     context_worker = MessageContextWorker(session, client)
     telegram_sources = TelegramSourceRepository(session)
     catalog_sources = CatalogSourceService(session)
@@ -410,6 +415,38 @@ def build_telegram_handler_registry(
             job.monitored_source_id,
             scheduler_job_id=job.id,
             limit=payload.get("limit", 100),
+        )
+        return JobHandlerResult(
+            checkpoint_after={"message_id": result.checkpoint_after},
+            result_summary=asdict(result),
+        )
+
+    async def ingest_telegram_raw(job: SchedulerJobRecord) -> JobHandlerResult:
+        if job.monitored_source_id is None:
+            raise ValueError("ingest_telegram_raw requires monitored_source_id")
+        payload = job.payload_json or {}
+        result = await polling_worker.poll_monitored_source(
+            job.monitored_source_id,
+            scheduler_job_id=job.id,
+            limit=payload.get("limit", 100),
+            require_active=False,
+            enqueue_classification=bool(payload.get("enqueue_classification", False)),
+        )
+        return JobHandlerResult(
+            checkpoint_after={"message_id": result.checkpoint_after},
+            result_summary=asdict(result),
+        )
+
+    async def export_telegram_raw(job: SchedulerJobRecord) -> JobHandlerResult:
+        if job.monitored_source_id is None:
+            raise ValueError("export_telegram_raw requires monitored_source_id")
+        payload = job.payload_json or {}
+        result = await polling_worker.export_monitored_source_raw(
+            job.monitored_source_id,
+            scheduler_job_id=job.id,
+            range_config=payload.get("range") if isinstance(payload.get("range"), dict) else {},
+            media_config=payload.get("media") if isinstance(payload.get("media"), dict) else {},
+            canonicalize=bool(payload.get("canonicalize", True)),
         )
         return JobHandlerResult(
             checkpoint_after={"message_id": result.checkpoint_after},
@@ -474,6 +511,7 @@ def build_telegram_handler_registry(
             scheduler.enqueue(
                 job_type="parse_artifact",
                 scope_type="parser",
+                priority="high",
                 scope_id=artifact.id,
                 idempotency_key=f"parse-artifact:{artifact.id}",
                 payload_json={
@@ -496,6 +534,8 @@ def build_telegram_handler_registry(
         "check_source_access": check_source_access,
         "fetch_source_preview": fetch_source_preview,
         "poll_monitored_source": poll_monitored_source,
+        "ingest_telegram_raw": ingest_telegram_raw,
+        "export_telegram_raw": export_telegram_raw,
         "fetch_message_context": fetch_message_context,
         "download_artifact": download_artifact,
     }
@@ -512,6 +552,7 @@ def build_catalog_handler_registry(
     source_service = CatalogSourceService(session)
     candidate_service = CatalogCandidateService(session)
     scheduler = SchedulerService(session)
+    settings = SettingsService(session)
 
     async def parse_artifact(job: SchedulerJobRecord) -> JobHandlerResult:
         if parser is None:
@@ -535,19 +576,20 @@ def build_catalog_handler_registry(
             parser_name=parsed.parser_name,
             parser_version=parsed.parser_version,
         )
-        for chunk in chunks:
-            scheduler.enqueue(
-                job_type="extract_catalog_facts",
-                scope_type="parser",
-                scope_id=chunk.id,
-                idempotency_key=f"extract-catalog-facts:{chunk.id}",
-                payload_json={
-                    "source_id": chunk.source_id,
-                    "artifact_id": chunk.artifact_id,
-                    "chunk_id": chunk.id,
-                    "extractor_version": "pur-heuristic-1",
-                },
-            )
+        if _catalog_auto_extract_after_ingest_enabled(settings, payload):
+            for chunk in chunks:
+                scheduler.enqueue(
+                    job_type="extract_catalog_facts",
+                    scope_type="parser",
+                    scope_id=chunk.id,
+                    idempotency_key=f"extract-catalog-facts:{chunk.id}",
+                    payload_json={
+                        "source_id": chunk.source_id,
+                        "artifact_id": chunk.artifact_id,
+                        "chunk_id": chunk.id,
+                        "extractor_version": "pur-heuristic-1",
+                    },
+                )
         return JobHandlerResult(
             result_summary={"chunk_count": len(chunks), "parser_name": parsed.parser_name}
         )
@@ -657,18 +699,19 @@ def build_catalog_handler_registry(
             parser_name="external-page-text",
             parser_version="1",
         )
-        for chunk in chunks:
-            scheduler.enqueue(
-                job_type="extract_catalog_facts",
-                scope_type="parser",
-                scope_id=chunk.id,
-                idempotency_key=f"extract-catalog-facts:{chunk.id}",
-                payload_json={
-                    "source_id": chunk.source_id,
-                    "chunk_id": chunk.id,
-                    "extractor_version": "external-page-runtime",
-                },
-            )
+        if _catalog_auto_extract_after_ingest_enabled(settings, payload):
+            for chunk in chunks:
+                scheduler.enqueue(
+                    job_type="extract_catalog_facts",
+                    scope_type="parser",
+                    scope_id=chunk.id,
+                    idempotency_key=f"extract-catalog-facts:{chunk.id}",
+                    payload_json={
+                        "source_id": chunk.source_id,
+                        "chunk_id": chunk.id,
+                        "extractor_version": "external-page-runtime",
+                    },
+                )
         return JobHandlerResult(
             result_summary={
                 "source_id": source.id,
@@ -1801,6 +1844,17 @@ def _mark_message_classified(session: Session, source_message_id: str) -> None:
     )
 
 
+def _catalog_auto_extract_after_ingest_enabled(
+    settings: SettingsService,
+    payload: dict[str, Any],
+) -> bool:
+    if "auto_extract" in payload:
+        return _truthy(payload["auto_extract"])
+    if "catalog_auto_extract_after_ingest_enabled" in payload:
+        return _truthy(payload["catalog_auto_extract_after_ingest_enabled"])
+    return _truthy(settings.get("catalog_auto_extract_after_ingest_enabled"))
+
+
 def _resolved_source_from_record(source: MonitoredSourceRecord) -> ResolvedTelegramSource:
     return ResolvedTelegramSource(
         input_ref=source.input_ref,
@@ -1827,9 +1881,17 @@ def _should_parse_artifact(
 ) -> bool:
     if download_status != "downloaded":
         return False
-    if mime_type == "application/pdf":
+    normalized_mime = mime_type.casefold().split(";", 1)[0].strip() if mime_type else None
+    if normalized_mime == "application/pdf":
         return True
-    return file_name is not None and file_name.casefold().endswith(".pdf")
+    if normalized_mime is not None and (
+        normalized_mime.startswith("text/")
+        or normalized_mime in {"application/json", "application/xml", "application/csv"}
+    ):
+        return True
+    return file_name is not None and file_name.casefold().endswith(
+        (".pdf", ".txt", ".md", ".csv", ".json", ".xml", ".html", ".htm")
+    )
 
 
 def _source_message_text(row: dict[str, Any]) -> str | None:

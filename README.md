@@ -2,7 +2,16 @@
 
 Greenfield implementation for PUR catalog source-of-truth, Telegram lead detection, and lightweight CRM.
 
-The current source of truth is `docs/superpowers/specs/2026-04-28-pur-catalog-source-of-truth-design.md`.
+Start with `docs/README.md` for the current documentation map and implementation
+status. The full target design remains in
+`docs/superpowers/specs/2026-04-28-pur-catalog-source-of-truth-design.md`.
+
+Operational notes:
+
+- Documentation map and implementation audit: `docs/README.md`.
+- Artifact visibility and production deployment runbook: `docs/operations/artifacts-and-production.md`.
+- Current production host: `teamd-ams1` / `31.130.128.89`.
+- Production web URL: `http://31.130.128.89:8000`.
 
 ## Development
 
@@ -50,6 +59,11 @@ docker compose up web
 docker compose run --rm worker
 ```
 
+Production runs through Docker Compose on `teamd-ams1`. Do not treat a local
+`uv run pur-leads web` process as production. Before any production restart,
+take a SQLite backup and check whether the worker is intentionally stopped.
+See `docs/operations/artifacts-and-production.md`.
+
 For fast iteration on a running server, use the dev override. It mounts
 `src/`, `migrations/`, and `alembic.ini` into the existing image, so normal
 Python/CSS/JS changes do not require a Docker rebuild:
@@ -60,6 +74,23 @@ scripts/deploy-dev.sh
 
 Rebuild the image when dependencies, the Dockerfile, or the Material Web vendor
 bundle change.
+
+## Artifacts UI
+
+Authenticated admins can inspect generated pipeline artifacts at `/artifacts`.
+The screen lists raw Telegram exports, stage metadata outputs, discovered files
+inside artifact directories, and previews JSON/JSONL, Parquet, SQLite, and text
+artifacts without requiring SSH. The API routes are:
+
+```text
+GET /api/artifacts
+GET /api/artifacts/{artifact_id}
+```
+
+The inventory is derived from `telegram_raw_export_runs`, `metadata_json` path
+fields, and bounded filesystem discovery under registered artifact directories.
+See `docs/operations/artifacts-and-production.md` for limits and operational
+behavior.
 
 ## Bootstrap Admin
 

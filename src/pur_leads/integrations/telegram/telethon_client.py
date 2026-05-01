@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+import base64
 import inspect
-from collections.abc import Callable
+from collections.abc import AsyncIterator, Callable, Sequence
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -15,6 +16,7 @@ from pur_leads.integrations.telegram.types import (
     ResolvedTelegramSource,
     SourceAccessResult,
     TelegramDocumentDownload,
+    TelegramMediaDownload,
     TelegramMessage,
 )
 
@@ -114,6 +116,41 @@ class TelethonTelegramClient:
             _message_from_telethon(source, message)
             async for message in client.iter_messages(entity, **kwargs)
         ]
+
+    async def iter_message_batches(
+        self,
+        source: ResolvedTelegramSource,
+        *,
+        after_message_id: int | None = None,
+        from_message_id: int | None = None,
+        after_date: datetime | None = None,
+        limit: int | None = None,
+        batch_size: int = 1000,
+    ) -> AsyncIterator[list[TelegramMessage]]:
+        if batch_size <= 0:
+            raise ValueError("batch_size must be positive")
+        client = await self._get_client()
+        entity = await client.get_entity(_entity_ref(source))
+        kwargs: dict[str, Any] = {
+            "limit": limit,
+            "reverse": True,
+            "wait_time": self.get_history_wait_seconds,
+        }
+        if after_message_id is not None:
+            kwargs["min_id"] = after_message_id
+        elif from_message_id is not None:
+            kwargs["min_id"] = max(from_message_id - 1, 0)
+        elif after_date is not None:
+            kwargs["offset_date"] = after_date
+
+        batch: list[TelegramMessage] = []
+        async for message in client.iter_messages(entity, **kwargs):
+            batch.append(_message_from_telethon(source, message))
+            if len(batch) >= batch_size:
+                yield batch
+                batch = []
+        if batch:
+            yield batch
 
     async def fetch_context(
         self,
@@ -219,6 +256,89 @@ class TelethonTelegramClient:
             local_path=str(downloaded_path),
         )
 
+    async def download_message_media(
+        self,
+        source: ResolvedTelegramSource,
+        *,
+        message_id: int,
+        destination_dir: str | Path,
+        allowed_media_types: Sequence[str],
+        max_file_size_bytes: int | None,
+    ) -> TelegramMediaDownload:
+        client = await self._get_client()
+        entity = await client.get_entity(_entity_ref(source))
+        message = await _get_message(client, entity, message_id)
+        if message is None:
+            return TelegramMediaDownload(
+                status="skipped",
+                media_type=None,
+                file_name=None,
+                mime_type=None,
+                file_size=None,
+                local_path=None,
+                skip_reason="message_not_found",
+            )
+
+        metadata = _downloadable_media_metadata(message)
+        if metadata is None:
+            return TelegramMediaDownload(
+                status="skipped",
+                media_type=None,
+                file_name=None,
+                mime_type=None,
+                file_size=None,
+                local_path=None,
+                skip_reason="no_media",
+            )
+        media_type = str(metadata["media_type"])
+        if media_type not in set(allowed_media_types):
+            return TelegramMediaDownload(
+                status="skipped",
+                media_type=media_type,
+                file_name=metadata["file_name"],
+                mime_type=metadata["mime_type"],
+                file_size=metadata["file_size"],
+                local_path=None,
+                skip_reason="media_type_not_allowed",
+            )
+        file_size = metadata["file_size"]
+        if (
+            max_file_size_bytes is not None
+            and file_size is not None
+            and int(file_size) > max_file_size_bytes
+        ):
+            return TelegramMediaDownload(
+                status="skipped",
+                media_type=media_type,
+                file_name=metadata["file_name"],
+                mime_type=metadata["mime_type"],
+                file_size=file_size,
+                local_path=None,
+                skip_reason="file_too_large",
+            )
+
+        destination = Path(destination_dir)
+        destination.mkdir(parents=True, exist_ok=True)
+        downloaded_path = await client.download_media(message, file=str(destination))
+        if downloaded_path is None:
+            return TelegramMediaDownload(
+                status="failed",
+                media_type=media_type,
+                file_name=metadata["file_name"],
+                mime_type=metadata["mime_type"],
+                file_size=file_size,
+                local_path=None,
+                error="download_media returned no path",
+            )
+        return TelegramMediaDownload(
+            status="downloaded",
+            media_type=media_type,
+            file_name=metadata["file_name"],
+            mime_type=metadata["mime_type"],
+            file_size=file_size,
+            local_path=str(downloaded_path),
+        )
+
     async def _get_client(self) -> Any:
         if self._client is None:
             client = self.client_factory(
@@ -300,11 +420,32 @@ def _message_from_telethon(source: ResolvedTelegramSource, message: Any) -> Tele
         reply_to_message_id=_reply_to_message_id(message),
         thread_id=_string_or_none(getattr(message, "grouped_id", None)),
         forward_metadata_json=_forward_metadata(message),
-        raw_metadata_json={
-            "post": bool(getattr(message, "post", False)),
-            "views": getattr(message, "views", None),
-        },
+        raw_metadata_json=_raw_message_metadata(message),
     )
+
+
+def _raw_message_metadata(message: Any) -> dict[str, Any]:
+    return {
+        "post": bool(getattr(message, "post", False)),
+        "views": _json_safe(getattr(message, "views", None)),
+        "forwards": _json_safe(getattr(message, "forwards", None)),
+        "edit_date": _json_safe(getattr(message, "edit_date", None)),
+        "grouped_id": _json_safe(getattr(message, "grouped_id", None)),
+        "telethon": {
+            "message": _telethon_dump(message),
+            "sender": _telethon_dump(getattr(message, "sender", None)),
+            "chat": _telethon_dump(getattr(message, "chat", None)),
+            "media": _telethon_dump(getattr(message, "media", None)),
+            "document": _telethon_dump(getattr(message, "document", None)),
+            "reply_to": _telethon_dump(getattr(message, "reply_to", None)),
+            "fwd_from": _telethon_dump(getattr(message, "fwd_from", None)),
+            "action": _telethon_dump(getattr(message, "action", None)),
+            "reactions": _telethon_dump(getattr(message, "reactions", None)),
+            "entities": _telethon_dump(getattr(message, "entities", None)),
+            "buttons": _telethon_dump(getattr(message, "buttons", None)),
+            "via_bot": _telethon_dump(getattr(message, "via_bot", None)),
+        },
+    }
 
 
 def _sender_display(sender: Any) -> str | None:
@@ -368,6 +509,42 @@ def _document_media_skip_reason(document: Any, mime_type: str | None) -> str | N
     return None
 
 
+def _downloadable_media_metadata(message: Any) -> dict[str, Any] | None:
+    media = getattr(message, "media", None)
+    document = getattr(message, "document", None)
+    if media is None and document is None:
+        return None
+    mime_type = _blank_to_none(getattr(document, "mime_type", None)) if document else None
+    return {
+        "media_type": _download_media_type(message, mime_type),
+        "file_name": _document_file_name(document) if document else None,
+        "mime_type": mime_type,
+        "file_size": _int_or_none(getattr(document, "size", None)) if document else None,
+    }
+
+
+def _download_media_type(message: Any, mime_type: str | None) -> str:
+    if mime_type:
+        if mime_type.startswith("image/"):
+            return "photo"
+        if mime_type.startswith("video/"):
+            return "video"
+        if mime_type.startswith("audio/"):
+            return "audio"
+        return "document"
+    media = getattr(message, "media", None)
+    media_name = media.__class__.__name__.lower() if media is not None else ""
+    if "photo" in media_name:
+        return "photo"
+    if "video" in media_name:
+        return "video"
+    if "audio" in media_name:
+        return "audio"
+    if getattr(message, "document", None) is not None:
+        return "document"
+    return "other"
+
+
 def _forward_metadata(message: Any) -> dict[str, Any] | None:
     forward = getattr(message, "fwd_from", None)
     if forward is None:
@@ -397,3 +574,58 @@ def _string_or_none(value: Any) -> str | None:
 
 def _int_or_none(value: Any) -> int | None:
     return int(value) if value is not None else None
+
+
+def _telethon_dump(value: Any) -> Any:
+    return _json_safe(value, visited=set())
+
+
+def _json_safe(value: Any, *, visited: set[int] | None = None, depth: int = 0) -> Any:
+    if value is None or isinstance(value, str | int | float | bool):
+        return value
+    if isinstance(value, datetime):
+        return value.isoformat()
+    if isinstance(value, bytes | bytearray | memoryview):
+        return {
+            "__type": "bytes",
+            "encoding": "base64",
+            "data": base64.b64encode(bytes(value)).decode("ascii"),
+        }
+    if depth > 8:
+        return repr(value)
+    if visited is None:
+        visited = set()
+    value_id = id(value)
+    if value_id in visited:
+        return {"__type": value.__class__.__name__, "__cycle__": True}
+    if isinstance(value, dict):
+        visited.add(value_id)
+        return {
+            str(key): _json_safe(item, visited=visited, depth=depth + 1)
+            for key, item in value.items()
+        }
+    if isinstance(value, list | tuple | set | frozenset):
+        visited.add(value_id)
+        return [_json_safe(item, visited=visited, depth=depth + 1) for item in value]
+
+    to_dict = getattr(value, "to_dict", None)
+    if callable(to_dict):
+        visited.add(value_id)
+        try:
+            dumped = to_dict()
+        except Exception:
+            dumped = None
+        if dumped is not None:
+            return _json_safe(dumped, visited=visited, depth=depth + 1)
+
+    try:
+        attributes = vars(value)
+    except TypeError:
+        return repr(value)
+    visited.add(value_id)
+    payload: dict[str, Any] = {"__class__": value.__class__.__name__}
+    for key, item in attributes.items():
+        if key.startswith("_"):
+            continue
+        payload[key] = _json_safe(item, visited=visited, depth=depth + 1)
+    return payload

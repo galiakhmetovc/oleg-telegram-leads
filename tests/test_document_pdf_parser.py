@@ -46,6 +46,32 @@ async def test_pdf_artifact_parser_requires_local_path():
         )
 
 
+@pytest.mark.asyncio
+async def test_document_parser_returns_chunks_for_text_documents(tmp_path):
+    text_path = tmp_path / "catalog.txt"
+    text_path.write_text(
+        "Dahua Hero A1 камера\n\n"
+        "Умные реле, датчики протечки и настройка Home Assistant",
+        encoding="utf-8",
+    )
+    parser = PdfArtifactParser(reader_factory=lambda path: FakeReader([]))
+
+    parsed = await parser.parse_artifact(
+        source_id="source-1",
+        artifact_id="artifact-1",
+        payload={
+            "local_path": str(text_path),
+            "file_name": "catalog.txt",
+            "mime_type": "text/plain",
+        },
+    )
+
+    assert parsed.parser_name == "plain-text"
+    assert parsed.chunks == [
+        "Dahua Hero A1 камера\n\nУмные реле, датчики протечки и настройка Home Assistant"
+    ]
+
+
 class FakeReader:
     def __init__(self, pages):
         self.pages = pages
