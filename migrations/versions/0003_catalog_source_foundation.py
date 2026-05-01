@@ -93,34 +93,35 @@ def upgrade() -> None:
         ["source_id", "artifact_id", "chunk_index"],
         unique=True,
     )
-    op.execute(
-        "CREATE VIRTUAL TABLE parsed_chunks_fts USING fts5("
-        "text, content='parsed_chunks', content_rowid='rowid')"
-    )
-    op.execute(
-        """
-        CREATE TRIGGER parsed_chunks_ai AFTER INSERT ON parsed_chunks BEGIN
-            INSERT INTO parsed_chunks_fts(rowid, text) VALUES (new.rowid, new.text);
-        END
-        """
-    )
-    op.execute(
-        """
-        CREATE TRIGGER parsed_chunks_ad AFTER DELETE ON parsed_chunks BEGIN
-            INSERT INTO parsed_chunks_fts(parsed_chunks_fts, rowid, text)
-            VALUES ('delete', old.rowid, old.text);
-        END
-        """
-    )
-    op.execute(
-        """
-        CREATE TRIGGER parsed_chunks_au AFTER UPDATE ON parsed_chunks BEGIN
-            INSERT INTO parsed_chunks_fts(parsed_chunks_fts, rowid, text)
-            VALUES ('delete', old.rowid, old.text);
-            INSERT INTO parsed_chunks_fts(rowid, text) VALUES (new.rowid, new.text);
-        END
-        """
-    )
+    if op.get_bind().dialect.name == "sqlite":
+        op.execute(
+            "CREATE VIRTUAL TABLE parsed_chunks_fts USING fts5("
+            "text, content='parsed_chunks', content_rowid='rowid')"
+        )
+        op.execute(
+            """
+            CREATE TRIGGER parsed_chunks_ai AFTER INSERT ON parsed_chunks BEGIN
+                INSERT INTO parsed_chunks_fts(rowid, text) VALUES (new.rowid, new.text);
+            END
+            """
+        )
+        op.execute(
+            """
+            CREATE TRIGGER parsed_chunks_ad AFTER DELETE ON parsed_chunks BEGIN
+                INSERT INTO parsed_chunks_fts(parsed_chunks_fts, rowid, text)
+                VALUES ('delete', old.rowid, old.text);
+            END
+            """
+        )
+        op.execute(
+            """
+            CREATE TRIGGER parsed_chunks_au AFTER UPDATE ON parsed_chunks BEGIN
+                INSERT INTO parsed_chunks_fts(parsed_chunks_fts, rowid, text)
+                VALUES ('delete', old.rowid, old.text);
+                INSERT INTO parsed_chunks_fts(rowid, text) VALUES (new.rowid, new.text);
+            END
+            """
+        )
 
     op.create_table(
         "extraction_runs",
@@ -595,10 +596,11 @@ def downgrade() -> None:
     op.drop_index("uq_catalog_versions_version", table_name="catalog_versions")
     op.drop_table("catalog_versions")
     op.drop_table("extraction_runs")
-    op.execute("DROP TRIGGER IF EXISTS parsed_chunks_au")
-    op.execute("DROP TRIGGER IF EXISTS parsed_chunks_ad")
-    op.execute("DROP TRIGGER IF EXISTS parsed_chunks_ai")
-    op.execute("DROP TABLE IF EXISTS parsed_chunks_fts")
+    if op.get_bind().dialect.name == "sqlite":
+        op.execute("DROP TRIGGER IF EXISTS parsed_chunks_au")
+        op.execute("DROP TRIGGER IF EXISTS parsed_chunks_ad")
+        op.execute("DROP TRIGGER IF EXISTS parsed_chunks_ai")
+        op.execute("DROP TABLE IF EXISTS parsed_chunks_fts")
     op.drop_index("uq_parsed_chunks_source_artifact_index", table_name="parsed_chunks")
     op.drop_table("parsed_chunks")
     op.drop_index("ix_artifacts_sha256", table_name="artifacts")

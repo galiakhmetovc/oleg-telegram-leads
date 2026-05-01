@@ -15,13 +15,10 @@ branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
 _START_MODES_WITH_BEGINNING = (
-    "start_mode IN ('from_now', 'from_message', 'recent_limit', "
-    "'recent_days', 'from_beginning')"
+    "start_mode IN ('from_now', 'from_message', 'recent_limit', 'recent_days', 'from_beginning')"
 )
 
-_PREVIOUS_START_MODES = (
-    "start_mode IN ('from_now', 'from_message', 'recent_limit', 'recent_days')"
-)
+_PREVIOUS_START_MODES = "start_mode IN ('from_now', 'from_message', 'recent_limit', 'recent_days')"
 
 _JOB_TYPES_WITH_RAW_INGEST = (
     "job_type IN ('poll_monitored_source', 'ingest_telegram_raw', 'check_source_access', "
@@ -45,24 +42,28 @@ _PREVIOUS_JOB_TYPES = (
 
 
 def upgrade() -> None:
-    with op.batch_alter_table("monitored_sources", recreate="always") as batch_op:
+    with op.batch_alter_table("monitored_sources", **_batch_kwargs()) as batch_op:
         batch_op.drop_constraint("ck_monitored_sources_start_mode", type_="check")
         batch_op.create_check_constraint(
             "ck_monitored_sources_start_mode",
             _START_MODES_WITH_BEGINNING,
         )
-    with op.batch_alter_table("scheduler_jobs", recreate="always") as batch_op:
+    with op.batch_alter_table("scheduler_jobs", **_batch_kwargs()) as batch_op:
         batch_op.drop_constraint("ck_scheduler_jobs_job_type", type_="check")
         batch_op.create_check_constraint("ck_scheduler_jobs_job_type", _JOB_TYPES_WITH_RAW_INGEST)
 
 
 def downgrade() -> None:
-    with op.batch_alter_table("scheduler_jobs", recreate="always") as batch_op:
+    with op.batch_alter_table("scheduler_jobs", **_batch_kwargs()) as batch_op:
         batch_op.drop_constraint("ck_scheduler_jobs_job_type", type_="check")
         batch_op.create_check_constraint("ck_scheduler_jobs_job_type", _PREVIOUS_JOB_TYPES)
-    with op.batch_alter_table("monitored_sources", recreate="always") as batch_op:
+    with op.batch_alter_table("monitored_sources", **_batch_kwargs()) as batch_op:
         batch_op.drop_constraint("ck_monitored_sources_start_mode", type_="check")
         batch_op.create_check_constraint(
             "ck_monitored_sources_start_mode",
             _PREVIOUS_START_MODES,
         )
+
+
+def _batch_kwargs() -> dict[str, str]:
+    return {"recreate": "always"} if op.get_bind().dialect.name == "sqlite" else {}

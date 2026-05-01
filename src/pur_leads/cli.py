@@ -11,7 +11,7 @@ from collections.abc import Sequence
 from pathlib import Path
 
 from pur_leads.core.config import load_settings
-from pur_leads.db.engine import create_sqlite_engine
+from pur_leads.db.engine import create_database_engine
 from pur_leads.db.migrations import upgrade_database
 from pur_leads.db.session import create_session_factory
 from pur_leads.integrations.ai.chat import AiChatCompletion
@@ -77,6 +77,7 @@ def main(argv: Sequence[str] | None = None) -> None:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="pur-leads")
+    parser.add_argument("--database-url", default=None)
     parser.add_argument("--database-path", type=Path, default=None)
 
     subcommands = parser.add_subparsers(required=True)
@@ -148,9 +149,7 @@ def build_parser() -> argparse.ArgumentParser:
     analyze_telegram_entity_ranking.add_argument("--raw-export-run-id", required=True)
     analyze_telegram_entity_ranking.add_argument("--enriched-root", type=Path, default=None)
     analyze_telegram_entity_ranking.set_defaults(handler=_analyze_telegram_entity_ranking)
-    analyze_telegram_entity_enrichment = analyze_commands.add_parser(
-        "telegram-entity-enrichment"
-    )
+    analyze_telegram_entity_enrichment = analyze_commands.add_parser("telegram-entity-enrichment")
     analyze_telegram_entity_enrichment.add_argument("--raw-export-run-id", required=True)
     analyze_telegram_entity_enrichment.add_argument("--limit", type=int, default=50)
     analyze_telegram_entity_enrichment.add_argument(
@@ -164,9 +163,7 @@ def build_parser() -> argparse.ArgumentParser:
     analyze_telegram_entity_enrichment.add_argument("--base-url", default=None)
     analyze_telegram_entity_enrichment.add_argument("--temperature", type=float, default=0.0)
     analyze_telegram_entity_enrichment.add_argument("--max-tokens", type=int, default=2048)
-    analyze_telegram_entity_enrichment.set_defaults(
-        handler=_analyze_telegram_entity_enrichment
-    )
+    analyze_telegram_entity_enrichment.set_defaults(handler=_analyze_telegram_entity_enrichment)
     analyze_telegram_chroma = analyze_commands.add_parser("telegram-chroma")
     analyze_telegram_chroma.add_argument("--raw-export-run-id", required=True)
     analyze_telegram_chroma.add_argument("--texts-parquet-path", type=Path, default=None)
@@ -188,11 +185,11 @@ def build_parser() -> argparse.ArgumentParser:
     analyze_telegram_lead_candidates.add_argument("--min-score", type=float, default=0.6)
     analyze_telegram_lead_candidates.add_argument("--batch-size", type=int, default=5000)
     analyze_telegram_lead_candidates.set_defaults(handler=_analyze_telegram_lead_candidates)
-    analyze_telegram_lead_candidate_llm = analyze_commands.add_parser(
-        "telegram-lead-candidate-llm"
-    )
+    analyze_telegram_lead_candidate_llm = analyze_commands.add_parser("telegram-lead-candidate-llm")
     analyze_telegram_lead_candidate_llm.add_argument("--raw-export-run-id", required=True)
-    analyze_telegram_lead_candidate_llm.add_argument("--candidates-json-path", type=Path, default=None)
+    analyze_telegram_lead_candidate_llm.add_argument(
+        "--candidates-json-path", type=Path, default=None
+    )
     analyze_telegram_lead_candidate_llm.add_argument("--output-root", type=Path, default=None)
     analyze_telegram_lead_candidate_llm.add_argument("--limit", type=int, default=100)
     analyze_telegram_lead_candidate_llm.add_argument("--provider", default=None)
@@ -204,9 +201,7 @@ def build_parser() -> argparse.ArgumentParser:
     analyze_telegram_lead_candidate_llm.add_argument("--context-window", type=int, default=2)
     analyze_telegram_lead_candidate_llm.add_argument("--thread-context-limit", type=int, default=8)
     analyze_telegram_lead_candidate_llm.add_argument("--dry-run", action="store_true")
-    analyze_telegram_lead_candidate_llm.set_defaults(
-        handler=_analyze_telegram_lead_candidate_llm
-    )
+    analyze_telegram_lead_candidate_llm.set_defaults(handler=_analyze_telegram_lead_candidate_llm)
 
     search_parser = subcommands.add_parser("search")
     search_commands = search_parser.add_subparsers(required=True)
@@ -735,7 +730,7 @@ def _web(args: argparse.Namespace) -> None:
     from pur_leads.web.app import create_app
 
     settings = load_settings()
-    app = create_app(database_path=args.database_path)
+    app = create_app(database_url=args.database_url, database_path=args.database_path)
     uvicorn.run(
         app,
         host=settings.web_host,
@@ -749,8 +744,11 @@ def _session_from_args(args: argparse.Namespace):
 
 
 def _engine_from_args(args: argparse.Namespace):
-    path = args.database_path or load_settings().database_path
-    return create_sqlite_engine(path)
+    settings = load_settings()
+    return create_database_engine(
+        database_url=args.database_url or settings.database_url,
+        sqlite_path=args.database_path or settings.database_path,
+    )
 
 
 def _ensure_database_upgraded(args: argparse.Namespace) -> None:
@@ -1203,9 +1201,7 @@ def _build_lead_candidate_arbitration_client(session, settings, args: argparse.N
             "lead_candidate_arbitration_base_url",
             env_names=("PUR_LEAD_CANDIDATE_ARBITRATION_BASE_URL",),
             env_value=os.getenv("PUR_LEAD_CANDIDATE_ARBITRATION_BASE_URL"),
-            default=(
-                route.base_url if route is not None else settings.lead_llm_shadow_base_url
-            ),
+            default=(route.base_url if route is not None else settings.lead_llm_shadow_base_url),
         )
     )
     return (

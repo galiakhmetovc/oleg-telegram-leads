@@ -323,6 +323,16 @@ def list_backups(
     }
 
 
+@router.post("/backups/database")
+def create_database_backup(
+    request: Request,
+    validated: SessionValidationResult = Depends(current_admin),
+    session: Session = Depends(get_session),
+) -> dict[str, Any]:
+    backup = _backup_service(request, session).create_database_backup(actor=_actor(validated))
+    return {"backup": jsonable_encoder(mask_secret_values(backup))}
+
+
 @router.post("/backups/sqlite")
 def create_sqlite_backup(
     request: Request,
@@ -389,8 +399,9 @@ def _limit(value: int) -> int:
 def _backup_service(request: Request, session: Session) -> BackupService:
     return BackupService(
         session,
-        database_path=request.app.state.database_path,
         backup_root=request.app.state.backup_path,
+        database_path=request.app.state.database_path,
+        database_url=request.app.state.database_url,
     )
 
 

@@ -9,6 +9,7 @@ dependencies = [
     "httpx>=0.28",
     "pypdf>=6.3",
     "pydantic-settings>=2.7",
+    "psycopg[binary]>=3.2",
     "sqlalchemy>=2.0",
     "telethon>=1.43,<2",
     "uvicorn>=0.34",

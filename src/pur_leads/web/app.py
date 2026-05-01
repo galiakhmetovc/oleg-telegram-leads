@@ -9,7 +9,7 @@ from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
 from pur_leads.core.config import load_settings
-from pur_leads.db.engine import create_sqlite_engine
+from pur_leads.db.engine import create_database_engine
 from pur_leads.db.migrations import upgrade_database
 from pur_leads.db.session import create_session_factory
 from pur_leads.services.web_auth import WebAuthService
@@ -30,6 +30,7 @@ from pur_leads.web.routes_today import router as today_router
 
 def create_app(
     *,
+    database_url: str | None = None,
     database_path: Path | str | None = None,
     bootstrap_admin_username: str | None = None,
     bootstrap_admin_password: str | None = None,
@@ -49,12 +50,17 @@ def create_app(
     resolved_database_path = (
         Path(database_path) if database_path is not None else settings.database_path
     )
-    engine = create_sqlite_engine(resolved_database_path)
+    resolved_database_url = database_url if database_url is not None else settings.database_url
+    engine = create_database_engine(
+        database_url=resolved_database_url,
+        sqlite_path=resolved_database_path,
+    )
     upgrade_database(engine)
     session_factory = create_session_factory(engine)
 
     app = FastAPI(title="PUR Leads")
     app.state.engine = engine
+    app.state.database_url = resolved_database_url
     app.state.session_factory = session_factory
     app.state.database_path = resolved_database_path
     app.state.backup_path = Path(backup_path) if backup_path is not None else settings.backup_path

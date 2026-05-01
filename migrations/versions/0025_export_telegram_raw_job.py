@@ -44,7 +44,7 @@ def upgrade() -> None:
         if not _scheduler_jobs_allow_raw_export(bind):
             _replace_sqlite_scheduler_job_type_constraint(bind, _JOB_TYPES_WITH_RAW_EXPORT)
         return
-    with op.batch_alter_table("scheduler_jobs", recreate="always") as batch_op:
+    with op.batch_alter_table("scheduler_jobs", **_batch_kwargs()) as batch_op:
         batch_op.drop_constraint("ck_scheduler_jobs_job_type", type_="check")
         batch_op.create_check_constraint(
             "ck_scheduler_jobs_job_type",
@@ -58,7 +58,7 @@ def downgrade() -> None:
         op.execute(sa.text("DROP TABLE IF EXISTS _alembic_tmp_scheduler_jobs"))
         _replace_sqlite_scheduler_job_type_constraint(bind, _PREVIOUS_JOB_TYPES)
         return
-    with op.batch_alter_table("scheduler_jobs", recreate="always") as batch_op:
+    with op.batch_alter_table("scheduler_jobs", **_batch_kwargs()) as batch_op:
         batch_op.drop_constraint("ck_scheduler_jobs_job_type", type_="check")
         batch_op.create_check_constraint("ck_scheduler_jobs_job_type", _PREVIOUS_JOB_TYPES)
 
@@ -89,3 +89,7 @@ def _replace_sqlite_scheduler_job_type_constraint(bind, replacement: str) -> Non
     schema_version = int(bind.execute(sa.text("PRAGMA schema_version")).scalar_one())
     bind.execute(sa.text(f"PRAGMA schema_version = {schema_version + 1}"))
     bind.execute(sa.text("PRAGMA writable_schema=OFF"))
+
+
+def _batch_kwargs() -> dict[str, str]:
+    return {"recreate": "always"} if op.get_bind().dialect.name == "sqlite" else {}

@@ -105,8 +105,9 @@ Current production server:
 - web URL: `http://31.130.128.89:8000`;
 - Docker Compose service: `web`;
 - container name: `oleg-telegram-leads-web-1`;
-- production database inside the container: `/app/data/pur-leads.sqlite3`;
-- host database path: `data/pur-leads.sqlite3`.
+- target production database: Postgres through `PUR_DATABASE_URL`;
+- legacy SQLite database path, while migration is still in progress:
+  `data/pur-leads.sqlite3`.
 
 The local/dev server `64.188.58.5` is not production.
 
@@ -123,7 +124,15 @@ Recommended procedure:
    ssh teamd-ams1 'cd /var/lib/teamd/workspaces/agents/default/projects/oleg-telegram-leads && docker compose ps --all'
    ```
 
-2. Back up the production SQLite database. The server may not have the `sqlite3` CLI, so use Python:
+2. Back up the production database.
+
+   If the web UI is available, use Operations -> Backups. The current endpoint
+   is database-neutral: `POST /api/operations/backups/database`. On Postgres it
+   creates a `postgres_pg_dump` archive and validates it with `pg_restore --list`;
+   on legacy SQLite it uses the SQLite backup API.
+
+   While production still runs on legacy SQLite, the server may not have the
+   `sqlite3` CLI, so the manual fallback is Python:
 
    ```bash
    DEPLOY_ID=prod-deploy-$(date -u +%Y%m%dT%H%M%SZ)
@@ -142,6 +151,13 @@ Recommended procedure:
        dst.close()
        src.close()
    PY"
+   ```
+
+   After the Postgres cutover, the manual fallback is `pg_dump`:
+
+   ```bash
+   ssh teamd-ams1 'cd /var/lib/teamd/workspaces/agents/default/projects/oleg-telegram-leads && mkdir -p backups/$DEPLOY_ID'
+   ssh teamd-ams1 'cd /var/lib/teamd/workspaces/agents/default/projects/oleg-telegram-leads && docker compose exec -T postgres pg_dump --format=custom --no-owner --no-privileges -U "$POSTGRES_USER" "$POSTGRES_DB" > backups/$DEPLOY_ID/pur-leads.dump'
    ```
 
 3. Back up any files that will be overwritten:
@@ -197,11 +213,53 @@ Expected:
 - `/api/artifacts` returns `401` without a session;
 - `web` logs show Uvicorn listening on `0.0.0.0:8000`.
 
+Postgres cutover note:
+
+- Compose now includes `postgres`, `web`, and `worker` wiring through
+  `PUR_DATABASE_URL`.
+- The application image includes `postgresql-client` for in-app
+  `pg_dump`/`pg_restore` backups.
+- Before switching production, run a clean Postgres migration smoke against a
+  disposable database and create a backup of the legacy SQLite database.
+
 ## Worker Policy
 
 The production `worker` service may be stopped intentionally.
 
 Do not start it as part of a UI-only deploy unless the operator explicitly wants background processing to resume. Starting the worker can read Telegram sources, process queued jobs, call LLM providers, and send notifications depending on the queue and settings.
+
+## Production Reset Policy
+
+When the operator asks to start fresh on production, perform a reset only after:
+
+1. Stopping worker containers.
+2. Creating a database backup.
+3. Creating a filesystem backup for raw/artifact/session paths that may be
+   removed.
+4. Confirming whether the web container should stay online or be stopped during
+   the reset.
+
+Preserve:
+
+- built-in admin and web auth tables;
+- settings and setting revisions;
+- configured resources and secret references;
+- local secret files;
+- Telegram userbot session files unless the operator explicitly asks to remove
+  accounts/sessions;
+- bootstrap password state.
+
+Delete/reset domain data:
+
+- Telegram sources, source messages, previews, access checks, raw export runs;
+- raw/processed/enriched/search/chroma artifacts;
+- catalog/knowledge data, candidates, extraction runs, classifier snapshots;
+- lead clusters, events, matches, feedback, CRM, tasks;
+- scheduler jobs/runs and operational events related to old data;
+- notification events for old leads.
+
+The current operator decision is to allow deleting all production domain data
+and starting from scratch, while preserving settings and connected resources.
 
 For the 2026-04-30 artifacts deployment:
 
@@ -239,7 +297,9 @@ Rollback web code:
 Rollback database only if the deployment changed data or migrations:
 
 1. Stop `web` and `worker`.
-2. Replace `data/pur-leads.sqlite3` from the backup.
+2. If still on legacy SQLite, replace `data/pur-leads.sqlite3` from the backup.
+   If already cut over to Postgres, restore the `postgres_pg_dump` archive to a
+   fresh database and point `PUR_DATABASE_URL` back to it.
 3. Start `web`.
 4. Verify `/health` and login.
 

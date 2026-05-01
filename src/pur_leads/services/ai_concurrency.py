@@ -141,10 +141,10 @@ class AiModelConcurrencyService:
         now = utc_now()
         expires_at = now + timedelta(seconds=max(1, int(lease_seconds)))
 
-        # SQLite has no SELECT FOR UPDATE. BEGIN IMMEDIATE serializes count+insert
-        # across worker processes while keeping the normal scheduler path unchanged.
-        self.session.commit()
-        self.session.execute(text("BEGIN IMMEDIATE"))
+        begin_serialized_lease_transaction(
+            self.session,
+            lock_key=f"ai-model-lease:{provider}:{provider_account_id or ''}:{normalized_model}",
+        )
         self._delete_expired(
             provider=provider,
             provider_account_id=provider_account_id,
@@ -263,6 +263,23 @@ def _normalize_model(model: str) -> str:
 
 def _account_model_key(provider_account_id: str, normalized_model: str) -> str:
     return f"{provider_account_id}:{normalized_model}"
+
+
+def begin_serialized_lease_transaction(session: Session, *, lock_key: str) -> None:
+    """Serialize lease acquisition for the current database dialect."""
+
+    session.commit()
+    dialect_name = session.get_bind().dialect.name
+    if dialect_name == "sqlite":
+        # SQLite has no SELECT FOR UPDATE. BEGIN IMMEDIATE serializes count+insert
+        # across worker processes while keeping the normal scheduler path unchanged.
+        session.execute(text("BEGIN IMMEDIATE"))
+        return
+    if dialect_name == "postgresql":
+        session.execute(
+            text("SELECT pg_advisory_xact_lock(hashtext(:lock_key))"),
+            {"lock_key": lock_key},
+        )
 
 
 def _int_like(value: Any) -> bool:

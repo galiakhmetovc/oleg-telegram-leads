@@ -2633,7 +2633,7 @@ async function createOperationBackup() {
   const button = document.querySelector("#operations-backup-create");
   if (button) button.disabled = true;
   try {
-    await api("/api/operations/backups/sqlite", { method: "POST", body: "{}" });
+    await api("/api/operations/backups/database", { method: "POST", body: "{}" });
     await loadOperations({ items: [], selectedId: null });
   } finally {
     if (button) button.disabled = false;

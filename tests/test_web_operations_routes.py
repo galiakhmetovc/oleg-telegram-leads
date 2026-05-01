@@ -85,8 +85,8 @@ def test_operations_routes_require_auth_and_expose_runtime_state(tmp_path):
     notifications = client.get("/api/operations/notifications").json()
     extraction_runs = client.get("/api/operations/extraction-runs?status=failed").json()
     access_checks = client.get("/api/operations/access-checks?status=flood_wait").json()
-    backup_denied = fixture["anonymous"].post("/api/operations/backups/sqlite")
-    backup_response = client.post("/api/operations/backups/sqlite")
+    backup_denied = fixture["anonymous"].post("/api/operations/backups/database")
+    backup_response = client.post("/api/operations/backups/database")
     backups = client.get("/api/operations/backups").json()
     restore_response = client.post(
         f"/api/operations/backups/{backup_response.json()['backup']['id']}/dry-run-restore"

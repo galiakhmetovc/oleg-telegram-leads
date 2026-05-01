@@ -10,15 +10,21 @@ capabilities that may not be implemented yet.
 
 Build a durable source-of-truth layer for PUR request interpretation and lead detection.
 
-The system must continuously read the PUR Telegram channel, parse messages and documents, extract catalog entities, terms, request signals, exclusions, conditions, actions, prices, availability facts, and support topics into SQLite, use those catalog facts immediately for request interpretation and lead detection, and let Oleg correct the system through a web interface. Telegram remains an information channel, not the main working UI.
+The system must continuously read the PUR Telegram channel, parse messages and documents, extract catalog entities, terms, request signals, exclusions, conditions, actions, prices, availability facts, and support topics into the operational database, use those catalog facts immediately for request interpretation and lead detection, and let Oleg correct the system through a web interface. Telegram remains an information channel, not the main working UI.
 
 The catalog is not only a sales catalog. It is the operational knowledge base that explains what the system should recognize, why it matters, when it is relevant, and when it should be ignored.
 
+Database note: this original spec was written when SQLite was the hot store.
+The current target operational database is Postgres. Remaining SQLite mentions
+in this document should be read as either historical implementation notes or as
+artifact/search-index usage. The active storage decision is
+`docs/superpowers/specs/2026-05-01-postgres-and-otel-storage-design.md`.
+
 ## Core Decisions
 
-- SQLite is the primary data store.
+- Postgres is the primary operational data store.
 - The PUR channel is the raw source of truth for facts.
-- The approved/auto-added SQLite catalog is the operational source of truth for classification.
+- The approved/auto-added catalog in the operational database is the source of truth for classification.
 - New catalog facts are auto-added by default as `auto_pending`.
 - `auto_pending` facts are active immediately in the classifier.
 - Feedback must be traceable to the exact lead, catalog item, term, source, and classifier version that caused a match.
@@ -42,6 +48,12 @@ The catalog is not only a sales catalog. It is the operational knowledge base th
 - New live monitoring sources default to `from_now`; historical backfill is explicit and retro/web-only by default.
 - Telegram-read jobs are serialized per userbot session. AI and parse jobs can run in parallel with configurable limits.
 - Logging and audit are first-class requirements for source sync, access issues, AI calls, parser runs, catalog changes, CRM changes, and notifications.
+- End-to-end lead traceability is a first-class product requirement. From every
+  operational lead, the administrator must be able to inspect the chain from
+  `lead_cluster` to `lead_event`, original Telegram message, raw ingest artifact,
+  prepared text/features, catalog matches, AI/rule decision, Telegram
+  notification, and feedback. The detailed target design is documented in
+  `docs/superpowers/specs/2026-05-01-end-to-end-lead-traceability-design.md`.
 - AI batching, reclassification, and retro research behavior are configurable because they will need tuning after real traffic is observed.
 - Retro research is a separate product workflow for testing new commercial directions against historical chat demand before adding them to the operational catalog.
 - All readable monitoring-source messages are stored, even if they are not leads, because reclassification, research, deduplication, sender intelligence, and future semantic search depend on historical data.
@@ -62,7 +74,7 @@ The catalog is not only a sales catalog. It is the operational knowledge base th
 - Local archive storage is the first phase. S3-compatible storage is represented in the schema and planned for a later phase.
 - Telegram ingest is a general chat analytics layer before it is a catalog or lead layer. The canonical design is documented in `docs/superpowers/specs/2026-04-30-continuous-telegram-ingest-chat-analytics-design.md`.
 - `poll_monitored_source` is the only runtime path that reads Telegram history. One-shot raw Telegram ingest jobs must not become a second read path.
-- Raw chat data is stored hot in SQLite for operations and materialized to `parquet_zstd` for archive, analytics, "ask your chat", retro research, and index rebuilds.
+- Raw chat data is stored hot in the operational database for operations and materialized to `parquet_zstd` for archive, analytics, "ask your chat", retro research, and index rebuilds.
 - POS-tagged normalization, entity extraction, thread reconstruction, FTS/search, QA detection, and knowledge synthesis are staged consumers of raw messages. Catalog extraction and lead detection consume those layers rather than bypassing them.
 - Catalog evidence is source-agnostic: channels, chats, private correspondence, employee/internal messages, manual uploads, pasted text, external pages, and documents can all feed raw evidence. The source-agnostic catalog ingest plan is documented in `docs/superpowers/plans/2026-04-30-source-agnostic-catalog-ingest-plan.md`.
 

@@ -1,8 +1,31 @@
-"""SQLite engine configuration."""
+"""Database engine configuration."""
 
 from pathlib import Path
 
 from sqlalchemy import Engine, create_engine, event
+from sqlalchemy.engine import make_url
+
+
+def create_database_engine(
+    *,
+    database_url: str | None = None,
+    sqlite_path: str | Path | None = None,
+) -> Engine:
+    """Create the operational database engine.
+
+    Postgres is the production database. SQLite remains available as a local
+    development/test fallback and for existing tests while the product migrates.
+    """
+
+    if database_url:
+        return create_engine(database_url, future=True, pool_pre_ping=True)
+    if sqlite_path is None:
+        raise ValueError("sqlite_path is required when database_url is not configured")
+    return create_sqlite_engine(sqlite_path)
+
+
+def is_postgres_url(database_url: str) -> bool:
+    return make_url(database_url).get_backend_name() == "postgresql"
 
 
 def create_sqlite_engine(db_path: str | Path) -> Engine:

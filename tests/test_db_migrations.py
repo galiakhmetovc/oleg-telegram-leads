@@ -1,7 +1,7 @@
 from sqlalchemy import inspect
 from sqlalchemy import text
 
-from pur_leads.db.engine import create_sqlite_engine
+from pur_leads.db.engine import create_database_engine, create_sqlite_engine
 from pur_leads.db.migrations import upgrade_database
 from pur_leads.models.catalog import catalog_quality_reviews_table
 
@@ -13,6 +13,23 @@ def test_sqlite_engine_enables_required_pragmas(tmp_path):
         assert connection.exec_driver_sql("PRAGMA foreign_keys").scalar_one() == 1
         assert connection.exec_driver_sql("PRAGMA busy_timeout").scalar_one() == 30000
         assert connection.exec_driver_sql("PRAGMA journal_mode").scalar_one().lower() == "wal"
+
+
+def test_database_engine_uses_postgres_url_when_configured():
+    engine = create_database_engine(
+        database_url="postgresql+psycopg://pur:secret@db.example.test:5432/pur_leads",
+        sqlite_path="ignored.sqlite3",
+    )
+
+    assert engine.url.get_backend_name() == "postgresql"
+    assert engine.url.get_driver_name() == "psycopg"
+    assert engine.url.database == "pur_leads"
+
+
+def test_database_engine_falls_back_to_sqlite_path(tmp_path):
+    engine = create_database_engine(database_url=None, sqlite_path=tmp_path / "fallback.db")
+
+    assert engine.url.get_backend_name() == "sqlite"
 
 
 def test_foundation_migration_creates_core_tables(tmp_path):
@@ -71,7 +88,7 @@ def test_catalog_quality_review_migration_handles_partial_table_from_concurrent_
 
     with engine.connect() as connection:
         assert connection.execute(text("select version_num from alembic_version")).scalar_one() == (
-            "0026_entity_enrichment_registry"
+            "0027_postgres_backup_type"
         )
         scheduler_sql = connection.execute(
             text("select sql from sqlite_master where type='table' and name='scheduler_jobs'")

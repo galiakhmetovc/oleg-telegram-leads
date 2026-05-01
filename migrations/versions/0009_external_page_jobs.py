@@ -33,7 +33,7 @@ _JOB_TYPES_WITHOUT_EXTERNAL_PAGES = (
 
 
 def upgrade() -> None:
-    with op.batch_alter_table("scheduler_jobs", recreate="always") as batch_op:
+    with op.batch_alter_table("scheduler_jobs", **_batch_kwargs()) as batch_op:
         batch_op.drop_constraint("ck_scheduler_jobs_job_type", type_="check")
         batch_op.create_check_constraint(
             "ck_scheduler_jobs_job_type", _JOB_TYPES_WITH_EXTERNAL_PAGES
@@ -41,8 +41,12 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    with op.batch_alter_table("scheduler_jobs", recreate="always") as batch_op:
+    with op.batch_alter_table("scheduler_jobs", **_batch_kwargs()) as batch_op:
         batch_op.drop_constraint("ck_scheduler_jobs_job_type", type_="check")
         batch_op.create_check_constraint(
             "ck_scheduler_jobs_job_type", _JOB_TYPES_WITHOUT_EXTERNAL_PAGES
         )
+
+
+def _batch_kwargs() -> dict[str, str]:
+    return {"recreate": "always"} if op.get_bind().dialect.name == "sqlite" else {}

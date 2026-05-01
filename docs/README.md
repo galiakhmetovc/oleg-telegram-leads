@@ -12,9 +12,11 @@ documents contain the detailed design.
 2. `docs/README.md` - current implementation status and documentation map.
 3. `docs/operations/artifacts-and-production.md` - production deployment and artifact UI runbook.
 4. `docs/superpowers/specs/2026-04-28-pur-catalog-source-of-truth-design.md` - full product target.
-5. `docs/superpowers/specs/2026-04-30-continuous-telegram-ingest-chat-analytics-design.md` - Telegram raw/analytics target.
-6. `docs/superpowers/plans/2026-04-30-source-agnostic-catalog-ingest-plan.md` - source-agnostic evidence/catalog ingest plan.
-7. `docs/superpowers/plans/2026-04-30-catalog-llm-trace-prompts.md` - prompt/trace/catalog rebuild target.
+5. `docs/superpowers/specs/2026-05-01-end-to-end-lead-traceability-design.md` - lead-to-source traceability target.
+6. `docs/superpowers/specs/2026-05-01-postgres-and-otel-storage-design.md` - Postgres and Jaeger/OTel storage target.
+7. `docs/superpowers/specs/2026-04-30-continuous-telegram-ingest-chat-analytics-design.md` - Telegram raw/analytics target.
+8. `docs/superpowers/plans/2026-04-30-source-agnostic-catalog-ingest-plan.md` - source-agnostic evidence/catalog ingest plan.
+9. `docs/superpowers/plans/2026-04-30-catalog-llm-trace-prompts.md` - prompt/trace/catalog rebuild target.
 
 The specs and plans are intentionally broader than the current code. When they
 conflict with this document, this document describes the current codebase state;
@@ -22,12 +24,15 @@ the specs describe the target direction.
 
 ## Current Product Shape
 
-PUR Leads is a FastAPI/SQLite application for:
+PUR Leads is a FastAPI/Postgres-target application for:
 
 - collecting Telegram/public-channel history and documents into a reusable raw layer;
 - normalizing and indexing that raw layer for search and analytics;
 - building catalog knowledge and lead examples with review/audit;
 - detecting and reviewing lead candidates;
+- explaining each lead through a source-backed trace from the lead card to the
+  original Telegram message, catalog facts, AI/rule decisions, notifications,
+  and feedback;
 - operating lightweight CRM, quality, resources, settings, and production visibility screens.
 
 Telegram is treated as a source and urgent notification channel. The web UI is
@@ -37,7 +42,16 @@ the operator workspace.
 
 Core application:
 
-- SQLite/Alembic foundation through migration `0026_entity_enrichment_registry`.
+- Alembic foundation through migration `0027_postgres_backup_type`.
+- Postgres is now the target operational database. SQLite remains a temporary
+  local/test fallback and artifact format while production cutover is in progress. The
+  storage decision is documented in `docs/superpowers/specs/2026-05-01-postgres-and-otel-storage-design.md`.
+- Docker Compose includes Postgres and wires `web`/`worker` through
+  `PUR_DATABASE_URL`.
+- Fresh Postgres migration smoke has been verified through Alembic head.
+- Database backup API is database-neutral at
+  `/api/operations/backups/database`: Postgres uses `pg_dump`/`pg_restore
+  --list`, SQLite uses the existing consistent backup fallback.
 - FastAPI web app with bootstrap local admin, Telegram-admin account support, resources, settings, AI registry, task executors, quality, operations, sources, catalog, CRM, leads, and artifacts pages.
 - Material Web assets are vendored locally; custom CSS is used for layout and product composition.
 - Worker runtime with scheduler jobs, retry/defer behavior, exponential backoff, `Retry-After` handling, and configurable worker concurrency.
@@ -109,6 +123,7 @@ Observability and operations:
 - `/operations` and `/api/operations/*` expose jobs, runs, events, capacity, backup/restore, quality, access checks, notifications, and audit summaries.
 - `/artifacts` and `/api/artifacts/*` expose generated files from raw export runs and stage metadata, including bounded filesystem discovery under artifact directories.
 - Artifact previews support JSON, JSONL, text, directories, Parquet, and SQLite.
+- End-to-end lead traceability is specified in `docs/superpowers/specs/2026-05-01-end-to-end-lead-traceability-design.md`.
 - Production runbook and rollback notes are documented in `docs/operations/artifacts-and-production.md`.
 
 ## Partially Implemented
@@ -118,9 +133,14 @@ Observability and operations:
 - Stage 6 thread reconstruction exists only as thread/reply fields used by search and lead candidate context. There is no standalone `threads.parquet` stage yet.
 - OCR is represented in AI registry and documentation, but scanned-PDF/image OCR via `GLM-OCR` is not wired as a complete parse fallback.
 - Prompt/LLM trace exists for entity enrichment and review-only lead arbitration, but a unified prompt registry, prompt editor, and generic AI trace viewer are not implemented end-to-end.
+- Operational leads have traceable domain tables (`lead_clusters`, `lead_events`, `lead_matches`, `decision_records`, `source_messages`), but there is no unified trace graph or product-visible `Trace` tab yet.
 - Some CLI paths still accept explicit provider/model/profile options or legacy catalog LLM settings. The target is to route all model work through AI registry task executors.
 - Circuit breaker and adaptive p95 timeout settings/help text are documented and exposed as configuration placeholders, but the full runtime breaker/adaptive-timeout behavior is not enforced everywhere yet.
 - Chroma runs embedded/local in-process. A separate Chroma server is not part of the current implementation.
+- Production cutover/reset from the old SQLite deployment to Postgres has not
+  been performed yet. The code and Compose path are ready for a fresh Postgres
+  database, but existing production data/settings still need the explicit
+  operator-approved backup/reset/cutover procedure.
 - Production has had the Artifacts UI deployed and verified, but the worker was intentionally left stopped for UI-only deployment.
 
 ## Not Implemented Yet
@@ -130,7 +150,11 @@ Observability and operations:
 - Stage 10 knowledge synthesis reports.
 - Full source-agnostic evidence UI and promotion workflow.
 - Full catalog extraction/rebuild flow from raw chunks through prompt registry, AI trace, candidate diff, and approved catalog mutation.
+- Full lead trace graph from lead cluster to Telegram message, raw ingest, catalog matches, AI/rule decision, notification, and feedback.
 - Full operational use of `ai_runs` / `ai_run_outputs` for every AI call.
+- Production cutover from the legacy SQLite deployment to Postgres.
+- Jaeger/OpenTelemetry collector deployment with OpenSearch trace storage and
+  Prometheus-compatible RED metrics.
 - Live Telegram listener; current runtime is polling/catchup plus explicit raw export jobs.
 - S3-compatible archive/backup backend.
 - Scoped web roles beyond `admin`.
@@ -152,6 +176,14 @@ Primary product target:
 
 - `docs/superpowers/specs/2026-04-28-pur-catalog-source-of-truth-design.md`
 
+End-to-end traceability target:
+
+- `docs/superpowers/specs/2026-05-01-end-to-end-lead-traceability-design.md`
+
+Storage and observability target:
+
+- `docs/superpowers/specs/2026-05-01-postgres-and-otel-storage-design.md`
+
 Telegram raw/analytics target:
 
 - `docs/superpowers/specs/2026-04-30-continuous-telegram-ingest-chat-analytics-design.md`
@@ -171,15 +203,21 @@ why a slice was built, not as the current status source.
 
 ## Next Architectural Priorities
 
-1. Make the source-agnostic evidence UI the product-visible raw layer:
+1. Complete Postgres migration:
+   Alembic on Postgres, Docker Compose Postgres service, backup/restore policy,
+   and production reset preserving settings/admin/resources/secrets.
+2. Add end-to-end lead traceability:
+   lead cluster -> lead event -> source message -> raw ingest -> prepared text ->
+   catalog match -> AI/rule decision -> notification -> feedback.
+3. Make the source-agnostic evidence UI the product-visible raw layer:
    raw source, message/document/page, parsed chunks, scope, parser status,
    privacy flags, and promotion actions.
-2. Unify prompt management and AI trace visibility:
+4. Unify prompt management and AI trace visibility:
    prompt version, model profile, request, response, parsed result, token/context
    usage, retries, fallback route, and catalog mutation diff.
-3. Finish catalog rebuild:
+5. Finish catalog rebuild:
    raw evidence -> ranked entities/chunks -> AI/rule extraction -> candidates ->
    review -> operational catalog snapshot.
-4. Move remaining AI calls onto AI registry task executors and shared trace/lease policy.
-5. Add OCR fallback for scanned documents and wire it through the same artifact/chunk model.
-6. Only after the raw/catalog trace is strong, consider topic/QA/knowledge synthesis.
+6. Move remaining AI calls onto AI registry task executors and shared trace/lease policy.
+7. Add OCR fallback for scanned documents and wire it through the same artifact/chunk model.
+8. Only after the raw/catalog trace is strong, consider topic/QA/knowledge synthesis.

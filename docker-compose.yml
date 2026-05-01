@@ -1,9 +1,30 @@
 services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-pur_leads}
+      POSTGRES_USER: ${POSTGRES_USER:-pur_leads}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-pur_leads_dev_password}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    ports:
+      - "127.0.0.1:${POSTGRES_PORT:-5433}:5432"
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U ${POSTGRES_USER:-pur_leads} -d ${POSTGRES_DB:-pur_leads}",
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+
   web:
     build: .
     command: ["web"]
     environment:
-      PUR_DATABASE_PATH: /app/data/pur-leads.sqlite3
+      PUR_DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-pur_leads}:${POSTGRES_PASSWORD:-pur_leads_dev_password}@postgres:5432/${POSTGRES_DB:-pur_leads}
       PUR_LOG_LEVEL: ${PUR_LOG_LEVEL:-INFO}
       PUR_WEB_HOST: 0.0.0.0
       PUR_WEB_PORT: 8000
@@ -21,13 +42,16 @@ services:
       - ./data:/app/data
       - ./artifacts:/app/artifacts
       - ./sessions:/app/sessions
+    depends_on:
+      postgres:
+        condition: service_healthy
     restart: unless-stopped
 
   worker:
     build: .
     command: ["worker", "run", "--poll-interval-seconds", "${WORKER_POLL_INTERVAL_SECONDS:-5}"]
     environment:
-      PUR_DATABASE_PATH: /app/data/pur-leads.sqlite3
+      PUR_DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-pur_leads}:${POSTGRES_PASSWORD:-pur_leads_dev_password}@postgres:5432/${POSTGRES_DB:-pur_leads}
       PUR_LOG_LEVEL: ${PUR_LOG_LEVEL:-INFO}
       PUR_WORKER_CONCURRENCY: ${PUR_WORKER_CONCURRENCY:-1}
       PUR_WEB_HOST: 0.0.0.0
@@ -43,4 +67,10 @@ services:
       - ./data:/app/data
       - ./artifacts:/app/artifacts
       - ./sessions:/app/sessions
+    depends_on:
+      postgres:
+        condition: service_healthy
     restart: unless-stopped
+
+volumes:
+  postgres-data:

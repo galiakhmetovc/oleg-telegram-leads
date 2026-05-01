@@ -8,6 +8,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class AppSettings(BaseSettings):
     """Environment-backed application settings."""
 
+    database_url: str | None = None
     database_path: Path = Path("./data/pur-leads.sqlite3")
     log_level: str = "INFO"
     web_host: str = "127.0.0.1"

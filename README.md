@@ -60,8 +60,11 @@ docker compose run --rm worker
 ```
 
 Production runs through Docker Compose on `teamd-ams1`. Do not treat a local
-`uv run pur-leads web` process as production. Before any production restart,
-take a SQLite backup and check whether the worker is intentionally stopped.
+`uv run pur-leads web` process as production. The target production database is
+Postgres via `PUR_DATABASE_URL`; `PUR_DATABASE_PATH` is a temporary SQLite
+fallback for local development/tests and generated artifact previews. Before any
+production restart, take a database backup and check whether the worker is
+intentionally stopped.
 See `docs/operations/artifacts-and-production.md`.
 
 For fast iteration on a running server, use the dev override. It mounts

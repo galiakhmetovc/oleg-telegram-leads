@@ -40,13 +40,16 @@ _PREVIOUS_JOB_TYPES = (
 def upgrade() -> None:
     bind = op.get_bind()
     inspector = sa.inspect(bind)
-    if not _scheduler_jobs_allow_quality_validation(bind):
-        if "catalog_quality_reviews" in set(inspector.get_table_names()):
-            op.drop_table("catalog_quality_reviews")
-            inspector = sa.inspect(bind)
+    if bind.dialect.name == "sqlite":
         op.execute(sa.text("DROP TABLE IF EXISTS _alembic_tmp_scheduler_jobs"))
-        _allow_scheduler_quality_validation(bind)
-        inspector = sa.inspect(bind)
+        if not _scheduler_jobs_allow_quality_validation(bind):
+            if "catalog_quality_reviews" in set(inspector.get_table_names()):
+                op.drop_table("catalog_quality_reviews")
+                inspector = sa.inspect(bind)
+            _replace_sqlite_scheduler_job_type_constraint(bind, _UPGRADED_JOB_TYPES)
+            inspector = sa.inspect(bind)
+    else:
+        _allow_scheduler_quality_validation()
 
     if "catalog_quality_reviews" not in set(inspector.get_table_names()):
         op.create_table(
@@ -108,6 +111,7 @@ def upgrade() -> None:
 def downgrade() -> None:
     bind = op.get_bind()
     if bind.dialect.name == "sqlite":
+        op.execute(sa.text("DROP TABLE IF EXISTS _alembic_tmp_scheduler_jobs"))
         _replace_sqlite_scheduler_job_type_constraint(bind, _PREVIOUS_JOB_TYPES)
     else:
         with op.batch_alter_table("scheduler_jobs") as batch_op:
@@ -128,10 +132,7 @@ def _scheduler_jobs_allow_quality_validation(bind) -> bool:  # noqa: ANN001
     return "catalog_candidate_validation" in str(sql)
 
 
-def _allow_scheduler_quality_validation(bind) -> None:  # noqa: ANN001
-    if bind.dialect.name == "sqlite":
-        _replace_sqlite_scheduler_job_type_constraint(bind, _UPGRADED_JOB_TYPES)
-        return
+def _allow_scheduler_quality_validation() -> None:
     with op.batch_alter_table("scheduler_jobs") as batch_op:
         batch_op.drop_constraint("ck_scheduler_jobs_job_type", type_="check")
         batch_op.create_check_constraint("ck_scheduler_jobs_job_type", _UPGRADED_JOB_TYPES)
