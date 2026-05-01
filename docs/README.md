@@ -10,13 +10,16 @@ documents contain the detailed design.
 
 1. `README.md` - quick project summary, local commands, production pointer.
 2. `docs/README.md` - current implementation status and documentation map.
-3. `docs/operations/artifacts-and-production.md` - production deployment and artifact UI runbook.
-4. `docs/superpowers/specs/2026-04-28-pur-catalog-source-of-truth-design.md` - full product target.
-5. `docs/superpowers/specs/2026-05-01-end-to-end-lead-traceability-design.md` - lead-to-source traceability target.
-6. `docs/superpowers/specs/2026-05-01-postgres-and-otel-storage-design.md` - Postgres and Jaeger/OTel storage target.
-7. `docs/superpowers/specs/2026-04-30-continuous-telegram-ingest-chat-analytics-design.md` - Telegram raw/analytics target.
-8. `docs/superpowers/plans/2026-04-30-source-agnostic-catalog-ingest-plan.md` - source-agnostic evidence/catalog ingest plan.
-9. `docs/superpowers/plans/2026-04-30-catalog-llm-trace-prompts.md` - prompt/trace/catalog rebuild target.
+3. `docs/product-entity-glossary.md` - product language for external systems,
+   connections, data sources, artifacts, interest context, AI executors, and
+   results.
+4. `docs/operations/artifacts-and-production.md` - production deployment and artifact UI runbook.
+5. `docs/superpowers/specs/2026-04-28-pur-catalog-source-of-truth-design.md` - full product target.
+6. `docs/superpowers/specs/2026-05-01-end-to-end-lead-traceability-design.md` - lead-to-source traceability target.
+7. `docs/superpowers/specs/2026-05-01-postgres-and-otel-storage-design.md` - Postgres and Jaeger/OTel storage target.
+8. `docs/superpowers/specs/2026-04-30-continuous-telegram-ingest-chat-analytics-design.md` - Telegram raw/analytics target.
+9. `docs/superpowers/plans/2026-04-30-source-agnostic-catalog-ingest-plan.md` - source-agnostic evidence/catalog ingest plan.
+10. `docs/superpowers/plans/2026-04-30-catalog-llm-trace-prompts.md` - prompt/trace/catalog rebuild target.
 
 The specs and plans are intentionally broader than the current code. When they
 conflict with this document, this document describes the current codebase state;
@@ -34,6 +37,13 @@ PUR Leads is a FastAPI/Postgres-target application for:
   original Telegram message, catalog facts, AI/rule decisions, notifications,
   and feedback;
 - operating lightweight CRM, quality, resources, settings, and production visibility screens.
+
+Product language is being normalized around the terms in
+`docs/product-entity-glossary.md`: external systems, connections, data sources,
+delivery channels, internal systems, interest context, artifacts, fragments, and
+results. The old broad term `resource` should not be used for new product
+language; existing `/resources` UI/routes are a migration target toward
+`Подключения`.
 
 Telegram is treated as a source and urgent notification channel. The web UI is
 the operator workspace.
