@@ -42,7 +42,8 @@ def login_page() -> str:
                 <p class="muted">Встроенный администратор должен заменить одноразовый пароль перед работой.</p>
               </div>
               <md-outlined-text-field name="new_password" label="Новый пароль" type="password"
-                autocomplete="new-password" required minlength="8">
+                autocomplete="new-password" required minlength="12" maxlength="128"
+                supporting-text="12-128 символов, без пробелов по краям, не должен содержать логин">
               </md-outlined-text-field>
               <md-filled-button type="submit">Сохранить пароль</md-filled-button>
               <p id="change-password-status" class="status-line" role="status"></p>

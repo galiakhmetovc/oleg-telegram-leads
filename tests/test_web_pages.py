@@ -31,6 +31,8 @@ def test_login_page_and_static_assets_are_served(tmp_path):
     )
     assert "Вход оператора" in login_response.text
     assert "Сменить пароль" in login_response.text
+    assert 'minlength="12"' in login_response.text
+    assert "12-128 символов" in login_response.text
     assert "/static/app.css" in login_response.text
     assert "/static/app.js" in login_response.text
     assert '<link rel="icon" href="data:,">' in login_response.text

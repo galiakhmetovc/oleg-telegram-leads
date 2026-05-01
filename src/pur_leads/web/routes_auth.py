@@ -11,6 +11,7 @@ from pur_leads.repositories.web_auth import WebUserRecord
 from pur_leads.services.web_auth import (
     AuthError,
     LoginResult,
+    PasswordPolicyError,
     SessionValidationResult,
     WebAuthService,
 )
@@ -76,11 +77,16 @@ def change_password(
     validated: SessionValidationResult = Depends(current_admin),
     auth_service: WebAuthService = Depends(get_auth_service),
 ) -> dict[str, Any]:
-    user = auth_service.change_password(
-        validated.user.id,
-        new_password=payload.new_password,
-        actor=validated.user.local_username or validated.user.telegram_user_id or validated.user.id,
-    )
+    try:
+        user = auth_service.change_password(
+            validated.user.id,
+            new_password=payload.new_password,
+            actor=validated.user.local_username
+            or validated.user.telegram_user_id
+            or validated.user.id,
+        )
+    except PasswordPolicyError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     if (
         validated.user.auth_type == "local"
         and validated.user.local_username == request.app.state.bootstrap_admin_username

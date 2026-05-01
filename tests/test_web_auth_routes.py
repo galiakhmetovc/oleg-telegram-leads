@@ -57,6 +57,32 @@ def test_local_auth_routes_login_me_change_password_and_logout(tmp_path):
         assert session_row["revoked_at"] is not None
 
 
+def test_change_password_route_returns_policy_error(tmp_path):
+    db_path = tmp_path / "test.db"
+    upgrade_database(create_sqlite_engine(db_path))
+    app = create_app(
+        database_path=db_path,
+        bootstrap_admin_username="admin",
+        bootstrap_admin_password="initial-secret",
+        bootstrap_admin_password_file=tmp_path / "bootstrap-admin-password.txt",
+        telegram_bot_token="telegram-token",
+    )
+    client = TestClient(app)
+
+    login_response = client.post(
+        "/api/auth/local",
+        json={"username": "admin", "password": "initial-secret"},
+    )
+    assert login_response.status_code == 200
+
+    change_response = client.post(
+        "/api/auth/change-password",
+        json={"new_password": "short"},
+    )
+    assert change_response.status_code == 422
+    assert "минимум 12" in change_response.json()["detail"]
+
+
 def test_bootstrap_admin_password_file_is_removed_after_forced_password_change(tmp_path):
     db_path = tmp_path / "test.db"
     password_file = tmp_path / "bootstrap-admin-password.txt"

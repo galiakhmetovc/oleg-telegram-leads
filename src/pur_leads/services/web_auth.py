@@ -18,12 +18,28 @@ from pur_leads.repositories.web_auth import WebAuthRepository, WebSessionRecord,
 from pur_leads.services.audit import AuditService
 
 PBKDF2_ALGORITHM = "pbkdf2_sha256"
-PBKDF2_ITERATIONS = 210_000
+PBKDF2_ITERATIONS = 600_000
+PASSWORD_MIN_LENGTH = 12
+PASSWORD_MAX_LENGTH = 128
 SESSION_TOKEN_BYTES = 32
+
+COMMON_WEAK_PASSWORDS = {
+    "administrator",
+    "adminpassword",
+    "changeme",
+    "defaultpassword",
+    "password",
+    "password123",
+    "qwerty123",
+}
 
 
 class AuthError(ValueError):
     """Raised when authentication or authorization fails."""
+
+
+class PasswordPolicyError(ValueError):
+    """Raised when a new local password does not satisfy policy."""
 
 
 class UserConflictError(ValueError):
@@ -67,6 +83,7 @@ class WebAuthService:
         existing = self.repository.get_user_by_local_username(username)
         if existing is not None:
             if reset_password_if_must_change and existing.must_change_password:
+                validate_password(password, username=username)
                 updated = self.repository.update_user(
                     existing.id,
                     password_hash=hash_password(password),
@@ -82,6 +99,7 @@ class WebAuthService:
                 )
                 return updated
             return existing
+        validate_password(password, username=username)
         now = utc_now()
         user = self.repository.create_user(
             telegram_user_id=None,
@@ -127,6 +145,12 @@ class WebAuthService:
             self._record_denied_login("local", username)
             raise AuthError("invalid credentials")
         self._require_active(user)
+        if password_hash_needs_rehash(user.password_hash):
+            user = self.repository.update_user(
+                user.id,
+                password_hash=hash_password(password),
+                updated_at=utc_now(),
+            )
         return self._create_login(
             user, auth_method="local", ip_address=ip_address, user_agent=user_agent
         )
@@ -201,6 +225,7 @@ class WebAuthService:
         user = self.repository.get_user(user_id)
         if user is None:
             raise KeyError(user_id)
+        validate_password(new_password, username=user.local_username)
         updated = self.repository.update_user(
             user.id,
             password_hash=hash_password(new_password),
@@ -417,6 +442,20 @@ class WebAuthService:
         )
 
 
+def validate_password(password: str, *, username: str | None = None) -> None:
+    if len(password) < PASSWORD_MIN_LENGTH:
+        raise PasswordPolicyError(f"Пароль должен содержать минимум {PASSWORD_MIN_LENGTH} символов")
+    if len(password) > PASSWORD_MAX_LENGTH:
+        raise PasswordPolicyError(f"Пароль должен быть не длиннее {PASSWORD_MAX_LENGTH} символов")
+    if password != password.strip():
+        raise PasswordPolicyError("Пароль не должен начинаться или заканчиваться пробелом")
+    normalized = password.casefold()
+    if normalized in COMMON_WEAK_PASSWORDS:
+        raise PasswordPolicyError("Пароль слишком очевидный")
+    if username and username.casefold() in normalized:
+        raise PasswordPolicyError("Пароль не должен содержать логин")
+
+
 def hash_password(password: str) -> str:
     salt = secrets.token_bytes(16)
     digest = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt, PBKDF2_ITERATIONS)
@@ -431,17 +470,33 @@ def hash_password(password: str) -> str:
 
 
 def verify_password(password: str, stored_hash: str) -> bool:
+    parsed = _parse_password_hash(stored_hash)
+    if parsed is None:
+        return False
+    iterations, salt, expected = parsed
+    actual = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt, iterations)
+    return hmac.compare_digest(actual, expected)
+
+
+def password_hash_needs_rehash(stored_hash: str) -> bool:
+    parsed = _parse_password_hash(stored_hash)
+    if parsed is None:
+        return True
+    iterations, _salt, _expected = parsed
+    return iterations < PBKDF2_ITERATIONS
+
+
+def _parse_password_hash(stored_hash: str) -> tuple[int, bytes, bytes] | None:
     try:
         algorithm, iterations_raw, salt_raw, digest_raw = stored_hash.split("$", 3)
         if algorithm != PBKDF2_ALGORITHM:
-            return False
+            return None
         iterations = int(iterations_raw)
         salt = base64.urlsafe_b64decode(salt_raw.encode("ascii"))
         expected = base64.urlsafe_b64decode(digest_raw.encode("ascii"))
     except (ValueError, TypeError):
-        return False
-    actual = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt, iterations)
-    return hmac.compare_digest(actual, expected)
+        return None
+    return iterations, salt, expected
 
 
 def hash_session_token(session_token: str) -> str:

@@ -1,6 +1,8 @@
 from datetime import UTC, datetime
+import base64
 import hashlib
 import hmac
+import secrets
 
 import pytest
 from sqlalchemy import select
@@ -10,7 +12,14 @@ from pur_leads.db.migrations import upgrade_database
 from pur_leads.db.session import create_session_factory
 from pur_leads.models.audit import audit_log_table, operational_events_table
 from pur_leads.models.web_auth import web_auth_sessions_table, web_users_table
-from pur_leads.services.web_auth import AuthError, WebAuthService
+from pur_leads.services.web_auth import (
+    AuthError,
+    PBKDF2_ALGORITHM,
+    PBKDF2_ITERATIONS,
+    PasswordPolicyError,
+    WebAuthService,
+    verify_password,
+)
 
 
 @pytest.fixture
@@ -67,6 +76,45 @@ def test_bootstrap_local_login_session_logout_and_password_change(auth_session):
         row["event_type"] == "access_check" and row["severity"] == "warning" for row in event_rows
     )
     assert service.login_local(username="admin", password="changed-secret").user.id == admin.id
+
+
+def test_change_password_rejects_weak_password(auth_session):
+    service = WebAuthService(auth_session, telegram_bot_token="bot-token")
+    admin = service.ensure_bootstrap_admin(username="admin", password="initial-secret")
+
+    with pytest.raises(PasswordPolicyError, match="минимум 12"):
+        service.change_password(admin.id, new_password="short", actor="admin")
+
+    row = (
+        auth_session.execute(select(web_users_table).where(web_users_table.c.id == admin.id))
+        .mappings()
+        .one()
+    )
+    assert verify_password("initial-secret", row["password_hash"])
+    assert row["must_change_password"] is True
+
+
+def test_password_hash_storage_format_and_login_rehash(auth_session):
+    service = WebAuthService(auth_session, telegram_bot_token="bot-token")
+    legacy_hash = _legacy_password_hash("initial-secret", iterations=210_000)
+    admin = service.ensure_bootstrap_admin(username="admin", password="initial-secret")
+    auth_session.execute(
+        web_users_table.update()
+        .where(web_users_table.c.id == admin.id)
+        .values(password_hash=legacy_hash)
+    )
+
+    service.login_local(username="admin", password="initial-secret")
+
+    row = (
+        auth_session.execute(select(web_users_table).where(web_users_table.c.id == admin.id))
+        .mappings()
+        .one()
+    )
+    assert row["password_hash"] != legacy_hash
+    assert row["password_hash"].startswith(f"{PBKDF2_ALGORITHM}${PBKDF2_ITERATIONS}$")
+    assert "initial-secret" not in row["password_hash"]
+    assert verify_password("initial-secret", row["password_hash"])
 
 
 def test_telegram_login_requires_valid_payload_and_preapproved_active_user(auth_session):
@@ -136,3 +184,16 @@ def _telegram_payload(*, bot_token: str, data: dict[str, str]) -> dict[str, str]
     secret_key = hashlib.sha256(bot_token.encode("utf-8")).digest()
     digest = hmac.new(secret_key, check_string.encode("utf-8"), hashlib.sha256).hexdigest()
     return {**data, "hash": digest}
+
+
+def _legacy_password_hash(password: str, *, iterations: int) -> str:
+    salt = secrets.token_bytes(16)
+    digest = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt, iterations)
+    return "$".join(
+        [
+            PBKDF2_ALGORITHM,
+            str(iterations),
+            base64.urlsafe_b64encode(salt).decode("ascii"),
+            base64.urlsafe_b64encode(digest).decode("ascii"),
+        ]
+    )
