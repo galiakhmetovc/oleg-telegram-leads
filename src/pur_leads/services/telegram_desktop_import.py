@@ -81,6 +81,7 @@ class TelegramDesktopArchiveImportService:
         added_by: str = "system",
         sync_source_messages: bool = False,
         source: MonitoredSourceRecord | None = None,
+        import_metadata: dict[str, Any] | None = None,
     ) -> TelegramDesktopArchiveImportResult:
         archive_path = Path(archive_path)
         payload, result_member = _read_archive_result(archive_path)
@@ -94,22 +95,27 @@ class TelegramDesktopArchiveImportService:
         resolved = ResolvedTelegramSource(
             input_ref=source.input_ref,
             source_kind=source_kind,
-            telegram_id=str(payload.get("id")) if payload.get("id") is not None else source.telegram_id,
+            telegram_id=str(payload.get("id"))
+            if payload.get("id") is not None
+            else source.telegram_id,
             username=source.username,
             title=_optional_string(payload.get("name")) or source.title,
         )
+        metadata_json = {
+            "desktop_import": {
+                "archive_name": archive_path.name,
+                "result_member": result_member,
+                "source_type": payload.get("type"),
+                "source_id": payload.get("id"),
+                "sync_source_messages": sync_source_messages,
+            }
+        }
+        if import_metadata:
+            metadata_json.update(import_metadata)
         writer = TelegramRawExportService(self.session, raw_root=self.raw_root).open_export(
             source=source,
             resolved_source=resolved,
-            metadata_json={
-                "desktop_import": {
-                    "archive_name": archive_path.name,
-                    "result_member": result_member,
-                    "source_type": payload.get("type"),
-                    "source_id": payload.get("id"),
-                    "sync_source_messages": sync_source_messages,
-                }
-            },
+            metadata_json=metadata_json,
         )
         self.session.execute(
             update(telegram_raw_export_runs_table)
@@ -130,7 +136,9 @@ class TelegramDesktopArchiveImportService:
                 for attachment in _attachment_rows(writer.run_id, source.id, message)
             ]
             _copy_result_json(archive_path, result_member, writer.result_json_path)
-            _write_jsonl(writer.messages_jsonl_path, [message.raw_message for message in raw_messages])
+            _write_jsonl(
+                writer.messages_jsonl_path, [message.raw_message for message in raw_messages]
+            )
             _write_jsonl(writer.attachments_jsonl_path, attachments)
             _write_messages_parquet(
                 writer.messages_parquet_path,
@@ -166,6 +174,7 @@ class TelegramDesktopArchiveImportService:
                     },
                     "message_count": len(raw_messages),
                     "attachment_count": len(attachments),
+                    "metadata": metadata_json,
                 },
             )
             created_source_messages = (
@@ -212,7 +221,9 @@ class TelegramDesktopArchiveImportService:
             source=source,
             created_source_messages=created_source_messages,
             skipped_source_messages=len(raw_messages) - created_source_messages,
-            service_message_count=sum(1 for message in raw_messages if message.raw_message["type"] != "message"),
+            service_message_count=sum(
+                1 for message in raw_messages if message.raw_message["type"] != "message"
+            ),
         )
 
     def _create_source(
@@ -233,7 +244,9 @@ class TelegramDesktopArchiveImportService:
         )
         updated = service.repository.update(
             source.id,
-            telegram_id=str(payload.get("id")) if payload.get("id") is not None else source.telegram_id,
+            telegram_id=str(payload.get("id"))
+            if payload.get("id") is not None
+            else source.telegram_id,
             title=_optional_string(payload.get("name")) or source.title,
             source_kind=_source_kind(payload, fallback=source.source_kind),
             status="active",
@@ -367,9 +380,13 @@ def _normalize_desktop_message(
         "from": raw.get("from") or raw.get("actor"),
         "from_id": raw.get("from_id") or raw.get("actor_id"),
         "text": text,
-        "text_entities": raw.get("text_entities") if isinstance(raw.get("text_entities"), list) else [],
+        "text_entities": raw.get("text_entities")
+        if isinstance(raw.get("text_entities"), list)
+        else [],
         "caption": caption,
-        "caption_entities": raw.get("caption_entities") if isinstance(raw.get("caption_entities"), list) else [],
+        "caption_entities": raw.get("caption_entities")
+        if isinstance(raw.get("caption_entities"), list)
+        else [],
         "reply_to_message_id": raw.get("reply_to_message_id"),
         "thread_id": raw.get("thread_id"),
         "media_type": raw_media.get("media_type") if raw_media else None,
@@ -488,8 +505,10 @@ def _file_name(value: Any, *, default: str | None = None) -> str | None:
 
 
 def _downloadable_media_path(value: Any) -> bool:
-    return isinstance(value, str) and bool(value.strip()) and not value.startswith(
-        "(File not included."
+    return (
+        isinstance(value, str)
+        and bool(value.strip())
+        and not value.startswith("(File not included.")
     )
 
 
@@ -518,7 +537,5 @@ def _message_datetime(raw: dict[str, Any]) -> datetime:
 
 def _normalize_text(*values: Any) -> str:
     return " ".join(
-        text.casefold().strip()
-        for text in (_text_plain(value) for value in values)
-        if text.strip()
+        text.casefold().strip() for text in (_text_plain(value) for value in values) if text.strip()
     )

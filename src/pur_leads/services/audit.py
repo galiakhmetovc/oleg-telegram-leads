@@ -7,6 +7,7 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
+from pur_leads.core.tracing import current_trace_context, with_current_trace
 from pur_leads.repositories.audit import AuditRepository
 
 SECRET_KEY_PARTS = ("secret", "token", "api_key", "apikey", "password")
@@ -44,7 +45,7 @@ class AuditService:
             entity_type=entity_type,
             entity_id=entity_id,
             old_value_json=mask_secret_values(old_value_json),
-            new_value_json=mask_secret_values(new_value_json),
+            new_value_json=mask_secret_values(with_current_trace(new_value_json)),
         )
         self.session.commit()
         return audit_id
@@ -65,9 +66,9 @@ class AuditService:
             severity=severity,
             entity_type=entity_type,
             entity_id=entity_id,
-            correlation_id=correlation_id,
+            correlation_id=correlation_id or _current_trace_correlation_id(),
             message=message,
-            details_json=mask_secret_values(details_json),
+            details_json=mask_secret_values(with_current_trace(details_json)),
         )
         self.session.commit()
         return event_id
@@ -91,3 +92,8 @@ def _is_secret_key(key: str) -> bool:
     if normalized in NON_SECRET_TOKEN_KEYS or normalized.endswith("_token_count"):
         return False
     return any(part in normalized for part in SECRET_KEY_PARTS)
+
+
+def _current_trace_correlation_id() -> str | None:
+    context = current_trace_context()
+    return context.trace_id if context is not None else None

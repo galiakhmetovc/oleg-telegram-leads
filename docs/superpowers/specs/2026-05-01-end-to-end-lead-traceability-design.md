@@ -225,8 +225,12 @@ The current schema already has many traceable entities:
 - notification/job/audit tables;
 - JSONL/parquet artifacts.
 
-The missing product layer is a unified trace graph. The persisted product graph
-should use OpenTelemetry-compatible names where practical:
+The first product trace foundation now exists in migration
+`0028_trace_foundation`. It is intentionally OpenTelemetry-compatible: `trace_id`
+is 32 lowercase hex chars and `span_id` is 16 lowercase hex chars. Current
+coverage starts at web authorization/session handling, Telegram archive resource
+upload, scheduler jobs, and worker runs; the remaining lead/catalog stages
+should attach to the same tables instead of inventing separate trace stores.
 
 ### `trace_spans`
 
@@ -237,19 +241,27 @@ span_id
 parent_span_id
 span_name
 span_kind
-entity_type
-entity_id
 status
-started_at
-finished_at
-duration_ms
+status_message
+user_id
+web_session_id
 actor
-summary
+request_id
+request_method
+request_path
+http_status_code
+resource_type
+resource_id
 attributes_json
+started_at
+ended_at
+created_at
 ```
 
 Examples of `span_name`:
 
+- `HTTP POST /api/auth/local`;
+- `resource.import.telegram_desktop_archive`;
 - `lead.cluster.created`;
 - `lead.event.detected`;
 - `message.ingested`;
@@ -267,8 +279,11 @@ id
 trace_id
 span_id
 event_name
-occurred_at
+severity
+entity_type
+entity_id
 attributes_json
+occurred_at
 ```
 
 Examples:
@@ -287,14 +302,12 @@ trace_id
 span_id
 linked_trace_id
 linked_span_id
-relation_type
-linked_entity_type
-linked_entity_id
-metadata_json
+link_type
+attributes_json
 created_at
 ```
 
-Examples of `relation_type`:
+Examples of `link_type`:
 
 - `primary_event`;
 - `source_message`;
@@ -311,6 +324,25 @@ Examples of `relation_type`:
 The trace layer must not replace domain tables or external OTel export. It links
 domain records and artifacts into a product-visible explanation graph and can be
 exported later to an OpenTelemetry Collector / Jaeger-compatible backend.
+
+Request/audit convention:
+
+- FastAPI middleware creates the server span and returns `x-trace-id`,
+  `x-request-id`, and `traceparent` response headers.
+- Successful authorization binds `user_id`, `web_session_id`, `auth_method`,
+  `actor`, and `role` to the request span.
+- `AuditService` automatically adds the current `trace` object to
+  `new_value_json` / event details and uses the current `trace_id` as default
+  `correlation_id`.
+- User-uploaded Telegram Desktop archives record the same trace in
+  `telegram_raw_export_runs.metadata_json.trace` and the upload metadata in
+  `telegram_raw_export_runs.metadata_json.upload`.
+- `SchedulerService.enqueue` copies the active trace to `scheduler_jobs.trace_id`,
+  `scheduler_jobs.parent_span_id`, and `scheduler_jobs.trace_context_json`.
+- `WorkerRuntime` restores that trace before handler execution, writes
+  `job_runs.trace_id/span_id/parent_span_id`, persists
+  `scheduler.job.<job_type>` spans, and makes child enqueues inherit the worker
+  span as parent.
 
 Do not store full raw texts, prompts, responses, documents, tokens, or secrets in
 span attributes. Store stable IDs, hashes, and artifact references. Full product

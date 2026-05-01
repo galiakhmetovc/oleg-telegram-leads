@@ -4,6 +4,12 @@ import pytest
 from sqlalchemy import select, update
 
 from pur_leads.core.time import utc_now
+from pur_leads.core.tracing import (
+    TraceContext,
+    current_trace_context,
+    reset_trace_context,
+    set_trace_context,
+)
 from pur_leads.db.engine import create_sqlite_engine
 from pur_leads.db.migrations import upgrade_database
 from pur_leads.db.session import create_session_factory
@@ -11,6 +17,7 @@ from pur_leads.integrations.ai.chat import AiModelConcurrencyLimitExceeded
 from pur_leads.models.audit import operational_events_table
 from pur_leads.models.scheduler import job_runs_table, scheduler_jobs_table
 from pur_leads.models.telegram_sources import monitored_sources_table
+from pur_leads.models.tracing import trace_spans_table
 from pur_leads.services.scheduler import SchedulerService
 from pur_leads.services.telegram_sources import TelegramSourceService
 from pur_leads.workers.runtime import JobHandlerResult, WorkerRuntime
@@ -309,3 +316,103 @@ def test_scheduler_repository_does_not_reacquire_running_job(runtime_session):
 
     assert first is not None
     assert second is None
+
+
+@pytest.mark.asyncio
+async def test_worker_propagates_trace_from_enqueued_job_to_handler_run_and_child_jobs(
+    runtime_session,
+):
+    request_context = TraceContext(
+        trace_id="1" * 32,
+        span_id="2" * 16,
+        parent_span_id=None,
+        request_id="request-1",
+        started_at=utc_now(),
+        request_method="POST",
+        request_path="/api/onboarding/resources/telegram-desktop-archive",
+        user_id="user-1",
+        web_session_id="session-1",
+        auth_method="local",
+        actor="admin",
+        role="admin",
+    )
+    token = set_trace_context(request_context)
+    try:
+        scheduler = SchedulerService(runtime_session)
+        job = scheduler.enqueue(
+            job_type="build_ai_batch",
+            scope_type="global",
+            payload_json={"value": 3},
+        )
+    finally:
+        reset_trace_context(token)
+
+    handled_trace: dict[str, str | None] = {}
+
+    async def handler(acquired_job):
+        active_trace = current_trace_context()
+        assert active_trace is not None
+        handled_trace.update(
+            {
+                "trace_id": active_trace.trace_id,
+                "span_id": active_trace.span_id,
+                "parent_span_id": active_trace.parent_span_id,
+                "user_id": active_trace.user_id,
+                "web_session_id": active_trace.web_session_id,
+            }
+        )
+        SchedulerService(runtime_session).enqueue(
+            job_type="parse_artifact",
+            scope_type="parser",
+            payload_json={"source_id": "source-1"},
+        )
+        return JobHandlerResult(result_summary={"value": acquired_job.payload_json["value"] + 1})
+
+    runtime = WorkerRuntime(runtime_session, handlers={"build_ai_batch": handler})
+
+    result = await runtime.run_once()
+
+    assert result.status == "succeeded"
+    stored_job = (
+        runtime_session.execute(
+            select(scheduler_jobs_table).where(scheduler_jobs_table.c.id == job.id)
+        )
+        .mappings()
+        .one()
+    )
+    run = runtime_session.execute(select(job_runs_table)).mappings().one()
+    span = (
+        runtime_session.execute(
+            select(trace_spans_table).where(
+                trace_spans_table.c.trace_id == request_context.trace_id,
+                trace_spans_table.c.span_name == "scheduler.job.build_ai_batch",
+            )
+        )
+        .mappings()
+        .one()
+    )
+    child_job = (
+        runtime_session.execute(
+            select(scheduler_jobs_table).where(scheduler_jobs_table.c.job_type == "parse_artifact")
+        )
+        .mappings()
+        .one()
+    )
+    assert stored_job["trace_id"] == request_context.trace_id
+    assert stored_job["parent_span_id"] == request_context.span_id
+    assert run["trace_id"] == request_context.trace_id
+    assert run["span_id"] == handled_trace["span_id"]
+    assert run["parent_span_id"] == request_context.span_id
+    assert handled_trace["trace_id"] == request_context.trace_id
+    assert handled_trace["parent_span_id"] == request_context.span_id
+    assert handled_trace["user_id"] == "user-1"
+    assert handled_trace["web_session_id"] == "session-1"
+    assert child_job["trace_id"] == request_context.trace_id
+    assert child_job["parent_span_id"] == handled_trace["span_id"]
+    assert child_job["trace_context_json"]["web_session_id"] == "session-1"
+    assert span["span_id"] == handled_trace["span_id"]
+    assert span["parent_span_id"] == request_context.span_id
+    assert span["resource_type"] == "scheduler_job"
+    assert span["resource_id"] == job.id
+    assert span["attributes_json"]["job_type"] == "build_ai_batch"
+    assert span["attributes_json"]["result_summary"]["value"] == 4

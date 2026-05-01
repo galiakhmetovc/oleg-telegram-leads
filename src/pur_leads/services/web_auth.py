@@ -13,6 +13,7 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from pur_leads.core.time import utc_now
+from pur_leads.core.tracing import bind_trace_subject
 from pur_leads.repositories.web_auth import WebAuthRepository, WebSessionRecord, WebUserRecord
 from pur_leads.services.audit import AuditService
 
@@ -383,8 +384,16 @@ class WebAuthService:
             revoked_at=None,
         )
         updated_user = self.repository.update_user(user.id, last_login_at=now, updated_at=now)
+        actor = user.local_username or user.telegram_user_id or user.id
+        bind_trace_subject(
+            user_id=user.id,
+            web_session_id=session.id,
+            auth_method=auth_method,
+            actor=actor,
+            role=user.role,
+        )
         self.audit.record_change(
-            actor=user.local_username or user.telegram_user_id or user.id,
+            actor=actor,
             action="web_auth.login_success",
             entity_type="web_user",
             entity_id=user.id,

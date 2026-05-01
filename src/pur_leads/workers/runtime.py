@@ -16,6 +16,13 @@ from sqlalchemy import and_, or_, select, update
 from sqlalchemy.orm import Session
 
 from pur_leads.core.time import utc_now
+from pur_leads.core.tracing import (
+    TraceContext,
+    new_trace_id,
+    reset_trace_context,
+    set_trace_context,
+    new_span_id,
+)
 from pur_leads.integrations.catalog.external_page import FetchedExternalPage
 from pur_leads.integrations.telegram.client import TelegramClientPort
 from pur_leads.integrations.telegram.types import ResolvedTelegramSource
@@ -34,6 +41,7 @@ from pur_leads.services.notifications import NotificationPolicyService
 from pur_leads.services.resource_capacity import ResourceCapacityService
 from pur_leads.services.scheduler import SchedulerService
 from pur_leads.services.settings import SettingsService
+from pur_leads.services.tracing import TraceService
 from pur_leads.workers.message_context import MessageContextWorker
 from pur_leads.workers.telegram_access import TelegramAccessWorker
 from pur_leads.workers.telegram_polling import TelegramPollingWorker
@@ -247,12 +255,30 @@ class WorkerRuntime:
         if job is None:
             return WorkerRunResult(status="idle")
 
-        run_id = self.scheduler.start_run(job.id, worker_name=self.worker_name)
+        job_trace_context = _trace_context_for_job(job)
+        trace_token = set_trace_context(job_trace_context)
+        run_id = self.scheduler.start_run(
+            job.id,
+            worker_name=self.worker_name,
+            trace_context=job_trace_context,
+        )
         handler = self.handlers.get(job.job_type)
         if handler is None:
-            result = self._fail_unsupported_job(job)
-            self.scheduler.finish_run(run_id, status="failed", error=result.message)
-            return result
+            try:
+                result = self._fail_unsupported_job(job)
+                self.scheduler.finish_run(run_id, status="failed", error=result.message)
+                _record_scheduler_job_span(
+                    self.session,
+                    job=job,
+                    trace_context=job_trace_context,
+                    run_id=run_id,
+                    status="error",
+                    job_status="failed",
+                    error=result.message,
+                )
+                return result
+            finally:
+                reset_trace_context(trace_token)
 
         try:
             handler_result = await handler(job)
@@ -260,6 +286,16 @@ class WorkerRuntime:
             result = self._fail_job(job, exc)
             run_status = "deferred" if result.status == "deferred" else "failed"
             self.scheduler.finish_run(run_id, status=run_status, error=result.message)
+            _record_scheduler_job_span(
+                self.session,
+                job=job,
+                trace_context=job_trace_context,
+                run_id=run_id,
+                status="error",
+                job_status=run_status,
+                error=result.message,
+            )
+            reset_trace_context(trace_token)
             return result
 
         checkpoint_after = _checkpoint_after(handler_result)
@@ -270,6 +306,16 @@ class WorkerRuntime:
             result_summary=result_summary,
         )
         self.scheduler.finish_run(run_id, status="succeeded", result_json=result_summary)
+        _record_scheduler_job_span(
+            self.session,
+            job=job,
+            trace_context=job_trace_context,
+            run_id=run_id,
+            status="ok",
+            job_status="succeeded",
+            result_summary=result_summary,
+        )
+        reset_trace_context(trace_token)
         return WorkerRunResult(status="succeeded", job_id=job.id, job_type=job.job_type)
 
     def _fail_unsupported_job(self, job: SchedulerJobRecord) -> WorkerRunResult:
@@ -1796,6 +1842,67 @@ def _float_setting(session: Session, key: str, default: float) -> float:
         return float(value)
     except (TypeError, ValueError):
         return default
+
+
+def _trace_context_for_job(job: SchedulerJobRecord) -> TraceContext:
+    payload = job.trace_context_json if isinstance(job.trace_context_json, dict) else {}
+    return TraceContext(
+        trace_id=job.trace_id or str(payload.get("trace_id") or new_trace_id()),
+        span_id=new_span_id(),
+        parent_span_id=job.parent_span_id or _optional_string(payload.get("span_id")),
+        request_id=str(payload.get("request_id") or f"job:{job.id}"),
+        started_at=utc_now(),
+        request_method=_optional_string(payload.get("request_method")),
+        request_path=_optional_string(payload.get("request_path")),
+        user_id=_optional_string(payload.get("user_id")),
+        web_session_id=_optional_string(payload.get("web_session_id")),
+        auth_method=_optional_string(payload.get("auth_method")),
+        actor=_optional_string(payload.get("actor")),
+        role=_optional_string(payload.get("role")),
+        sampled=bool(payload.get("sampled", True)),
+    )
+
+
+def _record_scheduler_job_span(
+    session: Session,
+    *,
+    job: SchedulerJobRecord,
+    trace_context: TraceContext,
+    run_id: str,
+    status: str,
+    job_status: str,
+    result_summary: Any = None,
+    error: str | None = None,
+) -> None:
+    try:
+        TraceService(session).record_context_span(
+            trace_context,
+            span_name=f"scheduler.job.{job.job_type}",
+            span_kind="consumer",
+            status=status,
+            status_message=error,
+            resource_type="scheduler_job",
+            resource_id=job.id,
+            attributes_json={
+                "job_run_id": run_id,
+                "job_type": job.job_type,
+                "job_status": job_status,
+                "scope_type": job.scope_type,
+                "scope_id": job.scope_id,
+                "monitored_source_id": job.monitored_source_id,
+                "source_message_id": job.source_message_id,
+                "worker_name": job.locked_by,
+                "attempt_count": job.attempt_count,
+                "result_summary": result_summary,
+                "error": error,
+            },
+        )
+    except Exception:
+        return
+
+
+def _optional_string(value: Any) -> str | None:
+    return value if isinstance(value, str) and value else None
 
 
 def _delay_queued_peer_jobs_after_retry(

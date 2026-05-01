@@ -91,6 +91,19 @@ lead_cluster
   -> artifact paths for large prompt/response/raw files
 ```
 
+Implemented first slice:
+
+- migration `0028_trace_foundation` creates `trace_spans`,
+  `trace_span_events`, and `trace_span_links`;
+- web middleware creates OTel-compatible request spans and response headers
+  (`traceparent`, `x-trace-id`, `x-request-id`);
+- login/auth binds spans to `web_users.id` and `web_auth_sessions.id`;
+- audit and operational events include trace metadata so product actions can be
+  correlated before the external OTLP exporter exists.
+- scheduler jobs and job runs store trace/span identifiers, and worker handlers
+  run under restored trace context so later exporters can map background work to
+  Jaeger spans instead of treating it as disconnected activity.
+
 This split is intentional:
 
 - Jaeger/OpenSearch/Prometheus explain runtime behavior, latency, errors, and

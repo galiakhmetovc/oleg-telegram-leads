@@ -44,6 +44,7 @@ def login_local(
         )
     except AuthError as exc:
         raise HTTPException(status_code=401, detail=str(exc)) from exc
+    _set_request_trace_subject(request, result)
     _set_session_cookie(request, response, result)
     return {"user": _user_payload(result.user)}
 
@@ -63,6 +64,7 @@ def login_telegram(
         )
     except AuthError as exc:
         raise HTTPException(status_code=401, detail=str(exc)) from exc
+    _set_request_trace_subject(request, result)
     _set_session_cookie(request, response, result)
     return {"user": _user_payload(result.user)}
 
@@ -115,6 +117,16 @@ def _set_session_cookie(request: Request, response: Response, result: LoginResul
         samesite="lax",
         max_age=int(request.app.state.web_session_duration_hours * 3600),
     )
+
+
+def _set_request_trace_subject(request: Request, result: LoginResult) -> None:
+    request.state.trace_subject = {
+        "user_id": result.user.id,
+        "web_session_id": result.session.id,
+        "auth_method": result.session.auth_method,
+        "actor": result.user.local_username or result.user.telegram_user_id or result.user.id,
+        "role": result.user.role,
+    }
 
 
 def _user_payload(user: WebUserRecord) -> dict[str, Any]:

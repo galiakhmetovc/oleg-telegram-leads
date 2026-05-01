@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+import zipfile
 
 import httpx
 from fastapi.testclient import TestClient
@@ -11,7 +12,10 @@ from pur_leads.db.engine import create_sqlite_engine
 from pur_leads.db.migrations import upgrade_database
 from pur_leads.db.session import create_session_factory
 from pur_leads.models.ai import ai_provider_accounts_table
+from pur_leads.models.audit import audit_log_table
 from pur_leads.models.settings import settings_table
+from pur_leads.models.telegram_sources import telegram_raw_export_runs_table
+from pur_leads.models.tracing import trace_spans_table
 from pur_leads.services.secrets import SecretRefService
 from pur_leads.services.web_auth import WebAuthService
 from pur_leads.web.app import create_app
@@ -284,6 +288,126 @@ def test_onboarding_interactive_userbot_login_start_and_complete(tmp_path):
         assert settings["telegram_api_id"] == 12345
 
 
+def test_login_request_creates_user_session_trace(tmp_path):
+    fixture = _setup_onboarding_app(tmp_path)
+    client = fixture["client"]
+
+    response = client.post(
+        "/api/auth/local",
+        json={"username": "admin", "password": "initial-secret"},
+        headers={"x-request-id": "login-request-1"},
+    )
+
+    assert response.status_code == 200
+    trace_id = response.headers["x-trace-id"]
+    assert len(trace_id) == 32
+    assert response.headers["x-request-id"] == "login-request-1"
+    with fixture["session_factory"]() as session:
+        span = (
+            session.execute(
+                select(trace_spans_table).where(trace_spans_table.c.trace_id == trace_id)
+            )
+            .mappings()
+            .one()
+        )
+        audit_row = (
+            session.execute(
+                select(audit_log_table).where(audit_log_table.c.action == "web_auth.login_success")
+            )
+            .mappings()
+            .one()
+        )
+    assert span["span_name"] == "HTTP POST /api/auth/local"
+    assert span["span_kind"] == "server"
+    assert span["status"] == "ok"
+    assert span["http_status_code"] == 200
+    assert span["user_id"] == response.json()["user"]["id"]
+    assert span["web_session_id"]
+    assert span["request_id"] == "login-request-1"
+    assert audit_row["new_value_json"]["trace"]["trace_id"] == trace_id
+    assert audit_row["new_value_json"]["trace"]["user_id"] == response.json()["user"]["id"]
+    assert audit_row["new_value_json"]["trace"]["web_session_id"] == span["web_session_id"]
+
+
+def test_uploading_telegram_desktop_archive_creates_traceable_data_source_resource(tmp_path):
+    archive_path = _write_desktop_archive(tmp_path)
+    fixture = _setup_onboarding_app(tmp_path, raw_export_storage_path=tmp_path / "raw")
+    client = fixture["client"]
+    _login_local(client)
+
+    with archive_path.open("rb") as archive_file:
+        response = client.post(
+            "/api/onboarding/resources/telegram-desktop-archive",
+            data={
+                "purpose": "lead_monitoring",
+                "display_name": "Чат лидов из архива",
+                "sync_source_messages": "true",
+            },
+            files={"file": ("ChatExport.zip", archive_file, "application/zip")},
+            headers={"x-request-id": "upload-request-1"},
+        )
+    resources_response = client.get("/api/onboarding/resources")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["resource"]["resource_type"] == "data_source_telegram_archive"
+    assert payload["resource"]["display_name"] == "Чат лидов из архива"
+    assert payload["result"]["message_count"] == 2
+    assert payload["result"]["created_source_messages"] == 2
+    assert "initial-secret" not in json.dumps(payload)
+
+    resources = resources_response.json()["items"]
+    uploaded = [
+        resource
+        for resource in resources
+        if resource["resource_type"] == "data_source_telegram_archive"
+    ]
+    assert len(uploaded) == 1
+    assert uploaded[0]["metadata"]["raw_export_run_id"] == payload["result"]["raw_export_run_id"]
+    assert uploaded[0]["metadata"]["message_count"] == 2
+    assert uploaded[0]["metadata"]["uploaded_by_user_id"] == payload["trace"]["user_id"]
+    assert uploaded[0]["delete_path"] is None
+
+    trace_id = response.headers["x-trace-id"]
+    with fixture["session_factory"]() as session:
+        raw_run = session.execute(select(telegram_raw_export_runs_table)).mappings().one()
+        upload_span = (
+            session.execute(
+                select(trace_spans_table).where(
+                    trace_spans_table.c.trace_id == trace_id,
+                    trace_spans_table.c.span_name == "resource.import.telegram_desktop_archive",
+                )
+            )
+            .mappings()
+            .one()
+        )
+        audit_row = (
+            session.execute(
+                select(audit_log_table).where(
+                    audit_log_table.c.action == "resource.data_source_uploaded"
+                )
+            )
+            .mappings()
+            .one()
+        )
+    assert raw_run["metadata_json"]["trace"]["trace_id"] == trace_id
+    assert raw_run["metadata_json"]["trace"]["user_id"] == payload["trace"]["user_id"]
+    assert raw_run["metadata_json"]["trace"]["web_session_id"] == payload["trace"]["web_session_id"]
+    assert Path(raw_run["metadata_json"]["upload"]["stored_archive_path"]).exists()
+    assert raw_run["metadata_json"]["upload"]["sha256"]
+    assert upload_span["parent_span_id"]
+    assert upload_span["resource_type"] == "monitored_source"
+    assert upload_span["resource_id"] == payload["result"]["monitored_source_id"]
+    assert (
+        upload_span["attributes_json"]["raw_export_run_id"]
+        == payload["result"]["raw_export_run_id"]
+    )
+    assert audit_row["new_value_json"]["trace"]["trace_id"] == trace_id
+    assert (
+        audit_row["new_value_json"]["raw_export_run_id"] == payload["result"]["raw_export_run_id"]
+    )
+
+
 class FakeUserbotLoginClient:
     def __init__(self) -> None:
         self.sent_codes: list[dict] = []
@@ -346,3 +470,40 @@ def _login_local(client: TestClient) -> None:
         json={"username": "admin", "password": "initial-secret"},
     )
     assert response.status_code == 200
+
+
+def _write_desktop_archive(tmp_path: Path) -> Path:
+    archive_path = tmp_path / "ChatExport.zip"
+    payload = {
+        "name": "Чат лидов",
+        "type": "public_supergroup",
+        "id": 1292716582,
+        "messages": [
+            {
+                "id": 1,
+                "type": "message",
+                "date": "2026-04-30T13:00:00",
+                "date_unixtime": "1777543200",
+                "from": "Анна",
+                "from_id": "user1",
+                "text": "Нужна камера Dahua A1",
+                "text_entities": [],
+            },
+            {
+                "id": 2,
+                "type": "message",
+                "date": "2026-04-30T13:01:00",
+                "date_unixtime": "1777543260",
+                "from": "Анна",
+                "from_id": "user1",
+                "text": "Нужна еще одна камера",
+                "text_entities": [],
+            },
+        ],
+    }
+    with zipfile.ZipFile(archive_path, "w") as archive:
+        archive.writestr(
+            "ChatExport_2026-04-30/result.json",
+            json.dumps(payload, ensure_ascii=False),
+        )
+    return archive_path

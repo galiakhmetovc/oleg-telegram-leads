@@ -37,7 +37,7 @@ def test_login_page_and_static_assets_are_served(tmp_path):
     assert "Noto+Sans" in login_response.text
     assert "Roboto" not in login_response.text
     assert "Material+Symbols+Outlined" in login_response.text
-    assert "icon_names=add,article,check_circle,close,database,description,folder" in login_response.text
+    assert "icon_names=add,archive,article,check_circle,close,database" in login_response.text
     assert "forum,model_training" in login_response.text
     assert 'type="module" src="/static/vendor/material-web.js"' in login_response.text
     assert css_response.status_code == 200
@@ -246,8 +246,9 @@ def test_workspace_admin_sections_are_protected_and_render_shells(tmp_path):
     assert "Порядок работы: источник → кандидат → подтверждение → снапшот → совпадение в чате." in (
         catalog_response.text
     )
-    assert "Ключевые слова дают fuzzy match, признаки запроса повышают уверенность, исключающие признаки снижают ее." in (
-        catalog_response.text
+    assert (
+        "Ключевые слова дают fuzzy match, признаки запроса повышают уверенность, исключающие признаки снижают ее."
+        in (catalog_response.text)
     )
     assert "Что продаем" not in catalog_response.text
     assert "Канонические товары, услуги, термины и офферы." not in catalog_response.text
@@ -302,6 +303,8 @@ def test_workspace_admin_sections_are_protected_and_render_shells(tmp_path):
     assert "/crm/convert" in js_response.text
     assert "/api/sources" in js_response.text
     assert "/api/onboarding/resources" in js_response.text
+    assert "/api/onboarding/resources/telegram-desktop-archive" in js_response.text
+    assert "uploadTelegramArchiveResource" in js_response.text
     assert "setOnboardingGroupDiscoverEnabled" in js_response.text
     assert "/api/onboarding/bot-token" in js_response.text
     assert "/api/onboarding/userbots/session-file" not in js_response.text
@@ -344,6 +347,10 @@ def test_workspace_admin_sections_are_protected_and_render_shells(tmp_path):
     assert "initQuality" in js_response.text
     assert "initToday" in js_response.text
     assert "initResources" in js_response.text
+    assert "XMLHttpRequest" in js_response.text
+    assert "uploadFormData" in js_response.text
+    assert "xhr.upload.onprogress" in js_response.text
+    assert "setTelegramArchiveUploadProgress" in js_response.text
     assert "initTaskExecutors" in js_response.text
     assert "initTaskTypes" in js_response.text
     assert 'window.location.assign("/")' in js_response.text
@@ -354,6 +361,16 @@ def test_workspace_admin_sections_are_protected_and_render_shells(tmp_path):
     assert "/api/admin/ai-model-profiles/" in js_response.text
     assert 'profile_id: data.get("profile_id")' in js_response.text
     assert 'account_id: data.get("account_id")' in js_response.text
+    resources_response = client.get("/resources")
+    assert 'value="telegram_desktop_archive"' in resources_response.text
+    assert 'id="onboarding-telegram-archive-form"' in resources_response.text
+    assert 'id="onboarding-telegram-archive-progress"' in resources_response.text
+    assert '<md-linear-progress id="onboarding-telegram-archive-progress-bar" value="0">' in (
+        resources_response.text
+    )
+    assert 'name="purpose"' in resources_response.text
+    assert 'name="file" type="file"' in resources_response.text
+    assert '<md-checkbox name="sync_source_messages"></md-checkbox>' in resources_response.text
 
 
 def _client(tmp_path) -> TestClient:

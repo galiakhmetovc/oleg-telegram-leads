@@ -42,7 +42,7 @@ the operator workspace.
 
 Core application:
 
-- Alembic foundation through migration `0027_postgres_backup_type`.
+- Alembic foundation through migration `0028_trace_foundation`.
 - Postgres is now the target operational database. SQLite remains a temporary
   local/test fallback and artifact format while production cutover is in progress. The
   storage decision is documented in `docs/superpowers/specs/2026-05-01-postgres-and-otel-storage-design.md`.
@@ -54,6 +54,11 @@ Core application:
   --list`, SQLite uses the existing consistent backup fallback.
 - FastAPI web app with bootstrap local admin, Telegram-admin account support, resources, settings, AI registry, task executors, quality, operations, sources, catalog, CRM, leads, and artifacts pages.
 - Material Web assets are vendored locally; custom CSS is used for layout and product composition.
+- Every web request now receives an OpenTelemetry-compatible trace context
+  (`trace_id`, `span_id`, `request_id`). Authentication binds the trace to the
+  web user and web session; audit/event payloads include the same trace metadata.
+  Scheduler jobs inherit the current trace at enqueue time, worker runs restore
+  that context before executing handlers, and child jobs inherit the worker span.
 - Worker runtime with scheduler jobs, retry/defer behavior, exponential backoff, `Retry-After` handling, and configurable worker concurrency.
 - Resource capacity report for worker slots, AI model pools, Telegram userbots, Telegram bots, local parser capacity, and external fetch capacity.
 
@@ -72,6 +77,13 @@ Telegram source and raw acquisition:
 - Raw export supports configurable ranges and media policy through source/job payloads.
 - When media is skipped or unavailable, metadata remains in the raw rows so downstream stages can still see that an attachment existed.
 - Telegram Desktop JSON zip import is supported and writes into the same raw export model.
+- `/resources` can accept a user-uploaded Telegram Desktop zip archive as a
+  data-source resource. The upload stores the original archive, imports
+  `result.json` into raw JSONL/Parquet artifacts, optionally syncs canonical
+  `source_messages`, and records the user/session/upload trace in
+  `telegram_raw_export_runs.metadata_json`. The web form shows upload progress;
+  later analysis stages remain manual unless the operator explicitly selects the
+  canonical-message sync option.
 
 Chat analytics pipeline:
 
@@ -123,6 +135,12 @@ Observability and operations:
 - `/operations` and `/api/operations/*` expose jobs, runs, events, capacity, backup/restore, quality, access checks, notifications, and audit summaries.
 - `/artifacts` and `/api/artifacts/*` expose generated files from raw export runs and stage metadata, including bounded filesystem discovery under artifact directories.
 - Artifact previews support JSON, JSONL, text, directories, Parquet, and SQLite.
+- `trace_spans`, `trace_span_events`, and `trace_span_links` persist the first
+  product trace graph foundation. Current coverage includes HTTP request spans,
+  login traces, user/session attributes, audit/event correlation, Telegram
+  archive upload/import spans, scheduler job spans, worker run span IDs, and
+  trace propagation to child jobs. The IDs are OTel-compatible so they can be
+  sent to Jaeger later.
 - End-to-end lead traceability is specified in `docs/superpowers/specs/2026-05-01-end-to-end-lead-traceability-design.md`.
 - Production runbook and rollback notes are documented in `docs/operations/artifacts-and-production.md`.
 
@@ -133,7 +151,7 @@ Observability and operations:
 - Stage 6 thread reconstruction exists only as thread/reply fields used by search and lead candidate context. There is no standalone `threads.parquet` stage yet.
 - OCR is represented in AI registry and documentation, but scanned-PDF/image OCR via `GLM-OCR` is not wired as a complete parse fallback.
 - Prompt/LLM trace exists for entity enrichment and review-only lead arbitration, but a unified prompt registry, prompt editor, and generic AI trace viewer are not implemented end-to-end.
-- Operational leads have traceable domain tables (`lead_clusters`, `lead_events`, `lead_matches`, `decision_records`, `source_messages`), but there is no unified trace graph or product-visible `Trace` tab yet.
+- Operational leads have traceable domain tables (`lead_clusters`, `lead_events`, `lead_matches`, `decision_records`, `source_messages`) and the trace foundation exists, but there is no product-visible lead `Trace` tab yet.
 - Some CLI paths still accept explicit provider/model/profile options or legacy catalog LLM settings. The target is to route all model work through AI registry task executors.
 - Circuit breaker and adaptive p95 timeout settings/help text are documented and exposed as configuration placeholders, but the full runtime breaker/adaptive-timeout behavior is not enforced everywhere yet.
 - Chroma runs embedded/local in-process. A separate Chroma server is not part of the current implementation.

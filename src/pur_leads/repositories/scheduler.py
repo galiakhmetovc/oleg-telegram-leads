@@ -40,6 +40,9 @@ class SchedulerJobRecord:
     checkpoint_after_json: Any
     result_summary_json: Any
     payload_json: Any
+    trace_id: str | None
+    parent_span_id: str | None
+    trace_context_json: Any
     last_error: str | None
     created_at: datetime
     updated_at: datetime
@@ -57,6 +60,9 @@ class JobRunRecord:
     result_json: Any
     error: str | None
     log_correlation_id: str | None
+    trace_id: str | None
+    span_id: str | None
+    parent_span_id: str | None
 
 
 class SchedulerRepository:
@@ -107,6 +113,9 @@ class SchedulerRepository:
         max_attempts: int = 3,
         checkpoint_before_json: Any = None,
         payload_json: Any = None,
+        trace_id: str | None = None,
+        parent_span_id: str | None = None,
+        trace_context_json: Any = None,
     ) -> SchedulerJobRecord:
         job_id = new_id()
         self.session.execute(
@@ -132,6 +141,9 @@ class SchedulerRepository:
                 checkpoint_after_json=None,
                 result_summary_json=None,
                 payload_json=payload_json,
+                trace_id=trace_id,
+                parent_span_id=parent_span_id,
+                trace_context_json=trace_context_json,
                 last_error=None,
                 created_at=self._to_db_datetime(now),
                 updated_at=self._to_db_datetime(now),
@@ -146,6 +158,9 @@ class SchedulerRepository:
         worker_name: str,
         started_at: datetime,
         log_correlation_id: str,
+        trace_id: str | None = None,
+        span_id: str | None = None,
+        parent_span_id: str | None = None,
     ) -> JobRunRecord:
         run_id = new_id()
         self.session.execute(
@@ -160,6 +175,9 @@ class SchedulerRepository:
                 result_json=None,
                 error=None,
                 log_correlation_id=log_correlation_id,
+                trace_id=trace_id,
+                span_id=span_id,
+                parent_span_id=parent_span_id,
             )
         )
         return self.get_run(run_id)  # type: ignore[return-value]

@@ -192,7 +192,7 @@ def resources_page(
                       <div>
                         <h2>Ресурсы системы</h2>
                         <p class="muted">
-                          Подключенные Telegram-аккаунты, боты, группы уведомлений и LLM-аккаунты.
+                          Исполнительные аккаунты, уведомления, AI-провайдеры и пользовательские источники данных.
                         </p>
                       </div>
                       <md-filled-button id="onboarding-add-resource" type="button">
@@ -221,6 +221,7 @@ def resources_page(
                         <option value="telegram_notification_group">Группа уведомлений</option>
                         <option value="ai_provider_account">LLM-провайдер</option>
                         <option value="telegram_userbot">Telegram-юзербот</option>
+                        <option value="telegram_desktop_archive">Архив Telegram</option>
                       </select>
                     </label>
                     <section class="onboarding-panel onboarding-panel-compact resource-form"
@@ -354,6 +355,47 @@ def resources_page(
                         </md-filled-button>
                       </form>
                       <p id="onboarding-interactive-status" class="status-line" role="status"></p>
+                    </section>
+                    <section class="onboarding-panel onboarding-panel-compact resource-form is-hidden"
+                      data-resource-form="telegram_desktop_archive">
+                      <div class="onboarding-panel-head">
+                        <md-icon aria-hidden="true">upload_file</md-icon>
+                        <div>
+                          <h3 class="md-typescale-title-large">Архив Telegram</h3>
+                          <p class="muted">Загрузите zip-экспорт Telegram Desktop как источник интересов или лидов.</p>
+                        </div>
+                      </div>
+                      <form id="onboarding-telegram-archive-form" class="material-form" enctype="multipart/form-data">
+                        <md-outlined-text-field name="display_name" label="Название"
+                          placeholder="Чат клиентов, канал ПУР, переписка с поставщиком">
+                        </md-outlined-text-field>
+                        <label class="material-select-field">
+                          Назначение
+                          <select name="purpose">
+                            <option value="lead_monitoring">Поиск лидов</option>
+                            <option value="catalog_ingestion">Знания и каталог</option>
+                            <option value="both">Лиды и знания</option>
+                          </select>
+                        </label>
+                        <label class="material-file-field">
+                          Zip-архив Telegram Desktop
+                          <input name="file" type="file" accept=".zip,application/zip" required>
+                        </label>
+                        <label class="material-checkbox-line">
+                          <md-checkbox name="sync_source_messages"></md-checkbox>
+                          Создать канонические сообщения сразу
+                        </label>
+                        <div id="onboarding-telegram-archive-progress" class="upload-progress is-hidden">
+                          <md-linear-progress id="onboarding-telegram-archive-progress-bar" value="0">
+                          </md-linear-progress>
+                          <span id="onboarding-telegram-archive-progress-label">0%</span>
+                        </div>
+                        <md-filled-button type="submit">
+                          <md-icon slot="icon">upload_file</md-icon>
+                          Загрузить источник
+                        </md-filled-button>
+                      </form>
+                      <p id="onboarding-telegram-archive-status" class="status-line" role="status"></p>
                     </section>
                   </div>
                 </dialog>
@@ -1509,7 +1551,7 @@ def _page(*, page: str, title: str, main: str) -> str:
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans:wght@400;500;600;700&amp;display=swap">
-  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined&amp;icon_names=add,article,check_circle,close,database,description,folder,forum,model_training,open_in_new,person,person_add,radio_button_unchecked,refresh,send,settings,smart_toy,storage,table_chart,upload_file,vpn_key&amp;display=block">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined&amp;icon_names=add,archive,article,check_circle,close,database,description,folder,forum,model_training,open_in_new,person,person_add,radio_button_unchecked,refresh,send,settings,smart_toy,storage,table_chart,upload_file,vpn_key&amp;display=block">
   <link rel="stylesheet" href="/static/app.css">
 </head>
 <body data-page="{page}">

@@ -8,6 +8,7 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from pur_leads.core.time import utc_now
+from pur_leads.core.tracing import TraceContext, current_trace_context
 from pur_leads.repositories.scheduler import SchedulerJobRecord, SchedulerRepository
 
 
@@ -37,6 +38,8 @@ class SchedulerService:
             if existing is not None:
                 return existing
 
+        trace_context = current_trace_context()
+        trace_context_json = _trace_context_payload(trace_context)
         job = self.repository.create(
             job_type=job_type,
             scope_type=scope_type,
@@ -50,17 +53,31 @@ class SchedulerService:
             max_attempts=max_attempts,
             checkpoint_before_json=checkpoint_before_json,
             payload_json=payload_json,
+            trace_id=trace_context.trace_id if trace_context is not None else None,
+            parent_span_id=trace_context.span_id if trace_context is not None else None,
+            trace_context_json=trace_context_json,
             now=utc_now(),
         )
         self.session.commit()
         return job
 
-    def start_run(self, job_id: str, *, worker_name: str) -> str:
+    def start_run(
+        self,
+        job_id: str,
+        *,
+        worker_name: str,
+        trace_context: TraceContext | None = None,
+    ) -> str:
         run = self.repository.start_run(
             scheduler_job_id=job_id,
             worker_name=worker_name,
             started_at=utc_now(),
-            log_correlation_id=f"job:{job_id}",
+            log_correlation_id=trace_context.trace_id
+            if trace_context is not None
+            else f"job:{job_id}",
+            trace_id=trace_context.trace_id if trace_context is not None else None,
+            span_id=trace_context.span_id if trace_context is not None else None,
+            parent_span_id=trace_context.parent_span_id if trace_context is not None else None,
         )
         self.session.commit()
         return run.id
@@ -154,3 +171,7 @@ class SchedulerService:
         job = self.repository.fail_permanently(job_id, error=error, now=utc_now())
         self.session.commit()
         return job
+
+
+def _trace_context_payload(context: TraceContext | None) -> dict[str, Any] | None:
+    return context.as_jsonable() if context is not None else None

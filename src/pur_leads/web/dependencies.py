@@ -5,6 +5,7 @@ from collections.abc import Iterator
 from fastapi import Depends, HTTPException, Request
 from sqlalchemy.orm import Session, sessionmaker
 
+from pur_leads.core.tracing import bind_trace_subject
 from pur_leads.services.secrets import SecretRefService
 from pur_leads.services.web_auth import AuthError, SessionValidationResult, WebAuthService
 
@@ -60,6 +61,22 @@ def current_admin(
             reason="admin_role_required",
         )
         raise HTTPException(status_code=403, detail="Admin role required")
+    bind_trace_subject(
+        user_id=validated.user.id,
+        web_session_id=validated.session.id,
+        auth_method=validated.session.auth_method,
+        actor=validated.user.local_username or validated.user.telegram_user_id or validated.user.id,
+        role=validated.user.role,
+    )
+    request.state.trace_subject = {
+        "user_id": validated.user.id,
+        "web_session_id": validated.session.id,
+        "auth_method": validated.session.auth_method,
+        "actor": validated.user.local_username
+        or validated.user.telegram_user_id
+        or validated.user.id,
+        "role": validated.user.role,
+    }
     return validated
 
 

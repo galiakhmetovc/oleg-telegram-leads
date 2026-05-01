@@ -794,6 +794,43 @@ md-text-button {
   font: 400 15px/1.4 var(--ui-font);
 }
 
+.material-file-field {
+  display: grid;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.material-file-field input {
+  width: 100%;
+  min-height: 48px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: #ffffff;
+  color: var(--text);
+  font: 400 14px/1.4 var(--ui-font);
+}
+
+.upload-progress {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+}
+
+.upload-progress md-linear-progress {
+  width: 100%;
+}
+
+.upload-progress span {
+  min-width: 44px;
+  color: var(--muted);
+  font-size: 13px;
+  text-align: right;
+}
+
 .onboarding-group-row {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;

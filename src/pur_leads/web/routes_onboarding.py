@@ -3,16 +3,19 @@
 from __future__ import annotations
 
 import re
+import hashlib
+import zipfile
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
 from pydantic import BaseModel, Field
 from sqlalchemy import func, insert, select, update
 from sqlalchemy.orm import Session
 
 from pur_leads.core.ids import new_id
 from pur_leads.core.time import utc_now
+from pur_leads.core.tracing import current_trace_json
 from pur_leads.integrations.telegram.bot_setup import (
     TelegramBotSetupClient,
     TelegramBotSetupError,
@@ -25,13 +28,17 @@ from pur_leads.integrations.telegram.userbot_login import (
 from pur_leads.models.ai import ai_provider_accounts_table
 from pur_leads.models.telegram_sources import (
     monitored_sources_table,
+    telegram_raw_export_runs_table,
     telegram_bots_table,
     telegram_notification_groups_table,
     userbot_accounts_table,
 )
 from pur_leads.services.ai_registry import AiRegistryService
+from pur_leads.services.audit import AuditService
 from pur_leads.services.secrets import SecretRefService
 from pur_leads.services.settings import SettingsService
+from pur_leads.services.telegram_desktop_import import TelegramDesktopArchiveImportService
+from pur_leads.services.tracing import TraceService
 from pur_leads.services.userbots import UserbotAccountService
 from pur_leads.services.web_auth import SessionValidationResult
 from pur_leads.web.dependencies import current_admin, get_session
@@ -140,6 +147,132 @@ async def list_resources(
 ) -> dict[str, Any]:
     await _refresh_missing_bot_usernames(request, session)
     return {"items": _resource_payloads(session)}
+
+
+@router.post("/resources/telegram-desktop-archive")
+async def upload_telegram_desktop_archive_resource(
+    request: Request,
+    file: UploadFile = File(...),
+    purpose: str = Form("lead_monitoring"),
+    display_name: str | None = Form(None),
+    sync_source_messages: bool = Form(False),
+    validated: SessionValidationResult = Depends(current_admin),
+    session: Session = Depends(get_session),
+) -> dict[str, Any]:
+    safe_name = _safe_upload_filename(file.filename or "telegram-export.zip")
+    if not safe_name.lower().endswith(".zip"):
+        raise HTTPException(status_code=400, detail="Нужен zip-архив Telegram Desktop")
+
+    upload_started_at = utc_now()
+    stored_path, size_bytes, sha256 = await _store_uploaded_file(
+        file,
+        root=Path(request.app.state.raw_export_storage_path),
+        safe_name=safe_name,
+    )
+    if not zipfile.is_zipfile(stored_path):
+        stored_path.unlink(missing_ok=True)
+        raise HTTPException(status_code=400, detail="Файл не похож на zip-архив Telegram Desktop")
+
+    trace = current_trace_json()
+    actor = _actor(validated)
+    input_ref = display_name.strip() if display_name and display_name.strip() else None
+    upload_metadata = {
+        "original_filename": safe_name,
+        "content_type": file.content_type,
+        "stored_archive_path": str(stored_path),
+        "size_bytes": size_bytes,
+        "sha256": sha256,
+        "uploaded_at": upload_started_at.isoformat(),
+        "uploaded_by": actor,
+    }
+    if trace:
+        upload_metadata["trace_id"] = trace["trace_id"]
+        upload_metadata["web_session_id"] = trace.get("web_session_id")
+        upload_metadata["user_id"] = trace.get("user_id")
+
+    try:
+        result = TelegramDesktopArchiveImportService(
+            session,
+            raw_root=request.app.state.raw_export_storage_path,
+        ).import_archive(
+            stored_path,
+            input_ref=input_ref,
+            purpose=purpose,
+            added_by=actor,
+            sync_source_messages=sync_source_messages,
+            import_metadata={
+                "trace": trace,
+                "upload": upload_metadata,
+                "resource": {"kind": "data_source", "resource_type": "telegram_desktop_archive"},
+            },
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    TraceService(session).record_child_span(
+        span_name="resource.import.telegram_desktop_archive",
+        status="ok",
+        started_at=upload_started_at,
+        resource_type="monitored_source",
+        resource_id=result.source.id,
+        attributes_json={
+            "raw_export_run_id": result.raw_export.run_id,
+            "message_count": result.message_count,
+            "attachment_count": result.attachment_count,
+            "created_source_messages": result.created_source_messages,
+            "stored_archive_path": str(stored_path),
+            "sha256": sha256,
+        },
+    )
+    TraceService(session).record_event(
+        event_name="resource.data_source_uploaded",
+        entity_type="monitored_source",
+        entity_id=result.source.id,
+        attributes_json={
+            "raw_export_run_id": result.raw_export.run_id,
+            "message_count": result.message_count,
+            "attachment_count": result.attachment_count,
+        },
+    )
+    AuditService(session).record_change(
+        actor=actor,
+        action="resource.data_source_uploaded",
+        entity_type="monitored_source",
+        entity_id=result.source.id,
+        old_value_json=None,
+        new_value_json={
+            "resource_type": "data_source_telegram_archive",
+            "purpose": purpose,
+            "raw_export_run_id": result.raw_export.run_id,
+            "message_count": result.message_count,
+            "attachment_count": result.attachment_count,
+            "stored_archive_path": str(stored_path),
+        },
+    )
+    resource = _data_source_resource_payload(
+        dict(
+            id=result.source.id,
+            input_ref=result.source.input_ref,
+            source_kind=result.source.source_kind,
+            source_purpose=result.source.source_purpose,
+            title=result.source.title,
+            status=result.source.status,
+            created_at=result.source.created_at,
+        ),
+        raw_run={
+            "id": result.raw_export.run_id,
+            "export_format": "telegram_desktop_json_v1",
+            "message_count": result.message_count,
+            "attachment_count": result.attachment_count,
+            "metadata_json": {"trace": trace, "upload": upload_metadata},
+            "started_at": upload_started_at,
+        },
+    )
+    return {
+        "resource": resource,
+        "result": result.as_jsonable(),
+        "trace": trace,
+    }
 
 
 @router.get("/bots")
@@ -725,6 +858,7 @@ def _resource_payloads(session: Session) -> list[dict[str, Any]]:
         "api_hash_configured": _is_secret_ref_value(api_hash_ref),
     }
     resources: list[dict[str, Any]] = []
+    resources.extend(_data_source_resource_payloads(session))
     resources.extend(
         _notification_group_resource_payload(group)
         for group in _notification_group_payloads(session)
@@ -743,6 +877,103 @@ def _resource_payloads(session: Session) -> list[dict[str, Any]]:
         if account.status == "active"
     )
     return resources
+
+
+def _data_source_resource_payloads(session: Session) -> list[dict[str, Any]]:
+    source_rows = (
+        session.execute(
+            select(monitored_sources_table).order_by(monitored_sources_table.c.created_at.desc())
+        )
+        .mappings()
+        .all()
+    )
+    latest_runs = _latest_raw_runs_by_source(session)
+    return [
+        _data_source_resource_payload(dict(source), raw_run=latest_runs.get(source["id"]))
+        for source in source_rows
+    ]
+
+
+def _latest_raw_runs_by_source(session: Session) -> dict[str, dict[str, Any]]:
+    rows = (
+        session.execute(
+            select(telegram_raw_export_runs_table).order_by(
+                telegram_raw_export_runs_table.c.started_at.desc()
+            )
+        )
+        .mappings()
+        .all()
+    )
+    latest: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        source_id = str(row["monitored_source_id"])
+        if source_id not in latest:
+            latest[source_id] = dict(row)
+    return latest
+
+
+def _data_source_resource_payload(
+    source: dict[str, Any],
+    *,
+    raw_run: dict[str, Any] | None,
+) -> dict[str, Any]:
+    metadata = raw_run.get("metadata_json") if raw_run else {}
+    metadata = metadata if isinstance(metadata, dict) else {}
+    trace = metadata.get("trace") if isinstance(metadata.get("trace"), dict) else {}
+    upload = metadata.get("upload") if isinstance(metadata.get("upload"), dict) else {}
+    export_format = raw_run.get("export_format") if raw_run else None
+    resource_type = (
+        "data_source_telegram_archive"
+        if export_format == "telegram_desktop_json_v1"
+        else "telegram_data_source"
+    )
+    message_count = int(raw_run.get("message_count") or 0) if raw_run else 0
+    attachment_count = int(raw_run.get("attachment_count") or 0) if raw_run else 0
+    purpose = str(source.get("source_purpose") or "")
+    detail_parts = [
+        _source_purpose_label(purpose),
+        f"{message_count} сообщений",
+        f"{attachment_count} вложений",
+    ]
+    display_name = (
+        str(source.get("input_ref") or "").strip()
+        or str(source.get("title") or "").strip()
+        or "Источник данных"
+    )
+    return {
+        "resource_id": f"{resource_type}:{source['id']}",
+        "id": source["id"],
+        "resource_type": resource_type,
+        "type_label": "Источник данных",
+        "display_name": display_name,
+        "status": source["status"],
+        "health": source["status"],
+        "detail": " / ".join(part for part in detail_parts if part),
+        "parent_resource_id": None,
+        "delete_path": None,
+        "metadata": {
+            "resource_category": "data_source",
+            "source_kind": source.get("source_kind"),
+            "source_purpose": purpose,
+            "input_ref": source.get("input_ref"),
+            "raw_export_run_id": raw_run.get("id") if raw_run else None,
+            "export_format": export_format,
+            "message_count": message_count,
+            "attachment_count": attachment_count,
+            "trace_id": trace.get("trace_id"),
+            "uploaded_by_user_id": trace.get("user_id") or upload.get("user_id"),
+            "uploaded_session_id": trace.get("web_session_id") or upload.get("web_session_id"),
+            "stored_archive_path": upload.get("stored_archive_path"),
+        },
+    }
+
+
+def _source_purpose_label(value: str) -> str:
+    return {
+        "lead_monitoring": "поиск лидов",
+        "catalog_ingestion": "знания/каталог",
+        "both": "лиды и знания",
+    }.get(value, value or "назначение не задано")
 
 
 def _notification_group_resource_payload(group: dict[str, Any]) -> dict[str, Any]:
@@ -1171,6 +1402,37 @@ def _bot_setup_client(request: Request) -> TelegramBotSetupClient:
 def _userbot_login_client(request: Request):
     factory = request.app.state.userbot_login_client_factory
     return factory() if factory else TelethonUserbotLoginClient()
+
+
+def _safe_upload_filename(value: str) -> str:
+    raw = Path(value.strip()).name
+    normalized = re.sub(r"[^A-Za-z0-9_. -]+", "_", raw).strip(" ._-")
+    return normalized or "telegram-export.zip"
+
+
+async def _store_uploaded_file(
+    file: UploadFile,
+    *,
+    root: Path,
+    safe_name: str,
+) -> tuple[Path, int, str]:
+    upload_id = new_id()
+    target_dir = (
+        root / "uploads" / "telegram_desktop_archives" / f"dt={utc_now().date()}" / upload_id
+    )
+    target_dir.mkdir(parents=True, exist_ok=False)
+    target_path = target_dir / safe_name
+    digest = hashlib.sha256()
+    size = 0
+    with target_path.open("wb") as target:
+        while chunk := await file.read(1024 * 1024):
+            size += len(chunk)
+            digest.update(chunk)
+            target.write(chunk)
+    if size == 0:
+        target_path.unlink(missing_ok=True)
+        raise HTTPException(status_code=400, detail="Архив пустой")
+    return target_path, size, digest.hexdigest()
 
 
 def _is_secret_ref_value(value: Any) -> bool:

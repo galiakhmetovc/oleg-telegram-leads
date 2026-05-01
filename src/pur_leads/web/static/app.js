@@ -1,9 +1,13 @@
 const page = document.body.dataset.page;
 
 const api = async (path, options = {}) => {
+  const headers =
+    options.body instanceof FormData
+      ? { ...(options.headers || {}) }
+      : { "content-type": "application/json", ...(options.headers || {}) };
   const response = await fetch(path, {
     credentials: "same-origin",
-    headers: { "content-type": "application/json", ...(options.headers || {}) },
+    headers,
     ...options,
   });
   if (!response.ok) {
@@ -14,6 +18,43 @@ const api = async (path, options = {}) => {
     throw new Error(payload.detail || `Ошибка запроса: ${response.status}`);
   }
   return response.json();
+};
+
+const uploadFormData = (path, formData, { onProgress, onProcessing } = {}) =>
+  new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", path);
+    xhr.withCredentials = true;
+    xhr.upload.onprogress = (event) => {
+      if (event.lengthComputable && event.total > 0) {
+        onProgress?.(event.loaded / event.total);
+      }
+    };
+    xhr.upload.onload = () => {
+      onProgress?.(1);
+      onProcessing?.();
+    };
+    xhr.onerror = () => reject(new Error("Ошибка сети при загрузке файла"));
+    xhr.onload = () => {
+      const payload = parseJsonResponse(xhr.responseText);
+      if (xhr.status === 401 || xhr.status === 403) {
+        window.location.assign("/login");
+      }
+      if (xhr.status < 200 || xhr.status >= 300) {
+        reject(new Error(payload.detail || `Ошибка запроса: ${xhr.status}`));
+        return;
+      }
+      resolve(payload);
+    };
+    xhr.send(formData);
+  });
+
+const parseJsonResponse = (value) => {
+  try {
+    return value ? JSON.parse(value) : {};
+  } catch {
+    return {};
+  }
 };
 
 const text = (value, fallback = "") => {
@@ -3648,6 +3689,9 @@ function initOnboarding() {
   document
     .querySelector("#onboarding-interactive-complete-form")
     ?.addEventListener("submit", completeInteractiveUserbotLogin);
+  document
+    .querySelector("#onboarding-telegram-archive-form")
+    ?.addEventListener("submit", uploadTelegramArchiveResource);
   loadOnboardingStatus();
   loadOnboardingResources();
   loadOnboardingBots();
@@ -3714,6 +3758,17 @@ function renderOnboardingResources(resources) {
     .map((resource) => {
       const icon = onboardingResourceIcon(resource.resource_type);
       const statusClass = resource.status === "active" ? "" : "is-warn";
+      const editButton = `<md-outlined-button type="button" data-edit-resource-type="${escapeHtml(resource.resource_type)}">
+            Редактировать
+          </md-outlined-button>`;
+      const deleteButton = resource.delete_path
+        ? `<md-outlined-button type="button"
+            data-delete-resource="${escapeHtml(resource.id)}"
+            data-resource-type="${escapeHtml(resource.resource_type)}"
+            data-delete-path="${escapeHtml(resource.delete_path)}">
+            Удалить
+          </md-outlined-button>`
+        : "";
       return `<div class="resource-row">
         <div class="resource-kind">
           <md-icon aria-hidden="true">${icon}</md-icon>
@@ -3725,14 +3780,8 @@ function renderOnboardingResources(resources) {
         </div>
         <div>${badge(label(resource.status, resource.status), statusClass)}</div>
         <div class="resource-actions">
-          <md-outlined-button type="button" data-edit-resource-type="${escapeHtml(resource.resource_type)}">
-            Редактировать
-          </md-outlined-button>
-          <md-outlined-button type="button"
-            data-delete-resource="${escapeHtml(resource.id)}"
-            data-resource-type="${escapeHtml(resource.resource_type)}">
-            Удалить
-          </md-outlined-button>
+          ${editButton}
+          ${deleteButton}
         </div>
       </div>`;
     })
@@ -3751,6 +3800,8 @@ function onboardingResourceIcon(resourceType) {
     telegram_notification_group: "forum",
     telegram_userbot: "person",
     ai_provider_account: "model_training",
+    data_source_telegram_archive: "archive",
+    telegram_data_source: "database",
   };
   return icons[resourceType] || "settings";
 }
@@ -3766,7 +3817,7 @@ async function deleteOnboardingResource(event) {
     ai_provider_account: `/api/onboarding/llm-providers/${encodeURIComponent(resourceId)}`,
     telegram_userbot: `/api/onboarding/userbots/${encodeURIComponent(resourceId)}`,
   };
-  const path = paths[resourceType];
+  const path = button.dataset.deletePath || paths[resourceType];
   if (!path) return;
   try {
     await api(path, { method: "DELETE" });
@@ -3843,6 +3894,73 @@ async function saveOnboardingBot(event) {
   } catch (error) {
     if (status) status.textContent = error.message;
   }
+}
+
+async function uploadTelegramArchiveResource(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const status = document.querySelector("#onboarding-telegram-archive-status");
+  const fileInput = form.querySelector('input[name="file"]');
+  const submitButton = form.querySelector('md-filled-button[type="submit"]');
+  const file = fileInput?.files?.[0];
+  if (!file) {
+    if (status) status.textContent = "Выберите zip-архив Telegram Desktop.";
+    return;
+  }
+  const data = new FormData(form);
+  const syncCheckbox = form.querySelector('[name="sync_source_messages"]');
+  data.set("sync_source_messages", syncCheckbox?.checked ? "true" : "false");
+  try {
+    setTelegramArchiveUploadProgress({ visible: true, value: 0, label: "0%" });
+    if (submitButton) submitButton.disabled = true;
+    if (status) status.textContent = "Загружаю архив...";
+    const payload = await uploadFormData("/api/onboarding/resources/telegram-desktop-archive", data, {
+      onProgress: (value) => {
+        const percent = Math.round(value * 100);
+        setTelegramArchiveUploadProgress({
+          visible: true,
+          value,
+          label: `${percent}%`,
+        });
+        if (status) status.textContent = `Загрузка архива: ${percent}%`;
+      },
+      onProcessing: () => {
+        setTelegramArchiveUploadProgress({
+          visible: true,
+          indeterminate: true,
+          label: "обработка",
+        });
+        if (status) status.textContent = "Архив получен. Создаю raw/parquet артефакты...";
+      },
+    });
+    const count = payload.result?.message_count ?? 0;
+    if (status) status.textContent = `Источник загружен. Сообщений: ${count}`;
+    form.reset();
+    closeOnboardingResourceDialog();
+    await refreshOnboardingResourceState();
+  } catch (error) {
+    if (status) status.textContent = error.message;
+  } finally {
+    if (submitButton) submitButton.disabled = false;
+    setTelegramArchiveUploadProgress({ visible: false, value: 0, label: "0%" });
+  }
+}
+
+function setTelegramArchiveUploadProgress({ visible, value = 0, label = "", indeterminate = false }) {
+  const container = document.querySelector("#onboarding-telegram-archive-progress");
+  const progress = document.querySelector("#onboarding-telegram-archive-progress-bar");
+  const labelTarget = document.querySelector("#onboarding-telegram-archive-progress-label");
+  if (!container || !progress) return;
+  container.classList.toggle("is-hidden", !visible);
+  if (indeterminate) {
+    progress.setAttribute("indeterminate", "");
+    progress.removeAttribute("value");
+  } else {
+    progress.removeAttribute("indeterminate");
+    progress.value = Math.max(0, Math.min(1, value));
+    progress.setAttribute("value", String(progress.value));
+  }
+  if (labelTarget) labelTarget.textContent = label;
 }
 
 async function loadOnboardingBots() {

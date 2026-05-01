@@ -1,17 +1,27 @@
 """FastAPI application factory."""
 
 from collections.abc import Callable
+from dataclasses import replace
 from pathlib import Path
 import secrets
 from typing import Any
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.staticfiles import StaticFiles
 
 from pur_leads.core.config import load_settings
+from pur_leads.core.time import utc_now
+from pur_leads.core.tracing import (
+    TraceContext,
+    current_trace_context,
+    reset_trace_context,
+    set_trace_context,
+    traceparent_value,
+)
 from pur_leads.db.engine import create_database_engine
 from pur_leads.db.migrations import upgrade_database
 from pur_leads.db.session import create_session_factory
+from pur_leads.services.tracing import TraceService
 from pur_leads.services.web_auth import WebAuthService
 from pur_leads.web.routes_admin import router as admin_router
 from pur_leads.web.routes_artifacts import router as artifacts_router
@@ -42,6 +52,7 @@ def create_app(
     bootstrap_admin_password_file: Path | str | None = None,
     local_secret_storage_path: Path | str | None = None,
     telegram_session_storage_path: Path | str | None = None,
+    raw_export_storage_path: Path | str | None = None,
     telegram_bot_api_base_url: str = "https://api.telegram.org",
     telegram_bot_api_transport: Any | None = None,
     userbot_login_client_factory: Callable[[], Any] | None = None,
@@ -73,6 +84,11 @@ def create_app(
         Path(telegram_session_storage_path)
         if telegram_session_storage_path is not None
         else settings.telegram_session_storage_path
+    )
+    app.state.raw_export_storage_path = (
+        Path(raw_export_storage_path)
+        if raw_export_storage_path is not None
+        else settings.raw_export_storage_path
     )
     app.state.telegram_bot_token = telegram_bot_token or settings.telegram_bot_token
     app.state.telegram_bot_api_base_url = telegram_bot_api_base_url
@@ -109,6 +125,8 @@ def create_app(
         session_duration_hours=app.state.web_session_duration_hours,
     )
 
+    _install_trace_middleware(app)
+
     static_path = Path(__file__).with_name("static")
     app.mount("/static", StaticFiles(directory=static_path), name="static")
     app.include_router(health_router)
@@ -125,6 +143,84 @@ def create_app(
     app.include_router(admin_router)
     app.include_router(pages_router)
     return app
+
+
+def _install_trace_middleware(app: FastAPI) -> None:
+    @app.middleware("http")
+    async def product_trace_middleware(request: Request, call_next):  # noqa: ANN001
+        headers = {key.lower(): value for key, value in request.headers.items()}
+        context = TraceContext.for_request(
+            method=request.method,
+            path=request.url.path,
+            headers=headers,
+            client_ip=request.client.host if request.client else None,
+            user_agent=request.headers.get("user-agent"),
+        )
+        token = set_trace_context(context)
+        try:
+            response = await call_next(request)
+        except Exception as exc:
+            _record_request_trace_span(
+                app,
+                _context_with_request_subject(current_trace_context() or context, request),
+                status="error",
+                status_message=str(exc) or exc.__class__.__name__,
+                http_status_code=500,
+            )
+            reset_trace_context(token)
+            raise
+
+        final_context = _context_with_request_subject(current_trace_context() or context, request)
+        response.headers["x-trace-id"] = final_context.trace_id
+        response.headers["x-request-id"] = final_context.request_id
+        response.headers["traceparent"] = traceparent_value(final_context)
+        _record_request_trace_span(
+            app,
+            final_context,
+            status="error" if response.status_code >= 500 else "ok",
+            status_message=None,
+            http_status_code=response.status_code,
+        )
+        reset_trace_context(token)
+        return response
+
+
+def _context_with_request_subject(context: TraceContext, request: Request) -> TraceContext:
+    subject = getattr(request.state, "trace_subject", None)
+    if not isinstance(subject, dict):
+        return context
+    return replace(
+        context,
+        user_id=subject.get("user_id") or context.user_id,
+        web_session_id=subject.get("web_session_id") or context.web_session_id,
+        auth_method=subject.get("auth_method") or context.auth_method,
+        actor=subject.get("actor") or context.actor,
+        role=subject.get("role") or context.role,
+    )
+
+
+def _record_request_trace_span(
+    app: FastAPI,
+    context: TraceContext,
+    *,
+    status: str,
+    status_message: str | None,
+    http_status_code: int,
+) -> None:
+    try:
+        with app.state.session_factory() as session:
+            TraceService(session).record_context_span(
+                context,
+                span_name=f"HTTP {context.request_method} {context.request_path}",
+                span_kind="server",
+                status=status,
+                status_message=status_message,
+                http_status_code=http_status_code,
+                ended_at=utc_now(),
+            )
+    except Exception:
+        # Tracing must never be the reason a product request fails.
+        return
 
 
 def _ensure_bootstrap_admin(

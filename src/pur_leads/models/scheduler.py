@@ -28,6 +28,9 @@ scheduler_jobs_table = Table(
     Column("checkpoint_after_json", JSON, nullable=True),
     Column("result_summary_json", JSON, nullable=True),
     Column("payload_json", JSON, nullable=True),
+    Column("trace_id", String(32), nullable=True),
+    Column("parent_span_id", String(16), nullable=True),
+    Column("trace_context_json", JSON, nullable=True),
     Column("last_error", Text, nullable=True),
     Column("created_at", DateTime(timezone=True), nullable=False),
     Column("updated_at", DateTime(timezone=True), nullable=False),
@@ -46,4 +49,7 @@ job_runs_table = Table(
     Column("result_json", JSON, nullable=True),
     Column("error", Text, nullable=True),
     Column("log_correlation_id", String(128), nullable=True),
+    Column("trace_id", String(32), nullable=True),
+    Column("span_id", String(16), nullable=True),
+    Column("parent_span_id", String(16), nullable=True),
 )
