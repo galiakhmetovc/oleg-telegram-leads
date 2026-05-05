@@ -184,7 +184,13 @@ class InterestContextDraftService:
                 stage_results=stage_results,
                 message="Собираю проверяемые карточки ядра интересов",
             )
-            items = self._assemble_items(context_id, draft_run_id, raw_runs, max_items=max_items)
+            refreshed_raw_runs = self._raw_export_runs(context_id)
+            items = self._assemble_items(
+                context_id,
+                draft_run_id,
+                refreshed_raw_runs,
+                max_items=max_items,
+            )
             completed_steps += 1
             assembly_result = {
                 "draft_run_id": draft_run_id,
