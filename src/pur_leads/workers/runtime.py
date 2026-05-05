@@ -545,6 +545,9 @@ def build_telegram_handler_registry(
         if not job.scope_id:
             raise ValueError("build_interest_context_draft requires scope_id")
         payload = job.payload_json if isinstance(job.payload_json, dict) else {}
+        resume_state = (
+            job.result_summary_json if isinstance(job.result_summary_json, dict) else None
+        )
         actor = str(payload.get("requested_by") or "worker")
         max_items = int(payload.get("max_items") or 120)
         draft_builder = InterestContextDraftService(
@@ -709,6 +712,7 @@ def build_telegram_handler_registry(
             ai_model_profile_id=route.model_profile_id,
             ai_agent_route_id=route.route_id,
             progress=update_progress,
+            resume_state=resume_state,
         )
         return JobHandlerResult(result_summary=result)
 

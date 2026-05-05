@@ -47,6 +47,7 @@ class InterestCoreCandidateEnhancementService:
         ai_model_profile_id: str | None = None,
         ai_agent_route_id: str | None = None,
         progress: ProgressCallback | None = None,
+        resume_state: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         payload = self.build_payload(context_id, max_items=max_items)
         chunk_size = max(
@@ -57,12 +58,16 @@ class InterestCoreCandidateEnhancementService:
             payload["candidates"],
             size=chunk_size,
         )
-        parsed = _empty_enhancement_result()
-        chunk_results: list[dict[str, Any]] = []
-        request_ids: list[str] = []
-        usage_by_chunk: list[dict[str, Any]] = []
+        resume = _resume_state(resume_state, chunk_count=len(chunks))
+        parsed = resume["partial_result"]
+        chunk_results = resume["chunk_results"]
+        request_ids = resume["request_ids"]
+        usage_by_chunk = resume["usage_by_chunk"]
+        completed_chunk_count = int(resume["completed_chunk_count"])
 
         for chunk_index, candidates in enumerate(chunks, start=1):
+            if chunk_index <= completed_chunk_count:
+                continue
             chunk_payload = {
                 **payload,
                 "candidates": candidates,
@@ -88,9 +93,14 @@ class InterestCoreCandidateEnhancementService:
                 chunk_index=chunk_index,
                 chunk_count=len(chunks),
                 chunk_size=len(candidates),
+                completed_chunk_count=completed_chunk_count,
                 improved_count=len(parsed["improved_candidates"]),
                 new_count=len(parsed["new_candidates"]),
                 rejected_count=len(parsed["rejected_candidates"]),
+                partial_result=parsed,
+                chunk_results=chunk_results,
+                usage_by_chunk=usage_by_chunk,
+                request_ids=request_ids,
                 model=model,
                 model_profile=model_profile,
             )
@@ -134,6 +144,7 @@ class InterestCoreCandidateEnhancementService:
                     "summary": chunk_parsed.get("summary"),
                 }
             )
+            completed_chunk_count = chunk_index
             _report(
                 progress,
                 status="running",
@@ -150,9 +161,14 @@ class InterestCoreCandidateEnhancementService:
                 chunk_index=chunk_index,
                 chunk_count=len(chunks),
                 chunk_size=len(candidates),
+                completed_chunk_count=completed_chunk_count,
                 improved_count=len(parsed["improved_candidates"]),
                 new_count=len(parsed["new_candidates"]),
                 rejected_count=len(parsed["rejected_candidates"]),
+                partial_result=parsed,
+                chunk_results=chunk_results,
+                usage_by_chunk=usage_by_chunk,
+                request_ids=request_ids,
                 model=model,
                 model_profile=model_profile,
             )
@@ -418,6 +434,42 @@ def _empty_enhancement_result() -> dict[str, Any]:
     }
 
 
+def _resume_state(value: dict[str, Any] | None, *, chunk_count: int) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        return {
+            "completed_chunk_count": 0,
+            "partial_result": _empty_enhancement_result(),
+            "chunk_results": [],
+            "usage_by_chunk": [],
+            "request_ids": [],
+        }
+    if value.get("kind") != "interest_core_candidate_enhancement":
+        return {
+            "completed_chunk_count": 0,
+            "partial_result": _empty_enhancement_result(),
+            "chunk_results": [],
+            "usage_by_chunk": [],
+            "request_ids": [],
+        }
+    completed = _positive_int(value.get("completed_chunk_count"), default=0)
+    completed = max(0, min(completed, chunk_count))
+    partial = value.get("partial_result")
+    if not isinstance(partial, dict):
+        partial = value.get("result")
+    parsed = (
+        normalize_candidate_enhancement_response(partial)
+        if isinstance(partial, dict)
+        else _empty_enhancement_result()
+    )
+    return {
+        "completed_chunk_count": completed,
+        "partial_result": parsed,
+        "chunk_results": _object_list(value.get("chunk_results"))[:chunk_count],
+        "usage_by_chunk": _object_list(value.get("usage_by_chunk"))[:chunk_count],
+        "request_ids": _string_list(value.get("request_ids"))[:chunk_count],
+    }
+
+
 def _merge_enhancement_result(target: dict[str, Any], chunk: dict[str, Any]) -> None:
     target["improved_candidates"].extend(chunk.get("improved_candidates") or [])
     target["new_candidates"].extend(chunk.get("new_candidates") or [])
@@ -500,3 +552,11 @@ def _nullable_string(value: Any, limit: int) -> str | None:
 def _enum(value: Any, allowed: set[str], default: str) -> str:
     text = _string(value).casefold()
     return text if text in allowed else default
+
+
+def _positive_int(value: Any, *, default: int) -> int:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return default
+    return parsed if parsed >= 0 else default
