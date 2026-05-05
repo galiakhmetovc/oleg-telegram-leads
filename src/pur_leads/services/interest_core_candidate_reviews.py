@@ -311,6 +311,71 @@ class InterestCoreCandidateReviewService:
             "by_status": {str(value): int(count) for value, count in status_rows},
         }
 
+    def approve_all_pending(
+        self,
+        context_id: str,
+        *,
+        actor: str,
+        note: str | None = None,
+    ) -> dict[str, Any]:
+        latest_job = self.latest_enhancement_job(context_id)
+        if latest_job is None:
+            raise ValueError("Нет LLM-рекомендаций для принятия")
+        if latest_job.get("status") in {"queued", "running"}:
+            raise ValueError("LLM-рекомендации еще формируются")
+        job_id = str(latest_job["id"])
+        self.ensure_job_reviews(latest_job)
+        rows = (
+            self.session.execute(
+                select(
+                    interest_core_candidate_reviews_table.c.id,
+                    interest_core_candidate_reviews_table.c.recommendation_type,
+                )
+                .where(interest_core_candidate_reviews_table.c.context_id == context_id)
+                .where(interest_core_candidate_reviews_table.c.enhancement_job_id == job_id)
+                .where(interest_core_candidate_reviews_table.c.status == "pending_review")
+                .order_by(interest_core_candidate_reviews_table.c.created_at)
+            )
+            .mappings()
+            .all()
+        )
+        approved = 0
+        applied = 0
+        accepted_rejections = 0
+        for row in rows:
+            review = self.set_status(
+                str(row["id"]),
+                status="approved",
+                actor=actor,
+                note=note,
+                context_id=context_id,
+            )
+            approved += 1
+            if row["recommendation_type"] == "rejected":
+                accepted_rejections += 1
+            if (review.metadata_json or {}).get("interest_core_item_id"):
+                applied += 1
+        self.audit.record_change(
+            actor=actor,
+            action="interest_core_candidate_reviews.approve_all_pending",
+            entity_type="interest_context",
+            entity_id=context_id,
+            old_value_json=None,
+            new_value_json={
+                "enhancement_job_id": job_id,
+                "approved": approved,
+                "applied": applied,
+                "accepted_rejections": accepted_rejections,
+            },
+        )
+        return {
+            "enhancement_job_id": job_id,
+            "approved": approved,
+            "applied": applied,
+            "accepted_rejections": accepted_rejections,
+            "summary": self.review_summary(context_id, enhancement_job_id=job_id),
+        }
+
     def set_status(
         self,
         review_id: str,

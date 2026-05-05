@@ -3750,7 +3750,10 @@ function initInterestContexts() {
     ?.addEventListener("click", () => enhanceInterestContextDraftWithLlm(state));
   document
     .querySelector("#interest-context-llm-enhance-review")
-    ?.addEventListener("click", (event) => updateInterestCoreCandidateReviewStatus(event, state));
+    ?.addEventListener("click", (event) => {
+      approveAllInterestCoreCandidateReviews(event, state);
+      updateInterestCoreCandidateReviewStatus(event, state);
+    });
   document
     .querySelector("#interest-context-open-raw-review")
     ?.addEventListener("click", () => loadInterestContextRawReview(state));
@@ -3772,6 +3775,7 @@ function initInterestContexts() {
   document
     .querySelector("#interest-context-review-items-page")
     ?.addEventListener("click", (event) => {
+      approveAllInterestCoreCandidateReviews(event, state);
       updateInterestCoreCandidateReviewStatus(event, state);
       changeInterestContextReviewItemsPage(event, state);
     });
@@ -4886,6 +4890,35 @@ async function updateInterestCoreCandidateReviewStatus(event, state) {
   }
 }
 
+async function approveAllInterestCoreCandidateReviews(event, state) {
+  const button = event.target.closest("[data-approve-all-reviews]");
+  if (!button || !state.selectedId || button.disabled) return;
+  const status = document.querySelector("#interest-context-status");
+  button.disabled = true;
+  if (status) status.textContent = "Принимаю все рекомендации...";
+  try {
+    const payload = await api(
+      `/api/interest-contexts/${encodeURIComponent(state.selectedId)}/candidate-reviews/approve-all`,
+      { method: "POST" }
+    );
+    if (currentInterestStep() === "reviews") {
+      state.reviewItemsOffset = 0;
+      await loadInterestContextReviewItemsPage(state);
+    } else {
+      renderInterestContextCandidateEnhancement(null, null, null, payload.reviews);
+    }
+    if (currentInterestStep() === "items") {
+      await loadInterestContextCoreItemsPage(state);
+    }
+    if (status) {
+      status.textContent = `Принято: ${payload.result?.approved || 0}, в рабочее ядро: ${payload.result?.applied || 0}`;
+    }
+  } catch (error) {
+    button.disabled = false;
+    if (status) status.textContent = error.message;
+  }
+}
+
 async function loadInterestContextReviewItemsPage(state) {
   const target = document.querySelector("#interest-context-review-items-page");
   const status = document.querySelector("#interest-context-status");
@@ -4935,9 +4968,25 @@ function renderInterestContextReviewItemsPage(payload, state) {
       </div>
     </div>
     ${renderCandidateReviewSummary(payload)}
+    ${renderApproveAllCandidateReviewsAction(payload)}
     ${items.length ? renderCandidateReviewSection(items, pagination) : '<div class="empty-state">LLM-рекомендаций пока нет</div>'}
     ${renderPageControls(pagination, "review")}
   </section>`;
+}
+
+function renderApproveAllCandidateReviewsAction(payload) {
+  const pendingCount = Number(payload?.summary?.by_status?.pending_review || 0);
+  if (!pendingCount) return "";
+  const jobStatus = String(payload?.latest_job?.status || "");
+  const isActive = isActiveCandidateEnhancementStatus(jobStatus);
+  const disabled = isActive ? "disabled" : "";
+  const hint = isActive
+    ? "Дождитесь завершения LLM-прогона. Новые рекомендации еще добавляются."
+    : `Будут приняты все ожидающие рекомендации: ${pendingCount}.`;
+  return `<div class="button-row review-bulk-actions">
+    <button type="button" data-approve-all-reviews ${disabled}>Принять все рекомендации</button>
+    <span class="muted">${escapeHtml(hint)}</span>
+  </div>`;
 }
 
 async function loadInterestContextCoreItemsPage(state) {

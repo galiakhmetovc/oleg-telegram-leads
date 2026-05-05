@@ -614,6 +614,32 @@ def list_interest_core_candidate_reviews(
     )
 
 
+@router.post("/{context_id}/candidate-reviews/approve-all")
+def approve_all_interest_core_candidate_reviews(
+    context_id: str,
+    validated: SessionValidationResult = Depends(current_admin),
+    session: Session = Depends(get_session),
+) -> dict[str, Any]:
+    context = InterestContextService(session).repository.get(context_id)
+    if context is None:
+        raise HTTPException(status_code=404, detail="Interest context not found")
+    try:
+        result = InterestCoreCandidateReviewService(session).approve_all_pending(
+            context.id,
+            actor=_actor(validated),
+            note="bulk approve",
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return jsonable_encoder(
+        {
+            "result": result,
+            "reviews": InterestCoreCandidateReviewService(session).latest_payload(context.id),
+            "core_items": InterestCoreItemService(session).latest_payload(context.id),
+        }
+    )
+
+
 @router.get("/{context_id}/core-items")
 def list_interest_core_items(
     context_id: str,
