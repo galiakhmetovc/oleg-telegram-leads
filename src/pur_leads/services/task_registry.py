@@ -76,6 +76,23 @@ TASK_DEFINITIONS: tuple[dict[str, Any], ...] = (
         "status": "active",
     },
     {
+        "task_type": "generate_interest_core_brief",
+        "display_name": "LLM-бриф ядра интересов",
+        "workload_class": "bulk/normal",
+        "required_capabilities": ["worker", "llm.text.strong"],
+        "parallelism_rule": (
+            "Запускается вручную после подготовки данных; использует маршрут catalog_extractor "
+            "и сохраняет полный prompt/request/response."
+        ),
+        "default_priority": 45,
+        "config_keys": [
+            "ai_model_concurrency_utilization_ratio",
+            "llm_request_timeout_seconds_by_task",
+            "catalog_llm_timeout_seconds",
+        ],
+        "status": "active",
+    },
+    {
         "task_type": "ocr_artifact",
         "display_name": "OCR документа",
         "workload_class": "bulk",

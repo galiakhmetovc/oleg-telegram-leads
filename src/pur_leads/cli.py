@@ -792,6 +792,7 @@ def _build_worker_handlers(
         build_telegram_handler_registry(
             session,
             telegram_client if telegram_client is not None else _build_telegram_client(session),
+            worker_name=worker_name,
             artifact_storage_path=settings.artifact_storage_path,
             raw_export_storage_path=settings.raw_export_storage_path,
             processed_storage_path=settings.processed_storage_path,

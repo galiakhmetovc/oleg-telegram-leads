@@ -10,6 +10,7 @@ from sqlalchemy import inspect, select
 from pur_leads.db.engine import create_sqlite_engine
 from pur_leads.db.migrations import upgrade_database
 from pur_leads.db.session import create_session_factory
+from pur_leads.models.interest_core_briefs import interest_core_briefs_table
 from pur_leads.models.interest_contexts import interest_contexts_table
 from pur_leads.models.scheduler import scheduler_jobs_table
 from pur_leads.models.telegram_sources import (
@@ -143,7 +144,37 @@ def test_interest_context_page_is_protected_and_empty_home_redirects_there(tmp_p
     assert 'id="interest-context-create-form"' in page_response.text
     assert 'id="interest-context-telegram-source-form"' in page_response.text
     assert 'id="interest-context-telegram-archive-form"' in page_response.text
+    assert 'id="interest-core-brief-form"' in page_response.text
     assert "initInterestContexts" in js_response.text
+
+
+def test_interest_context_manual_brief_api_creates_active_version(tmp_path):
+    fixture = _setup_app(tmp_path)
+    client = fixture["client"]
+    _login(client)
+    context_id = client.post(
+        "/api/interest-contexts",
+        json={"name": "ПУР"},
+    ).json()["context"]["id"]
+
+    response = client.post(
+        f"/api/interest-contexts/{context_id}/briefs/manual",
+        json={
+            "brief_text": "ПУР занимается умным домом и видеонаблюдением.",
+            "activate": True,
+        },
+    )
+    list_response = client.get(f"/api/interest-contexts/{context_id}/briefs")
+
+    assert response.status_code == 200
+    assert response.json()["brief"]["status"] == "active"
+    assert list_response.json()["active"]["brief_text"].startswith("ПУР занимается")
+
+    with fixture["session_factory"]() as session:
+        row = session.execute(select(interest_core_briefs_table)).mappings().one()
+    assert row["context_id"] == context_id
+    assert row["version"] == 1
+    assert row["source"] == "manual"
 
 
 def _setup_app(tmp_path, **kwargs):

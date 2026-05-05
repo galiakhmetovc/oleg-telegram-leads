@@ -3715,6 +3715,7 @@ function initInterestContexts() {
     detail: null,
     preparePollTimer: null,
     draftPollTimer: null,
+    briefPollTimer: null,
   };
   document
     .querySelector("#interest-context-refresh")
@@ -3737,6 +3738,12 @@ function initInterestContexts() {
   document
     .querySelector("#interest-context-prepare-data")
     ?.addEventListener("click", () => startInterestContextDataPreparation(state));
+  document
+    .querySelector("#interest-core-brief-form")
+    ?.addEventListener("submit", (event) => saveManualInterestCoreBrief(event, state));
+  document
+    .querySelector("#interest-core-brief-generate")
+    ?.addEventListener("click", () => generateInterestCoreBrief(state));
   setInterestContextFormsEnabled(false);
   loadInterestContexts(state);
 }
@@ -3789,11 +3796,13 @@ function renderInterestContextList(state) {
 async function loadInterestContextDetail(contextId, state) {
   stopInterestContextPreparePolling(state);
   stopInterestContextDraftPolling(state);
+  stopInterestCoreBriefPolling(state);
   const detail = await api(`/api/interest-contexts/${encodeURIComponent(contextId)}`);
   state.detail = detail;
   renderInterestContextDetail(detail);
   await loadInterestContextPrepareStatus(state, { silent: true });
   await loadInterestContextDraftStatus(state, { silent: true });
+  await loadInterestCoreBriefStatus(state, { silent: true });
 }
 
 function renderInterestContextEmptyDetail() {
@@ -3806,6 +3815,9 @@ function renderInterestContextEmptyDetail() {
   const rawReview = document.querySelector("#interest-context-raw-review");
   const prepareProgress = document.querySelector("#interest-context-prepare-progress");
   const draftReview = document.querySelector("#interest-context-draft-review");
+  const briefProgress = document.querySelector("#interest-core-brief-progress");
+  const briefList = document.querySelector("#interest-core-brief-list");
+  const briefText = document.querySelector("#interest-core-brief-text");
   if (title) title.textContent = "Выберите контекст";
   if (description) {
     description.textContent = "Сначала создайте ядро интересов, затем добавьте Telegram-канал или архив.";
@@ -3815,6 +3827,9 @@ function renderInterestContextEmptyDetail() {
   if (rawReview) rawReview.innerHTML = "";
   if (prepareProgress) prepareProgress.innerHTML = "";
   if (draftReview) draftReview.innerHTML = "";
+  if (briefProgress) briefProgress.innerHTML = "";
+  if (briefList) briefList.innerHTML = "";
+  if (briefText) briefText.value = "";
 }
 
 function renderInterestContextDetail(detail) {
@@ -4015,6 +4030,183 @@ function setInterestContextUploadProgress({ visible, value = 0, label = "", inde
     progress.setAttribute("value", String(progress.value));
   }
   if (labelTarget) labelTarget.textContent = label;
+}
+
+async function saveManualInterestCoreBrief(event, state) {
+  event.preventDefault();
+  const status = document.querySelector("#interest-context-status");
+  const form = event.currentTarget;
+  if (!state.selectedId) {
+    if (status) status.textContent = "Сначала выберите контекст";
+    return;
+  }
+  try {
+    const payload = await api(
+      `/api/interest-contexts/${encodeURIComponent(state.selectedId)}/briefs/manual`,
+      {
+        method: "POST",
+        body: JSON.stringify({
+          brief_text: formValue(form, "brief_text"),
+          activate: true,
+        }),
+      }
+    );
+    renderInterestCoreBriefs(payload.briefs);
+    if (status) status.textContent = "Бриф ядра интересов сохранен";
+  } catch (error) {
+    if (status) status.textContent = error.message;
+  }
+}
+
+async function generateInterestCoreBrief(state) {
+  const status = document.querySelector("#interest-context-status");
+  if (!state.selectedId) {
+    if (status) status.textContent = "Сначала выберите контекст";
+    return;
+  }
+  try {
+    const payload = await api(
+      `/api/interest-contexts/${encodeURIComponent(state.selectedId)}/briefs/generate`,
+      {
+        method: "POST",
+        body: JSON.stringify({
+          activate: true,
+          agent_key: "catalog_extractor",
+          route_role: "primary",
+        }),
+      }
+    );
+    renderInterestCoreBriefGeneration(payload.progress, payload.job, payload.briefs);
+    if (status) status.textContent = "LLM-бриф поставлен в очередь";
+    scheduleInterestCoreBriefPolling(state);
+  } catch (error) {
+    if (status) status.textContent = error.message;
+  }
+}
+
+async function loadInterestCoreBriefStatus(state, { silent = false } = {}) {
+  const status = document.querySelector("#interest-context-status");
+  if (!state.selectedId) return;
+  try {
+    const payload = await api(
+      `/api/interest-contexts/${encodeURIComponent(state.selectedId)}/briefs/generate/status`
+    );
+    renderInterestCoreBriefGeneration(payload.progress, payload.job, payload.briefs);
+    if (isActiveBriefStatus(payload.progress?.status)) {
+      scheduleInterestCoreBriefPolling(state);
+    } else {
+      stopInterestCoreBriefPolling(state);
+    }
+  } catch (error) {
+    if (!silent && status) status.textContent = error.message;
+  }
+}
+
+function scheduleInterestCoreBriefPolling(state) {
+  if (state.briefPollTimer) return;
+  state.briefPollTimer = window.setInterval(() => {
+    loadInterestCoreBriefStatus(state, { silent: true });
+  }, 2000);
+}
+
+function stopInterestCoreBriefPolling(state) {
+  if (!state.briefPollTimer) return;
+  window.clearInterval(state.briefPollTimer);
+  state.briefPollTimer = null;
+}
+
+function isActiveBriefStatus(status) {
+  return ["queued", "running"].includes(String(status || ""));
+}
+
+function renderInterestCoreBriefGeneration(progress, job, briefs) {
+  renderInterestCoreBriefs(briefs);
+  const target = document.querySelector("#interest-core-brief-progress");
+  if (!target) return;
+  const status = String(progress?.status || "not_started");
+  if (status === "not_started") {
+    target.innerHTML = "";
+    return;
+  }
+  const overall = normalizePercent(progress?.overall_percent);
+  const stage = normalizePercent(progress?.stage_percent);
+  const message = progress?.message || status;
+  target.innerHTML = `<section class="prepare-progress-surface ${isActiveBriefStatus(status) ? "is-active" : ""}">
+    <div class="section-head">
+      <div>
+        <h3>Формирование LLM-брифа</h3>
+        <p class="muted">${escapeHtml(message)}</p>
+      </div>
+      <div class="badges">
+        ${badge(label(status), status === "failed" ? "is-danger" : "")}
+        ${progress?.model ? badge(progress.model) : ""}
+        ${job?.id ? badge(`job ${job.id}`) : ""}
+      </div>
+    </div>
+    <div class="prepare-progress-bars">
+      ${renderProgressLine("Общий прогресс", overall, progress?.version ? `версия ${progress.version}` : "задача")}
+      ${renderProgressLine(progress?.current_stage_label || "LLM-бриф", stage, progress?.model_profile || "модель")}
+    </div>
+  </section>`;
+}
+
+function renderInterestCoreBriefs(briefs) {
+  const textField = document.querySelector("#interest-core-brief-text");
+  const list = document.querySelector("#interest-core-brief-list");
+  const active = briefs?.active || null;
+  const items = briefs?.items || [];
+  if (textField) {
+    textField.value = active?.brief_text || "";
+  }
+  if (!list) return;
+  if (!items.length) {
+    list.innerHTML = '<div class="empty-state">Бриф еще не задан. Введите его вручную или сформируйте из источников.</div>';
+    return;
+  }
+  list.innerHTML = `<div class="table-list">${items
+    .map((item) => {
+      const isActive = item.status === "active";
+      const sourceLabel = item.source === "llm_generated" ? "LLM" : "ручной";
+      return `<div class="table-row brief-row">
+        <div>
+          <strong>Версия ${escapeHtml(String(item.version || ""))}: ${escapeHtml(item.title || "бриф")}</strong>
+          <p class="muted">${escapeHtml(shortText(item.brief_text || "", 260))}</p>
+          <div class="badges">
+            ${badge(label(item.status || "draft"), isActive ? "" : "is-warn")}
+            ${badge(sourceLabel)}
+            ${item.model ? badge(item.model) : ""}
+            ${item.model_profile ? badge(item.model_profile) : ""}
+          </div>
+        </div>
+        <div class="resource-actions">
+          ${
+            isActive
+              ? ""
+              : `<md-outlined-button type="button" data-activate-brief="${escapeHtml(item.id)}">Сделать активным</md-outlined-button>`
+          }
+        </div>
+      </div>`;
+    })
+    .join("")}</div>`;
+  list.querySelectorAll("[data-activate-brief]").forEach((button) => {
+    button.addEventListener("click", () => activateInterestCoreBrief(button.dataset.activateBrief));
+  });
+}
+
+async function activateInterestCoreBrief(briefId) {
+  const contextId = document.body.dataset.interestContextId;
+  const status = document.querySelector("#interest-context-status");
+  if (!contextId || !briefId) return;
+  try {
+    const payload = await api(
+      `/api/interest-contexts/${encodeURIComponent(contextId)}/briefs/${encodeURIComponent(briefId)}/activate`,
+      { method: "POST" }
+    );
+    renderInterestCoreBriefs(payload.briefs);
+    if (status) status.textContent = "Активная версия брифа обновлена";
+  } catch (error) {
+    if (status) status.textContent = error.message;
+  }
 }
 
 async function buildInterestContextDraft(state) {
@@ -4475,23 +4667,27 @@ function renderRawReviewMessages(messages, previewSource) {
 }
 
 function setInterestContextFormsEnabled(enabled) {
-  ["#interest-context-telegram-source-form", "#interest-context-telegram-archive-form"].forEach(
-    (selector) => {
-      document
-        .querySelectorAll(
-          `${selector} input, ${selector} select, ${selector} md-outlined-text-field, ${selector} md-filled-button`
-        )
-        .forEach((field) => {
-          field.disabled = !enabled;
-        });
-    }
-  );
+  [
+    "#interest-context-telegram-source-form",
+    "#interest-context-telegram-archive-form",
+    "#interest-core-brief-form",
+  ].forEach((selector) => {
+    document
+      .querySelectorAll(
+        `${selector} input, ${selector} select, ${selector} md-outlined-text-field, ${selector} md-filled-button`
+      )
+      .forEach((field) => {
+        field.disabled = !enabled;
+      });
+  });
   const draftButton = document.querySelector("#interest-context-build-draft");
   if (draftButton) draftButton.disabled = !enabled;
   const rawReviewButton = document.querySelector("#interest-context-open-raw-review");
   if (rawReviewButton) rawReviewButton.disabled = !enabled;
   const prepareButton = document.querySelector("#interest-context-prepare-data");
   if (prepareButton) prepareButton.disabled = !enabled;
+  const generateBriefButton = document.querySelector("#interest-core-brief-generate");
+  if (generateBriefButton) generateBriefButton.disabled = !enabled;
 }
 
 function openOnboardingResourceDialog(event) {

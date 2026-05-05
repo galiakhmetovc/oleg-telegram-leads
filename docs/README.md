@@ -1,6 +1,6 @@
 # PUR Leads Documentation Index
 
-Last audited: 2026-05-01.
+Last audited: 2026-05-05.
 
 This is the main entry point for project documentation. Treat this file as the
 current map of what is implemented, what is partial, and which secondary
@@ -52,7 +52,7 @@ the operator workspace.
 
 Core application:
 
-- Alembic foundation through migration `0029_interest_contexts`.
+- Alembic foundation through migration `0034_interest_core_briefs`.
 - Postgres is now the target operational database. SQLite remains a temporary
   local/test fallback and artifact format while production cutover is in progress. The
   storage decision is documented in `docs/superpowers/specs/2026-05-01-postgres-and-otel-storage-design.md`.
@@ -67,6 +67,11 @@ Core application:
   Interest Context before lead detection. A logged-in empty installation
   redirects from `/` to this screen so the operator first creates the context
   and adds evidence sources.
+- Interest Contexts now have a versioned **Interest Core Brief**. The operator
+  can write the brief manually or enqueue `generate_interest_core_brief`, which
+  builds a prompt from prepared Telegram messages/documents and stores the exact
+  prompt, request JSON, provider response JSON, parsed JSON, selected
+  provider/model/profile/route, source refs, author, status, and active version.
 - Material Web assets are vendored locally; custom CSS is used for layout and product composition.
 - Every web request now receives an OpenTelemetry-compatible trace context
   (`trace_id`, `span_id`, `request_id`). Authentication binds the trace to the
@@ -132,6 +137,11 @@ Chat analytics pipeline:
   Adds transparent rule-based score, status, reasons, penalties, ranked JSON, and noise report. No AI and no domain profiles are applied.
 - Stage 5.2 entity enrichment: `pur-leads analyze telegram-entity-enrichment`.
   Uses either rule-based fallback or LLM to map ranked entities into a canonical registry. It stores prompt text, request JSON, response JSON, parsed response, context snapshot, provider/model/profile, and source refs. Writes `auto_pending` canonical entities and merge-review candidates, not approved catalog truth.
+- Interest Core Brief generation is the first LLM step for the product scenario.
+  It is explicit and manual: raw/prepared context evidence goes into a stable
+  business brief before later candidate/catalog/lead prompts use it. Current
+  prompt version is `interest-core-brief-v1`; output is an editable active/draft
+  version in `interest_core_briefs`.
 
 Catalog and examples:
 
@@ -173,7 +183,9 @@ Observability and operations:
 - Manual text/catalog-note input exists; full manual arbitrary document upload into the same evidence graph is not yet productized.
 - Stage 6 thread reconstruction exists only as thread/reply fields used by search and lead candidate context. There is no standalone `threads.parquet` stage yet.
 - OCR is represented in AI registry and documentation, but scanned-PDF/image OCR via `GLM-OCR` is not wired as a complete parse fallback.
-- Prompt/LLM trace exists for entity enrichment and review-only lead arbitration, but a unified prompt registry, prompt editor, and generic AI trace viewer are not implemented end-to-end.
+- Prompt/LLM trace exists for Interest Core Brief generation, entity enrichment,
+  and review-only lead arbitration, but a unified prompt registry, prompt
+  editor, and generic AI trace viewer are not implemented end-to-end.
 - Operational leads have traceable domain tables (`lead_clusters`, `lead_events`, `lead_matches`, `decision_records`, `source_messages`) and the trace foundation exists, but there is no product-visible lead `Trace` tab yet.
 - Some CLI paths still accept explicit provider/model/profile options or legacy catalog LLM settings. The target is to route all model work through AI registry task executors.
 - Circuit breaker and adaptive p95 timeout settings/help text are documented and exposed as configuration placeholders, but the full runtime breaker/adaptive-timeout behavior is not enforced everywhere yet.
@@ -208,6 +220,10 @@ Observability and operations:
 - Interest Context intake was added: a user can create a context, attach a
   Telegram link or Telegram Desktop export, and stop after raw/parquet
   artifact creation for manual verification.
+- Interest Core Brief was added to the Interest Context flow. It is a
+  versioned, editable bridge between raw evidence and later LLM/catalog logic:
+  manual input works immediately, and LLM generation is scheduled through the
+  AI registry route `catalog_extractor`.
 - Stage 5.1 rule-based entity ranking was added to clean and prioritize noisy POS entities before LLM.
 - Stage 5.2 canonical entity enrichment was added with persistent registry context between LLM calls, preventing independent requests from inventing duplicate canonical names silently.
 - Review-only lead candidate discovery and LLM arbitration were added to inspect lead quality without creating live leads.
@@ -256,12 +272,15 @@ why a slice was built, not as the current status source.
 3. Make the source-agnostic evidence UI the product-visible raw layer:
    raw source, message/document/page, parsed chunks, scope, parser status,
    privacy flags, and promotion actions.
-4. Unify prompt management and AI trace visibility:
+4. Use the active Interest Core Brief in the next catalog/core-candidate LLM pass:
+   pass the active brief, ranked candidates, known canonical entities, evidence
+   refs, and existing aliases into the prompt so model outputs stay consistent.
+5. Unify prompt management and AI trace visibility:
    prompt version, model profile, request, response, parsed result, token/context
    usage, retries, fallback route, and catalog mutation diff.
-5. Finish catalog rebuild:
+6. Finish catalog rebuild:
    raw evidence -> ranked entities/chunks -> AI/rule extraction -> candidates ->
    review -> operational catalog snapshot.
-6. Move remaining AI calls onto AI registry task executors and shared trace/lease policy.
-7. Add OCR fallback for scanned documents and wire it through the same artifact/chunk model.
-8. Only after the raw/catalog trace is strong, consider topic/QA/knowledge synthesis.
+7. Move remaining AI calls onto AI registry task executors and shared trace/lease policy.
+8. Add OCR fallback for scanned documents and wire it through the same artifact/chunk model.
+9. Only after the raw/catalog trace is strong, consider topic/QA/knowledge synthesis.

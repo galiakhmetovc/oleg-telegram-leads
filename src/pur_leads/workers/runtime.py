@@ -15,6 +15,7 @@ from urllib.parse import urlsplit, urlunsplit
 from sqlalchemy import and_, or_, select, update
 from sqlalchemy.orm import Session
 
+from pur_leads.core.config import load_settings
 from pur_leads.core.time import utc_now
 from pur_leads.core.tracing import (
     TraceContext,
@@ -32,11 +33,19 @@ from pur_leads.repositories.leads import LeadClusterRecord, LeadEventRecord
 from pur_leads.repositories.telegram_sources import MonitoredSourceRecord, TelegramSourceRepository
 from pur_leads.models.telegram_sources import monitored_sources_table, source_messages_table
 from pur_leads.services.audit import AuditService
+from pur_leads.services.ai_chat_clients import (
+    build_zai_chat_client_for_route,
+    select_ai_route,
+)
 from pur_leads.services.catalog_candidates import CatalogCandidateService
 from pur_leads.services.catalog_sources import CatalogSourceService
 from pur_leads.services.classifier_snapshots import ClassifierSnapshotService
 from pur_leads.services.evaluation import EvaluationService
 from pur_leads.services.interest_context_drafts import InterestContextDraftService
+from pur_leads.services.interest_core_briefs import (
+    GENERATE_INTEREST_CORE_BRIEF_JOB,
+    InterestCoreBriefService,
+)
 from pur_leads.services.interest_context_preparation import InterestContextPreparationService
 from pur_leads.services.leads import LeadDetectionResult, LeadMatchInput, LeadService
 from pur_leads.services.notifications import NotificationPolicyService
@@ -420,6 +429,7 @@ def build_telegram_handler_registry(
     session: Session,
     client: TelegramClientPort,
     *,
+    worker_name: str = "worker",
     artifact_storage_path: str | Path | None = None,
     raw_export_storage_path: str | Path | None = None,
     processed_storage_path: str | Path | None = None,
@@ -550,6 +560,80 @@ def build_telegram_handler_registry(
         )
         return JobHandlerResult(result_summary=result.as_jsonable())
 
+    async def generate_interest_core_brief(job: SchedulerJobRecord) -> JobHandlerResult:
+        if not job.scope_id:
+            raise ValueError("generate_interest_core_brief requires scope_id")
+        payload = job.payload_json if isinstance(job.payload_json, dict) else {}
+        actor = str(payload.get("requested_by") or "worker")
+        agent_key = str(payload.get("agent_key") or "catalog_extractor")
+        route_role = str(payload.get("route_role") or "primary")
+        route = select_ai_route(session, agent_key=agent_key, route_role=route_role)
+        if route is None and route_role != "fallback":
+            route = select_ai_route(session, agent_key=agent_key, route_role="fallback")
+        if route is None:
+            raise ValueError(f"No AI route configured for {agent_key}")
+        settings = load_settings()
+        client = build_zai_chat_client_for_route(
+            session,
+            route=route,
+            settings=settings,
+            worker_name=worker_name,
+            task_type="interest_core_brief_generation",
+            default_timeout_seconds=float(settings.catalog_llm_timeout_seconds),
+        )
+        max_tokens = int(payload.get("max_tokens") or route.max_output_tokens or 4096)
+        temperature = float(
+            payload.get(
+                "temperature",
+                route.temperature if route.temperature is not None else 0.0,
+            )
+        )
+
+        scheduler.update_result_summary(
+            job.id,
+            result_summary={
+                "kind": "interest_core_brief_generation",
+                "status": "running",
+                "current_stage": "llm_generation",
+                "current_stage_label": "LLM-бриф",
+                "overall_percent": 30,
+                "stage_percent": 30,
+                "message": f"Формирую бриф через {route.model}",
+                "model": route.model,
+                "model_profile": route.model_profile,
+            },
+        )
+        record = await InterestCoreBriefService(session).generate_from_sources_async(
+            job.scope_id,
+            client=client,
+            actor=actor,
+            provider=route.provider,
+            model=route.model,
+            model_profile=route.model_profile,
+            max_tokens=max_tokens,
+            temperature=temperature,
+            activate=bool(payload.get("activate", True)),
+            ai_provider_account_id=route.provider_account_id,
+            ai_model_id=route.model_id,
+            ai_model_profile_id=route.model_profile_id,
+            ai_agent_route_id=route.route_id,
+        )
+        return JobHandlerResult(
+            result_summary={
+                "kind": "interest_core_brief_generation",
+                "status": "succeeded",
+                "current_stage": "done",
+                "current_stage_label": "Готово",
+                "overall_percent": 100,
+                "stage_percent": 100,
+                "message": f"Бриф v{record.version} сформирован",
+                "brief_id": record.id,
+                "version": record.version,
+                "model": route.model,
+                "model_profile": route.model_profile,
+            }
+        )
+
     async def fetch_message_context(job: SchedulerJobRecord) -> JobHandlerResult:
         if job.source_message_id is None:
             raise ValueError("fetch_message_context requires source_message_id")
@@ -635,6 +719,7 @@ def build_telegram_handler_registry(
         "export_telegram_raw": export_telegram_raw,
         "prepare_interest_context_data": prepare_interest_context_data,
         "build_interest_context_draft": build_interest_context_draft,
+        GENERATE_INTEREST_CORE_BRIEF_JOB: generate_interest_core_brief,
         "fetch_message_context": fetch_message_context,
         "download_artifact": download_artifact,
     }

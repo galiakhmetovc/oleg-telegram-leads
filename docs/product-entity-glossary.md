@@ -262,6 +262,7 @@ It is broader than a product catalog.
 
 It contains:
 
+- active Interest Core Brief;
 - interest directions;
 - products, services, topics, and problems;
 - terms and synonyms;
@@ -276,6 +277,13 @@ It contains:
 - lead and non-lead examples;
 - operator feedback;
 - versions and snapshots.
+
+**Interest Core Brief** is the editable narrative layer of an Interest Context.
+It tells LLM stages, reviewers, and future automation what the context is about
+before detailed candidates are interpreted. A brief can be written manually or
+generated from prepared sources. Each version stores its source, prompt version,
+full prompt, request JSON, response JSON, parsed JSON, provider, model, model
+profile, route, source refs, author, and active/draft/archive status.
 
 Example:
 

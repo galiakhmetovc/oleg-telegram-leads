@@ -21,6 +21,10 @@ from pur_leads.services.interest_context_drafts import (
     BUILD_INTEREST_CONTEXT_DRAFT_JOB,
     InterestContextDraftService,
 )
+from pur_leads.services.interest_core_briefs import (
+    GENERATE_INTEREST_CORE_BRIEF_JOB,
+    InterestCoreBriefService,
+)
 from pur_leads.models.telegram_sources import (
     monitored_sources_table,
     source_messages_table,
@@ -75,6 +79,20 @@ class InterestContextPrepareDataRequest(BaseModel):
 
 class InterestContextBuildDraftRequest(BaseModel):
     max_items: int = Field(default=1000, ge=1, le=5000)
+
+
+class InterestCoreBriefManualRequest(BaseModel):
+    brief_text: str = Field(min_length=1)
+    title: str | None = None
+    activate: bool = True
+
+
+class InterestCoreBriefGenerateRequest(BaseModel):
+    activate: bool = True
+    agent_key: str = "catalog_extractor"
+    route_role: str = "primary"
+    max_tokens: int | None = Field(default=None, ge=1, le=32000)
+    temperature: float | None = Field(default=None, ge=0.0, le=2.0)
 
 
 @router.get("")
@@ -455,6 +473,135 @@ def get_interest_context_draft_status(
     }
 
 
+@router.get("/{context_id}/briefs")
+def list_interest_core_briefs(
+    context_id: str,
+    _validated: SessionValidationResult = Depends(current_admin),
+    session: Session = Depends(get_session),
+) -> dict[str, Any]:
+    context = InterestContextService(session).repository.get(context_id)
+    if context is None:
+        raise HTTPException(status_code=404, detail="Interest context not found")
+    return jsonable_encoder(InterestCoreBriefService(session).latest_payload(context.id))
+
+
+@router.post("/{context_id}/briefs/manual")
+def create_manual_interest_core_brief(
+    context_id: str,
+    payload: InterestCoreBriefManualRequest,
+    validated: SessionValidationResult = Depends(current_admin),
+    session: Session = Depends(get_session),
+) -> dict[str, Any]:
+    if InterestContextService(session).repository.get(context_id) is None:
+        raise HTTPException(status_code=404, detail="Interest context not found")
+    try:
+        record = InterestCoreBriefService(session).create_manual(
+            context_id,
+            brief_text=payload.brief_text,
+            title=payload.title,
+            actor=_actor(validated),
+            activate=payload.activate,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return jsonable_encoder(
+        {
+            "brief": record.as_jsonable(),
+            "briefs": InterestCoreBriefService(session).latest_payload(context_id),
+        }
+    )
+
+
+@router.post("/{context_id}/briefs/generate")
+def generate_interest_core_brief(
+    context_id: str,
+    payload: InterestCoreBriefGenerateRequest,
+    validated: SessionValidationResult = Depends(current_admin),
+    session: Session = Depends(get_session),
+) -> dict[str, Any]:
+    context = InterestContextService(session).repository.get(context_id)
+    if context is None:
+        raise HTTPException(status_code=404, detail="Interest context not found")
+    prepare_job = _latest_prepare_job(session, context.id)
+    if prepare_job is None:
+        raise HTTPException(status_code=400, detail="Сначала нажмите «Подготовить данные»")
+    if prepare_job.get("status") in {"queued", "running"}:
+        raise HTTPException(status_code=400, detail="Подготовка данных еще выполняется")
+    if prepare_job.get("status") != "succeeded":
+        raise HTTPException(
+            status_code=400, detail="Последняя подготовка данных завершилась ошибкой"
+        )
+    active_job = _active_core_brief_job(session, context.id)
+    if active_job is not None:
+        return {
+            "job": _row(active_job),
+            "progress": _core_brief_progress_from_row(active_job),
+            "briefs": InterestCoreBriefService(session).latest_payload(context.id),
+        }
+    job = SchedulerService(session).enqueue(
+        job_type=GENERATE_INTEREST_CORE_BRIEF_JOB,
+        scope_type="interest_context",
+        scope_id=context.id,
+        priority="normal",
+        max_attempts=2,
+        payload_json={
+            "requested_by": _actor(validated),
+            "activate": payload.activate,
+            "agent_key": payload.agent_key,
+            "route_role": payload.route_role,
+            "max_tokens": payload.max_tokens,
+            "temperature": payload.temperature,
+        },
+    )
+    return {
+        "job": _job_payload(job),
+        "progress": _core_brief_progress(job),
+        "briefs": InterestCoreBriefService(session).latest_payload(context.id),
+    }
+
+
+@router.get("/{context_id}/briefs/generate/status")
+def get_interest_core_brief_generation_status(
+    context_id: str,
+    _validated: SessionValidationResult = Depends(current_admin),
+    session: Session = Depends(get_session),
+) -> dict[str, Any]:
+    context = InterestContextService(session).repository.get(context_id)
+    if context is None:
+        raise HTTPException(status_code=404, detail="Interest context not found")
+    job = _latest_core_brief_job(session, context.id)
+    return {
+        "job": _row(job) if job else None,
+        "progress": _core_brief_progress_from_row(job) if job else _empty_core_brief_progress(),
+        "briefs": InterestCoreBriefService(session).latest_payload(context.id),
+    }
+
+
+@router.post("/{context_id}/briefs/{brief_id}/activate")
+def activate_interest_core_brief(
+    context_id: str,
+    brief_id: str,
+    validated: SessionValidationResult = Depends(current_admin),
+    session: Session = Depends(get_session),
+) -> dict[str, Any]:
+    if InterestContextService(session).repository.get(context_id) is None:
+        raise HTTPException(status_code=404, detail="Interest context not found")
+    try:
+        record = InterestCoreBriefService(session).activate(
+            context_id,
+            brief_id,
+            actor=_actor(validated),
+        )
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Interest core brief not found") from exc
+    return jsonable_encoder(
+        {
+            "brief": record.as_jsonable(),
+            "briefs": InterestCoreBriefService(session).latest_payload(context_id),
+        }
+    )
+
+
 def _source_start_mode(payload: InterestContextTelegramSourceRequest) -> str | None:
     if payload.range_mode == "from_beginning":
         return "from_beginning"
@@ -547,6 +694,39 @@ def _active_draft_job(session: Session, context_id: str) -> dict[str, Any] | Non
         session.execute(
             select(scheduler_jobs_table)
             .where(scheduler_jobs_table.c.job_type == BUILD_INTEREST_CONTEXT_DRAFT_JOB)
+            .where(scheduler_jobs_table.c.scope_type == "interest_context")
+            .where(scheduler_jobs_table.c.scope_id == context_id)
+            .where(scheduler_jobs_table.c.status.in_(["queued", "running"]))
+            .order_by(desc(scheduler_jobs_table.c.created_at))
+            .limit(1)
+        )
+        .mappings()
+        .first()
+    )
+    return dict(row) if row is not None else None
+
+
+def _latest_core_brief_job(session: Session, context_id: str) -> dict[str, Any] | None:
+    row = (
+        session.execute(
+            select(scheduler_jobs_table)
+            .where(scheduler_jobs_table.c.job_type == GENERATE_INTEREST_CORE_BRIEF_JOB)
+            .where(scheduler_jobs_table.c.scope_type == "interest_context")
+            .where(scheduler_jobs_table.c.scope_id == context_id)
+            .order_by(desc(scheduler_jobs_table.c.created_at))
+            .limit(1)
+        )
+        .mappings()
+        .first()
+    )
+    return dict(row) if row is not None else None
+
+
+def _active_core_brief_job(session: Session, context_id: str) -> dict[str, Any] | None:
+    row = (
+        session.execute(
+            select(scheduler_jobs_table)
+            .where(scheduler_jobs_table.c.job_type == GENERATE_INTEREST_CORE_BRIEF_JOB)
             .where(scheduler_jobs_table.c.scope_type == "interest_context")
             .where(scheduler_jobs_table.c.scope_id == context_id)
             .where(scheduler_jobs_table.c.status.in_(["queued", "running"]))
@@ -674,6 +854,60 @@ def _empty_draft_progress() -> dict[str, Any]:
         "stage_results": [],
         "raw_export_run_count": 0,
         "candidate_count": 0,
+    }
+
+
+def _core_brief_progress(job: Any) -> dict[str, Any]:
+    return _core_brief_progress_from_row(_job_payload(job))
+
+
+def _core_brief_progress_from_row(job: dict[str, Any] | None) -> dict[str, Any]:
+    if not job:
+        return _empty_core_brief_progress()
+    progress = job.get("result_summary_json")
+    if isinstance(progress, dict) and progress.get("kind") == "interest_core_brief_generation":
+        return progress
+    if job.get("status") == "succeeded" and isinstance(progress, dict):
+        return {
+            "kind": "interest_core_brief_generation",
+            "status": "succeeded",
+            "current_stage": "done",
+            "current_stage_label": "Готово",
+            "overall_percent": 100,
+            "stage_percent": 100,
+            "message": progress.get("message") or "Бриф сформирован",
+            "brief_id": progress.get("brief_id"),
+            "version": progress.get("version"),
+            "model": progress.get("model"),
+            "model_profile": progress.get("model_profile"),
+        }
+    status = str(job.get("status") or "unknown")
+    return {
+        "kind": "interest_core_brief_generation",
+        "status": status,
+        "current_stage": None,
+        "current_stage_label": "В очереди" if status == "queued" else status,
+        "overall_percent": 0,
+        "stage_percent": 0,
+        "message": "Задача ожидает воркер"
+        if status == "queued"
+        else job.get("last_error") or status,
+        "brief_id": None,
+        "version": None,
+    }
+
+
+def _empty_core_brief_progress() -> dict[str, Any]:
+    return {
+        "kind": "interest_core_brief_generation",
+        "status": "not_started",
+        "current_stage": None,
+        "current_stage_label": "Не запускалось",
+        "overall_percent": 0,
+        "stage_percent": 0,
+        "message": "LLM-бриф ядра еще не формировался",
+        "brief_id": None,
+        "version": None,
     }
 
 

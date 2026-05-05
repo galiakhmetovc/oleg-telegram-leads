@@ -321,6 +321,37 @@ def interest_contexts_page(
                   </section>
                   <section class="detail-section">
                     <div class="section-head">
+                      <div>
+                        <h3>Бриф ядра интересов</h3>
+                        <p class="muted">
+                          Редактируемый контекст для LLM: чем занимается проект, что считать интересом,
+                          поводом связаться и шумом. Его можно ввести вручную или сформировать из подготовленных данных.
+                        </p>
+                      </div>
+                      <div class="button-row">
+                        <md-filled-tonal-button id="interest-core-brief-generate" type="button">
+                          <md-icon slot="icon">auto_awesome</md-icon>
+                          Сформировать из источников
+                        </md-filled-tonal-button>
+                      </div>
+                    </div>
+                    <form id="interest-core-brief-form" class="material-form single-column-form">
+                      <md-outlined-text-field id="interest-core-brief-text" name="brief_text"
+                        label="Бриф" type="textarea"
+                        placeholder="Например: ПУР занимается умным домом, видеонаблюдением, щитовым оборудованием...">
+                      </md-outlined-text-field>
+                      <div class="button-row">
+                        <md-filled-button type="submit">
+                          <md-icon slot="icon">save</md-icon>
+                          Сохранить вручную
+                        </md-filled-button>
+                      </div>
+                    </form>
+                    <div id="interest-core-brief-progress" class="prepare-progress-panel" aria-live="polite"></div>
+                    <div id="interest-core-brief-list" class="brief-list" aria-live="polite"></div>
+                  </section>
+                  <section class="detail-section">
+                    <div class="section-head">
                       <h3>Источники и raw-артефакты</h3>
                       <div class="button-row">
                         <md-filled-tonal-button id="interest-context-open-raw-review" type="button">
