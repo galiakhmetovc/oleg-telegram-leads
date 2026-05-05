@@ -101,18 +101,22 @@ class InterestCoreCandidateEnhancementService:
             completion = None
             last_error = ""
             for attempt in range(1, safe_chunk_max_attempts + 1):
-                completion = await client.complete(
-                    messages=messages,
-                    model=model,
-                    temperature=temperature,
-                    max_tokens=max_tokens,
-                )
                 try:
+                    completion = await client.complete(
+                        messages=messages,
+                        model=model,
+                        temperature=temperature,
+                        max_tokens=max_tokens,
+                    )
                     chunk_parsed = normalize_candidate_enhancement_response(
                         parse_interest_core_brief_response(completion.content)
                     )
                     break
-                except (json.JSONDecodeError, ValueError) as exc:
+                except Exception as exc:
+                    if getattr(exc, "resource_unavailable", False):
+                        raise
+                    if not _retryable_chunk_error(exc):
+                        raise
                     last_error = str(exc) or exc.__class__.__name__
                     if attempt < safe_chunk_max_attempts:
                         await asyncio.sleep(min(5, attempt))
@@ -599,6 +603,12 @@ def _processed_candidate_count(
     if completed_chunk_count <= 0:
         return 0
     return sum(len(chunk) for chunk in chunks[:completed_chunk_count])
+
+
+def _retryable_chunk_error(exc: Exception) -> bool:
+    if getattr(exc, "retryable", False):
+        return True
+    return isinstance(exc, (json.JSONDecodeError, ValueError))
 
 
 def _empty_enhancement_result() -> dict[str, Any]:
