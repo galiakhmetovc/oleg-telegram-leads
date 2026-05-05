@@ -164,23 +164,111 @@ def interest_contexts_page(
 ) -> Response:
     if not _has_page_session(request, auth_service):
         return RedirectResponse("/login", status_code=303)
-    return HTMLResponse(
-        _page(
-            page="interest-contexts",
-            title="Ядро интересов",
-            main="""
-            <main class="workspace resources-workspace">
-              <header class="topbar">
+    return HTMLResponse(_interest_context_step_page("load"))
+
+
+@router.get("/interest-contexts/check", response_class=HTMLResponse)
+def interest_context_check_page(
+    request: Request,
+    auth_service: WebAuthService = Depends(get_auth_service),
+) -> Response:
+    if not _has_page_session(request, auth_service):
+        return RedirectResponse("/login", status_code=303)
+    return HTMLResponse(_interest_context_step_page("check"))
+
+
+@router.get("/interest-contexts/prepare", response_class=HTMLResponse)
+def interest_context_prepare_page(
+    request: Request,
+    auth_service: WebAuthService = Depends(get_auth_service),
+) -> Response:
+    if not _has_page_session(request, auth_service):
+        return RedirectResponse("/login", status_code=303)
+    return HTMLResponse(_interest_context_step_page("prepare"))
+
+
+@router.get("/interest-contexts/core", response_class=HTMLResponse)
+def interest_context_core_page(
+    request: Request,
+    auth_service: WebAuthService = Depends(get_auth_service),
+) -> Response:
+    if not _has_page_session(request, auth_service):
+        return RedirectResponse("/login", status_code=303)
+    return HTMLResponse(_interest_context_step_page("core"))
+
+
+@router.get("/interest-contexts/llm", response_class=HTMLResponse)
+def interest_context_llm_page(
+    request: Request,
+    auth_service: WebAuthService = Depends(get_auth_service),
+) -> Response:
+    if not _has_page_session(request, auth_service):
+        return RedirectResponse("/login", status_code=303)
+    return HTMLResponse(_interest_context_step_page("llm"))
+
+
+_INTEREST_CONTEXT_STEPS = (
+    ("load", "/interest-contexts", "Загрузка данных"),
+    ("check", "/interest-contexts/check", "Проверка данных"),
+    ("prepare", "/interest-contexts/prepare", "Подготовка данных"),
+    ("core", "/interest-contexts/core", "Формирование ядра"),
+    ("llm", "/interest-contexts/llm", "LLM"),
+)
+
+
+def _interest_context_step_page(step: str) -> str:
+    title_by_step = {
+        "load": "Загрузка данных",
+        "check": "Проверка данных",
+        "prepare": "Подготовка данных",
+        "core": "Формирование ядра",
+        "llm": "LLM",
+    }
+    intro_by_step = {
+        "load": "Добавьте Telegram-ссылку или ZIP-архив Telegram Desktop. На этом шаге сохраняем raw-данные без AI.",
+        "check": "Проверьте, что raw/parquet, вложения и рабочая таблица собраны корректно.",
+        "prepare": "Запустите нормализацию, локальный индекс, извлечение и ранжирование кандидатов.",
+        "core": "Сформируйте черновик ядра интересов и проверьте кандидатов перед дальнейшим улучшением.",
+        "llm": "Настройте и проверьте LLM-бриф: контекст, который будет передаваться моделям на следующих этапах.",
+    }
+    step = step if step in title_by_step else "load"
+    title = title_by_step[step]
+    main = f"""
+            <main class="workspace resources-workspace" data-interest-step="{step}">
+              <header class="topbar scenario-topbar">
                 <div>
                   <span class="eyebrow">PUR Leads</span>
-                  <h1>Ядро интересов</h1>
+                  <h1>{title}</h1>
                 </div>
-                <nav>
+                <nav class="interest-step-nav" aria-label="Сценарий ядра интересов">
+                  {_interest_context_step_nav(step)}
                   <md-outlined-button id="logout-button" type="button">Выйти</md-outlined-button>
                 </nav>
               </header>
               <section class="interest-context-layout">
-                <aside class="queue-pane" aria-label="Контексты интересов">
+                {_interest_context_context_panel()}
+                <section class="detail-pane interest-context-detail-pane" aria-live="polite">
+                  {_interest_context_detail_header(intro_by_step[step])}
+                  {_interest_context_step_body(step)}
+                </section>
+                {_interest_context_stage_panel(step)}
+              </section>
+            </main>
+            """
+    return _page(page="interest-contexts", title=title, main=main)
+
+
+def _interest_context_step_nav(active_step: str) -> str:
+    return "".join(
+        f'<a class="interest-step-link {"is-active" if step == active_step else ""}" '
+        f'data-interest-step-link="{step}" href="{path}">{label}</a>'
+        for step, path, label in _INTEREST_CONTEXT_STEPS
+    )
+
+
+def _interest_context_context_panel() -> str:
+    return """
+                <aside class="queue-pane interest-context-pane" aria-label="Контексты интересов">
                   <div class="section-head">
                     <div>
                       <h2>Контексты</h2>
@@ -206,16 +294,34 @@ def interest_contexts_page(
                   <div id="interest-context-list" class="queue-list" aria-live="polite"></div>
                   <p id="interest-context-status" class="status-line" role="status"></p>
                 </aside>
-                <section class="detail-pane interest-context-detail-pane" aria-live="polite">
-                  <header class="detail-header">
+    """
+
+
+def _interest_context_detail_header(intro: str) -> str:
+    return f"""
+                  <header class="detail-header scenario-detail-header">
                     <div>
                       <h2 id="interest-context-detail-title">Выберите контекст</h2>
-                      <p id="interest-context-detail-description" class="muted">
-                        Сначала создайте ядро интересов, затем добавьте Telegram-канал или архив.
-                      </p>
+                      <p id="interest-context-detail-description" class="muted">{intro}</p>
                     </div>
                     <div class="badges" id="interest-context-detail-badges"></div>
                   </header>
+    """
+
+
+def _interest_context_step_body(step: str) -> str:
+    bodies = {
+        "load": _interest_context_load_body,
+        "check": _interest_context_check_body,
+        "prepare": _interest_context_prepare_body,
+        "core": _interest_context_core_body,
+        "llm": _interest_context_llm_body,
+    }
+    return bodies[step]()
+
+
+def _interest_context_load_body() -> str:
+    return """
                   <section class="detail-section">
                     <h3>Telegram-ссылка</h3>
                     <p class="muted">
@@ -306,19 +412,110 @@ def interest_contexts_page(
                   </section>
                   <section class="detail-section">
                     <div class="section-head">
+                      <h3>Добавленные источники</h3>
+                      <a class="interest-next-link" href="/interest-contexts/check">Дальше: проверка данных</a>
+                    </div>
+                    <div id="interest-context-source-list" class="resource-list" aria-live="polite"></div>
+                  </section>
+    """
+
+
+def _interest_context_check_body() -> str:
+    return """
+                  <section class="detail-section">
+                    <div class="section-head">
                       <div>
-                        <h3>Бриф ядра интересов</h3>
+                        <h3>Raw/parquet и рабочая таблица</h3>
                         <p class="muted">
-                          Редактируемый контекст для LLM: чем занимается проект, что считать интересом,
+                          Проверяем количество сообщений, вложений, raw-запуски, наличие файлов и примеры сообщений.
+                        </p>
+                      </div>
+                      <md-filled-tonal-button id="interest-context-open-raw-review" type="button">
+                        <md-icon slot="icon">table_chart</md-icon>
+                        Обновить проверку
+                      </md-filled-tonal-button>
+                    </div>
+                    <div id="interest-context-raw-review" class="raw-review-panel" aria-live="polite"></div>
+                  </section>
+                  <section class="detail-section">
+                    <div class="section-head">
+                      <h3>Источники</h3>
+                      <a class="interest-next-link" href="/interest-contexts/prepare">Дальше: подготовка данных</a>
+                    </div>
+                    <div id="interest-context-source-list" class="resource-list" aria-live="polite"></div>
+                  </section>
+    """
+
+
+def _interest_context_prepare_body() -> str:
+    return """
+                  <section class="detail-section">
+                    <div class="section-head">
+                      <div>
+                        <h3>Подготовка данных</h3>
+                        <p class="muted">
+                          Запускает Stage 2-5: нормализацию текста, локальный индекс, сущности, очистку и ранжирование.
+                        </p>
+                      </div>
+                      <md-filled-button id="interest-context-prepare-data" type="button">
+                        <md-icon slot="icon">model_training</md-icon>
+                        Подготовить данные
+                      </md-filled-button>
+                    </div>
+                    <div id="interest-context-prepare-progress" class="prepare-progress-panel" aria-live="polite"></div>
+                  </section>
+                  <section class="detail-section">
+                    <div class="section-head">
+                      <h3>Источники для подготовки</h3>
+                      <a class="interest-next-link" href="/interest-contexts/core">Дальше: формирование ядра</a>
+                    </div>
+                    <div id="interest-context-source-list" class="resource-list" aria-live="polite"></div>
+                  </section>
+    """
+
+
+def _interest_context_core_body() -> str:
+    return """
+                  <section class="detail-section">
+                    <div class="section-head">
+                      <div>
+                        <h3>Формирование ядра интересов</h3>
+                        <p class="muted">
+                          Собирает кандидатов из подготовленных данных. Это rule-based этап без LLM.
+                        </p>
+                      </div>
+                      <md-filled-button id="interest-context-build-draft" type="button">
+                        <md-icon slot="icon">hub</md-icon>
+                        Сформировать ядро
+                      </md-filled-button>
+                    </div>
+                    <div id="interest-context-draft-review" class="draft-review-panel" aria-live="polite"></div>
+                  </section>
+                  <section class="detail-section">
+                    <div class="section-head">
+                      <h3>Источники</h3>
+                      <a class="interest-next-link" href="/interest-contexts/llm">Дальше: LLM</a>
+                    </div>
+                    <div id="interest-context-source-list" class="resource-list" aria-live="polite"></div>
+                  </section>
+    """
+
+
+def _interest_context_llm_body() -> str:
+    return """
+                  <section class="detail-section">
+                    <div class="section-head">
+                      <div>
+                        <h3>LLM-бриф ядра интересов</h3>
+                        <p class="muted">
+                          Редактируемый контекст для моделей: чем занимается проект, что считать интересом,
                           поводом связаться и шумом. Его можно ввести вручную или сформировать из подготовленных данных.
                         </p>
                       </div>
-                      <div class="button-row">
-                        <md-filled-tonal-button id="interest-core-brief-generate" type="button">
-                          <md-icon slot="icon">auto_awesome</md-icon>
-                          Сформировать из источников
-                        </md-filled-tonal-button>
-                      </div>
+                      <md-filled-tonal-button id="interest-core-brief-generate" type="button">
+                        <md-icon slot="icon">model_training</md-icon>
+                        Сформировать из источников
+                      </md-filled-tonal-button>
                     </div>
                     <form id="interest-core-brief-form" class="material-form single-column-form">
                       <md-outlined-text-field id="interest-core-brief-text" name="brief_text"
@@ -327,7 +524,7 @@ def interest_contexts_page(
                       </md-outlined-text-field>
                       <div class="button-row">
                         <md-filled-button type="submit">
-                          <md-icon slot="icon">save</md-icon>
+                          <md-icon slot="icon">check_circle</md-icon>
                           Сохранить вручную
                         </md-filled-button>
                       </div>
@@ -337,54 +534,46 @@ def interest_contexts_page(
                   </section>
                   <section class="detail-section">
                     <div class="section-head">
-                      <h3>Источники и raw-артефакты</h3>
-                      <div class="button-row">
-                        <md-filled-tonal-button id="interest-context-open-raw-review" type="button">
-                          <md-icon slot="icon">table_chart</md-icon>
-                          Проверить данные
-                        </md-filled-tonal-button>
-                        <md-filled-button id="interest-context-prepare-data" type="button">
-                          <md-icon slot="icon">model_training</md-icon>
-                          Подготовить данные
-                        </md-filled-button>
-                        <md-filled-button id="interest-context-build-draft" type="button">
-                          <md-icon slot="icon">hub</md-icon>
-                          Сформировать ядро интересов
-                        </md-filled-button>
-                      </div>
+                      <h3>Источники контекста</h3>
                     </div>
                     <div id="interest-context-source-list" class="resource-list" aria-live="polite"></div>
-                    <div id="interest-context-prepare-progress" class="prepare-progress-panel" aria-live="polite"></div>
-                    <div id="interest-context-draft-review" class="draft-review-panel" aria-live="polite"></div>
-                    <div id="interest-context-raw-review" class="raw-review-panel" aria-live="polite"></div>
                   </section>
-                </section>
-                <aside class="side-pane operations-signals" aria-label="Следующие шаги">
+    """
+
+
+def _interest_context_stage_panel(active_step: str) -> str:
+    step_rows = "".join(
+        f"""<div class="table-row {"is-active" if step == active_step else ""}">
+                        <div><strong>{label}</strong><p class="muted">{_interest_context_stage_hint(step)}</p></div>
+                        <span>{index}</span>
+                      </div>"""
+        for index, (step, _path, label) in enumerate(_INTEREST_CONTEXT_STEPS, start=1)
+    )
+    return f"""
+                <aside class="side-pane operations-signals interest-stage-panel" aria-label="Сценарий">
                   <section>
-                    <h2>Текущий этап</h2>
+                    <h2>Сценарий</h2>
                     <p class="muted">
-                      Собираем воспроизводимые сырые данные. Автоматическая обработка, лиды и уведомления здесь не запускаются.
+                      Идем последовательно от сырых данных к проверяемому ядру интересов.
                     </p>
                   </section>
                   <section>
-                    <h2>После загрузки</h2>
-                    <div class="table-list">
-                      <div class="table-row">
-                        <div><strong>Проверка raw/parquet</strong><p class="muted">Открыть артефакты и убедиться, что данные полные.</p></div>
-                        <span>ручной шаг</span>
-                      </div>
-                      <div class="table-row">
-                        <div><strong>Подготовка знаний</strong><p class="muted">Запустить нормализацию, поиск сущностей и черновик каталога.</p></div>
-                        <span>следующий этап</span>
-                      </div>
+                    <div class="table-list scenario-step-list">
+                      {step_rows}
                     </div>
                   </section>
                 </aside>
-              </section>
-            </main>
-            """,
-        )
-    )
+    """
+
+
+def _interest_context_stage_hint(step: str) -> str:
+    return {
+        "load": "канал, чат или архив",
+        "check": "raw/parquet, вложения, примеры",
+        "prepare": "нормализация, индекс, сущности",
+        "core": "кандидаты ядра без LLM",
+        "llm": "бриф и будущие промпты",
+    }[step]
 
 
 @router.get("/interest-contexts/{context_id}/draft", response_class=HTMLResponse)

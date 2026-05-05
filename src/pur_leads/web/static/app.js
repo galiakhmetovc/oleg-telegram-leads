@@ -3709,10 +3709,12 @@ function initResources() {
 }
 
 function initInterestContexts() {
+  const stepRoot = document.querySelector("[data-interest-step]");
   const state = {
     items: [],
-    selectedId: null,
+    selectedId: new URLSearchParams(window.location.search).get("context_id"),
     detail: null,
+    step: stepRoot?.dataset.interestStep || "load",
     preparePollTimer: null,
     draftPollTimer: null,
     briefPollTimer: null,
@@ -3755,6 +3757,7 @@ async function loadInterestContexts(state) {
     state.items = payload.items || [];
     const selectedStillVisible = state.items.some((item) => item.id === state.selectedId);
     state.selectedId = selectedStillVisible ? state.selectedId : state.items[0]?.id || null;
+    updateInterestContextStepLinks(state.selectedId);
     renderInterestContextList(state);
     if (state.selectedId) {
       await loadInterestContextDetail(state.selectedId, state);
@@ -3787,6 +3790,7 @@ function renderInterestContextList(state) {
   target.querySelectorAll(".queue-item").forEach((button) => {
     button.addEventListener("click", async () => {
       state.selectedId = button.dataset.id;
+      setSelectedInterestContextUrl(state.selectedId);
       renderInterestContextList(state);
       await loadInterestContextDetail(state.selectedId, state);
     });
@@ -3803,11 +3807,15 @@ async function loadInterestContextDetail(contextId, state) {
   await loadInterestContextPrepareStatus(state, { silent: true });
   await loadInterestContextDraftStatus(state, { silent: true });
   await loadInterestCoreBriefStatus(state, { silent: true });
+  if (state.step === "check") {
+    await loadInterestContextRawReview(state);
+  }
 }
 
 function renderInterestContextEmptyDetail() {
   setInterestContextFormsEnabled(false);
   delete document.body.dataset.interestContextId;
+  updateInterestContextStepLinks(null);
   const title = document.querySelector("#interest-context-detail-title");
   const description = document.querySelector("#interest-context-detail-description");
   const badges = document.querySelector("#interest-context-detail-badges");
@@ -3835,6 +3843,7 @@ function renderInterestContextEmptyDetail() {
 function renderInterestContextDetail(detail) {
   const context = detail.context || {};
   if (context.id) document.body.dataset.interestContextId = context.id;
+  updateInterestContextStepLinks(context.id || null);
   const title = document.querySelector("#interest-context-detail-title");
   const description = document.querySelector("#interest-context-detail-description");
   const badges = document.querySelector("#interest-context-detail-badges");
@@ -3858,6 +3867,10 @@ function renderInterestContextDetail(detail) {
       const rawText = rawRun
         ? `${rawRun.message_count || 0} сообщений / ${rawRun.attachment_count || 0} вложений`
         : "raw-артефакты еще не созданы";
+      const reviewControl =
+        currentInterestStep() === "check"
+          ? `<md-filled-tonal-button type="button" data-open-raw-review>Проверить данные</md-filled-tonal-button>`
+          : `<a class="button-link" href="${escapeHtml(interestContextStepHref("/interest-contexts/check", context.id))}">Проверить данные</a>`;
       return `<div class="resource-row">
         <div class="resource-kind">
           <md-icon aria-hidden="true">${rawRun ? "archive" : "database"}</md-icon>
@@ -3873,9 +3886,7 @@ function renderInterestContextDetail(detail) {
           ${rawRun ? badge(label(rawRun.status || "unknown"), rawRun.status === "failed" ? "is-danger" : "") : ""}
         </div>
         <div class="resource-actions">
-          <md-filled-tonal-button type="button" data-open-raw-review>
-            Проверить данные
-          </md-filled-tonal-button>
+          ${reviewControl}
         </div>
       </div>`;
     })
@@ -3885,6 +3896,41 @@ function renderInterestContextDetail(detail) {
       loadInterestContextRawReview({ selectedId: detail.context?.id })
     );
   });
+}
+
+function currentInterestStep() {
+  return document.querySelector("[data-interest-step]")?.dataset.interestStep || "load";
+}
+
+function interestContextStepHref(path, contextId) {
+  if (!contextId) return path;
+  const url = new URL(path, window.location.origin);
+  url.searchParams.set("context_id", contextId);
+  return `${url.pathname}${url.search}`;
+}
+
+function updateInterestContextStepLinks(contextId) {
+  document.querySelectorAll("[data-interest-step-link], .interest-next-link").forEach((link) => {
+    const rawHref = link.getAttribute("href") || "/interest-contexts";
+    const url = new URL(rawHref, window.location.origin);
+    if (contextId) {
+      url.searchParams.set("context_id", contextId);
+    } else {
+      url.searchParams.delete("context_id");
+    }
+    link.setAttribute("href", `${url.pathname}${url.search}`);
+  });
+}
+
+function setSelectedInterestContextUrl(contextId) {
+  updateInterestContextStepLinks(contextId);
+  const url = new URL(window.location.href);
+  if (contextId) {
+    url.searchParams.set("context_id", contextId);
+  } else {
+    url.searchParams.delete("context_id");
+  }
+  window.history.replaceState({}, "", `${url.pathname}${url.search}`);
 }
 
 async function createInterestContext(event, state) {
@@ -3901,6 +3947,7 @@ async function createInterestContext(event, state) {
     });
     form.reset();
     state.selectedId = payload.context?.id || null;
+    setSelectedInterestContextUrl(state.selectedId);
     if (status) status.textContent = "Контекст создан";
     await loadInterestContexts(state);
   } catch (error) {

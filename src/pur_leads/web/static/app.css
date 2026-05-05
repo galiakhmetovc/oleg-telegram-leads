@@ -275,14 +275,49 @@ md-text-button {
   display: none;
 }
 
-.topbar nav a[href="/interest-contexts"] {
+.topbar nav a[href="/interest-contexts"],
+.topbar nav a.interest-step-link {
   display: inline-flex;
+}
+
+.interest-step-nav {
+  max-width: min(900px, 100%);
+}
+
+.interest-step-link {
+  min-height: 34px;
+  align-items: center;
+  padding: 0 10px;
+  color: var(--muted);
+  border-bottom: 2px solid transparent;
+}
+
+.interest-step-link.is-active {
+  color: var(--accent-strong);
+  border-color: var(--accent);
 }
 
 .topbar nav button {
   border-color: var(--line);
   background: #ffffff;
   color: var(--text);
+}
+
+.button-link {
+  min-height: 38px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 14px;
+  border: 1px solid var(--line);
+  background: #ffffff;
+  color: var(--text);
+}
+
+.button-link:hover {
+  border-color: var(--accent);
+  background: #f1faf5;
+  color: var(--accent-strong);
 }
 
 .icon-button {
@@ -1381,6 +1416,20 @@ md-text-button {
 
 .interest-context-detail-pane {
   overflow: auto;
+}
+
+.scenario-detail-header {
+  align-items: start;
+}
+
+.scenario-step-list .table-row.is-active {
+  border-color: var(--accent);
+  background: #f1faf5;
+}
+
+.scenario-step-list .table-row.is-active span {
+  color: var(--accent-strong);
+  font-weight: 700;
 }
 
 .draft-screen-shell {
