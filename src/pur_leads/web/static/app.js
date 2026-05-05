@@ -227,6 +227,7 @@ document.addEventListener("DOMContentLoaded", () => {
   if (page === "onboarding") initOnboarding();
   if (page === "resources") initResources();
   if (page === "interest-contexts") initInterestContexts();
+  if (page === "interest-context-draft") initInterestContextDraftScreen();
   if (page === "users") initUsersPage();
   if (page === "settings") initSettingsPage();
   if (page === "ai-registry") initAiRegistryPage();
@@ -3797,6 +3798,7 @@ async function loadInterestContextDetail(contextId, state) {
 
 function renderInterestContextEmptyDetail() {
   setInterestContextFormsEnabled(false);
+  delete document.body.dataset.interestContextId;
   const title = document.querySelector("#interest-context-detail-title");
   const description = document.querySelector("#interest-context-detail-description");
   const badges = document.querySelector("#interest-context-detail-badges");
@@ -3817,6 +3819,7 @@ function renderInterestContextEmptyDetail() {
 
 function renderInterestContextDetail(detail) {
   const context = detail.context || {};
+  if (context.id) document.body.dataset.interestContextId = context.id;
   const title = document.querySelector("#interest-context-detail-title");
   const description = document.querySelector("#interest-context-detail-description");
   const badges = document.querySelector("#interest-context-detail-badges");
@@ -4023,7 +4026,7 @@ async function buildInterestContextDraft(state) {
   try {
     const payload = await api(`/api/interest-contexts/${encodeURIComponent(state.selectedId)}/draft`, {
       method: "POST",
-      body: JSON.stringify({ max_items: 120 }),
+      body: JSON.stringify({ max_items: 1000 }),
     });
     renderInterestContextDraft(payload.progress, payload.job, payload.draft);
     if (status) status.textContent = "Сборка ядра интересов поставлена в очередь";
@@ -4182,7 +4185,9 @@ function renderInterestContextPrepareProgress(progress, job) {
 }
 
 function renderInterestContextDraft(progress, job, draft) {
-  const target = document.querySelector("#interest-context-draft-review");
+  const target =
+    document.querySelector("#interest-context-draft-review") ||
+    document.querySelector("#interest-context-draft-screen");
   if (!target) return;
   const status = String(progress?.status || "not_started");
   const draftItems = draft?.items || [];
@@ -4196,6 +4201,10 @@ function renderInterestContextDraft(progress, job, draft) {
   const stageLabel = progress?.current_stage_label || "Сборка ядра интересов";
   const message = progress?.message || status;
   const stageResults = progress?.stage_results || [];
+  const contextId =
+    document.body.dataset.interestContextId ||
+    document.querySelector("#interest-context-draft-screen")?.dataset.contextId ||
+    "";
   target.innerHTML = `<section class="draft-review-section">
     <div class="section-head">
       <div>
@@ -4207,6 +4216,11 @@ function renderInterestContextDraft(progress, job, draft) {
         ${badge("без LLM")}
         ${job?.id ? badge(`job ${job.id}`) : ""}
       </div>
+      ${
+        contextId
+          ? `<md-outlined-button type="button" onclick="window.location.assign('/interest-contexts/${encodeURIComponent(contextId)}/draft')">Открыть экран</md-outlined-button>`
+          : ""
+      }
     </div>
     ${
       status !== "not_started"
@@ -4224,6 +4238,21 @@ function renderInterestContextDraft(progress, job, draft) {
     ${renderDraftStageResults(stageResults)}
     ${renderDraftItems(draftItems)}
   </section>`;
+}
+
+function initInterestContextDraftScreen() {
+  const root = document.querySelector("#interest-context-draft-screen");
+  const contextId = root?.dataset.contextId || "";
+  if (!contextId) return;
+  document.body.dataset.interestContextId = contextId;
+  const state = {
+    selectedId: contextId,
+    draftPollTimer: null,
+  };
+  document
+    .querySelector("#interest-context-draft-refresh")
+    ?.addEventListener("click", () => loadInterestContextDraftStatus(state));
+  loadInterestContextDraftStatus(state);
 }
 
 function renderDraftStageResults(stageResults) {

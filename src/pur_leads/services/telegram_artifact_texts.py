@@ -9,7 +9,10 @@ from hashlib import sha256
 import json
 from pathlib import Path
 import re
+import shutil
+import threading
 from typing import Any, Protocol
+import zipfile
 
 import pyarrow as pa
 import pyarrow.parquet as pq
@@ -20,6 +23,11 @@ from pur_leads.core.time import utc_now
 from pur_leads.integrations.catalog.external_page import HttpExternalPageFetcher
 from pur_leads.integrations.documents.pdf_parser import PdfArtifactParser
 from pur_leads.models.telegram_sources import telegram_raw_export_runs_table
+from pur_leads.services.telegram_desktop_import import (
+    _archive_member_for_media,
+    _desktop_media_path,
+    _safe_media_relative_path,
+)
 from pur_leads.services.telegram_run_metadata import merge_raw_export_run_metadata
 from pur_leads.services.telegram_text_normalization import TelegramTextNormalizationService
 
@@ -107,9 +115,7 @@ class TelegramArtifactTextExtractionService:
         attachments_path = _resolve_path(run["attachments_parquet_path"])
         message_rows = pq.ParquetFile(messages_path).read().to_pylist()
         attachment_rows = (
-            pq.ParquetFile(attachments_path).read().to_pylist()
-            if attachments_path.exists()
-            else []
+            pq.ParquetFile(attachments_path).read().to_pylist() if attachments_path.exists() else []
         )
 
         output_dir = (
@@ -123,7 +129,7 @@ class TelegramArtifactTextExtractionService:
         summary_path = output_dir / "artifact_texts_summary.json"
 
         candidates = _candidate_counts(message_rows, attachment_rows)
-        artifact_rows = asyncio.run(
+        artifact_rows = _run_coroutine_blocking(
             self._extract_rows(
                 run=run,
                 message_rows=message_rows,
@@ -199,9 +205,7 @@ class TelegramArtifactTextExtractionService:
                 )
             )
         if self.parse_documents:
-            message_rows_by_id = {
-                int(row["telegram_message_id"]): row for row in message_rows
-            }
+            message_rows_by_id = {int(row["telegram_message_id"]): row for row in message_rows}
             document_candidates = _document_candidates(attachment_rows, message_rows_by_id)
             rows.extend(
                 await self._extract_candidate_batch(
@@ -303,7 +307,7 @@ class TelegramArtifactTextExtractionService:
         run: dict[str, Any],
         candidate: dict[str, Any],
     ) -> list[dict[str, Any]]:
-        local_path = _resolve_optional_local_path(candidate.get("local_path"), run=run)
+        local_path = _resolve_document_local_path(candidate, run=run)
         artifact_id = _artifact_id(
             "document",
             candidate["telegram_message_id"],
@@ -513,8 +517,14 @@ def _document_candidates(
             continue
         message_row = (message_rows_by_id or {}).get(int(row["telegram_message_id"]), {})
         raw = _json_dict(row.get("raw_attachment_json"))
-        download = raw.get("raw_export_download") if isinstance(raw.get("raw_export_download"), dict) else {}
-        media_ref = raw.get("telegram_media_ref") if isinstance(raw.get("telegram_media_ref"), dict) else {}
+        download = (
+            raw.get("raw_export_download")
+            if isinstance(raw.get("raw_export_download"), dict)
+            else {}
+        )
+        media_ref = (
+            raw.get("telegram_media_ref") if isinstance(raw.get("telegram_media_ref"), dict) else {}
+        )
         candidates.append(
             {
                 "telegram_message_id": int(row["telegram_message_id"]),
@@ -583,7 +593,9 @@ def _is_supported_document(row: dict[str, Any]) -> bool:
 
 
 def _media_source_url(row: dict[str, Any], raw: dict[str, Any]) -> str:
-    media_ref = raw.get("telegram_media_ref") if isinstance(raw.get("telegram_media_ref"), dict) else {}
+    media_ref = (
+        raw.get("telegram_media_ref") if isinstance(raw.get("telegram_media_ref"), dict) else {}
+    )
     return str(row.get("message_url") or media_ref.get("message_url") or "")
 
 
@@ -605,7 +617,9 @@ def _metrics(rows: list[dict[str, Any]], *, candidates: dict[str, int]) -> dict[
         "total_rows": len(rows),
         "extracted_rows": statuses.get("extracted", 0),
         "rows_with_text": sum(1 for row in rows if row["has_text"]),
-        "tokenizer_error_rows": sum(1 for row in rows if row["normalization_status"] == "tokenizer_error"),
+        "tokenizer_error_rows": sum(
+            1 for row in rows if row["normalization_status"] == "tokenizer_error"
+        ),
         "total_tokens": sum(int(row["token_count"] or 0) for row in rows),
         "status_distribution": dict(sorted(statuses.items())),
         "artifact_kind_distribution": dict(sorted(kinds.items())),
@@ -712,6 +726,67 @@ def _resolve_optional_local_path(value: Any, *, run: dict[str, Any]) -> Path | N
     return path
 
 
+def _resolve_document_local_path(candidate: dict[str, Any], *, run: dict[str, Any]) -> Path | None:
+    local_path = _resolve_optional_local_path(candidate.get("local_path"), run=run)
+    if local_path is not None and local_path.exists():
+        return local_path
+    return _extract_missing_desktop_import_media(candidate, run=run)
+
+
+def _extract_missing_desktop_import_media(
+    candidate: dict[str, Any],
+    *,
+    run: dict[str, Any],
+) -> Path | None:
+    raw = candidate.get("raw_artifact")
+    if not isinstance(raw, dict):
+        return None
+    tdesktop_media = raw.get("raw_tdesktop_media_json")
+    if not isinstance(tdesktop_media, dict):
+        return None
+    media_path = _desktop_media_path(tdesktop_media)
+    if not media_path:
+        return None
+    manifest_path = _resolve_path(run.get("manifest_path") or "")
+    if not manifest_path.exists():
+        return None
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    archive_info = manifest.get("archive") if isinstance(manifest, dict) else {}
+    if not isinstance(archive_info, dict):
+        return None
+    archive_path = _resolve_path(archive_info.get("path") or "")
+    result_member = str(archive_info.get("result_member") or "")
+    if not archive_path.exists() or not result_member:
+        return None
+    result_prefix = str(Path(result_member).parent).replace("\\", "/")
+    result_prefix = "" if result_prefix == "." else result_prefix.strip("/")
+    target = (
+        _resolve_path(run.get("output_dir") or ".")
+        / "media"
+        / _safe_media_relative_path(media_path)
+    )
+    if target.exists():
+        return target
+    try:
+        with zipfile.ZipFile(archive_path) as archive:
+            member = _archive_member_for_media(
+                media_path,
+                result_prefix=result_prefix,
+                members=set(archive.namelist()),
+            )
+            if member is None:
+                return None
+            target.parent.mkdir(parents=True, exist_ok=True)
+            with archive.open(member) as source_file, target.open("wb") as target_file:
+                shutil.copyfileobj(source_file, target_file)
+    except (OSError, zipfile.BadZipFile, ValueError):
+        return None
+    return target if target.exists() else None
+
+
 def _artifact_id(kind: str, telegram_message_id: Any, value: str) -> str:
     digest = sha256(f"{kind}:{telegram_message_id}:{value}".encode("utf-8")).hexdigest()[:24]
     return f"{kind}:{digest}"
@@ -747,3 +822,25 @@ def _truncate(value: str, limit: int) -> str:
 def _resolve_path(value: Path | str | Any) -> Path:
     path = Path(str(value))
     return path if path.is_absolute() else Path(".") / path
+
+
+def _run_coroutine_blocking(coroutine: Any) -> Any:
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.run(coroutine)
+
+    result: dict[str, Any] = {}
+
+    def run_in_thread() -> None:
+        try:
+            result["value"] = asyncio.run(coroutine)
+        except BaseException as exc:  # pragma: no cover - re-raised in caller thread
+            result["error"] = exc
+
+    thread = threading.Thread(target=run_in_thread, daemon=True)
+    thread.start()
+    thread.join()
+    if "error" in result:
+        raise result["error"]
+    return result.get("value")

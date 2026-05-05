@@ -74,7 +74,7 @@ class InterestContextPrepareDataRequest(BaseModel):
 
 
 class InterestContextBuildDraftRequest(BaseModel):
-    max_items: int = Field(default=120, ge=1, le=500)
+    max_items: int = Field(default=1000, ge=1, le=5000)
 
 
 @router.get("")

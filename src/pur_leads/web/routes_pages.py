@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from html import escape
+
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
 
@@ -362,6 +364,77 @@ def interest_contexts_page(
                     </div>
                   </section>
                 </aside>
+              </section>
+            </main>
+            """,
+        )
+    )
+
+
+@router.get("/interest-contexts/{context_id}/draft", response_class=HTMLResponse)
+def interest_context_draft_page(
+    context_id: str,
+    request: Request,
+    auth_service: WebAuthService = Depends(get_auth_service),
+) -> Response:
+    if not _has_page_session(request, auth_service):
+        return RedirectResponse("/login", status_code=303)
+    context = InterestContextService(auth_service.session).repository.get(context_id)
+    context_title = context.name if context is not None else "Ядро интересов"
+    return HTMLResponse(
+        _page(
+            page="interest-context-draft",
+            title=f"Кандидаты - {context_title}",
+            main=f"""
+            <main class="workspace resources-workspace">
+              <header class="topbar">
+                <div>
+                  <span class="eyebrow">PUR Leads</span>
+                  <h1>Кандидаты ядра интересов</h1>
+                </div>
+                <nav>
+                  <a href="/">Лиды</a>
+                  <a href="/interest-contexts">Интересы</a>
+                  <a href="/today">Сегодня</a>
+                  <a href="/sources">Источники</a>
+                  <a href="/resources">Ресурсы</a>
+                  <a href="/catalog">Каталог</a>
+                  <a href="/crm">CRM</a>
+                  <a href="/users">Пользователи</a>
+                  <a href="/settings">Настройки</a>
+                  <a href="/ai-registry">AI-реестр</a>
+                  <a href="/task-executors">Исполнители задач</a>
+                  <a href="/task-types">Задачи</a>
+                  <a href="/quality">Качество</a>
+                  <a href="/artifacts">Артефакты</a>
+                  <a href="/operations">Операции</a>
+                  <md-outlined-button id="logout-button" type="button">Выйти</md-outlined-button>
+                </nav>
+              </header>
+              <section class="draft-screen-shell">
+                <header class="detail-header">
+                  <div>
+                    <h2>{escape(context_title)}</h2>
+                    <p class="muted">
+                      Все кандидаты показываются для ручного ревью. На этом этапе AI не используется.
+                    </p>
+                  </div>
+                  <div class="button-row">
+                    <md-outlined-button type="button" onclick="window.location.assign('/interest-contexts')">
+                      Назад к контекстам
+                    </md-outlined-button>
+                    <md-filled-tonal-button id="interest-context-draft-refresh" type="button">
+                      <md-icon slot="icon">refresh</md-icon>
+                      Обновить
+                    </md-filled-tonal-button>
+                  </div>
+                </header>
+                <div id="interest-context-draft-screen"
+                  data-context-id="{escape(context_id)}"
+                  class="draft-review-panel"
+                  aria-live="polite">
+                  <div class="empty-state">Загружаю кандидатов...</div>
+                </div>
               </section>
             </main>
             """,

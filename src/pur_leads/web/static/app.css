@@ -1375,6 +1375,30 @@ md-text-button {
   overflow: auto;
 }
 
+.draft-screen-shell {
+  min-height: 0;
+  overflow: auto;
+  display: grid;
+  align-content: start;
+  gap: 18px;
+  padding: 18px 22px 28px;
+}
+
+.draft-screen-shell .draft-review-section {
+  border: 0;
+  padding: 0;
+}
+
+.draft-screen-shell .draft-items .table-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
+  gap: 10px;
+}
+
+.draft-screen-shell .draft-item-row {
+  align-items: start;
+}
+
 .single-column-form,
 .interest-source-form {
   grid-template-columns: 1fr;

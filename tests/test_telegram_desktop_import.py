@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 import json
+from pathlib import Path
 import zipfile
 
 import pyarrow.parquet as pq
@@ -49,11 +50,18 @@ def test_telegram_desktop_archive_import_writes_raw_export_and_source_messages(t
         attachment_rows = pq.read_table(result.raw_export.attachments_parquet_path).to_pylist()
         assert attachment_rows[0]["telegram_message_id"] == 3
         assert attachment_rows[0]["file_name"] == "photo.jpg"
-        assert attachment_rows[0]["downloadable"] is False
+        assert attachment_rows[0]["downloadable"] is True
+        download = json.loads(attachment_rows[0]["raw_attachment_json"])["raw_export_download"]
+        assert download["status"] == "downloaded"
+        assert Path(download["local_path"]).exists()
 
-        source_rows = session.execute(
-            select(source_messages_table).order_by(source_messages_table.c.telegram_message_id)
-        ).mappings().all()
+        source_rows = (
+            session.execute(
+                select(source_messages_table).order_by(source_messages_table.c.telegram_message_id)
+            )
+            .mappings()
+            .all()
+        )
         assert len(source_rows) == 2
         assert source_rows[0]["telegram_message_id"] == 2
         assert source_rows[0]["text"] == "Нужна камера Dahua A1"
@@ -109,7 +117,7 @@ def _write_desktop_archive(tmp_path):
                 "from": "Анна",
                 "from_id": "user1",
                 "reply_to_message_id": 2,
-                "photo": "(File not included. Change data exporting settings to download.)",
+                "photo": "photos/photo.jpg",
                 "photo_file_size": 1234,
                 "width": 100,
                 "height": 100,
@@ -123,4 +131,5 @@ def _write_desktop_archive(tmp_path):
             "ChatExport_2026-04-30/result.json",
             json.dumps(payload, ensure_ascii=False),
         )
+        archive.writestr("ChatExport_2026-04-30/photos/photo.jpg", b"fake-jpeg")
     return archive_path

@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import UTC, datetime
 import json
+from posixpath import normpath
 import shutil
 import zipfile
 from pathlib import Path
@@ -132,6 +133,13 @@ class TelegramDesktopArchiveImportService:
                 source=source,
                 resolved_source=resolved,
             )
+            media_extraction = _extract_desktop_media_files(
+                archive_path,
+                result_member=result_member,
+                raw_messages=raw_messages,
+                output_dir=writer.output_dir,
+            )
+            metadata_json["desktop_import"]["media_extraction"] = media_extraction
             attachments = [
                 attachment
                 for message in raw_messages
@@ -196,6 +204,7 @@ class TelegramDesktopArchiveImportService:
                     status="succeeded",
                     message_count=len(raw_messages),
                     attachment_count=len(attachments),
+                    metadata_json=metadata_json,
                     finished_at=finished_at,
                 )
             )
@@ -335,6 +344,80 @@ def _copy_result_json(archive_path: Path, result_member: str, target: Path) -> N
             shutil.copyfileobj(source_file, target_file)
 
 
+def _extract_desktop_media_files(
+    archive_path: Path,
+    *,
+    result_member: str,
+    raw_messages: list[TelegramRawExportMessage],
+    output_dir: Path,
+) -> dict[str, Any]:
+    result_prefix = str(Path(result_member).parent).replace("\\", "/")
+    result_prefix = "" if result_prefix == "." else result_prefix.strip("/")
+    media_dir = output_dir / "media"
+    extracted = 0
+    missing = 0
+    not_included = 0
+    skipped = 0
+    with zipfile.ZipFile(archive_path) as archive:
+        members = set(archive.namelist())
+        for message in raw_messages:
+            raw_media = message.raw_message.get("raw_media_json")
+            if not isinstance(raw_media, dict):
+                continue
+            tdesktop_media = raw_media.get("raw_tdesktop_media_json")
+            if not isinstance(tdesktop_media, dict):
+                skipped += 1
+                continue
+            media_path = _desktop_media_path(tdesktop_media)
+            download = raw_media.setdefault("raw_export_download", {})
+            download["original_path"] = media_path
+            if not media_path:
+                not_included += 1
+                download.update(
+                    {
+                        "status": "not_included",
+                        "local_path": None,
+                        "skip_reason": "telegram_desktop_export_file_not_included",
+                    }
+                )
+                continue
+            member = _archive_member_for_media(
+                media_path,
+                result_prefix=result_prefix,
+                members=members,
+            )
+            if member is None:
+                missing += 1
+                download.update(
+                    {
+                        "status": "missing_from_archive",
+                        "local_path": None,
+                        "skip_reason": "archive_member_not_found",
+                    }
+                )
+                continue
+            target = media_dir / _safe_media_relative_path(media_path)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            with archive.open(member) as source_file, target.open("wb") as target_file:
+                shutil.copyfileobj(source_file, target_file)
+            extracted += 1
+            download.update(
+                {
+                    "status": "downloaded",
+                    "local_path": str(target),
+                    "archive_member": member,
+                    "file_size": target.stat().st_size,
+                    "extracted_at": utc_now().isoformat(),
+                }
+            )
+    return {
+        "extracted": extracted,
+        "missing_from_archive": missing,
+        "not_included": not_included,
+        "skipped": skipped,
+    }
+
+
 def _raw_export_messages(
     payload: dict[str, Any],
     *,
@@ -436,6 +519,7 @@ def _raw_media(raw: dict[str, Any], *, message_url: str | None) -> dict[str, Any
         "raw_export_download": {
             "status": "not_extracted",
             "local_path": None,
+            "original_path": raw.get("photo") or raw.get("file"),
         },
         "telegram_media_ref": {
             "kind": "telegram_desktop_export_media",
@@ -506,6 +590,43 @@ def _file_name(value: Any, *, default: str | None = None) -> str | None:
     if value.startswith("(File not included."):
         return default
     return Path(value).name
+
+
+def _desktop_media_path(raw_tdesktop_media: dict[str, Any]) -> str | None:
+    for key in ("file", "photo", "thumbnail"):
+        value = raw_tdesktop_media.get(key)
+        if isinstance(value, str) and value.strip() and not value.startswith("(File not included."):
+            return value.replace("\\", "/")
+    return None
+
+
+def _archive_member_for_media(
+    media_path: str,
+    *,
+    result_prefix: str,
+    members: set[str],
+) -> str | None:
+    media_path = _normalize_zip_relative_path(media_path)
+    candidates = [media_path]
+    if result_prefix:
+        candidates.insert(0, f"{result_prefix}/{media_path}")
+    for candidate in candidates:
+        if candidate in members:
+            return candidate
+    suffix = f"/{media_path}"
+    matches = sorted(member for member in members if member.endswith(suffix))
+    return matches[0] if len(matches) == 1 else None
+
+
+def _normalize_zip_relative_path(value: str) -> str:
+    normalized = normpath(value.replace("\\", "/")).lstrip("/")
+    if normalized == "." or normalized.startswith("../") or normalized == "..":
+        raise ValueError(f"unsafe Telegram Desktop media path: {value}")
+    return normalized
+
+
+def _safe_media_relative_path(value: str) -> Path:
+    return Path(_normalize_zip_relative_path(value))
 
 
 def _downloadable_media_path(value: Any) -> bool:

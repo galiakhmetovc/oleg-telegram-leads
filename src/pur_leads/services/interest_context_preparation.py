@@ -15,6 +15,7 @@ from pur_leads.models.telegram_sources import (
     monitored_sources_table,
     telegram_raw_export_runs_table,
 )
+from pur_leads.services.telegram_artifact_texts import TelegramArtifactTextExtractionService
 from pur_leads.services.telegram_chroma_index import TelegramChromaIndexService
 from pur_leads.services.telegram_fts_index import TelegramFtsIndexService
 from pur_leads.services.telegram_text_normalization import TelegramTextNormalizationService
@@ -26,6 +27,7 @@ ProgressCallback = Callable[[dict[str, Any]], None]
 
 STAGES: tuple[dict[str, str], ...] = (
     {"key": "text_normalization", "label": "Нормализация текста"},
+    {"key": "artifact_text_extraction", "label": "Тексты вложений"},
     {"key": "fts_index", "label": "Полнотекстовый индекс"},
     {"key": "chroma_index", "label": "Семантический индекс"},
 )
@@ -218,6 +220,20 @@ class InterestContextPreparationService:
             ).write_texts(raw_export_run_id)
             return {
                 "texts_parquet_path": str(result.texts_parquet_path),
+                "summary_path": str(result.summary_path),
+                **result.metrics,
+            }
+        if stage == "artifact_text_extraction":
+            result = TelegramArtifactTextExtractionService(
+                self.session,
+                processed_root=self.processed_root,
+                fetch_external_pages=True,
+                parse_documents=True,
+                external_fetch_timeout_seconds=600.0,
+                document_parse_timeout_seconds=600.0,
+            ).write_texts(raw_export_run_id)
+            return {
+                "artifact_texts_parquet_path": str(result.texts_parquet_path),
                 "summary_path": str(result.summary_path),
                 **result.metrics,
             }

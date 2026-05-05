@@ -83,7 +83,7 @@ class InterestContextDraftService:
         context_id: str,
         *,
         actor: str,
-        max_items: int = 120,
+        max_items: int = 1000,
         progress: ProgressCallback | None = None,
     ) -> InterestContextDraftBuildResult:
         raw_runs = self._raw_export_runs(context_id)
@@ -258,7 +258,7 @@ class InterestContextDraftService:
             )
             raise
 
-    def latest_payload(self, context_id: str, *, limit: int = 120) -> dict[str, Any]:
+    def latest_payload(self, context_id: str, *, limit: int = 1000) -> dict[str, Any]:
         run = self._latest_run(context_id)
         if run is None:
             return {"draft_run": None, "items": [], "summary": None}

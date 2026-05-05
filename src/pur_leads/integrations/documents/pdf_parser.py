@@ -3,13 +3,21 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 import pypdf
 from pypdf import PdfReader
 
-from pur_leads.workers.runtime import ParsedArtifact
+
+@dataclass(frozen=True)
+class ParsedArtifact:
+    source_id: str
+    artifact_id: str | None
+    chunks: list[str]
+    parser_name: str
+    parser_version: str
 
 
 class PdfArtifactParser:
