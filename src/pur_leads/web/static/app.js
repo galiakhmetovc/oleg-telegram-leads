@@ -5014,6 +5014,7 @@ function renderInterestContextCandidateEnhancement(progress, job, enhancement, r
         <div class="badges">
           ${badge(label(status), status === "failed" ? "is-danger" : "")}
           ${progress?.model ? badge(progress.model) : ""}
+          ${progress?.active_parallelism ? badge(`${progress.active_parallelism} потоков`) : ""}
           ${job?.id ? badge(`job ${job.id}`) : ""}
         </div>
       </div>
@@ -5039,6 +5040,7 @@ function renderInterestContextCandidateEnhancement(progress, job, enhancement, r
         ${badge(label(status), status === "failed" ? "is-danger" : "")}
         ${progress?.model ? badge(progress.model) : ""}
         ${progress?.model_profile ? badge(progress.model_profile) : ""}
+        ${progress?.active_parallelism ? badge(`${progress.active_parallelism} потоков`) : ""}
         ${job?.id ? badge(`job ${job.id}`) : ""}
       </div>
     </div>
@@ -5166,7 +5168,8 @@ function renderCoreItems(items, pagination) {
 function enhancementProgressHint(progress) {
   const chunkIndex = progress?.chunk_index || 0;
   const chunkCount = progress?.chunk_count || 0;
-  if (chunkCount) return `фрагмент ${chunkIndex}/${chunkCount}`;
+  const parallelism = progress?.active_parallelism ? ` · ${progress.active_parallelism} потоков` : "";
+  if (chunkCount) return `фрагмент ${chunkIndex}/${chunkCount}${parallelism}`;
   return progress?.model || "модель";
 }
 

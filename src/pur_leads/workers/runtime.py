@@ -34,6 +34,7 @@ from pur_leads.repositories.telegram_sources import MonitoredSourceRecord, Teleg
 from pur_leads.models.telegram_sources import monitored_sources_table, source_messages_table
 from pur_leads.services.audit import AuditService
 from pur_leads.services.ai_chat_clients import (
+    build_ai_model_concurrency_limiter,
     build_zai_chat_client_for_route,
     select_ai_route,
 )
@@ -678,6 +679,29 @@ def build_telegram_handler_registry(
         )
         max_items = int(payload.get("max_items") or 1000)
         candidate_chunk_size = int(payload.get("candidate_chunk_size") or 10)
+        requested_parallelism = _non_negative_int(
+            payload.get("parallelism"),
+            default=_non_negative_int(
+                SettingsService(session).get("interest_core_llm_enhancement_parallelism"),
+                default=0,
+            ),
+        )
+
+        def enhancement_parallelism() -> int:
+            configured = _non_negative_int(
+                SettingsService(session).get("interest_core_llm_enhancement_parallelism"),
+                default=requested_parallelism,
+            )
+            if configured > 0:
+                return _bounded_worker_parallelism(session, configured)
+            limiter = build_ai_model_concurrency_limiter(session, worker_name=worker_name)
+            if limiter is None:
+                return 1
+            effective_limit = limiter.effective_limit_for_model(
+                route.model,
+                provider_account_id=route.provider_account_id,
+            )
+            return _bounded_worker_parallelism(session, effective_limit)
 
         scheduler.update_result_summary(
             job.id,
@@ -691,6 +715,8 @@ def build_telegram_handler_registry(
                 "message": f"Улучшаю кандидатов через {route.model}",
                 "candidate_count": max_items,
                 "candidate_chunk_size": candidate_chunk_size,
+                "configured_parallelism": requested_parallelism,
+                "active_parallelism": enhancement_parallelism(),
                 "model": route.model,
                 "model_profile": route.model_profile,
             },
@@ -723,6 +749,8 @@ def build_telegram_handler_registry(
             ai_agent_route_id=route.route_id,
             progress=update_progress,
             resume_state=resume_state,
+            parallelism=requested_parallelism,
+            parallelism_getter=enhancement_parallelism,
         )
         review_count = InterestCoreCandidateReviewService(
             session
@@ -1997,6 +2025,21 @@ def _positive_int(value: Any, *, default: int) -> int:
     if parsed <= 0:
         return default
     return parsed
+
+
+def _non_negative_int(value: Any, *, default: int) -> int:
+    if value is None:
+        return default
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return default
+    return parsed if parsed >= 0 else default
+
+
+def _bounded_worker_parallelism(session: Session, value: int) -> int:
+    cap = _positive_int(SettingsService(session).get("worker_capacity_global_cap"), default=32)
+    return max(1, min(cap, int(value)))
 
 
 def _optional_payload_string(payload: dict[str, Any], key: str) -> str | None:

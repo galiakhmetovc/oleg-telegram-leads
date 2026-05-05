@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 from collections.abc import Callable
 from typing import Any
@@ -48,6 +49,8 @@ class InterestCoreCandidateEnhancementService:
         ai_agent_route_id: str | None = None,
         progress: ProgressCallback | None = None,
         resume_state: dict[str, Any] | None = None,
+        parallelism: int = 1,
+        parallelism_getter: Callable[[], int] | None = None,
     ) -> dict[str, Any]:
         payload = self.build_payload(context_id, max_items=max_items)
         chunk_size = max(
@@ -64,45 +67,22 @@ class InterestCoreCandidateEnhancementService:
         request_ids = resume["request_ids"]
         usage_by_chunk = resume["usage_by_chunk"]
         completed_chunk_count = int(resume["completed_chunk_count"])
+        last_active_parallelism = 1
 
-        for chunk_index, candidates in enumerate(chunks, start=1):
-            if chunk_index <= completed_chunk_count:
-                continue
-            chunk_payload = {
-                **payload,
-                "candidates": candidates,
-                "chunk": {
-                    "index": chunk_index,
-                    "count": len(chunks),
-                    "candidate_count": len(candidates),
-                    "candidate_offset": (chunk_index - 1) * len(candidates),
-                },
-                "canonical_registry": _canonical_registry(parsed),
-            }
-            _report(
-                progress,
-                status="running",
-                current_stage="llm_enhancement",
-                current_stage_label=f"LLM-фрагмент {chunk_index}/{len(chunks)}",
-                overall_percent=_progress_percent(chunk_index - 1, len(chunks)),
-                stage_percent=0,
-                message=f"Улучшаю кандидатов {chunk_index}/{len(chunks)} через {model}",
-                context_id=context_id,
-                candidate_count=len(payload["candidates"]),
-                processed_candidate_count=(chunk_index - 1) * chunk_size,
+        async def complete_chunk(
+            *,
+            chunk_index: int,
+            candidates: list[dict[str, Any]],
+            canonical_registry: list[dict[str, Any]],
+            active_parallelism: int,
+        ) -> dict[str, Any]:
+            chunk_payload = _chunk_payload(
+                payload,
+                candidates=candidates,
                 chunk_index=chunk_index,
                 chunk_count=len(chunks),
-                chunk_size=len(candidates),
-                completed_chunk_count=completed_chunk_count,
-                improved_count=len(parsed["improved_candidates"]),
-                new_count=len(parsed["new_candidates"]),
-                rejected_count=len(parsed["rejected_candidates"]),
-                partial_result=parsed,
-                chunk_results=chunk_results,
-                usage_by_chunk=usage_by_chunk,
-                request_ids=request_ids,
-                model=model,
-                model_profile=model_profile,
+                canonical_registry=canonical_registry,
+                active_parallelism=active_parallelism,
             )
             prompt_text = render_interest_core_candidate_enhancement_prompt(chunk_payload)
             messages = [
@@ -124,44 +104,60 @@ class InterestCoreCandidateEnhancementService:
             chunk_parsed = normalize_candidate_enhancement_response(
                 parse_interest_core_brief_response(completion.content)
             )
-            _merge_enhancement_result(parsed, chunk_parsed)
-            if completion.request_id:
-                request_ids.append(completion.request_id)
-            usage_by_chunk.append(
-                {
-                    "chunk_index": chunk_index,
-                    "usage": completion.usage,
-                    "request_id": completion.request_id,
-                }
+            return {
+                "chunk_index": chunk_index,
+                "candidates": candidates,
+                "parsed": chunk_parsed,
+                "request_id": completion.request_id,
+                "usage": completion.usage,
+            }
+
+        while completed_chunk_count < len(chunks):
+            next_chunk_index = completed_chunk_count + 1
+            remaining_chunk_count = len(chunks) - completed_chunk_count
+            active_parallelism = _current_parallelism(
+                parallelism,
+                parallelism_getter=parallelism_getter,
+                remaining_chunk_count=remaining_chunk_count,
             )
-            chunk_results.append(
-                {
-                    "chunk_index": chunk_index,
-                    "candidate_count": len(candidates),
-                    "improved_count": len(chunk_parsed["improved_candidates"]),
-                    "new_count": len(chunk_parsed["new_candidates"]),
-                    "rejected_count": len(chunk_parsed["rejected_candidates"]),
-                    "summary": chunk_parsed.get("summary"),
-                }
-            )
-            completed_chunk_count = chunk_index
+            last_active_parallelism = active_parallelism
+            wave = [
+                (chunk_index, chunks[chunk_index - 1])
+                for chunk_index in range(
+                    next_chunk_index,
+                    min(len(chunks), next_chunk_index + active_parallelism - 1) + 1,
+                )
+            ]
+            canonical_registry = _canonical_registry(parsed)
+            first_wave_chunk = wave[0][0]
+            last_wave_chunk = wave[-1][0]
             _report(
                 progress,
                 status="running",
                 current_stage="llm_enhancement",
-                current_stage_label=f"LLM-фрагмент {chunk_index}/{len(chunks)}",
-                overall_percent=_progress_percent(chunk_index, len(chunks)),
-                stage_percent=100,
-                message=f"Готов фрагмент {chunk_index}/{len(chunks)}",
+                current_stage_label=_chunk_stage_label(
+                    first_wave_chunk,
+                    last_wave_chunk,
+                    len(chunks),
+                ),
+                overall_percent=_progress_percent(completed_chunk_count, len(chunks)),
+                stage_percent=0,
+                message=(
+                    f"Улучшаю кандидатов {first_wave_chunk}-{last_wave_chunk}/{len(chunks)} "
+                    f"через {model}"
+                ),
                 context_id=context_id,
                 candidate_count=len(payload["candidates"]),
-                processed_candidate_count=min(
-                    len(payload["candidates"]), chunk_index * chunk_size
+                processed_candidate_count=_processed_candidate_count(
+                    chunks,
+                    completed_chunk_count=completed_chunk_count,
                 ),
-                chunk_index=chunk_index,
+                chunk_index=first_wave_chunk,
                 chunk_count=len(chunks),
-                chunk_size=len(candidates),
+                chunk_size=chunk_size,
                 completed_chunk_count=completed_chunk_count,
+                active_parallelism=active_parallelism,
+                configured_parallelism=int(parallelism or 0),
                 improved_count=len(parsed["improved_candidates"]),
                 new_count=len(parsed["new_candidates"]),
                 rejected_count=len(parsed["rejected_candidates"]),
@@ -172,6 +168,72 @@ class InterestCoreCandidateEnhancementService:
                 model=model,
                 model_profile=model_profile,
             )
+            wave_results = await asyncio.gather(
+                *(
+                    complete_chunk(
+                        chunk_index=chunk_index,
+                        candidates=candidates,
+                        canonical_registry=canonical_registry,
+                        active_parallelism=active_parallelism,
+                    )
+                    for chunk_index, candidates in wave
+                )
+            )
+            for wave_result in sorted(wave_results, key=lambda item: int(item["chunk_index"])):
+                chunk_index = int(wave_result["chunk_index"])
+                candidates = wave_result["candidates"]
+                chunk_parsed = wave_result["parsed"]
+                _merge_enhancement_result(parsed, chunk_parsed)
+                if wave_result["request_id"]:
+                    request_ids.append(wave_result["request_id"])
+                usage_by_chunk.append(
+                    {
+                        "chunk_index": chunk_index,
+                        "usage": wave_result["usage"],
+                        "request_id": wave_result["request_id"],
+                    }
+                )
+                chunk_results.append(
+                    {
+                        "chunk_index": chunk_index,
+                        "candidate_count": len(candidates),
+                        "improved_count": len(chunk_parsed["improved_candidates"]),
+                        "new_count": len(chunk_parsed["new_candidates"]),
+                        "rejected_count": len(chunk_parsed["rejected_candidates"]),
+                        "summary": chunk_parsed.get("summary"),
+                    }
+                )
+                completed_chunk_count = chunk_index
+                _report(
+                    progress,
+                    status="running",
+                    current_stage="llm_enhancement",
+                    current_stage_label=f"LLM-фрагмент {chunk_index}/{len(chunks)}",
+                    overall_percent=_progress_percent(chunk_index, len(chunks)),
+                    stage_percent=100,
+                    message=f"Готов фрагмент {chunk_index}/{len(chunks)}",
+                    context_id=context_id,
+                    candidate_count=len(payload["candidates"]),
+                    processed_candidate_count=_processed_candidate_count(
+                        chunks,
+                        completed_chunk_count=completed_chunk_count,
+                    ),
+                    chunk_index=chunk_index,
+                    chunk_count=len(chunks),
+                    chunk_size=len(candidates),
+                    completed_chunk_count=completed_chunk_count,
+                    active_parallelism=active_parallelism,
+                    configured_parallelism=int(parallelism or 0),
+                    improved_count=len(parsed["improved_candidates"]),
+                    new_count=len(parsed["new_candidates"]),
+                    rejected_count=len(parsed["rejected_candidates"]),
+                    partial_result=parsed,
+                    chunk_results=chunk_results,
+                    usage_by_chunk=usage_by_chunk,
+                    request_ids=request_ids,
+                    model=model,
+                    model_profile=model_profile,
+                )
 
         parsed["summary"] = _combined_summary(parsed, chunk_results)
         return {
@@ -189,6 +251,8 @@ class InterestCoreCandidateEnhancementService:
             "candidate_count": len(payload["candidates"]),
             "candidate_chunk_size": chunk_size,
             "chunk_count": len(chunks),
+            "active_parallelism": last_active_parallelism,
+            "configured_parallelism": int(parallelism or 0),
             "improved_count": len(parsed["improved_candidates"]),
             "new_count": len(parsed["new_candidates"]),
             "rejected_count": len(parsed["rejected_candidates"]),
@@ -423,6 +487,64 @@ def _progress_percent(done: int, total: int) -> int:
 
 def _chunks(items: list[dict[str, Any]], *, size: int) -> list[list[dict[str, Any]]]:
     return [items[index : index + size] for index in range(0, len(items), size)]
+
+
+def _chunk_payload(
+    payload: dict[str, Any],
+    *,
+    candidates: list[dict[str, Any]],
+    chunk_index: int,
+    chunk_count: int,
+    canonical_registry: list[dict[str, Any]],
+    active_parallelism: int,
+) -> dict[str, Any]:
+    return {
+        **payload,
+        "candidates": candidates,
+        "chunk": {
+            "index": chunk_index,
+            "count": chunk_count,
+            "candidate_count": len(candidates),
+            "candidate_offset": max(0, chunk_index - 1) * len(candidates),
+            "active_parallelism": active_parallelism,
+        },
+        "canonical_registry": canonical_registry,
+    }
+
+
+def _current_parallelism(
+    configured_parallelism: int,
+    *,
+    parallelism_getter: Callable[[], int] | None,
+    remaining_chunk_count: int,
+) -> int:
+    value = configured_parallelism
+    if parallelism_getter is not None:
+        try:
+            value = parallelism_getter()
+        except Exception:
+            value = configured_parallelism
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        parsed = 1
+    return max(1, min(max(1, remaining_chunk_count), parsed))
+
+
+def _chunk_stage_label(first_chunk: int, last_chunk: int, chunk_count: int) -> str:
+    if first_chunk == last_chunk:
+        return f"LLM-фрагмент {first_chunk}/{chunk_count}"
+    return f"LLM-фрагменты {first_chunk}-{last_chunk}/{chunk_count}"
+
+
+def _processed_candidate_count(
+    chunks: list[list[dict[str, Any]]],
+    *,
+    completed_chunk_count: int,
+) -> int:
+    if completed_chunk_count <= 0:
+        return 0
+    return sum(len(chunk) for chunk in chunks[:completed_chunk_count])
 
 
 def _empty_enhancement_result() -> dict[str, Any]:

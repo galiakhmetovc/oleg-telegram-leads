@@ -105,6 +105,7 @@ class InterestCoreBriefGenerateRequest(BaseModel):
 class InterestCoreCandidateEnhanceRequest(BaseModel):
     max_items: int = Field(default=1000, ge=1, le=5000)
     candidate_chunk_size: int = Field(default=10, ge=1, le=50)
+    parallelism: int | None = Field(default=None, ge=0, le=64)
     agent_key: str = "catalog_extractor"
     route_role: str = "primary"
     max_tokens: int | None = Field(default=None, ge=1, le=32000)
@@ -554,6 +555,7 @@ def enhance_interest_context_draft_with_llm(
             "requested_by": _actor(validated),
             "max_items": payload.max_items,
             "candidate_chunk_size": payload.candidate_chunk_size,
+            "parallelism": payload.parallelism,
             "agent_key": payload.agent_key,
             "route_role": payload.route_role,
             "max_tokens": payload.max_tokens,
@@ -1159,6 +1161,11 @@ def _candidate_enhancement_progress_from_row(job: dict[str, Any] | None) -> dict
             "improved_count": progress.get("improved_count", 0),
             "new_count": progress.get("new_count", 0),
             "rejected_count": progress.get("rejected_count", 0),
+            "chunk_index": progress.get("chunk_count", 0),
+            "chunk_count": progress.get("chunk_count", 0),
+            "completed_chunk_count": progress.get("chunk_count", 0),
+            "active_parallelism": progress.get("active_parallelism"),
+            "configured_parallelism": progress.get("configured_parallelism"),
             "model": progress.get("model"),
             "model_profile": progress.get("model_profile"),
         }
