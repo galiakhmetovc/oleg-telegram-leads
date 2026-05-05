@@ -42,6 +42,10 @@ from pur_leads.services.catalog_sources import CatalogSourceService
 from pur_leads.services.classifier_snapshots import ClassifierSnapshotService
 from pur_leads.services.evaluation import EvaluationService
 from pur_leads.services.interest_context_drafts import InterestContextDraftService
+from pur_leads.services.interest_core_candidate_enhancement import (
+    ENHANCE_INTEREST_CORE_CANDIDATES_JOB,
+    InterestCoreCandidateEnhancementService,
+)
 from pur_leads.services.interest_core_briefs import (
     GENERATE_INTEREST_CORE_BRIEF_JOB,
     InterestCoreBriefService,
@@ -636,6 +640,70 @@ def build_telegram_handler_registry(
             }
         )
 
+    async def enhance_interest_core_candidates(job: SchedulerJobRecord) -> JobHandlerResult:
+        if not job.scope_id:
+            raise ValueError("enhance_interest_core_candidates requires scope_id")
+        payload = job.payload_json if isinstance(job.payload_json, dict) else {}
+        actor = str(payload.get("requested_by") or "worker")
+        agent_key = str(payload.get("agent_key") or "catalog_extractor")
+        route_role = str(payload.get("route_role") or "primary")
+        route = select_ai_route(session, agent_key=agent_key, route_role=route_role)
+        if route is None and route_role != "fallback":
+            route = select_ai_route(session, agent_key=agent_key, route_role="fallback")
+        if route is None:
+            raise ValueError(f"No AI route configured for {agent_key}")
+        settings = load_settings()
+        client = build_zai_chat_client_for_route(
+            session,
+            route=route,
+            settings=settings,
+            worker_name=worker_name,
+            task_type="interest_core_candidate_enhancement",
+            default_timeout_seconds=float(settings.catalog_llm_timeout_seconds),
+        )
+        max_tokens = int(payload.get("max_tokens") or route.max_output_tokens or 4096)
+        payload_temperature = payload.get("temperature")
+        temperature = float(
+            payload_temperature
+            if payload_temperature is not None
+            else route.temperature
+            if route.temperature is not None
+            else 0.0
+        )
+        max_items = int(payload.get("max_items") or 80)
+
+        scheduler.update_result_summary(
+            job.id,
+            result_summary={
+                "kind": "interest_core_candidate_enhancement",
+                "status": "running",
+                "current_stage": "llm_enhancement",
+                "current_stage_label": "LLM-улучшение",
+                "overall_percent": 30,
+                "stage_percent": 30,
+                "message": f"Улучшаю кандидатов через {route.model}",
+                "candidate_count": max_items,
+                "model": route.model,
+                "model_profile": route.model_profile,
+            },
+        )
+        result = await InterestCoreCandidateEnhancementService(session).enhance_async(
+            job.scope_id,
+            client=client,
+            actor=actor,
+            provider=route.provider,
+            model=route.model,
+            model_profile=route.model_profile,
+            max_items=max_items,
+            max_tokens=max_tokens,
+            temperature=temperature,
+            ai_provider_account_id=route.provider_account_id,
+            ai_model_id=route.model_id,
+            ai_model_profile_id=route.model_profile_id,
+            ai_agent_route_id=route.route_id,
+        )
+        return JobHandlerResult(result_summary=result)
+
     async def fetch_message_context(job: SchedulerJobRecord) -> JobHandlerResult:
         if job.source_message_id is None:
             raise ValueError("fetch_message_context requires source_message_id")
@@ -722,6 +790,7 @@ def build_telegram_handler_registry(
         "prepare_interest_context_data": prepare_interest_context_data,
         "build_interest_context_draft": build_interest_context_draft,
         GENERATE_INTEREST_CORE_BRIEF_JOB: generate_interest_core_brief,
+        ENHANCE_INTEREST_CORE_CANDIDATES_JOB: enhance_interest_core_candidates,
         "fetch_message_context": fetch_message_context,
         "download_artifact": download_artifact,
     }

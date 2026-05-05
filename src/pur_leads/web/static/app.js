@@ -3717,6 +3717,7 @@ function initInterestContexts() {
     step: stepRoot?.dataset.interestStep || "load",
     preparePollTimer: null,
     draftPollTimer: null,
+    enhancePollTimer: null,
     briefPollTimer: null,
   };
   document
@@ -3734,6 +3735,9 @@ function initInterestContexts() {
   document
     .querySelector("#interest-context-build-draft")
     ?.addEventListener("click", () => buildInterestContextDraft(state));
+  document
+    .querySelector("#interest-context-enhance-draft-llm")
+    ?.addEventListener("click", () => enhanceInterestContextDraftWithLlm(state));
   document
     .querySelector("#interest-context-open-raw-review")
     ?.addEventListener("click", () => loadInterestContextRawReview(state));
@@ -3807,12 +3811,14 @@ function renderInterestContextList(state) {
 async function loadInterestContextDetail(contextId, state) {
   stopInterestContextPreparePolling(state);
   stopInterestContextDraftPolling(state);
+  stopInterestContextEnhancementPolling(state);
   stopInterestCoreBriefPolling(state);
   const detail = await api(`/api/interest-contexts/${encodeURIComponent(contextId)}`);
   state.detail = detail;
   renderInterestContextDetail(detail);
   await loadInterestContextPrepareStatus(state, { silent: true });
   await loadInterestContextDraftStatus(state, { silent: true });
+  await loadInterestContextEnhancementStatus(state, { silent: true });
   await loadInterestCoreBriefStatus(state, { silent: true });
   if (state.step === "check") {
     await loadInterestContextRawReview(state);
@@ -3830,6 +3836,7 @@ function renderInterestContextEmptyDetail() {
   const rawReview = document.querySelector("#interest-context-raw-review");
   const prepareProgress = document.querySelector("#interest-context-prepare-progress");
   const draftReview = document.querySelector("#interest-context-draft-review");
+  const enhanceReview = document.querySelector("#interest-context-llm-enhance-review");
   const briefProgress = document.querySelector("#interest-core-brief-progress");
   const briefList = document.querySelector("#interest-core-brief-list");
   const briefText = document.querySelector("#interest-core-brief-text");
@@ -3842,6 +3849,7 @@ function renderInterestContextEmptyDetail() {
   if (rawReview) rawReview.innerHTML = "";
   if (prepareProgress) prepareProgress.innerHTML = "";
   if (draftReview) draftReview.innerHTML = "";
+  if (enhanceReview) enhanceReview.innerHTML = "";
   if (briefProgress) briefProgress.innerHTML = "";
   if (briefList) briefList.innerHTML = "";
   if (briefText) briefText.value = "";
@@ -4480,6 +4488,67 @@ function isActiveDraftStatus(status) {
   return ["queued", "running"].includes(String(status || ""));
 }
 
+async function enhanceInterestContextDraftWithLlm(state) {
+  const status = document.querySelector("#interest-context-status");
+  if (!state.selectedId) {
+    if (status) status.textContent = "Сначала выберите контекст";
+    return;
+  }
+  try {
+    const payload = await api(
+      `/api/interest-contexts/${encodeURIComponent(state.selectedId)}/draft/enhance-llm`,
+      {
+        method: "POST",
+        body: JSON.stringify({
+          max_items: 80,
+          agent_key: "catalog_extractor",
+          route_role: "primary",
+        }),
+      }
+    );
+    renderInterestContextCandidateEnhancement(payload.progress, payload.job, payload.enhancement);
+    if (status) status.textContent = "LLM-улучшение кандидатов поставлено в очередь";
+    scheduleInterestContextEnhancementPolling(state);
+  } catch (error) {
+    if (status) status.textContent = error.message;
+  }
+}
+
+async function loadInterestContextEnhancementStatus(state, { silent = false } = {}) {
+  const status = document.querySelector("#interest-context-status");
+  if (!state.selectedId) return;
+  try {
+    const payload = await api(
+      `/api/interest-contexts/${encodeURIComponent(state.selectedId)}/draft/enhance-llm/status`
+    );
+    renderInterestContextCandidateEnhancement(payload.progress, payload.job, payload.enhancement);
+    if (isActiveCandidateEnhancementStatus(payload.progress?.status)) {
+      scheduleInterestContextEnhancementPolling(state);
+    } else {
+      stopInterestContextEnhancementPolling(state);
+    }
+  } catch (error) {
+    if (!silent && status) status.textContent = error.message;
+  }
+}
+
+function scheduleInterestContextEnhancementPolling(state) {
+  if (state.enhancePollTimer) return;
+  state.enhancePollTimer = window.setInterval(() => {
+    loadInterestContextEnhancementStatus(state, { silent: true });
+  }, 2000);
+}
+
+function stopInterestContextEnhancementPolling(state) {
+  if (!state.enhancePollTimer) return;
+  window.clearInterval(state.enhancePollTimer);
+  state.enhancePollTimer = null;
+}
+
+function isActiveCandidateEnhancementStatus(status) {
+  return ["queued", "running"].includes(String(status || ""));
+}
+
 async function loadInterestContextRawReview(state) {
   const target = document.querySelector("#interest-context-raw-review");
   const status = document.querySelector("#interest-context-status");
@@ -4638,6 +4707,111 @@ function renderInterestContextDraft(progress, job, draft) {
     ${renderDraftStageResults(stageResults)}
     ${renderDraftItems(draftItems)}
   </section>`;
+}
+
+function renderInterestContextCandidateEnhancement(progress, job, enhancement) {
+  const target = document.querySelector("#interest-context-llm-enhance-review");
+  if (!target) return;
+  const status = String(progress?.status || "not_started");
+  if (status === "not_started" && !enhancement) {
+    target.innerHTML = "";
+    return;
+  }
+  const result = enhancement?.result || {};
+  const overall = normalizePercent(progress?.overall_percent);
+  const stage = normalizePercent(progress?.stage_percent);
+  const message = progress?.message || status;
+  target.innerHTML = `<section class="draft-review-section">
+    <div class="section-head">
+      <div>
+        <h3>LLM-рекомендации по ядру</h3>
+        <p class="muted">${escapeHtml(message)}</p>
+      </div>
+      <div class="badges">
+        ${badge(label(status), status === "failed" ? "is-danger" : "")}
+        ${progress?.model ? badge(progress.model) : ""}
+        ${progress?.model_profile ? badge(progress.model_profile) : ""}
+        ${job?.id ? badge(`job ${job.id}`) : ""}
+      </div>
+    </div>
+    ${
+      status !== "not_started"
+        ? `<div class="prepare-progress-bars">
+            ${renderProgressLine("Общий прогресс", overall, `${progress?.candidate_count || 0} кандидатов`)}
+            ${renderProgressLine(progress?.current_stage_label || "LLM-улучшение", stage, progress?.model || "модель")}
+          </div>`
+        : ""
+    }
+    <div class="prepare-progress-meta">
+      ${renderOpsMetric("Улучшено", progress?.improved_count || 0, "из rule-based")}
+      ${renderOpsMetric("Добавлено", progress?.new_count || 0, "из брифа/evidence")}
+      ${renderOpsMetric("Отклонено", progress?.rejected_count || 0, "как шум")}
+    </div>
+    ${result?.summary ? `<p class="muted">${escapeHtml(result.summary)}</p>` : ""}
+    ${renderEnhancedCandidateSection("Улучшенные кандидаты", result.improved_candidates || [], renderImprovedCandidateRow)}
+    ${renderEnhancedCandidateSection("Новые кандидаты от LLM", result.new_candidates || [], renderNewCandidateRow)}
+    ${renderEnhancedCandidateSection("Кандидаты на отклонение", result.rejected_candidates || [], renderRejectedCandidateRow)}
+  </section>`;
+}
+
+function renderEnhancedCandidateSection(title, items, rowRenderer) {
+  if (!items.length) return "";
+  return `<div class="draft-items">
+    <div class="section-head compact-section-head">
+      <h4>${escapeHtml(title)}</h4>
+      <span class="muted">${escapeHtml(String(items.length))}</span>
+    </div>
+    <div class="table-list">${items.slice(0, 120).map(rowRenderer).join("")}</div>
+  </div>`;
+}
+
+function renderImprovedCandidateRow(item) {
+  return `<div class="table-row draft-item-row">
+    <div>
+      <strong>${escapeHtml(item.canonical_name || item.source_candidate_id || "кандидат")}</strong>
+      <p class="muted">${escapeHtml(item.description || item.rationale || "")}</p>
+      <div class="badges">
+        ${badge(label(item.decision || "needs_review"), item.decision === "reject" ? "is-danger" : "")}
+        ${item.category ? badge(item.category) : ""}
+        ${badge(label(item.confidence || "medium"))}
+        ${item.merge_into_candidate_id ? badge(`merge -> ${item.merge_into_candidate_id}`) : ""}
+      </div>
+      ${renderCandidateSignalLine("Сигналы", item.lead_signals)}
+      ${renderCandidateSignalLine("Синонимы", item.synonyms)}
+      ${renderCandidateSignalLine("Шум", item.noise_patterns)}
+    </div>
+  </div>`;
+}
+
+function renderNewCandidateRow(item) {
+  return `<div class="table-row draft-item-row">
+    <div>
+      <strong>${escapeHtml(item.canonical_name || "новый кандидат")}</strong>
+      <p class="muted">${escapeHtml(item.description || item.rationale || "")}</p>
+      <div class="badges">
+        ${item.category ? badge(item.category) : ""}
+        ${badge(label(item.confidence || "medium"))}
+      </div>
+      ${renderCandidateSignalLine("Сигналы", item.lead_signals)}
+      ${renderCandidateSignalLine("Синонимы", item.synonyms)}
+      ${renderCandidateSignalLine("Шум", item.noise_patterns)}
+    </div>
+  </div>`;
+}
+
+function renderRejectedCandidateRow(item) {
+  return `<div class="table-row draft-item-row">
+    <div>
+      <strong>${escapeHtml(item.source_candidate_id || "кандидат")}</strong>
+      <p class="muted">${escapeHtml(item.reason || "")}</p>
+      <div class="badges">${badge("reject", "is-danger")}</div>
+    </div>
+  </div>`;
+}
+
+function renderCandidateSignalLine(title, items) {
+  if (!Array.isArray(items) || !items.length) return "";
+  return `<p class="draft-evidence"><strong>${escapeHtml(title)}:</strong> ${escapeHtml(items.slice(0, 5).join("; "))}</p>`;
 }
 
 function initInterestContextDraftScreen() {
@@ -4887,6 +5061,8 @@ function setInterestContextFormsEnabled(enabled) {
   });
   const draftButton = document.querySelector("#interest-context-build-draft");
   if (draftButton) draftButton.disabled = !enabled;
+  const enhanceDraftButton = document.querySelector("#interest-context-enhance-draft-llm");
+  if (enhanceDraftButton) enhanceDraftButton.disabled = !enabled;
   const rawReviewButton = document.querySelector("#interest-context-open-raw-review");
   if (rawReviewButton) rawReviewButton.disabled = !enabled;
   const prepareButton = document.querySelector("#interest-context-prepare-data");

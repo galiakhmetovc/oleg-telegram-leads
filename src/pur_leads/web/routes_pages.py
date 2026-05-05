@@ -484,12 +484,19 @@ def _interest_context_core_body() -> str:
                           Собирает кандидатов из подготовленных данных. Это rule-based этап без LLM.
                         </p>
                       </div>
-                      <md-filled-button id="interest-context-build-draft" type="button">
-                        <md-icon slot="icon">hub</md-icon>
-                        Сформировать ядро
-                      </md-filled-button>
+                      <div class="button-row">
+                        <md-filled-button id="interest-context-build-draft" type="button">
+                          <md-icon slot="icon">hub</md-icon>
+                          Сформировать ядро
+                        </md-filled-button>
+                        <md-filled-tonal-button id="interest-context-enhance-draft-llm" type="button">
+                          <md-icon slot="icon">auto_fix_high</md-icon>
+                          Улучшить через LLM
+                        </md-filled-tonal-button>
+                      </div>
                     </div>
                     <div id="interest-context-draft-review" class="draft-review-panel" aria-live="polite"></div>
+                    <div id="interest-context-llm-enhance-review" class="draft-review-panel" aria-live="polite"></div>
                   </section>
                   <section class="detail-section">
                     <div class="section-head">
@@ -2074,7 +2081,7 @@ def _page(*, page: str, title: str, main: str) -> str:
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans:wght@400;500;600;700&amp;display=swap">
-  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined&amp;icon_names=add,archive,article,check_circle,close,database,description,folder,forum,hub,model_training,open_in_new,person,person_add,radio_button_unchecked,refresh,send,settings,smart_toy,storage,table_chart,upload_file,vpn_key&amp;display=block">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined&amp;icon_names=add,archive,article,auto_fix_high,check_circle,close,database,description,folder,forum,hub,model_training,open_in_new,person,person_add,radio_button_unchecked,refresh,send,settings,smart_toy,storage,table_chart,upload_file,vpn_key&amp;display=block">
   <link rel="stylesheet" href="/static/app.css">
 </head>
 <body data-page="{page}">

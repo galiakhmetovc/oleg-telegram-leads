@@ -21,6 +21,9 @@ from pur_leads.services.interest_context_drafts import (
     BUILD_INTEREST_CONTEXT_DRAFT_JOB,
     InterestContextDraftService,
 )
+from pur_leads.services.interest_core_candidate_enhancement import (
+    ENHANCE_INTEREST_CORE_CANDIDATES_JOB,
+)
 from pur_leads.services.interest_core_briefs import (
     GENERATE_INTEREST_CORE_BRIEF_JOB,
     InterestCoreBriefService,
@@ -89,6 +92,14 @@ class InterestCoreBriefManualRequest(BaseModel):
 
 class InterestCoreBriefGenerateRequest(BaseModel):
     activate: bool = True
+    agent_key: str = "catalog_extractor"
+    route_role: str = "primary"
+    max_tokens: int | None = Field(default=None, ge=1, le=32000)
+    temperature: float | None = Field(default=None, ge=0.0, le=2.0)
+
+
+class InterestCoreCandidateEnhanceRequest(BaseModel):
+    max_items: int = Field(default=80, ge=1, le=300)
     agent_key: str = "catalog_extractor"
     route_role: str = "primary"
     max_tokens: int | None = Field(default=None, ge=1, le=32000)
@@ -473,6 +484,75 @@ def get_interest_context_draft_status(
     }
 
 
+@router.post("/{context_id}/draft/enhance-llm")
+def enhance_interest_context_draft_with_llm(
+    context_id: str,
+    payload: InterestCoreCandidateEnhanceRequest,
+    validated: SessionValidationResult = Depends(current_admin),
+    session: Session = Depends(get_session),
+) -> dict[str, Any]:
+    context = InterestContextService(session).repository.get(context_id)
+    if context is None:
+        raise HTTPException(status_code=404, detail="Interest context not found")
+    draft = InterestContextDraftService(session).latest_payload(context.id, limit=1)
+    draft_run = draft.get("draft_run")
+    if not draft_run:
+        raise HTTPException(status_code=400, detail="Сначала сформируйте rule-based ядро")
+    if draft_run.get("status") != "succeeded":
+        raise HTTPException(status_code=400, detail="Последняя сборка ядра еще не готова")
+    if InterestCoreBriefService(session).active_brief(context.id) is None:
+        raise HTTPException(status_code=400, detail="Сначала создайте активный LLM-бриф")
+    active_job = _active_candidate_enhancement_job(session, context.id)
+    if active_job is not None:
+        return {
+            "job": _row(active_job),
+            "progress": _candidate_enhancement_progress_from_row(active_job),
+            "enhancement": _candidate_enhancement_payload(active_job),
+        }
+    job = SchedulerService(session).enqueue(
+        job_type=ENHANCE_INTEREST_CORE_CANDIDATES_JOB,
+        scope_type="interest_context",
+        scope_id=context.id,
+        priority="normal",
+        max_attempts=2,
+        payload_json={
+            "requested_by": _actor(validated),
+            "max_items": payload.max_items,
+            "agent_key": payload.agent_key,
+            "route_role": payload.route_role,
+            "max_tokens": payload.max_tokens,
+            "temperature": payload.temperature,
+        },
+        checkpoint_before_json={
+            "draft_run_id": draft_run.get("id"),
+        },
+    )
+    return {
+        "job": _job_payload(job),
+        "progress": _candidate_enhancement_progress(job),
+        "enhancement": None,
+    }
+
+
+@router.get("/{context_id}/draft/enhance-llm/status")
+def get_interest_context_draft_llm_enhancement_status(
+    context_id: str,
+    _validated: SessionValidationResult = Depends(current_admin),
+    session: Session = Depends(get_session),
+) -> dict[str, Any]:
+    context = InterestContextService(session).repository.get(context_id)
+    if context is None:
+        raise HTTPException(status_code=404, detail="Interest context not found")
+    job = _latest_candidate_enhancement_job(session, context.id)
+    return {
+        "job": _row(job) if job else None,
+        "progress": _candidate_enhancement_progress_from_row(job)
+        if job
+        else _empty_candidate_enhancement_progress(),
+        "enhancement": _candidate_enhancement_payload(job) if job else None,
+    }
+
+
 @router.get("/{context_id}/briefs")
 def list_interest_core_briefs(
     context_id: str,
@@ -739,6 +819,41 @@ def _active_core_brief_job(session: Session, context_id: str) -> dict[str, Any] 
     return dict(row) if row is not None else None
 
 
+def _latest_candidate_enhancement_job(session: Session, context_id: str) -> dict[str, Any] | None:
+    row = (
+        session.execute(
+            select(scheduler_jobs_table)
+            .where(scheduler_jobs_table.c.job_type == ENHANCE_INTEREST_CORE_CANDIDATES_JOB)
+            .where(scheduler_jobs_table.c.scope_type == "interest_context")
+            .where(scheduler_jobs_table.c.scope_id == context_id)
+            .order_by(desc(scheduler_jobs_table.c.created_at))
+            .limit(1)
+        )
+        .mappings()
+        .first()
+    )
+    return dict(row) if row is not None else None
+
+
+def _active_candidate_enhancement_job(
+    session: Session, context_id: str
+) -> dict[str, Any] | None:
+    row = (
+        session.execute(
+            select(scheduler_jobs_table)
+            .where(scheduler_jobs_table.c.job_type == ENHANCE_INTEREST_CORE_CANDIDATES_JOB)
+            .where(scheduler_jobs_table.c.scope_type == "interest_context")
+            .where(scheduler_jobs_table.c.scope_id == context_id)
+            .where(scheduler_jobs_table.c.status.in_(["queued", "running"]))
+            .order_by(desc(scheduler_jobs_table.c.created_at))
+            .limit(1)
+        )
+        .mappings()
+        .first()
+    )
+    return dict(row) if row is not None else None
+
+
 def _job_payload(job: Any) -> dict[str, Any]:
     return asdict(job) if hasattr(job, "__dataclass_fields__") else dict(job)
 
@@ -866,7 +981,7 @@ def _core_brief_progress_from_row(job: dict[str, Any] | None) -> dict[str, Any]:
         return _empty_core_brief_progress()
     progress = job.get("result_summary_json")
     if isinstance(progress, dict) and progress.get("kind") == "interest_core_brief_generation":
-        return progress
+        return _progress_with_actual_job_status(job, progress)
     if job.get("status") == "succeeded" and isinstance(progress, dict):
         return {
             "kind": "interest_core_brief_generation",
@@ -909,6 +1024,112 @@ def _empty_core_brief_progress() -> dict[str, Any]:
         "brief_id": None,
         "version": None,
     }
+
+
+def _candidate_enhancement_progress(job: Any) -> dict[str, Any]:
+    return _candidate_enhancement_progress_from_row(_job_payload(job))
+
+
+def _candidate_enhancement_progress_from_row(job: dict[str, Any] | None) -> dict[str, Any]:
+    if not job:
+        return _empty_candidate_enhancement_progress()
+    progress = job.get("result_summary_json")
+    if isinstance(progress, dict) and progress.get("kind") == "interest_core_candidate_enhancement":
+        return _progress_with_actual_job_status(job, progress)
+    if job.get("status") == "succeeded" and isinstance(progress, dict):
+        return {
+            "kind": "interest_core_candidate_enhancement",
+            "status": "succeeded",
+            "current_stage": "done",
+            "current_stage_label": "Готово",
+            "overall_percent": 100,
+            "stage_percent": 100,
+            "message": progress.get("message") or "LLM-рекомендации готовы",
+            "candidate_count": progress.get("candidate_count", 0),
+            "improved_count": progress.get("improved_count", 0),
+            "new_count": progress.get("new_count", 0),
+            "rejected_count": progress.get("rejected_count", 0),
+            "model": progress.get("model"),
+            "model_profile": progress.get("model_profile"),
+        }
+    status = str(job.get("status") or "unknown")
+    return {
+        "kind": "interest_core_candidate_enhancement",
+        "status": status,
+        "current_stage": None,
+        "current_stage_label": "В очереди" if status == "queued" else status,
+        "overall_percent": 0,
+        "stage_percent": 0,
+        "message": "Задача ожидает воркер"
+        if status == "queued"
+        else job.get("last_error") or status,
+        "candidate_count": (job.get("payload_json") or {}).get("max_items", 0)
+        if isinstance(job.get("payload_json"), dict)
+        else 0,
+        "improved_count": 0,
+        "new_count": 0,
+        "rejected_count": 0,
+    }
+
+
+def _empty_candidate_enhancement_progress() -> dict[str, Any]:
+    return {
+        "kind": "interest_core_candidate_enhancement",
+        "status": "not_started",
+        "current_stage": None,
+        "current_stage_label": "Не запускалось",
+        "overall_percent": 0,
+        "stage_percent": 0,
+        "message": "LLM-улучшение кандидатов еще не запускалось",
+        "candidate_count": 0,
+        "improved_count": 0,
+        "new_count": 0,
+        "rejected_count": 0,
+    }
+
+
+def _candidate_enhancement_payload(job: dict[str, Any] | None) -> dict[str, Any] | None:
+    if not job:
+        return None
+    progress = job.get("result_summary_json")
+    if not isinstance(progress, dict):
+        return None
+    if progress.get("kind") != "interest_core_candidate_enhancement":
+        return None
+    if progress.get("status") != "succeeded":
+        return None
+    return progress
+
+
+def _progress_with_actual_job_status(
+    job: dict[str, Any],
+    progress: dict[str, Any],
+) -> dict[str, Any]:
+    job_status = str(job.get("status") or "")
+    progress_status = str(progress.get("status") or "")
+    if job_status == "failed" and progress_status != "failed":
+        return {
+            **progress,
+            "status": "failed",
+            "current_stage_label": "Ошибка",
+            "overall_percent": progress.get("overall_percent", 0),
+            "stage_percent": progress.get("stage_percent", 0),
+            "message": (
+                job.get("last_error")
+                or progress.get("message")
+                or "Задача завершилась ошибкой"
+            ),
+        }
+    if job_status == "succeeded" and progress_status != "succeeded":
+        return {
+            **progress,
+            "status": "succeeded",
+            "current_stage": "done",
+            "current_stage_label": "Готово",
+            "overall_percent": 100,
+            "stage_percent": 100,
+        }
+    return progress
 
 
 def _row(row: dict[str, Any]) -> dict[str, Any]:
