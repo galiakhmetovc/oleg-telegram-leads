@@ -3860,6 +3860,7 @@ async function loadInterestContextDetail(contextId, state) {
     await loadInterestContextDraftItemsPage(state);
   }
   if (state.step === "reviews") {
+    await loadInterestContextEnhancementStatus(state, { silent: true });
     state.reviewItemsOffset = 0;
     await loadInterestContextReviewItemsPage(state);
   }
@@ -4643,8 +4644,14 @@ async function loadInterestContextEnhancementStatus(state, { silent = false } = 
     );
     if (isActiveCandidateEnhancementStatus(payload.progress?.status)) {
       scheduleInterestContextEnhancementPolling(state);
+      if (currentInterestStep() === "reviews") {
+        await loadInterestContextReviewItemsPage(state);
+      }
     } else {
       stopInterestContextEnhancementPolling(state);
+      if (currentInterestStep() === "reviews") {
+        await loadInterestContextReviewItemsPage(state);
+      }
     }
   } catch (error) {
     if (!silent && status) status.textContent = error.message;

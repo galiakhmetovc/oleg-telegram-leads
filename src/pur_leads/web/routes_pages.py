@@ -614,6 +614,7 @@ def _interest_context_reviews_body() -> str:
                         <a class="interest-next-link" href="/interest-contexts/core/items">Рабочее ядро</a>
                       </div>
                     </div>
+                    <div id="interest-context-llm-enhance-review" class="draft-review-panel" data-summary-only="true" aria-live="polite"></div>
                     <div id="interest-context-review-items-page" class="draft-review-panel" aria-live="polite"></div>
                   </section>
     """
