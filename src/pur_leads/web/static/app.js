@@ -114,6 +114,7 @@ const LABELS = {
   lead_phrase: "признак запроса",
   lead_monitoring: "поиск лидов",
   leads: "лиды",
+  lead_signal: "сигнал интереса",
   language_model: "языковая модель",
   low: "низкий",
   manual: "вручную",
@@ -185,6 +186,10 @@ const LABELS = {
   filesystem_discovery: "найдено на диске",
   metadata_json: "metadata запуска",
   telegram_raw_export_runs: "raw export run",
+  canonical: "название ядра",
+  phrase: "фраза",
+  synonym: "синоним",
+  token_overlap: "пересечение токенов",
 };
 
 const label = (value, fallback = "") => LABELS[value] || text(value, fallback);
@@ -3729,6 +3734,11 @@ function initInterestContexts() {
     reviewItemsOffset: 0,
     coreItemsLimit: 10,
     coreItemsOffset: 0,
+    analysisRunsLimit: 10,
+    analysisRunsOffset: 0,
+    analysisMatchesLimit: 10,
+    analysisMatchesOffset: 0,
+    selectedAnalysisRunId: null,
   };
   document
     .querySelector("#interest-context-refresh")
@@ -3742,6 +3752,18 @@ function initInterestContexts() {
   document
     .querySelector("#interest-context-telegram-archive-form")
     ?.addEventListener("submit", (event) => uploadInterestContextTelegramArchive(event, state));
+  document
+    .querySelector("#interest-analysis-archive-form")
+    ?.addEventListener("submit", (event) => uploadInterestAnalysisArchive(event, state));
+  document
+    .querySelector("#interest-analysis-refresh")
+    ?.addEventListener("click", () => loadInterestAnalysisRuns(state));
+  document
+    .querySelector("#interest-analysis-runs")
+    ?.addEventListener("click", (event) => handleInterestAnalysisRunsClick(event, state));
+  document
+    .querySelector("#interest-analysis-matches")
+    ?.addEventListener("click", (event) => handleInterestAnalysisMatchesClick(event, state));
   document
     .querySelector("#interest-context-build-draft")
     ?.addEventListener("click", () => buildInterestContextDraft(state));
@@ -3872,6 +3894,12 @@ async function loadInterestContextDetail(contextId, state) {
     state.coreItemsOffset = 0;
     await loadInterestContextCoreItemsPage(state);
   }
+  if (state.step === "analyze") {
+    state.analysisRunsOffset = 0;
+    state.analysisMatchesOffset = 0;
+    state.selectedAnalysisRunId = null;
+    await loadInterestAnalysisRuns(state);
+  }
   if (state.step === "llm") {
     await loadInterestCoreBriefStatus(state, { silent: true });
   }
@@ -3895,6 +3923,8 @@ function renderInterestContextEmptyDetail() {
   const briefProgress = document.querySelector("#interest-core-brief-progress");
   const briefList = document.querySelector("#interest-core-brief-list");
   const briefText = document.querySelector("#interest-core-brief-text");
+  const analysisRuns = document.querySelector("#interest-analysis-runs");
+  const analysisMatches = document.querySelector("#interest-analysis-matches");
   if (title) title.textContent = "Выберите контекст";
   if (description) {
     description.textContent = "Сначала создайте ядро интересов, затем добавьте Telegram-канал или архив.";
@@ -3908,6 +3938,8 @@ function renderInterestContextEmptyDetail() {
   if (briefProgress) briefProgress.innerHTML = "";
   if (briefList) briefList.innerHTML = "";
   if (briefText) briefText.value = "";
+  if (analysisRuns) analysisRuns.innerHTML = "";
+  if (analysisMatches) analysisMatches.innerHTML = "";
 }
 
 function renderInterestContextDetail(detail) {
@@ -4144,6 +4176,285 @@ function setInterestContextUploadProgress({ visible, value = 0, label = "", inde
     progress.setAttribute("value", String(progress.value));
   }
   if (labelTarget) labelTarget.textContent = label;
+}
+
+async function uploadInterestAnalysisArchive(event, state) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const status = document.querySelector("#interest-analysis-status");
+  const submitButton = form.querySelector('md-filled-button[type="submit"]');
+  const fileInput = form.querySelector('input[name="file"]');
+  if (!state.selectedId) {
+    if (status) status.textContent = "Сначала выберите контекст";
+    return;
+  }
+  if (!fileInput?.files?.[0]) {
+    if (status) status.textContent = "Выберите zip-архив Telegram Desktop.";
+    return;
+  }
+  const data = new FormData(form);
+  try {
+    setInterestAnalysisUploadProgress({ visible: true, value: 0, label: "0%" });
+    if (submitButton) submitButton.disabled = true;
+    if (status) status.textContent = "Загружаю архив для анализа...";
+    const payload = await uploadFormData(
+      `/api/interest-contexts/${encodeURIComponent(state.selectedId)}/analysis/telegram-archive`,
+      data,
+      {
+        onProgress: (value) => {
+          const percent = Math.round(value * 100);
+          setInterestAnalysisUploadProgress({ visible: true, value, label: `${percent}%` });
+          if (status) status.textContent = `Загрузка архива: ${percent}%`;
+        },
+        onProcessing: () => {
+          setInterestAnalysisUploadProgress({
+            visible: true,
+            indeterminate: true,
+            label: "анализ",
+          });
+          if (status) {
+            status.textContent = "Архив получен. Создаю raw/parquet и считаю совпадения...";
+          }
+        },
+      }
+    );
+    form.reset();
+    const summary = payload.analysis?.summary || {};
+    const runId = payload.analysis?.run?.id || null;
+    state.selectedAnalysisRunId = runId;
+    state.analysisRunsOffset = 0;
+    state.analysisMatchesOffset = 0;
+    if (status) {
+      status.textContent = `Анализ готов: ${summary.match_count || 0} совпадений, ${summary.matched_message_count || 0} сообщений`;
+    }
+    await loadInterestContexts(state);
+    await loadInterestAnalysisRuns(state);
+    if (runId) await loadInterestAnalysisMatches(state, runId);
+  } catch (error) {
+    if (status) status.textContent = error.message;
+  } finally {
+    if (submitButton) submitButton.disabled = false;
+    setInterestAnalysisUploadProgress({ visible: false, value: 0, label: "0%" });
+  }
+}
+
+function setInterestAnalysisUploadProgress({ visible, value = 0, label = "", indeterminate = false }) {
+  const container = document.querySelector("#interest-analysis-upload-progress");
+  const progress = document.querySelector("#interest-analysis-upload-progress-bar");
+  const labelTarget = document.querySelector("#interest-analysis-upload-progress-label");
+  if (!container || !progress) return;
+  container.classList.toggle("is-hidden", !visible);
+  if (indeterminate) {
+    progress.setAttribute("indeterminate", "");
+    progress.removeAttribute("value");
+  } else {
+    progress.removeAttribute("indeterminate");
+    progress.value = Math.max(0, Math.min(1, value));
+    progress.setAttribute("value", String(progress.value));
+  }
+  if (labelTarget) labelTarget.textContent = label;
+}
+
+async function loadInterestAnalysisRuns(state) {
+  const target = document.querySelector("#interest-analysis-runs");
+  const status = document.querySelector("#interest-analysis-status");
+  if (!target || !state.selectedId) return;
+  target.innerHTML = '<div class="empty-state">Загружаю запуски анализа...</div>';
+  try {
+    const params = new URLSearchParams({
+      limit: String(state.analysisRunsLimit),
+      offset: String(state.analysisRunsOffset),
+    });
+    const payload = await api(
+      `/api/interest-contexts/${encodeURIComponent(state.selectedId)}/analysis/runs?${params.toString()}`
+    );
+    renderInterestAnalysisRuns(payload, state);
+    const firstRun = payload.items?.[0]?.id || null;
+    const selectedStillVisible = (payload.items || []).some(
+      (item) => item.id === state.selectedAnalysisRunId
+    );
+    state.selectedAnalysisRunId = selectedStillVisible
+      ? state.selectedAnalysisRunId
+      : firstRun;
+    if (state.selectedAnalysisRunId) {
+      await loadInterestAnalysisMatches(state, state.selectedAnalysisRunId);
+    } else {
+      renderInterestAnalysisMatches(null, state);
+    }
+  } catch (error) {
+    target.innerHTML = `<div class="empty-state">${escapeHtml(error.message)}</div>`;
+    if (status) status.textContent = error.message;
+  }
+}
+
+function handleInterestAnalysisRunsClick(event, state) {
+  const pageButton = event.target.closest("[data-analysis-runs-page-action]");
+  if (pageButton) {
+    const action = pageButton.dataset.analysisRunsPageAction;
+    if (action === "prev") {
+      state.analysisRunsOffset = Math.max(0, state.analysisRunsOffset - state.analysisRunsLimit);
+    }
+    if (action === "next") {
+      state.analysisRunsOffset += state.analysisRunsLimit;
+    }
+    loadInterestAnalysisRuns(state);
+    return;
+  }
+  const runButton = event.target.closest("[data-analysis-run-id]");
+  if (!runButton) return;
+  state.selectedAnalysisRunId = runButton.dataset.analysisRunId;
+  state.analysisMatchesOffset = 0;
+  renderInterestAnalysisRunSelection(state.selectedAnalysisRunId);
+  loadInterestAnalysisMatches(state, state.selectedAnalysisRunId);
+}
+
+function handleInterestAnalysisMatchesClick(event, state) {
+  const pageButton = event.target.closest("[data-analysis-matches-page-action]");
+  if (!pageButton || !state.selectedAnalysisRunId) return;
+  const action = pageButton.dataset.analysisMatchesPageAction;
+  if (action === "prev") {
+    state.analysisMatchesOffset = Math.max(
+      0,
+      state.analysisMatchesOffset - state.analysisMatchesLimit
+    );
+  }
+  if (action === "next") {
+    state.analysisMatchesOffset += state.analysisMatchesLimit;
+  }
+  loadInterestAnalysisMatches(state, state.selectedAnalysisRunId);
+}
+
+function renderInterestAnalysisRuns(payload, state) {
+  const target = document.querySelector("#interest-analysis-runs");
+  if (!target) return;
+  const items = payload.items || [];
+  const pagination = payload.pagination || { limit: state.analysisRunsLimit, offset: 0, total: 0 };
+  if (!items.length) {
+    target.innerHTML = '<div class="empty-state">Загрузите ZIP-архив чата, чтобы получить первый анализ по ядру.</div>';
+    return;
+  }
+  target.innerHTML = `<section class="draft-review-section">
+    <div class="operations-summary raw-review-summary">
+      <div class="ops-metric-row">
+        ${renderOpsMetric("Запуски", pagination.total || 0, "в этом контексте")}
+        ${renderOpsMetric("Последний анализ", payload.summary?.latest_match_count || 0, "совпадений")}
+        ${renderOpsMetric("Сообщения", payload.summary?.latest_matched_message_count || 0, "с совпадениями")}
+      </div>
+    </div>
+    <div class="table-list">${items.map((item) => renderInterestAnalysisRunRow(item, state)).join("")}</div>
+    ${renderPageControls(pagination, "analysis-runs")}
+  </section>`;
+}
+
+function renderInterestAnalysisRunSelection(runId) {
+  document.querySelectorAll("[data-analysis-run-id]").forEach((row) => {
+    row.classList.toggle("is-active", row.dataset.analysisRunId === runId);
+  });
+}
+
+function renderInterestAnalysisRunRow(item, state) {
+  const summary = item.summary_json || {};
+  const active = item.id === state.selectedAnalysisRunId ? "is-active" : "";
+  const title = item.source_title || item.raw_export_run_id || item.id;
+  return `<button class="table-row linked-row analysis-run-row ${active}" type="button" data-analysis-run-id="${escapeHtml(item.id)}">
+    <div>
+      <strong>${escapeHtml(title)}</strong>
+      <p class="muted">${escapeHtml([time(item.created_at), `run ${item.id}`].filter(Boolean).join(" / "))}</p>
+      <div class="badges">
+        ${badge(label(item.status || "unknown"), item.status === "failed" ? "is-danger" : "")}
+        ${badge(`${item.message_count || 0} сообщений`)}
+        ${badge(`${item.core_item_count || 0} элементов ядра`)}
+        ${badge(`${item.match_count || 0} совпадений`)}
+        ${badge(`${item.matched_message_count || 0} сообщений найдено`)}
+      </div>
+      ${renderAnalysisCounters(summary.by_category, "Категории")}
+    </div>
+    <span>Открыть</span>
+  </button>`;
+}
+
+async function loadInterestAnalysisMatches(state, runId) {
+  const target = document.querySelector("#interest-analysis-matches");
+  const status = document.querySelector("#interest-analysis-status");
+  if (!target || !state.selectedId || !runId) return;
+  target.innerHTML = '<div class="empty-state">Загружаю найденные сообщения...</div>';
+  try {
+    const params = new URLSearchParams({
+      limit: String(state.analysisMatchesLimit),
+      offset: String(state.analysisMatchesOffset),
+    });
+    const payload = await api(
+      `/api/interest-contexts/${encodeURIComponent(state.selectedId)}/analysis/runs/${encodeURIComponent(runId)}/matches?${params.toString()}`
+    );
+    renderInterestAnalysisMatches(payload, state);
+  } catch (error) {
+    target.innerHTML = `<div class="empty-state">${escapeHtml(error.message)}</div>`;
+    if (status) status.textContent = error.message;
+  }
+}
+
+function renderInterestAnalysisMatches(payload, state) {
+  const target = document.querySelector("#interest-analysis-matches");
+  if (!target) return;
+  if (!payload) {
+    target.innerHTML = '<div class="empty-state">Запуск анализа еще не выбран.</div>';
+    return;
+  }
+  const items = payload.items || [];
+  const pagination =
+    payload.pagination || { limit: state.analysisMatchesLimit, offset: 0, total: 0 };
+  const run = payload.run || {};
+  if (!items.length) {
+    target.innerHTML = `<div class="empty-state">В запуске ${escapeHtml(run.id || "")} совпадений нет.</div>`;
+    return;
+  }
+  target.innerHTML = `<section class="draft-review-section">
+    <div class="section-head compact-section-head">
+      <h4>Сообщения из запуска ${escapeHtml(run.id || "")}</h4>
+      <span class="muted">${escapeHtml(`${pagination.offset + 1}-${Math.min(pagination.offset + items.length, pagination.total)} из ${pagination.total}`)}</span>
+    </div>
+    <div class="table-list">${items.map(renderInterestAnalysisMatchRow).join("")}</div>
+    ${renderPageControls(pagination, "analysis-matches")}
+  </section>`;
+}
+
+function renderInterestAnalysisMatchRow(item) {
+  const evidence = item.evidence_json || {};
+  return `<div class="table-row draft-item-row">
+    <div>
+      <strong>${escapeHtml(item.canonical_name || "элемент ядра")}</strong>
+      <p class="muted">${escapeHtml([`сообщение #${item.telegram_message_id || "н/д"}`, time(item.message_date), item.sender_id].filter(Boolean).join(" / "))}</p>
+      <p>${escapeHtml(shortText(item.message_text || "без текста", 420))}</p>
+      <div class="badges">
+        ${item.category ? badge(item.category) : ""}
+        ${badge(label(item.match_kind || "match"))}
+        ${badge(`score ${formatScore(item.score)}`)}
+        ${item.matched_text ? badge(`совпало: ${item.matched_text}`) : ""}
+      </div>
+      ${renderAnalysisEvidence(evidence)}
+    </div>
+  </div>`;
+}
+
+function renderAnalysisEvidence(evidence) {
+  const parts = [];
+  if (Array.isArray(evidence.matched_tokens) && evidence.matched_tokens.length) {
+    parts.push(`токены: ${evidence.matched_tokens.slice(0, 8).join(", ")}`);
+  }
+  if (Array.isArray(evidence.noise_hits) && evidence.noise_hits.length) {
+    parts.push(`шум: ${evidence.noise_hits.slice(0, 3).join(", ")}`);
+  }
+  if (evidence.hit_kind) parts.push(`тип совпадения: ${label(evidence.hit_kind)}`);
+  return parts.length
+    ? `<p class="draft-evidence"><strong>Почему найдено:</strong> ${escapeHtml(parts.join("; "))}</p>`
+    : "";
+}
+
+function renderAnalysisCounters(value, title) {
+  if (!value || typeof value !== "object") return "";
+  const items = Object.entries(value).slice(0, 4);
+  if (!items.length) return "";
+  return `<p class="draft-evidence"><strong>${escapeHtml(title)}:</strong> ${escapeHtml(items.map(([key, count]) => `${key}: ${count}`).join("; "))}</p>`;
 }
 
 async function saveManualInterestCoreBrief(event, state) {
@@ -5293,7 +5604,11 @@ function renderPageControls(pagination, kind) {
       ? "data-review-page-action"
       : kind === "core"
         ? "data-core-page-action"
-        : "data-draft-page-action";
+        : kind === "analysis-runs"
+          ? "data-analysis-runs-page-action"
+          : kind === "analysis-matches"
+            ? "data-analysis-matches-page-action"
+            : "data-draft-page-action";
   return `<div class="queue-pagination">
     <span class="muted">${escapeHtml(`${from}-${to} из ${pagination.total}`)}</span>
     <div class="button-row">
@@ -5543,6 +5858,7 @@ function setInterestContextFormsEnabled(enabled) {
   [
     "#interest-context-telegram-source-form",
     "#interest-context-telegram-archive-form",
+    "#interest-analysis-archive-form",
     "#interest-core-brief-form",
   ].forEach((selector) => {
     document
@@ -5563,6 +5879,8 @@ function setInterestContextFormsEnabled(enabled) {
   if (prepareButton) prepareButton.disabled = !enabled;
   const generateBriefButton = document.querySelector("#interest-core-brief-generate");
   if (generateBriefButton) generateBriefButton.disabled = !enabled;
+  const analysisRefreshButton = document.querySelector("#interest-analysis-refresh");
+  if (analysisRefreshButton) analysisRefreshButton.disabled = !enabled;
 }
 
 function openOnboardingResourceDialog(event) {

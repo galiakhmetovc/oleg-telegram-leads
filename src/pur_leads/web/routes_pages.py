@@ -227,6 +227,16 @@ def interest_context_core_items_page(
     return HTMLResponse(_interest_context_step_page("items"))
 
 
+@router.get("/interest-contexts/analyze", response_class=HTMLResponse)
+def interest_context_analysis_page(
+    request: Request,
+    auth_service: WebAuthService = Depends(get_auth_service),
+) -> Response:
+    if not _has_page_session(request, auth_service):
+        return RedirectResponse("/login", status_code=303)
+    return HTMLResponse(_interest_context_step_page("analyze"))
+
+
 @router.get("/interest-contexts/llm", response_class=HTMLResponse)
 def interest_context_llm_page(
     request: Request,
@@ -245,6 +255,7 @@ _INTEREST_CONTEXT_STEPS = (
     ("candidates", "/interest-contexts/core/candidates", "Кандидаты"),
     ("reviews", "/interest-contexts/core/reviews", "LLM-рекомендации"),
     ("items", "/interest-contexts/core/items", "Рабочее ядро"),
+    ("analyze", "/interest-contexts/analyze", "Анализ чата"),
     ("llm", "/interest-contexts/llm", "LLM"),
 )
 
@@ -258,6 +269,7 @@ def _interest_context_step_page(step: str) -> str:
         "candidates": "Кандидаты ядра",
         "reviews": "LLM-рекомендации",
         "items": "Рабочее ядро",
+        "analyze": "Анализ чата",
         "llm": "LLM",
     }
     intro_by_step = {
@@ -268,6 +280,7 @@ def _interest_context_step_page(step: str) -> str:
         "candidates": "Просматривайте rule-based кандидатов постранично, без длинного списка на рабочем экране.",
         "reviews": "Разбирайте рекомендации LLM постранично: одобрить, отклонить или вернуть на ревью.",
         "items": "Здесь лежат элементы ядра интересов, которые оператор уже одобрил.",
+        "analyze": "Загрузите архив Telegram-чата и получите объяснимый анализ по рабочему ядру интересов.",
         "llm": "Настройте и проверьте LLM-бриф: контекст, который будет передаваться моделям на следующих этапах.",
     }
     step = step if step in title_by_step else "load"
@@ -357,6 +370,7 @@ def _interest_context_step_body(step: str) -> str:
         "candidates": _interest_context_candidates_body,
         "reviews": _interest_context_reviews_body,
         "items": _interest_context_items_body,
+        "analyze": _interest_context_analysis_body,
         "llm": _interest_context_llm_body,
     }
     return bodies[step]()
@@ -567,6 +581,13 @@ def _interest_context_core_body() -> str:
                         </div>
                         <span>Открыть</span>
                       </a>
+                      <a class="table-row linked-row" href="/interest-contexts/analyze">
+                        <div>
+                          <strong>Анализ чата</strong>
+                          <p class="muted">Загрузка отдельного Telegram-архива и проверка по рабочему ядру.</p>
+                        </div>
+                        <span>Открыть</span>
+                      </a>
                     </div>
                   </section>
     """
@@ -637,9 +658,70 @@ def _interest_context_items_body() -> str:
                           Обновить
                         </md-outlined-button>
                         <a class="interest-next-link" href="/interest-contexts/core/reviews">LLM-рекомендации</a>
+                        <a class="interest-next-link" href="/interest-contexts/analyze">Анализ чата</a>
                       </div>
                     </div>
                     <div id="interest-context-core-items-page" class="draft-review-panel" aria-live="polite"></div>
+                  </section>
+    """
+
+
+def _interest_context_analysis_body() -> str:
+    return """
+                  <section class="detail-section">
+                    <div class="section-head">
+                      <div>
+                        <h3>Загрузка чата для анализа</h3>
+                        <p class="muted">
+                          Архив Telegram Desktop будет сохранен как raw/parquet, сообщения попадут в рабочую таблицу,
+                          затем система сопоставит их с утвержденным ядром интересов. LLM на этом шаге не используется.
+                        </p>
+                      </div>
+                    </div>
+                    <form id="interest-analysis-archive-form" class="material-form interest-source-form">
+                      <md-outlined-text-field name="display_name" label="Название анализа"
+                        placeholder="Например, чат с лидами за апрель">
+                      </md-outlined-text-field>
+                      <label class="material-file-field">
+                        ZIP-архив Telegram Desktop
+                        <input name="file" type="file" accept=".zip,application/zip" required>
+                      </label>
+                      <md-filled-button type="submit">
+                        <md-icon slot="icon">analytics</md-icon>
+                        Загрузить и проанализировать
+                      </md-filled-button>
+                    </form>
+                    <div id="interest-analysis-upload-progress" class="upload-progress is-hidden">
+                      <md-linear-progress id="interest-analysis-upload-progress-bar" value="0"></md-linear-progress>
+                      <span id="interest-analysis-upload-progress-label">0%</span>
+                    </div>
+                    <p id="interest-analysis-status" class="status-line" role="status"></p>
+                  </section>
+                  <section class="detail-section">
+                    <div class="section-head">
+                      <div>
+                        <h3>Запуски анализа</h3>
+                        <p class="muted">
+                          Каждый запуск связан с конкретным загруженным архивом и версией рабочего ядра на момент анализа.
+                        </p>
+                      </div>
+                      <md-outlined-button id="interest-analysis-refresh" type="button">
+                        <md-icon slot="icon">refresh</md-icon>
+                        Обновить
+                      </md-outlined-button>
+                    </div>
+                    <div id="interest-analysis-runs" class="draft-review-panel" aria-live="polite"></div>
+                  </section>
+                  <section class="detail-section">
+                    <div class="section-head">
+                      <div>
+                        <h3>Найденные сообщения</h3>
+                        <p class="muted">
+                          Показаны сообщения, элемент ядра, совпавшая фраза и локальный score.
+                        </p>
+                      </div>
+                    </div>
+                    <div id="interest-analysis-matches" class="draft-review-panel" aria-live="polite"></div>
                   </section>
     """
 
@@ -758,6 +840,7 @@ def _interest_context_stage_hint(step: str) -> str:
         "candidates": "rule-based список по страницам",
         "reviews": "проверка LLM-рекомендаций",
         "items": "утвержденное ядро",
+        "analyze": "ZIP чата и совпадения",
         "llm": "бриф и будущие промпты",
     }[step]
 

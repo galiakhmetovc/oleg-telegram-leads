@@ -27,6 +27,7 @@ from pur_leads.services.interest_core_candidate_enhancement import (
 from pur_leads.services.interest_core_candidate_reviews import (
     InterestCoreCandidateReviewService,
 )
+from pur_leads.services.interest_core_chat_analysis import InterestCoreChatAnalysisService
 from pur_leads.services.interest_core_items import InterestCoreItemService
 from pur_leads.services.interest_core_briefs import (
     GENERATE_INTEREST_CORE_BRIEF_JOB,
@@ -430,6 +431,183 @@ async def upload_telegram_archive_to_interest_context(
             "trace": trace,
         }
     )
+
+
+@router.post("/{context_id}/analysis/telegram-archive")
+async def upload_telegram_archive_for_interest_analysis(
+    request: Request,
+    context_id: str,
+    file: UploadFile = File(...),
+    display_name: str | None = Form(None),
+    validated: SessionValidationResult = Depends(current_admin),
+    session: Session = Depends(get_session),
+) -> dict[str, Any]:
+    service = InterestContextService(session)
+    context = service.repository.get(context_id)
+    if context is None:
+        raise HTTPException(status_code=404, detail="Interest context not found")
+    if InterestCoreItemService(session).item_count(context.id) <= 0:
+        raise HTTPException(status_code=400, detail="Сначала сформируйте и примите рабочее ядро")
+
+    safe_name = _safe_upload_filename(file.filename or "telegram-analysis.zip")
+    if not safe_name.lower().endswith(".zip"):
+        raise HTTPException(status_code=400, detail="Нужен zip-архив Telegram Desktop")
+
+    upload_started_at = utc_now()
+    stored_path, size_bytes, sha256 = await _store_uploaded_file(
+        file,
+        root=Path(request.app.state.raw_export_storage_path),
+        safe_name=safe_name,
+    )
+    if not zipfile.is_zipfile(stored_path):
+        stored_path.unlink(missing_ok=True)
+        raise HTTPException(status_code=400, detail="Файл не похож на zip-архив Telegram Desktop")
+
+    actor = _actor(validated)
+    trace = current_trace_json()
+    input_ref = display_name.strip() if display_name and display_name.strip() else None
+    upload_metadata = {
+        "original_filename": safe_name,
+        "content_type": file.content_type,
+        "stored_archive_path": str(stored_path),
+        "size_bytes": size_bytes,
+        "sha256": sha256,
+        "uploaded_at": upload_started_at.isoformat(),
+        "uploaded_by": actor,
+    }
+    if trace:
+        upload_metadata["trace_id"] = trace["trace_id"]
+        upload_metadata["web_session_id"] = trace.get("web_session_id")
+        upload_metadata["user_id"] = trace.get("user_id")
+
+    try:
+        result = TelegramDesktopArchiveImportService(
+            session,
+            raw_root=request.app.state.raw_export_storage_path,
+        ).import_archive(
+            stored_path,
+            input_ref=input_ref,
+            purpose=INTEREST_CONTEXT_SOURCE_PURPOSE,
+            interest_context_id=context.id,
+            added_by=actor,
+            sync_source_messages=True,
+            import_metadata={
+                "trace": trace,
+                "upload": upload_metadata,
+                "interest_context": {
+                    "id": context.id,
+                    "name": context.name,
+                    "source_role": "interest_core_analysis",
+                },
+            },
+        )
+        analysis = InterestCoreChatAnalysisService(session).analyze_raw_export(
+            context_id=context.id,
+            monitored_source_id=result.source.id,
+            raw_export_run_id=result.raw_export.run_id,
+            actor=actor,
+            source_title=result.source.title or input_ref or safe_name,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    service.repository.update(context.id, updated_at=utc_now())
+    session.commit()
+    TraceService(session).record_child_span(
+        span_name="interest_context.analysis.telegram_desktop_archive",
+        status="ok",
+        started_at=upload_started_at,
+        resource_type="interest_context",
+        resource_id=context.id,
+        attributes_json={
+            "monitored_source_id": result.source.id,
+            "raw_export_run_id": result.raw_export.run_id,
+            "analysis_run_id": analysis.get("run", {}).get("id") if analysis.get("run") else None,
+            "message_count": result.message_count,
+            "attachment_count": result.attachment_count,
+            "match_count": analysis.get("summary", {}).get("match_count"),
+            "stored_archive_path": str(stored_path),
+            "sha256": sha256,
+        },
+    )
+    AuditService(session).record_change(
+        actor=actor,
+        action="interest_context.analysis_archive_uploaded",
+        entity_type="interest_context",
+        entity_id=context.id,
+        old_value_json=None,
+        new_value_json={
+            "monitored_source_id": result.source.id,
+            "raw_export_run_id": result.raw_export.run_id,
+            "analysis": analysis.get("summary"),
+            "stored_archive_path": str(stored_path),
+        },
+    )
+    raw_run = (
+        session.execute(
+            select(telegram_raw_export_runs_table).where(
+                telegram_raw_export_runs_table.c.id == result.raw_export.run_id
+            )
+        )
+        .mappings()
+        .one()
+    )
+    return jsonable_encoder(
+        {
+            "source": asdict(result.source),
+            "raw_export_run": {
+                **dict(raw_run),
+                "export_format": DESKTOP_IMPORT_EXPORT_FORMAT,
+            },
+            "import_result": result.as_jsonable(),
+            "analysis": analysis,
+            "trace": trace,
+        }
+    )
+
+
+@router.get("/{context_id}/analysis/runs")
+def list_interest_core_analysis_runs(
+    context_id: str,
+    limit: int = 10,
+    offset: int = 0,
+    _validated: SessionValidationResult = Depends(current_admin),
+    session: Session = Depends(get_session),
+) -> dict[str, Any]:
+    context = InterestContextService(session).repository.get(context_id)
+    if context is None:
+        raise HTTPException(status_code=404, detail="Interest context not found")
+    return jsonable_encoder(
+        InterestCoreChatAnalysisService(session).latest_payload(
+            context.id,
+            limit=max(1, min(limit, 100)),
+            offset=max(0, offset),
+        )
+    )
+
+
+@router.get("/{context_id}/analysis/runs/{run_id}/matches")
+def list_interest_core_analysis_matches(
+    context_id: str,
+    run_id: str,
+    limit: int = 10,
+    offset: int = 0,
+    _validated: SessionValidationResult = Depends(current_admin),
+    session: Session = Depends(get_session),
+) -> dict[str, Any]:
+    context = InterestContextService(session).repository.get(context_id)
+    if context is None:
+        raise HTTPException(status_code=404, detail="Interest context not found")
+    try:
+        payload = InterestCoreChatAnalysisService(session).list_matches(
+            context_id=context.id,
+            run_id=run_id,
+            limit=max(1, min(limit, 100)),
+            offset=max(0, offset),
+        )
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Analysis run not found") from exc
+    return jsonable_encoder(payload)
 
 
 @router.post("/{context_id}/draft")
