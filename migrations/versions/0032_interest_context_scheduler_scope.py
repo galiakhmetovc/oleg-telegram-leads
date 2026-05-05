@@ -58,7 +58,7 @@ def _scheduler_jobs_allow_interest_context_scope(bind) -> bool:  # noqa: ANN001
     sql = bind.execute(
         sa.text("select sql from sqlite_master where type='table' and name='scheduler_jobs'")
     ).scalar_one()
-    return "interest_context" in str(sql)
+    return "'interest_context'" in str(sql)
 
 
 def _replace_sqlite_scheduler_scope_type_constraint(bind, replacement: str) -> None:  # noqa: ANN001

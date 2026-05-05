@@ -63,6 +63,19 @@ TASK_DEFINITIONS: tuple[dict[str, Any], ...] = (
         "status": "active",
     },
     {
+        "task_type": "build_interest_context_draft",
+        "display_name": "Сборка черновика ядра интересов",
+        "workload_class": "bulk",
+        "required_capabilities": ["worker", "local_nlp", "local_entity_ranking"],
+        "parallelism_rule": (
+            "Запускается вручную после подготовки данных; LLM не вызывает, пишет прогресс "
+            "и кандидатов в БД."
+        ),
+        "default_priority": 50,
+        "config_keys": ["worker_concurrency"],
+        "status": "active",
+    },
+    {
         "task_type": "ocr_artifact",
         "display_name": "OCR документа",
         "workload_class": "bulk",

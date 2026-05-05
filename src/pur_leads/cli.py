@@ -795,6 +795,7 @@ def _build_worker_handlers(
             artifact_storage_path=settings.artifact_storage_path,
             raw_export_storage_path=settings.raw_export_storage_path,
             processed_storage_path=settings.processed_storage_path,
+            enriched_storage_path=settings.enriched_storage_path,
             search_storage_path=settings.search_storage_path,
             chroma_storage_path=settings.chroma_storage_path,
         )

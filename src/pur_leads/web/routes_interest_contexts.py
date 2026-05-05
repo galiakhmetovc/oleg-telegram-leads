@@ -17,6 +17,10 @@ from sqlalchemy.orm import Session
 from pur_leads.core.time import utc_now
 from pur_leads.core.tracing import current_trace_json
 from pur_leads.models.scheduler import scheduler_jobs_table
+from pur_leads.services.interest_context_drafts import (
+    BUILD_INTEREST_CONTEXT_DRAFT_JOB,
+    InterestContextDraftService,
+)
 from pur_leads.models.telegram_sources import (
     monitored_sources_table,
     source_messages_table,
@@ -67,6 +71,10 @@ class InterestContextTelegramSourceRequest(BaseModel):
 
 class InterestContextPrepareDataRequest(BaseModel):
     embedding_profile: str = DEFAULT_PREPARE_EMBEDDING_PROFILE
+
+
+class InterestContextBuildDraftRequest(BaseModel):
+    max_items: int = Field(default=120, ge=1, le=500)
 
 
 @router.get("")
@@ -387,26 +395,63 @@ async def upload_telegram_archive_to_interest_context(
 @router.post("/{context_id}/draft")
 def build_interest_context_draft(
     context_id: str,
+    payload: InterestContextBuildDraftRequest,
+    validated: SessionValidationResult = Depends(current_admin),
+    session: Session = Depends(get_session),
+) -> dict[str, Any]:
+    service = InterestContextService(session)
+    context = service.repository.get(context_id)
+    if context is None:
+        raise HTTPException(status_code=404, detail="Interest context not found")
+    prepare_job = _latest_prepare_job(session, context.id)
+    if prepare_job is None:
+        raise HTTPException(status_code=400, detail="Сначала нажмите «Подготовить данные»")
+    if prepare_job.get("status") in {"queued", "running"}:
+        raise HTTPException(status_code=400, detail="Подготовка данных еще выполняется")
+    if prepare_job.get("status") != "succeeded":
+        raise HTTPException(
+            status_code=400, detail="Последняя подготовка данных завершилась ошибкой"
+        )
+    active_job = _active_draft_job(session, context.id)
+    if active_job is not None:
+        return {
+            "job": _row(active_job),
+            "progress": _draft_progress_from_row(active_job),
+            "draft": InterestContextDraftService(session).latest_payload(context.id),
+        }
+    job = SchedulerService(session).enqueue(
+        job_type=BUILD_INTEREST_CONTEXT_DRAFT_JOB,
+        scope_type="interest_context",
+        scope_id=context.id,
+        priority="normal",
+        max_attempts=1,
+        payload_json={
+            "requested_by": _actor(validated),
+            "max_items": payload.max_items,
+            "uses_llm": False,
+        },
+    )
+    return {
+        "job": _job_payload(job),
+        "progress": _draft_progress(job),
+        "draft": InterestContextDraftService(session).latest_payload(context.id),
+    }
+
+
+@router.get("/{context_id}/draft/status")
+def get_interest_context_draft_status(
+    context_id: str,
     _validated: SessionValidationResult = Depends(current_admin),
     session: Session = Depends(get_session),
 ) -> dict[str, Any]:
-    try:
-        detail = InterestContextService(session).get_detail(context_id)
-    except KeyError as exc:
-        raise HTTPException(status_code=404, detail="Interest context not found") from exc
-    raw_runs = [
-        source.latest_raw_export_run
-        for source in detail.sources
-        if source.latest_raw_export_run
-        and source.latest_raw_export_run.get("status") == "succeeded"
-    ]
+    context = InterestContextService(session).repository.get(context_id)
+    if context is None:
+        raise HTTPException(status_code=404, detail="Interest context not found")
+    job = _latest_draft_job(session, context.id)
     return {
-        "status": "manual_next_step",
-        "message": (
-            "Сырые данные собраны. Следующий ручной шаг: открыть артефакты, "
-            "проверить raw/parquet и запустить подготовку знаний."
-        ),
-        "ready_raw_export_runs": len(raw_runs),
+        "job": _row(job) if job else None,
+        "progress": _draft_progress_from_row(job) if job else _empty_draft_progress(),
+        "draft": InterestContextDraftService(session).latest_payload(context.id),
     }
 
 
@@ -481,6 +526,39 @@ def _active_prepare_job(session: Session, context_id: str) -> dict[str, Any] | N
     return dict(row) if row is not None else None
 
 
+def _latest_draft_job(session: Session, context_id: str) -> dict[str, Any] | None:
+    row = (
+        session.execute(
+            select(scheduler_jobs_table)
+            .where(scheduler_jobs_table.c.job_type == BUILD_INTEREST_CONTEXT_DRAFT_JOB)
+            .where(scheduler_jobs_table.c.scope_type == "interest_context")
+            .where(scheduler_jobs_table.c.scope_id == context_id)
+            .order_by(desc(scheduler_jobs_table.c.created_at))
+            .limit(1)
+        )
+        .mappings()
+        .first()
+    )
+    return dict(row) if row is not None else None
+
+
+def _active_draft_job(session: Session, context_id: str) -> dict[str, Any] | None:
+    row = (
+        session.execute(
+            select(scheduler_jobs_table)
+            .where(scheduler_jobs_table.c.job_type == BUILD_INTEREST_CONTEXT_DRAFT_JOB)
+            .where(scheduler_jobs_table.c.scope_type == "interest_context")
+            .where(scheduler_jobs_table.c.scope_id == context_id)
+            .where(scheduler_jobs_table.c.status.in_(["queued", "running"]))
+            .order_by(desc(scheduler_jobs_table.c.created_at))
+            .limit(1)
+        )
+        .mappings()
+        .first()
+    )
+    return dict(row) if row is not None else None
+
+
 def _job_payload(job: Any) -> dict[str, Any]:
     return asdict(job) if hasattr(job, "__dataclass_fields__") else dict(job)
 
@@ -538,6 +616,64 @@ def _empty_prepare_progress() -> dict[str, Any]:
         "message": "Подготовка данных еще не запускалась",
         "stage_results": [],
         "raw_export_run_count": 0,
+    }
+
+
+def _draft_progress(job: Any) -> dict[str, Any]:
+    return _draft_progress_from_row(_job_payload(job))
+
+
+def _draft_progress_from_row(job: dict[str, Any] | None) -> dict[str, Any]:
+    if not job:
+        return _empty_draft_progress()
+    progress = job.get("result_summary_json")
+    if isinstance(progress, dict) and progress.get("kind") == "interest_context_draft_build":
+        return progress
+    if job.get("status") == "succeeded" and isinstance(progress, dict):
+        return {
+            "kind": "interest_context_draft_build",
+            "status": "succeeded",
+            "current_stage": "done",
+            "current_stage_label": "Готово",
+            "overall_percent": 100,
+            "stage_percent": 100,
+            "message": f"Черновик собран: {progress.get('candidate_count', 0)} кандидатов",
+            "stage_results": progress.get("stage_results", []),
+            "raw_export_run_count": progress.get("raw_export_run_count", 0),
+            "candidate_count": progress.get("candidate_count", 0),
+            "total_steps": progress.get("total_steps", 0),
+            "completed_steps": progress.get("completed_steps", 0),
+            "draft_run_id": progress.get("draft_run_id"),
+        }
+    status = str(job.get("status") or "unknown")
+    return {
+        "kind": "interest_context_draft_build",
+        "status": status,
+        "current_stage": None,
+        "current_stage_label": "В очереди" if status == "queued" else status,
+        "overall_percent": 0,
+        "stage_percent": 0,
+        "message": "Задача ожидает воркер"
+        if status == "queued"
+        else job.get("last_error") or status,
+        "stage_results": [],
+        "raw_export_run_count": 0,
+        "candidate_count": 0,
+    }
+
+
+def _empty_draft_progress() -> dict[str, Any]:
+    return {
+        "kind": "interest_context_draft_build",
+        "status": "not_started",
+        "current_stage": None,
+        "current_stage_label": "Не запускалось",
+        "overall_percent": 0,
+        "stage_percent": 0,
+        "message": "Черновик ядра еще не собирался",
+        "stage_results": [],
+        "raw_export_run_count": 0,
+        "candidate_count": 0,
     }
 
 

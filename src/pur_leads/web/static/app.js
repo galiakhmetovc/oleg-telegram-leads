@@ -130,6 +130,7 @@ const LABELS = {
   other: "другое",
   paused: "пауза",
   pending: "ожидает",
+  pending_review: "ожидает ревью",
   person: "человек",
   price: "параметр",
   product: "предмет",
@@ -159,6 +160,8 @@ const LABELS = {
   telegram_supergroup: "Telegram-супергруппа",
   telegram_channel: "Telegram-канал",
   text: "текст",
+  term: "термин",
+  theme: "тема",
   terms: "условия",
   unknown: "неизвестно",
   urgent: "срочно",
@@ -3705,7 +3708,13 @@ function initResources() {
 }
 
 function initInterestContexts() {
-  const state = { items: [], selectedId: null, detail: null, preparePollTimer: null };
+  const state = {
+    items: [],
+    selectedId: null,
+    detail: null,
+    preparePollTimer: null,
+    draftPollTimer: null,
+  };
   document
     .querySelector("#interest-context-refresh")
     ?.addEventListener("click", () => loadInterestContexts(state));
@@ -3778,10 +3787,12 @@ function renderInterestContextList(state) {
 
 async function loadInterestContextDetail(contextId, state) {
   stopInterestContextPreparePolling(state);
+  stopInterestContextDraftPolling(state);
   const detail = await api(`/api/interest-contexts/${encodeURIComponent(contextId)}`);
   state.detail = detail;
   renderInterestContextDetail(detail);
   await loadInterestContextPrepareStatus(state, { silent: true });
+  await loadInterestContextDraftStatus(state, { silent: true });
 }
 
 function renderInterestContextEmptyDetail() {
@@ -3792,6 +3803,7 @@ function renderInterestContextEmptyDetail() {
   const sources = document.querySelector("#interest-context-source-list");
   const rawReview = document.querySelector("#interest-context-raw-review");
   const prepareProgress = document.querySelector("#interest-context-prepare-progress");
+  const draftReview = document.querySelector("#interest-context-draft-review");
   if (title) title.textContent = "Выберите контекст";
   if (description) {
     description.textContent = "Сначала создайте ядро интересов, затем добавьте Telegram-канал или архив.";
@@ -3800,6 +3812,7 @@ function renderInterestContextEmptyDetail() {
   if (sources) sources.innerHTML = '<div class="empty-state">Источников пока нет</div>';
   if (rawReview) rawReview.innerHTML = "";
   if (prepareProgress) prepareProgress.innerHTML = "";
+  if (draftReview) draftReview.innerHTML = "";
 }
 
 function renderInterestContextDetail(detail) {
@@ -4010,12 +4023,49 @@ async function buildInterestContextDraft(state) {
   try {
     const payload = await api(`/api/interest-contexts/${encodeURIComponent(state.selectedId)}/draft`, {
       method: "POST",
-      body: JSON.stringify({}),
+      body: JSON.stringify({ max_items: 120 }),
     });
-    if (status) status.textContent = payload.message || "Готово";
+    renderInterestContextDraft(payload.progress, payload.job, payload.draft);
+    if (status) status.textContent = "Сборка ядра интересов поставлена в очередь";
+    scheduleInterestContextDraftPolling(state);
   } catch (error) {
     if (status) status.textContent = error.message;
   }
+}
+
+async function loadInterestContextDraftStatus(state, { silent = false } = {}) {
+  const status = document.querySelector("#interest-context-status");
+  if (!state.selectedId) return;
+  try {
+    const payload = await api(
+      `/api/interest-contexts/${encodeURIComponent(state.selectedId)}/draft/status`
+    );
+    renderInterestContextDraft(payload.progress, payload.job, payload.draft);
+    if (isActiveDraftStatus(payload.progress?.status)) {
+      scheduleInterestContextDraftPolling(state);
+    } else {
+      stopInterestContextDraftPolling(state);
+    }
+  } catch (error) {
+    if (!silent && status) status.textContent = error.message;
+  }
+}
+
+function scheduleInterestContextDraftPolling(state) {
+  if (state.draftPollTimer) return;
+  state.draftPollTimer = window.setInterval(() => {
+    loadInterestContextDraftStatus(state, { silent: true });
+  }, 2000);
+}
+
+function stopInterestContextDraftPolling(state) {
+  if (!state.draftPollTimer) return;
+  window.clearInterval(state.draftPollTimer);
+  state.draftPollTimer = null;
+}
+
+function isActiveDraftStatus(status) {
+  return ["queued", "running"].includes(String(status || ""));
 }
 
 async function loadInterestContextRawReview(state) {
@@ -4129,6 +4179,118 @@ function renderInterestContextPrepareProgress(progress, job) {
     </div>
     ${renderPrepareStageResults(stageResults)}
   </section>`;
+}
+
+function renderInterestContextDraft(progress, job, draft) {
+  const target = document.querySelector("#interest-context-draft-review");
+  if (!target) return;
+  const status = String(progress?.status || "not_started");
+  const draftItems = draft?.items || [];
+  const draftRun = draft?.draft_run || null;
+  if (status === "not_started" && !draftRun) {
+    target.innerHTML = "";
+    return;
+  }
+  const overall = normalizePercent(progress?.overall_percent);
+  const stage = normalizePercent(progress?.stage_percent);
+  const stageLabel = progress?.current_stage_label || "Сборка ядра интересов";
+  const message = progress?.message || status;
+  const stageResults = progress?.stage_results || [];
+  target.innerHTML = `<section class="draft-review-section">
+    <div class="section-head">
+      <div>
+        <h3>Черновик ядра интересов</h3>
+        <p class="muted">${escapeHtml(message)}</p>
+      </div>
+      <div class="badges">
+        ${badge(label(status), status === "failed" ? "is-danger" : "")}
+        ${badge("без LLM")}
+        ${job?.id ? badge(`job ${job.id}`) : ""}
+      </div>
+    </div>
+    ${
+      status !== "not_started"
+        ? `<div class="prepare-progress-bars">
+            ${renderProgressLine("Общий прогресс", overall, `${progress?.completed_steps || 0}/${progress?.total_steps || 0} шагов`)}
+            ${renderProgressLine(stageLabel, stage, progress?.run_count ? `запуск ${progress?.run_index || 0}/${progress.run_count}` : "этап")}
+          </div>`
+        : ""
+    }
+    <div class="prepare-progress-meta">
+      ${renderOpsMetric("Кандидаты", progress?.candidate_count || draftItems.length || 0, "ожидают ревью")}
+      ${renderOpsMetric("Raw-запуски", progress?.raw_export_run_count || 0, "в контексте")}
+      ${renderOpsMetric("Алгоритм", "rules", "NLP/POS/score")}
+    </div>
+    ${renderDraftStageResults(stageResults)}
+    ${renderDraftItems(draftItems)}
+  </section>`;
+}
+
+function renderDraftStageResults(stageResults) {
+  if (!stageResults.length) return "";
+  const rows = stageResults.slice(-7);
+  return `<div class="table-list prepare-stage-results">${rows
+    .map((result) => {
+      const metrics = result.metrics || {};
+      const metricText = [
+        metrics.total_rows ? `${metrics.total_rows} строк` : "",
+        metrics.entity_rows ? `${metrics.entity_rows} сущностей` : "",
+        metrics.ranked_entity_rows ? `${metrics.ranked_entity_rows} ранжировано` : "",
+        metrics.candidate_count ? `${metrics.candidate_count} кандидатов` : "",
+      ]
+        .filter(Boolean)
+        .join(" / ");
+      return `<div class="table-row">
+        <div>
+          <strong>${escapeHtml(result.stage_label || result.stage || "этап")}</strong>
+          <p class="muted">${escapeHtml(metricText || result.raw_export_run_id || "готово")}</p>
+        </div>
+        <span>${badge("готово")}</span>
+      </div>`;
+    })
+    .join("")}</div>`;
+}
+
+function renderDraftItems(items) {
+  if (!items.length) {
+    return '<div class="empty-state">Кандидатов пока нет. Запустите формирование ядра интересов после подготовки данных.</div>';
+  }
+  return `<div class="draft-items">
+    <div class="section-head compact-section-head">
+      <h4>Кандидаты для ревью</h4>
+      <span class="muted">${escapeHtml(String(items.length))} показано</span>
+    </div>
+    <div class="table-list">${items
+      .map((item) => {
+        const metadata = item.metadata_json || {};
+        const evidence = item.evidence_json || [];
+        const examples = evidence
+          .map((entry) => entry.example)
+          .filter(Boolean)
+          .slice(0, 2);
+        return `<div class="table-row draft-item-row">
+          <div>
+            <strong>${escapeHtml(item.title || item.normalized_key || "кандидат")}</strong>
+            <p class="muted">${escapeHtml(item.description || "")}</p>
+            <div class="badges">
+              ${badge(label(item.item_type || "term"))}
+              ${badge(`score ${formatScore(item.score)}`)}
+              ${badge(label(item.confidence || "medium"))}
+              ${badge(label(item.status || "pending_review"))}
+              ${metadata.uses_llm === false ? badge("без AI") : ""}
+            </div>
+            ${examples.length ? `<div class="draft-evidence">${examples.map((example) => `<p>${escapeHtml(example)}</p>`).join("")}</div>` : ""}
+          </div>
+        </div>`;
+      })
+      .join("")}</div>
+  </div>`;
+}
+
+function formatScore(value) {
+  const parsed = Number.parseFloat(value);
+  if (Number.isNaN(parsed)) return "0.00";
+  return parsed.toFixed(2);
 }
 
 function renderProgressLine(labelText, percent, hint) {

@@ -36,6 +36,7 @@ from pur_leads.services.catalog_candidates import CatalogCandidateService
 from pur_leads.services.catalog_sources import CatalogSourceService
 from pur_leads.services.classifier_snapshots import ClassifierSnapshotService
 from pur_leads.services.evaluation import EvaluationService
+from pur_leads.services.interest_context_drafts import InterestContextDraftService
 from pur_leads.services.interest_context_preparation import InterestContextPreparationService
 from pur_leads.services.leads import LeadDetectionResult, LeadMatchInput, LeadService
 from pur_leads.services.notifications import NotificationPolicyService
@@ -422,6 +423,7 @@ def build_telegram_handler_registry(
     artifact_storage_path: str | Path | None = None,
     raw_export_storage_path: str | Path | None = None,
     processed_storage_path: str | Path | None = None,
+    enriched_storage_path: str | Path | None = None,
     search_storage_path: str | Path | None = None,
     chroma_storage_path: str | Path | None = None,
 ) -> dict[str, JobHandler]:
@@ -525,6 +527,29 @@ def build_telegram_handler_registry(
         )
         return JobHandlerResult(result_summary=result.as_jsonable())
 
+    async def build_interest_context_draft(job: SchedulerJobRecord) -> JobHandlerResult:
+        if not job.scope_id:
+            raise ValueError("build_interest_context_draft requires scope_id")
+        payload = job.payload_json if isinstance(job.payload_json, dict) else {}
+        actor = str(payload.get("requested_by") or "worker")
+        max_items = int(payload.get("max_items") or 120)
+        draft_builder = InterestContextDraftService(
+            session,
+            processed_root=processed_storage_path or "./data/processed",
+            enriched_root=enriched_storage_path or "./data/enriched",
+        )
+
+        def update_progress(progress_payload: dict[str, Any]) -> None:
+            scheduler.update_result_summary(job.id, result_summary=progress_payload)
+
+        result = draft_builder.build(
+            job.scope_id,
+            actor=actor,
+            max_items=max_items,
+            progress=update_progress,
+        )
+        return JobHandlerResult(result_summary=result.as_jsonable())
+
     async def fetch_message_context(job: SchedulerJobRecord) -> JobHandlerResult:
         if job.source_message_id is None:
             raise ValueError("fetch_message_context requires source_message_id")
@@ -609,6 +634,7 @@ def build_telegram_handler_registry(
         "ingest_telegram_raw": ingest_telegram_raw,
         "export_telegram_raw": export_telegram_raw,
         "prepare_interest_context_data": prepare_interest_context_data,
+        "build_interest_context_draft": build_interest_context_draft,
         "fetch_message_context": fetch_message_context,
         "download_artifact": download_artifact,
     }

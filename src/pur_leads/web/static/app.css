@@ -568,6 +568,10 @@ md-text-button {
   display: none;
 }
 
+.draft-review-panel:empty {
+  display: none;
+}
+
 .prepare-progress-surface {
   display: grid;
   gap: 12px;
@@ -617,6 +621,44 @@ md-text-button {
 
 .prepare-stage-results {
   margin-top: 2px;
+}
+
+.draft-review-section {
+  display: grid;
+  gap: 12px;
+  margin-top: 12px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  background: #ffffff;
+}
+
+.compact-section-head {
+  align-items: center;
+  min-height: 0;
+}
+
+.draft-items {
+  display: grid;
+  gap: 8px;
+}
+
+.draft-item-row {
+  align-items: start;
+}
+
+.draft-evidence {
+  display: grid;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.draft-evidence p {
+  margin: 0;
+  padding: 8px 10px;
+  border-left: 3px solid rgba(22, 119, 75, 0.25);
+  background: #f7faf8;
+  color: var(--muted);
+  overflow-wrap: anywhere;
 }
 
 .raw-review-section {
