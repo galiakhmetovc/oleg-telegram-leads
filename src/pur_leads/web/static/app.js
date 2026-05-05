@@ -5022,6 +5022,7 @@ function renderInterestContextCandidateEnhancement(progress, job, enhancement, r
         ${renderOpsMetric("Улучшено", progress?.improved_count || 0, "из rule-based")}
         ${renderOpsMetric("Добавлено", progress?.new_count || 0, "из брифа/evidence")}
         ${renderOpsMetric("Отклонено", progress?.rejected_count || 0, "как шум")}
+        ${progress?.failed_chunk_count ? renderOpsMetric("Ошибки", progress.failed_chunk_count, "фрагменты JSON") : ""}
       </div>
       ${renderCandidateReviewSummary(reviews)}
       <div class="button-row">
@@ -5056,6 +5057,7 @@ function renderInterestContextCandidateEnhancement(progress, job, enhancement, r
       ${renderOpsMetric("Улучшено", progress?.improved_count || 0, "из rule-based")}
       ${renderOpsMetric("Добавлено", progress?.new_count || 0, "из брифа/evidence")}
       ${renderOpsMetric("Отклонено", progress?.rejected_count || 0, "как шум")}
+      ${progress?.failed_chunk_count ? renderOpsMetric("Ошибки", progress.failed_chunk_count, "фрагменты JSON") : ""}
     </div>
     ${renderCandidateReviewSummary(reviews)}
     ${renderCandidateReviewSection(reviewItems)}

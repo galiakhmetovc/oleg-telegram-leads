@@ -40,6 +40,7 @@ DEFAULT_SETTINGS: dict[str, SettingDefault] = {
     "document_parse_concurrency": SettingDefault(4, "int"),
     "document_parse_timeout_seconds": SettingDefault(600, "int"),
     "interest_core_llm_enhancement_parallelism": SettingDefault(0, "int"),
+    "interest_core_llm_enhancement_chunk_max_attempts": SettingDefault(2, "int"),
     "telegram_api_id": SettingDefault(None, "int"),
     "telegram_api_hash_secret_ref": SettingDefault(None, "secret_ref"),
     "telegram_bot_token_secret_ref": SettingDefault(None, "secret_ref"),

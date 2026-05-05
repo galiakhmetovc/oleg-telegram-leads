@@ -1161,6 +1161,7 @@ def _candidate_enhancement_progress_from_row(job: dict[str, Any] | None) -> dict
             "improved_count": progress.get("improved_count", 0),
             "new_count": progress.get("new_count", 0),
             "rejected_count": progress.get("rejected_count", 0),
+            "failed_chunk_count": progress.get("failed_chunk_count", 0),
             "chunk_index": progress.get("chunk_count", 0),
             "chunk_count": progress.get("chunk_count", 0),
             "completed_chunk_count": progress.get("chunk_count", 0),

@@ -679,6 +679,10 @@ def build_telegram_handler_registry(
         )
         max_items = int(payload.get("max_items") or 1000)
         candidate_chunk_size = int(payload.get("candidate_chunk_size") or 10)
+        chunk_max_attempts = _positive_int(
+            SettingsService(session).get("interest_core_llm_enhancement_chunk_max_attempts"),
+            default=2,
+        )
         requested_parallelism = _non_negative_int(
             payload.get("parallelism"),
             default=_non_negative_int(
@@ -717,6 +721,7 @@ def build_telegram_handler_registry(
                 "candidate_chunk_size": candidate_chunk_size,
                 "configured_parallelism": requested_parallelism,
                 "active_parallelism": enhancement_parallelism(),
+                "chunk_max_attempts": chunk_max_attempts,
                 "model": route.model,
                 "model_profile": route.model_profile,
             },
@@ -751,6 +756,7 @@ def build_telegram_handler_registry(
             resume_state=resume_state,
             parallelism=requested_parallelism,
             parallelism_getter=enhancement_parallelism,
+            chunk_max_attempts=chunk_max_attempts,
         )
         review_count = InterestCoreCandidateReviewService(
             session

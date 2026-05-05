@@ -51,6 +51,7 @@ class InterestCoreCandidateEnhancementService:
         resume_state: dict[str, Any] | None = None,
         parallelism: int = 1,
         parallelism_getter: Callable[[], int] | None = None,
+        chunk_max_attempts: int = 2,
     ) -> dict[str, Any]:
         payload = self.build_payload(context_id, max_items=max_items)
         chunk_size = max(
@@ -66,8 +67,10 @@ class InterestCoreCandidateEnhancementService:
         chunk_results = resume["chunk_results"]
         request_ids = resume["request_ids"]
         usage_by_chunk = resume["usage_by_chunk"]
+        failed_chunks = resume["failed_chunks"]
         completed_chunk_count = int(resume["completed_chunk_count"])
         last_active_parallelism = 1
+        safe_chunk_max_attempts = max(1, min(5, int(chunk_max_attempts or 1)))
 
         async def complete_chunk(
             *,
@@ -95,21 +98,46 @@ class InterestCoreCandidateEnhancementService:
                 ),
                 AiChatMessage(role="user", content=prompt_text),
             ]
-            completion = await client.complete(
-                messages=messages,
-                model=model,
-                temperature=temperature,
-                max_tokens=max_tokens,
-            )
-            chunk_parsed = normalize_candidate_enhancement_response(
-                parse_interest_core_brief_response(completion.content)
-            )
+            completion = None
+            last_error = ""
+            for attempt in range(1, safe_chunk_max_attempts + 1):
+                completion = await client.complete(
+                    messages=messages,
+                    model=model,
+                    temperature=temperature,
+                    max_tokens=max_tokens,
+                )
+                try:
+                    chunk_parsed = normalize_candidate_enhancement_response(
+                        parse_interest_core_brief_response(completion.content)
+                    )
+                    break
+                except (json.JSONDecodeError, ValueError) as exc:
+                    last_error = str(exc) or exc.__class__.__name__
+                    if attempt < safe_chunk_max_attempts:
+                        await asyncio.sleep(min(5, attempt))
+                    continue
+            else:
+                return {
+                    "chunk_index": chunk_index,
+                    "candidates": candidates,
+                    "parsed": _empty_enhancement_result(),
+                    "request_id": completion.request_id if completion is not None else None,
+                    "usage": completion.usage if completion is not None else {},
+                    "error": last_error or "LLM returned invalid JSON",
+                    "attempts": safe_chunk_max_attempts,
+                    "raw_content": _truncate(
+                        completion.content if completion is not None else "",
+                        2000,
+                    ),
+                }
             return {
                 "chunk_index": chunk_index,
                 "candidates": candidates,
                 "parsed": chunk_parsed,
                 "request_id": completion.request_id,
                 "usage": completion.usage,
+                "attempts": attempt,
             }
 
         while completed_chunk_count < len(chunks):
@@ -161,10 +189,12 @@ class InterestCoreCandidateEnhancementService:
                 improved_count=len(parsed["improved_candidates"]),
                 new_count=len(parsed["new_candidates"]),
                 rejected_count=len(parsed["rejected_candidates"]),
+                failed_chunk_count=len(failed_chunks),
                 partial_result=parsed,
                 chunk_results=chunk_results,
                 usage_by_chunk=usage_by_chunk,
                 request_ids=request_ids,
+                failed_chunks=failed_chunks,
                 model=model,
                 model_profile=model_profile,
             )
@@ -183,7 +213,20 @@ class InterestCoreCandidateEnhancementService:
                 chunk_index = int(wave_result["chunk_index"])
                 candidates = wave_result["candidates"]
                 chunk_parsed = wave_result["parsed"]
-                _merge_enhancement_result(parsed, chunk_parsed)
+                is_failed_chunk = bool(wave_result.get("error"))
+                if is_failed_chunk:
+                    failed_chunks.append(
+                        {
+                            "chunk_index": chunk_index,
+                            "candidate_count": len(candidates),
+                            "error": str(wave_result.get("error") or "")[:1000],
+                            "attempts": int(wave_result.get("attempts") or 1),
+                            "request_id": wave_result.get("request_id"),
+                            "raw_content": str(wave_result.get("raw_content") or "")[:2000],
+                        }
+                    )
+                else:
+                    _merge_enhancement_result(parsed, chunk_parsed)
                 if wave_result["request_id"]:
                     request_ids.append(wave_result["request_id"])
                 usage_by_chunk.append(
@@ -191,6 +234,7 @@ class InterestCoreCandidateEnhancementService:
                         "chunk_index": chunk_index,
                         "usage": wave_result["usage"],
                         "request_id": wave_result["request_id"],
+                        "attempts": int(wave_result.get("attempts") or 1),
                     }
                 )
                 chunk_results.append(
@@ -201,6 +245,9 @@ class InterestCoreCandidateEnhancementService:
                         "new_count": len(chunk_parsed["new_candidates"]),
                         "rejected_count": len(chunk_parsed["rejected_candidates"]),
                         "summary": chunk_parsed.get("summary"),
+                        "status": "failed" if is_failed_chunk else "succeeded",
+                        "error": wave_result.get("error"),
+                        "attempts": int(wave_result.get("attempts") or 1),
                     }
                 )
                 completed_chunk_count = chunk_index
@@ -227,10 +274,12 @@ class InterestCoreCandidateEnhancementService:
                     improved_count=len(parsed["improved_candidates"]),
                     new_count=len(parsed["new_candidates"]),
                     rejected_count=len(parsed["rejected_candidates"]),
+                    failed_chunk_count=len(failed_chunks),
                     partial_result=parsed,
                     chunk_results=chunk_results,
                     usage_by_chunk=usage_by_chunk,
                     request_ids=request_ids,
+                    failed_chunks=failed_chunks,
                     model=model,
                     model_profile=model_profile,
                 )
@@ -243,7 +292,7 @@ class InterestCoreCandidateEnhancementService:
             "current_stage_label": "Готово",
             "overall_percent": 100,
             "stage_percent": 100,
-            "message": _summary_message(parsed),
+            "message": _summary_message(parsed, failed_chunk_count=len(failed_chunks)),
             "context_id": context_id,
             "brief_id": payload["brief"]["id"],
             "brief_version": payload["brief"]["version"],
@@ -256,6 +305,7 @@ class InterestCoreCandidateEnhancementService:
             "improved_count": len(parsed["improved_candidates"]),
             "new_count": len(parsed["new_candidates"]),
             "rejected_count": len(parsed["rejected_candidates"]),
+            "failed_chunk_count": len(failed_chunks),
             "prompt_version": INTEREST_CORE_CANDIDATE_ENHANCEMENT_PROMPT_VERSION,
             "provider": provider,
             "model": model,
@@ -269,6 +319,7 @@ class InterestCoreCandidateEnhancementService:
             "chunk_results": chunk_results,
             "usage_by_chunk": usage_by_chunk,
             "request_ids": request_ids,
+            "failed_chunks": failed_chunks,
         }
 
     def build_payload(self, context_id: str, *, max_items: int) -> dict[str, Any]:
@@ -466,12 +517,15 @@ def _normalize_new(item: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _summary_message(parsed: dict[str, Any]) -> str:
-    return (
+def _summary_message(parsed: dict[str, Any], *, failed_chunk_count: int = 0) -> str:
+    message = (
         f"LLM-рекомендации готовы: {len(parsed['improved_candidates'])} улучшено, "
         f"{len(parsed['new_candidates'])} добавлено, "
         f"{len(parsed['rejected_candidates'])} отклонено"
     )
+    if failed_chunk_count:
+        message = f"{message}; {failed_chunk_count} фрагментов с ошибкой JSON"
+    return message
 
 
 def _report(progress: ProgressCallback | None, **payload: Any) -> None:
@@ -564,6 +618,7 @@ def _resume_state(value: dict[str, Any] | None, *, chunk_count: int) -> dict[str
             "chunk_results": [],
             "usage_by_chunk": [],
             "request_ids": [],
+            "failed_chunks": [],
         }
     if value.get("kind") != "interest_core_candidate_enhancement":
         return {
@@ -572,6 +627,7 @@ def _resume_state(value: dict[str, Any] | None, *, chunk_count: int) -> dict[str
             "chunk_results": [],
             "usage_by_chunk": [],
             "request_ids": [],
+            "failed_chunks": [],
         }
     completed = _positive_int(value.get("completed_chunk_count"), default=0)
     completed = max(0, min(completed, chunk_count))
@@ -589,6 +645,7 @@ def _resume_state(value: dict[str, Any] | None, *, chunk_count: int) -> dict[str
         "chunk_results": _object_list(value.get("chunk_results"))[:chunk_count],
         "usage_by_chunk": _object_list(value.get("usage_by_chunk"))[:chunk_count],
         "request_ids": _string_list(value.get("request_ids"))[:chunk_count],
+        "failed_chunks": _object_list(value.get("failed_chunks"))[:chunk_count],
     }
 
 
@@ -639,6 +696,11 @@ def _dedupe_registry(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
         seen.add(key)
         result.append(item)
     return result
+
+
+def _truncate(value: Any, limit: int) -> str:
+    text = str(value or "")
+    return text if len(text) <= limit else text[: limit - 3] + "..."
 
 
 def _combined_summary(parsed: dict[str, Any], chunks: list[dict[str, Any]]) -> str:
