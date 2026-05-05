@@ -4501,6 +4501,7 @@ async function enhanceInterestContextDraftWithLlm(state) {
         method: "POST",
         body: JSON.stringify({
           max_items: 80,
+          candidate_chunk_size: 10,
           agent_key: "catalog_extractor",
           route_role: "primary",
         }),
@@ -4738,7 +4739,7 @@ function renderInterestContextCandidateEnhancement(progress, job, enhancement) {
       status !== "not_started"
         ? `<div class="prepare-progress-bars">
             ${renderProgressLine("Общий прогресс", overall, `${progress?.candidate_count || 0} кандидатов`)}
-            ${renderProgressLine(progress?.current_stage_label || "LLM-улучшение", stage, progress?.model || "модель")}
+            ${renderProgressLine(progress?.current_stage_label || "LLM-улучшение", stage, enhancementProgressHint(progress))}
           </div>`
         : ""
     }
@@ -4752,6 +4753,13 @@ function renderInterestContextCandidateEnhancement(progress, job, enhancement) {
     ${renderEnhancedCandidateSection("Новые кандидаты от LLM", result.new_candidates || [], renderNewCandidateRow)}
     ${renderEnhancedCandidateSection("Кандидаты на отклонение", result.rejected_candidates || [], renderRejectedCandidateRow)}
   </section>`;
+}
+
+function enhancementProgressHint(progress) {
+  const chunkIndex = progress?.chunk_index || 0;
+  const chunkCount = progress?.chunk_count || 0;
+  if (chunkCount) return `фрагмент ${chunkIndex}/${chunkCount}`;
+  return progress?.model || "модель";
 }
 
 function renderEnhancedCandidateSection(title, items, rowRenderer) {

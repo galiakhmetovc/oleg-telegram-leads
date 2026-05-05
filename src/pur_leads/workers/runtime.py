@@ -671,6 +671,7 @@ def build_telegram_handler_registry(
             else 0.0
         )
         max_items = int(payload.get("max_items") or 80)
+        candidate_chunk_size = int(payload.get("candidate_chunk_size") or 10)
 
         scheduler.update_result_summary(
             job.id,
@@ -683,10 +684,15 @@ def build_telegram_handler_registry(
                 "stage_percent": 30,
                 "message": f"Улучшаю кандидатов через {route.model}",
                 "candidate_count": max_items,
+                "candidate_chunk_size": candidate_chunk_size,
                 "model": route.model,
                 "model_profile": route.model_profile,
             },
         )
+
+        def update_progress(progress_payload: dict[str, Any]) -> None:
+            scheduler.update_result_summary(job.id, result_summary=progress_payload)
+
         result = await InterestCoreCandidateEnhancementService(session).enhance_async(
             job.scope_id,
             client=client,
@@ -695,12 +701,14 @@ def build_telegram_handler_registry(
             model=route.model,
             model_profile=route.model_profile,
             max_items=max_items,
+            candidate_chunk_size=candidate_chunk_size,
             max_tokens=max_tokens,
             temperature=temperature,
             ai_provider_account_id=route.provider_account_id,
             ai_model_id=route.model_id,
             ai_model_profile_id=route.model_profile_id,
             ai_agent_route_id=route.route_id,
+            progress=update_progress,
         )
         return JobHandlerResult(result_summary=result)
 

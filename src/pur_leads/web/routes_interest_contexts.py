@@ -100,6 +100,7 @@ class InterestCoreBriefGenerateRequest(BaseModel):
 
 class InterestCoreCandidateEnhanceRequest(BaseModel):
     max_items: int = Field(default=80, ge=1, le=300)
+    candidate_chunk_size: int = Field(default=10, ge=1, le=50)
     agent_key: str = "catalog_extractor"
     route_role: str = "primary"
     max_tokens: int | None = Field(default=None, ge=1, le=32000)
@@ -518,6 +519,7 @@ def enhance_interest_context_draft_with_llm(
         payload_json={
             "requested_by": _actor(validated),
             "max_items": payload.max_items,
+            "candidate_chunk_size": payload.candidate_chunk_size,
             "agent_key": payload.agent_key,
             "route_role": payload.route_role,
             "max_tokens": payload.max_tokens,
