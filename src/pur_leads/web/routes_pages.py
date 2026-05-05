@@ -176,21 +176,6 @@ def interest_contexts_page(
                   <h1>Ядро интересов</h1>
                 </div>
                 <nav>
-                  <a href="/">Лиды</a>
-                  <a href="/interest-contexts">Интересы</a>
-                  <a href="/today">Сегодня</a>
-                  <a href="/sources">Источники</a>
-                  <a href="/resources">Ресурсы</a>
-                  <a href="/catalog">Каталог</a>
-                  <a href="/crm">CRM</a>
-                  <a href="/users">Пользователи</a>
-                  <a href="/settings">Настройки</a>
-                  <a href="/ai-registry">AI-реестр</a>
-                  <a href="/task-executors">Исполнители задач</a>
-                  <a href="/task-types">Задачи</a>
-                  <a href="/quality">Качество</a>
-                  <a href="/artifacts">Артефакты</a>
-                  <a href="/operations">Операции</a>
                   <md-outlined-button id="logout-button" type="button">Выйти</md-outlined-button>
                 </nav>
               </header>
@@ -424,21 +409,7 @@ def interest_context_draft_page(
                   <h1>Кандидаты ядра интересов</h1>
                 </div>
                 <nav>
-                  <a href="/">Лиды</a>
-                  <a href="/interest-contexts">Интересы</a>
-                  <a href="/today">Сегодня</a>
-                  <a href="/sources">Источники</a>
-                  <a href="/resources">Ресурсы</a>
-                  <a href="/catalog">Каталог</a>
-                  <a href="/crm">CRM</a>
-                  <a href="/users">Пользователи</a>
-                  <a href="/settings">Настройки</a>
-                  <a href="/ai-registry">AI-реестр</a>
-                  <a href="/task-executors">Исполнители задач</a>
-                  <a href="/task-types">Задачи</a>
-                  <a href="/quality">Качество</a>
-                  <a href="/artifacts">Артефакты</a>
-                  <a href="/operations">Операции</a>
+                  <a href="/interest-contexts">Ядро интересов</a>
                   <md-outlined-button id="logout-button" type="button">Выйти</md-outlined-button>
                 </nav>
               </header>

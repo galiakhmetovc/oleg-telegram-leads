@@ -271,6 +271,14 @@ md-text-button {
   gap: 14px;
 }
 
+.topbar nav a {
+  display: none;
+}
+
+.topbar nav a[href="/interest-contexts"] {
+  display: inline-flex;
+}
+
 .topbar nav button {
   border-color: var(--line);
   background: #ffffff;

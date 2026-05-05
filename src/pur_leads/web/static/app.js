@@ -3876,9 +3876,6 @@ function renderInterestContextDetail(detail) {
           <md-filled-tonal-button type="button" data-open-raw-review>
             Проверить данные
           </md-filled-tonal-button>
-          <md-outlined-button type="button" onclick="window.location.assign('/artifacts')">
-            Артефакты
-          </md-outlined-button>
         </div>
       </div>`;
     })
@@ -4393,10 +4390,6 @@ function renderInterestContextDraft(progress, job, draft) {
   const stageLabel = progress?.current_stage_label || "Сборка ядра интересов";
   const message = progress?.message || status;
   const stageResults = progress?.stage_results || [];
-  const contextId =
-    document.body.dataset.interestContextId ||
-    document.querySelector("#interest-context-draft-screen")?.dataset.contextId ||
-    "";
   target.innerHTML = `<section class="draft-review-section">
     <div class="section-head">
       <div>
@@ -4408,11 +4401,6 @@ function renderInterestContextDraft(progress, job, draft) {
         ${badge("без LLM")}
         ${job?.id ? badge(`job ${job.id}`) : ""}
       </div>
-      ${
-        contextId
-          ? `<md-outlined-button type="button" onclick="window.location.assign('/interest-contexts/${encodeURIComponent(contextId)}/draft')">Открыть экран</md-outlined-button>`
-          : ""
-      }
     </div>
     ${
       status !== "not_started"
@@ -4568,9 +4556,6 @@ function renderInterestContextRawReview(payload) {
         <h3>Проверка данных контекста</h3>
         <p class="muted">${escapeHtml(rawReviewScopeText(payload))}</p>
       </div>
-      <md-outlined-button type="button" onclick="window.location.assign('/artifacts')">
-        Глобальные артефакты
-      </md-outlined-button>
     </div>
     <div class="operations-summary raw-review-summary">
       <div class="ops-metric-row">
