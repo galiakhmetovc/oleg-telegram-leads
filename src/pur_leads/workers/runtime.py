@@ -582,11 +582,13 @@ def build_telegram_handler_registry(
             default_timeout_seconds=float(settings.catalog_llm_timeout_seconds),
         )
         max_tokens = int(payload.get("max_tokens") or route.max_output_tokens or 4096)
+        payload_temperature = payload.get("temperature")
         temperature = float(
-            payload.get(
-                "temperature",
-                route.temperature if route.temperature is not None else 0.0,
-            )
+            payload_temperature
+            if payload_temperature is not None
+            else route.temperature
+            if route.temperature is not None
+            else 0.0
         )
 
         scheduler.update_result_summary(
