@@ -564,6 +564,61 @@ md-text-button {
   display: none;
 }
 
+.prepare-progress-panel:empty {
+  display: none;
+}
+
+.prepare-progress-surface {
+  display: grid;
+  gap: 12px;
+  margin-top: 12px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  background: #fbfcfd;
+}
+
+.prepare-progress-surface.is-active {
+  border-color: rgba(22, 119, 75, 0.35);
+}
+
+.prepare-progress-bars {
+  display: grid;
+  gap: 10px;
+}
+
+.prepare-progress-line {
+  display: grid;
+  grid-template-columns: minmax(190px, 0.45fr) minmax(220px, 1fr) 48px;
+  align-items: center;
+  gap: 12px;
+}
+
+.prepare-progress-line > div {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.prepare-progress-line span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.prepare-progress-line b {
+  text-align: right;
+  color: var(--text);
+}
+
+.prepare-progress-meta {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  gap: 8px;
+}
+
+.prepare-stage-results {
+  margin-top: 2px;
+}
+
 .raw-review-section {
   display: grid;
   gap: 12px;
@@ -1527,6 +1582,14 @@ md-text-button {
 
   .raw-review-grid {
     grid-template-columns: 1fr;
+  }
+
+  .prepare-progress-line {
+    grid-template-columns: 1fr;
+  }
+
+  .prepare-progress-line b {
+    text-align: left;
   }
 
   .checkpoint-form {

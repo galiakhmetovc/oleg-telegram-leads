@@ -157,6 +157,14 @@ class SchedulerService:
         )
         self.session.commit()
 
+    def update_result_summary(self, job_id: str, *, result_summary: Any) -> None:
+        self.repository.update_result_summary(
+            job_id,
+            result_summary=result_summary,
+            now=utc_now(),
+        )
+        self.session.commit()
+
     def fail(self, job_id: str, *, error: str, retry_at: datetime) -> SchedulerJobRecord:
         job = self.repository.fail(job_id, error=error, retry_at=retry_at, now=utc_now())
         self.session.commit()

@@ -357,6 +357,16 @@ class SchedulerRepository:
             )
         )
 
+    def update_result_summary(self, job_id: str, *, result_summary: Any, now: datetime) -> None:
+        self.session.execute(
+            update(scheduler_jobs_table)
+            .where(scheduler_jobs_table.c.id == job_id)
+            .values(
+                result_summary_json=result_summary,
+                updated_at=self._to_db_datetime(now),
+            )
+        )
+
     def fail(
         self, job_id: str, *, error: str, retry_at: datetime, now: datetime
     ) -> SchedulerJobRecord:

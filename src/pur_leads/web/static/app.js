@@ -3705,7 +3705,7 @@ function initResources() {
 }
 
 function initInterestContexts() {
-  const state = { items: [], selectedId: null, detail: null };
+  const state = { items: [], selectedId: null, detail: null, preparePollTimer: null };
   document
     .querySelector("#interest-context-refresh")
     ?.addEventListener("click", () => loadInterestContexts(state));
@@ -3724,6 +3724,9 @@ function initInterestContexts() {
   document
     .querySelector("#interest-context-open-raw-review")
     ?.addEventListener("click", () => loadInterestContextRawReview(state));
+  document
+    .querySelector("#interest-context-prepare-data")
+    ?.addEventListener("click", () => startInterestContextDataPreparation(state));
   setInterestContextFormsEnabled(false);
   loadInterestContexts(state);
 }
@@ -3774,9 +3777,11 @@ function renderInterestContextList(state) {
 }
 
 async function loadInterestContextDetail(contextId, state) {
+  stopInterestContextPreparePolling(state);
   const detail = await api(`/api/interest-contexts/${encodeURIComponent(contextId)}`);
   state.detail = detail;
   renderInterestContextDetail(detail);
+  await loadInterestContextPrepareStatus(state, { silent: true });
 }
 
 function renderInterestContextEmptyDetail() {
@@ -3786,6 +3791,7 @@ function renderInterestContextEmptyDetail() {
   const badges = document.querySelector("#interest-context-detail-badges");
   const sources = document.querySelector("#interest-context-source-list");
   const rawReview = document.querySelector("#interest-context-raw-review");
+  const prepareProgress = document.querySelector("#interest-context-prepare-progress");
   if (title) title.textContent = "Выберите контекст";
   if (description) {
     description.textContent = "Сначала создайте ядро интересов, затем добавьте Telegram-канал или архив.";
@@ -3793,6 +3799,7 @@ function renderInterestContextEmptyDetail() {
   if (badges) badges.innerHTML = "";
   if (sources) sources.innerHTML = '<div class="empty-state">Источников пока нет</div>';
   if (rawReview) rawReview.innerHTML = "";
+  if (prepareProgress) prepareProgress.innerHTML = "";
 }
 
 function renderInterestContextDetail(detail) {
@@ -4030,6 +4037,142 @@ async function loadInterestContextRawReview(state) {
   }
 }
 
+async function startInterestContextDataPreparation(state) {
+  const status = document.querySelector("#interest-context-status");
+  if (!state.selectedId) {
+    if (status) status.textContent = "Сначала выберите контекст";
+    return;
+  }
+  try {
+    const payload = await api(
+      `/api/interest-contexts/${encodeURIComponent(state.selectedId)}/prepare-data`,
+      {
+        method: "POST",
+        body: JSON.stringify({ embedding_profile: "local_hashing_v1" }),
+      }
+    );
+    renderInterestContextPrepareProgress(payload.progress, payload.job);
+    if (status) status.textContent = "Подготовка данных поставлена в очередь";
+    scheduleInterestContextPreparePolling(state);
+  } catch (error) {
+    if (status) status.textContent = error.message;
+  }
+}
+
+async function loadInterestContextPrepareStatus(state, { silent = false } = {}) {
+  const status = document.querySelector("#interest-context-status");
+  if (!state.selectedId) return;
+  try {
+    const payload = await api(
+      `/api/interest-contexts/${encodeURIComponent(state.selectedId)}/prepare-data/status`
+    );
+    renderInterestContextPrepareProgress(payload.progress, payload.job);
+    if (isActivePrepareStatus(payload.progress?.status)) {
+      scheduleInterestContextPreparePolling(state);
+    } else {
+      stopInterestContextPreparePolling(state);
+    }
+  } catch (error) {
+    if (!silent && status) status.textContent = error.message;
+  }
+}
+
+function scheduleInterestContextPreparePolling(state) {
+  if (state.preparePollTimer) return;
+  state.preparePollTimer = window.setInterval(() => {
+    loadInterestContextPrepareStatus(state, { silent: true });
+  }, 2000);
+}
+
+function stopInterestContextPreparePolling(state) {
+  if (!state.preparePollTimer) return;
+  window.clearInterval(state.preparePollTimer);
+  state.preparePollTimer = null;
+}
+
+function isActivePrepareStatus(status) {
+  return ["queued", "running"].includes(String(status || ""));
+}
+
+function renderInterestContextPrepareProgress(progress, job) {
+  const target = document.querySelector("#interest-context-prepare-progress");
+  if (!target) return;
+  const status = String(progress?.status || "not_started");
+  if (status === "not_started") {
+    target.innerHTML = "";
+    return;
+  }
+  const overall = normalizePercent(progress?.overall_percent);
+  const stage = normalizePercent(progress?.stage_percent);
+  const stageLabel = progress?.current_stage_label || "Подготовка данных";
+  const message = progress?.message || status;
+  const stageResults = progress?.stage_results || [];
+  target.innerHTML = `<section class="prepare-progress-surface ${isActivePrepareStatus(status) ? "is-active" : ""}">
+    <div class="section-head">
+      <div>
+        <h3>Подготовка данных</h3>
+        <p class="muted">${escapeHtml(message)}</p>
+      </div>
+      <div class="badges">
+        ${badge(label(status), status === "failed" ? "is-danger" : "")}
+        ${job?.id ? badge(`job ${job.id}`) : ""}
+      </div>
+    </div>
+    <div class="prepare-progress-bars">
+      ${renderProgressLine("Общий прогресс", overall, `${progress?.completed_steps || 0}/${progress?.total_steps || 0} шагов`)}
+      ${renderProgressLine(stageLabel, stage, progress?.run_count ? `запуск ${progress?.run_index || 0}/${progress.run_count}` : "этап")}
+    </div>
+    <div class="prepare-progress-meta">
+      ${renderOpsMetric("Raw-запуски", progress?.raw_export_run_count || 0, "в контексте")}
+      ${renderOpsMetric("Этап", progress?.stage_index || 0, `из ${progress?.stage_count || 0}`)}
+      ${renderOpsMetric("Embedding", "local", "local_hashing_v1")}
+    </div>
+    ${renderPrepareStageResults(stageResults)}
+  </section>`;
+}
+
+function renderProgressLine(labelText, percent, hint) {
+  const value = Math.max(0, Math.min(1, percent / 100));
+  return `<div class="prepare-progress-line">
+    <div>
+      <strong>${escapeHtml(labelText)}</strong>
+      <span>${escapeHtml(hint || "")}</span>
+    </div>
+    <md-linear-progress value="${escapeHtml(String(value))}"></md-linear-progress>
+    <b>${escapeHtml(String(percent))}%</b>
+  </div>`;
+}
+
+function renderPrepareStageResults(stageResults) {
+  if (!stageResults.length) return "";
+  const rows = stageResults.slice(-6);
+  return `<div class="table-list prepare-stage-results">${rows
+    .map((result) => {
+      const metrics = result.metrics || {};
+      const metricText = [
+        metrics.total_messages ? `${metrics.total_messages} сообщений` : "",
+        metrics.indexed_documents ? `${metrics.indexed_documents} документов в индексе` : "",
+        metrics.collection_count ? `${metrics.collection_count} Chroma` : "",
+      ]
+        .filter(Boolean)
+        .join(" / ");
+      return `<div class="table-row">
+        <div>
+          <strong>${escapeHtml(result.stage_label || result.stage || "этап")}</strong>
+          <p class="muted">${escapeHtml(metricText || result.raw_export_run_id || "")}</p>
+        </div>
+        <span>${badge("готово")}</span>
+      </div>`;
+    })
+    .join("")}</div>`;
+}
+
+function normalizePercent(value) {
+  const parsed = Number.parseInt(value, 10);
+  if (Number.isNaN(parsed)) return 0;
+  return Math.max(0, Math.min(100, parsed));
+}
+
 function renderInterestContextRawReview(payload) {
   const target = document.querySelector("#interest-context-raw-review");
   if (!target) return;
@@ -4156,6 +4299,8 @@ function setInterestContextFormsEnabled(enabled) {
   if (draftButton) draftButton.disabled = !enabled;
   const rawReviewButton = document.querySelector("#interest-context-open-raw-review");
   if (rawReviewButton) rawReviewButton.disabled = !enabled;
+  const prepareButton = document.querySelector("#interest-context-prepare-data");
+  if (prepareButton) prepareButton.disabled = !enabled;
 }
 
 function openOnboardingResourceDialog(event) {

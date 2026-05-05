@@ -36,6 +36,7 @@ from pur_leads.services.catalog_candidates import CatalogCandidateService
 from pur_leads.services.catalog_sources import CatalogSourceService
 from pur_leads.services.classifier_snapshots import ClassifierSnapshotService
 from pur_leads.services.evaluation import EvaluationService
+from pur_leads.services.interest_context_preparation import InterestContextPreparationService
 from pur_leads.services.leads import LeadDetectionResult, LeadMatchInput, LeadService
 from pur_leads.services.notifications import NotificationPolicyService
 from pur_leads.services.resource_capacity import ResourceCapacityService
@@ -420,6 +421,9 @@ def build_telegram_handler_registry(
     *,
     artifact_storage_path: str | Path | None = None,
     raw_export_storage_path: str | Path | None = None,
+    processed_storage_path: str | Path | None = None,
+    search_storage_path: str | Path | None = None,
+    chroma_storage_path: str | Path | None = None,
 ) -> dict[str, JobHandler]:
     access_worker = TelegramAccessWorker(session, client)
     polling_worker = TelegramPollingWorker(
@@ -498,6 +502,28 @@ def build_telegram_handler_registry(
             checkpoint_after={"message_id": result.checkpoint_after},
             result_summary=asdict(result),
         )
+
+    async def prepare_interest_context_data(job: SchedulerJobRecord) -> JobHandlerResult:
+        if not job.scope_id:
+            raise ValueError("prepare_interest_context_data requires scope_id")
+        payload = job.payload_json if isinstance(job.payload_json, dict) else {}
+        embedding_profile = str(payload.get("embedding_profile") or "local_hashing_v1")
+        preparation = InterestContextPreparationService(
+            session,
+            processed_root=processed_storage_path or "./data/processed",
+            search_root=search_storage_path or "./data/search",
+            chroma_root=chroma_storage_path or "./data/chroma",
+        )
+
+        def update_progress(progress_payload: dict[str, Any]) -> None:
+            scheduler.update_result_summary(job.id, result_summary=progress_payload)
+
+        result = preparation.prepare(
+            job.scope_id,
+            embedding_profile=embedding_profile,
+            progress=update_progress,
+        )
+        return JobHandlerResult(result_summary=result.as_jsonable())
 
     async def fetch_message_context(job: SchedulerJobRecord) -> JobHandlerResult:
         if job.source_message_id is None:
@@ -582,6 +608,7 @@ def build_telegram_handler_registry(
         "poll_monitored_source": poll_monitored_source,
         "ingest_telegram_raw": ingest_telegram_raw,
         "export_telegram_raw": export_telegram_raw,
+        "prepare_interest_context_data": prepare_interest_context_data,
         "fetch_message_context": fetch_message_context,
         "download_artifact": download_artifact,
     }

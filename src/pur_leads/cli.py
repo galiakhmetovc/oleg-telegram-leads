@@ -794,6 +794,9 @@ def _build_worker_handlers(
             telegram_client if telegram_client is not None else _build_telegram_client(session),
             artifact_storage_path=settings.artifact_storage_path,
             raw_export_storage_path=settings.raw_export_storage_path,
+            processed_storage_path=settings.processed_storage_path,
+            search_storage_path=settings.search_storage_path,
+            chroma_storage_path=settings.chroma_storage_path,
         )
     )
     return handlers

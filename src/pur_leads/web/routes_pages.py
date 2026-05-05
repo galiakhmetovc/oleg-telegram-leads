@@ -325,12 +325,17 @@ def interest_contexts_page(
                           <md-icon slot="icon">table_chart</md-icon>
                           Проверить данные
                         </md-filled-tonal-button>
+                        <md-filled-button id="interest-context-prepare-data" type="button">
+                          <md-icon slot="icon">model_training</md-icon>
+                          Подготовить данные
+                        </md-filled-button>
                         <md-filled-tonal-button id="interest-context-build-draft" type="button">
                           Собрать черновик
                         </md-filled-tonal-button>
                       </div>
                     </div>
                     <div id="interest-context-source-list" class="resource-list" aria-live="polite"></div>
+                    <div id="interest-context-prepare-progress" class="prepare-progress-panel" aria-live="polite"></div>
                     <div id="interest-context-raw-review" class="raw-review-panel" aria-live="polite"></div>
                   </section>
                 </section>

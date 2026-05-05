@@ -16,17 +16,23 @@ from sqlalchemy.orm import Session
 
 from pur_leads.core.time import utc_now
 from pur_leads.core.tracing import current_trace_json
+from pur_leads.models.scheduler import scheduler_jobs_table
 from pur_leads.models.telegram_sources import (
     monitored_sources_table,
     source_messages_table,
     telegram_raw_export_runs_table,
 )
 from pur_leads.services.audit import AuditService
+from pur_leads.services.interest_context_preparation import (
+    DEFAULT_PREPARE_EMBEDDING_PROFILE,
+    PREPARE_INTEREST_CONTEXT_DATA_JOB,
+)
 from pur_leads.services.interest_contexts import (
     INTEREST_CONTEXT_SOURCE_PURPOSE,
     InterestContextDetail,
     InterestContextService,
 )
+from pur_leads.services.scheduler import SchedulerService
 from pur_leads.services.telegram_desktop_import import (
     DESKTOP_IMPORT_EXPORT_FORMAT,
     TelegramDesktopArchiveImportService,
@@ -57,6 +63,10 @@ class InterestContextTelegramSourceRequest(BaseModel):
     max_media_size_bytes: int | None = None
     check_access: bool = False
     enqueue_raw_export: bool = True
+
+
+class InterestContextPrepareDataRequest(BaseModel):
+    embedding_profile: str = DEFAULT_PREPARE_EMBEDDING_PROFILE
 
 
 @router.get("")
@@ -135,6 +145,73 @@ def get_interest_context_raw_review(
             "preview_source": preview_source,
         }
     )
+
+
+@router.post("/{context_id}/prepare-data")
+def prepare_interest_context_data(
+    context_id: str,
+    payload: InterestContextPrepareDataRequest,
+    validated: SessionValidationResult = Depends(current_admin),
+    session: Session = Depends(get_session),
+) -> dict[str, Any]:
+    service = InterestContextService(session)
+    context = service.repository.get(context_id)
+    if context is None:
+        raise HTTPException(status_code=404, detail="Interest context not found")
+    raw_runs = [
+        row
+        for row in _raw_runs_for_sources(
+            session,
+            [
+                str(row["id"])
+                for row in session.execute(
+                    select(monitored_sources_table.c.id).where(
+                        monitored_sources_table.c.interest_context_id == context.id
+                    )
+                )
+                .mappings()
+                .all()
+            ],
+        )
+        if row.get("status") == "succeeded"
+    ]
+    if not raw_runs:
+        raise HTTPException(status_code=400, detail="Сначала загрузите или соберите raw-данные")
+    active_job = _active_prepare_job(session, context.id)
+    if active_job is not None:
+        return {"job": _row(active_job), "progress": _job_progress_from_row(active_job)}
+    job = SchedulerService(session).enqueue(
+        job_type=PREPARE_INTEREST_CONTEXT_DATA_JOB,
+        scope_type="interest_context",
+        scope_id=context.id,
+        priority="normal",
+        max_attempts=1,
+        payload_json={
+            "embedding_profile": payload.embedding_profile,
+            "requested_by": _actor(validated),
+            "raw_export_run_count": len(raw_runs),
+        },
+        checkpoint_before_json={
+            "raw_export_run_ids": [row["id"] for row in raw_runs],
+        },
+    )
+    return {"job": _job_payload(job), "progress": _job_progress(job)}
+
+
+@router.get("/{context_id}/prepare-data/status")
+def get_interest_context_prepare_data_status(
+    context_id: str,
+    _validated: SessionValidationResult = Depends(current_admin),
+    session: Session = Depends(get_session),
+) -> dict[str, Any]:
+    context = InterestContextService(session).repository.get(context_id)
+    if context is None:
+        raise HTTPException(status_code=404, detail="Interest context not found")
+    job = _latest_prepare_job(session, context.id)
+    return {
+        "job": _row(job) if job else None,
+        "progress": _job_progress_from_row(job) if job else _empty_prepare_progress(),
+    }
 
 
 @router.post("/{context_id}/telegram-source")
@@ -369,6 +446,103 @@ def _raw_runs_for_sources(session: Session, source_ids: list[str]) -> list[dict[
         .mappings()
         .all()
     ]
+
+
+def _latest_prepare_job(session: Session, context_id: str) -> dict[str, Any] | None:
+    row = (
+        session.execute(
+            select(scheduler_jobs_table)
+            .where(scheduler_jobs_table.c.job_type == PREPARE_INTEREST_CONTEXT_DATA_JOB)
+            .where(scheduler_jobs_table.c.scope_type == "interest_context")
+            .where(scheduler_jobs_table.c.scope_id == context_id)
+            .order_by(desc(scheduler_jobs_table.c.created_at))
+            .limit(1)
+        )
+        .mappings()
+        .first()
+    )
+    return dict(row) if row is not None else None
+
+
+def _active_prepare_job(session: Session, context_id: str) -> dict[str, Any] | None:
+    row = (
+        session.execute(
+            select(scheduler_jobs_table)
+            .where(scheduler_jobs_table.c.job_type == PREPARE_INTEREST_CONTEXT_DATA_JOB)
+            .where(scheduler_jobs_table.c.scope_type == "interest_context")
+            .where(scheduler_jobs_table.c.scope_id == context_id)
+            .where(scheduler_jobs_table.c.status.in_(["queued", "running"]))
+            .order_by(desc(scheduler_jobs_table.c.created_at))
+            .limit(1)
+        )
+        .mappings()
+        .first()
+    )
+    return dict(row) if row is not None else None
+
+
+def _job_payload(job: Any) -> dict[str, Any]:
+    return asdict(job) if hasattr(job, "__dataclass_fields__") else dict(job)
+
+
+def _job_progress(job: Any) -> dict[str, Any]:
+    return _job_progress_from_row(_job_payload(job))
+
+
+def _job_progress_from_row(job: dict[str, Any] | None) -> dict[str, Any]:
+    if not job:
+        return _empty_prepare_progress()
+    progress = job.get("result_summary_json")
+    if isinstance(progress, dict) and progress.get("kind") == "interest_context_data_preparation":
+        return progress
+    if job.get("status") == "succeeded" and isinstance(progress, dict):
+        return {
+            "kind": "interest_context_data_preparation",
+            "status": "succeeded",
+            "current_stage": "done",
+            "current_stage_label": "Готово",
+            "overall_percent": 100,
+            "stage_percent": 100,
+            "message": "Данные подготовлены",
+            "stage_results": progress.get("stage_results", []),
+            "raw_export_run_count": progress.get("raw_export_run_count", 0),
+            "total_steps": progress.get("total_steps", 0),
+            "completed_steps": progress.get("completed_steps", 0),
+        }
+    status = str(job.get("status") or "unknown")
+    return {
+        "kind": "interest_context_data_preparation",
+        "status": status,
+        "current_stage": None,
+        "current_stage_label": "В очереди" if status == "queued" else status,
+        "overall_percent": 0,
+        "stage_percent": 0,
+        "message": "Задача ожидает воркер"
+        if status == "queued"
+        else job.get("last_error") or status,
+        "stage_results": [],
+        "raw_export_run_count": (job.get("payload_json") or {}).get("raw_export_run_count", 0)
+        if isinstance(job.get("payload_json"), dict)
+        else 0,
+    }
+
+
+def _empty_prepare_progress() -> dict[str, Any]:
+    return {
+        "kind": "interest_context_data_preparation",
+        "status": "not_started",
+        "current_stage": None,
+        "current_stage_label": "Не запускалось",
+        "overall_percent": 0,
+        "stage_percent": 0,
+        "message": "Подготовка данных еще не запускалась",
+        "stage_results": [],
+        "raw_export_run_count": 0,
+    }
+
+
+def _row(row: dict[str, Any]) -> dict[str, Any]:
+    return dict(row)
 
 
 def _raw_review_summary(
