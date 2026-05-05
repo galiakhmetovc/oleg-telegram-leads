@@ -46,6 +46,9 @@ from pur_leads.services.interest_core_candidate_enhancement import (
     ENHANCE_INTEREST_CORE_CANDIDATES_JOB,
     InterestCoreCandidateEnhancementService,
 )
+from pur_leads.services.interest_core_candidate_reviews import (
+    InterestCoreCandidateReviewService,
+)
 from pur_leads.services.interest_core_briefs import (
     GENERATE_INTEREST_CORE_BRIEF_JOB,
     InterestCoreBriefService,
@@ -714,6 +717,15 @@ def build_telegram_handler_registry(
             progress=update_progress,
             resume_state=resume_state,
         )
+        review_count = InterestCoreCandidateReviewService(
+            session
+        ).replace_from_enhancement_result(
+            context_id=job.scope_id,
+            enhancement_job_id=job.id,
+            result_summary=result,
+            actor=actor,
+        )
+        result["review_count"] = review_count
         return JobHandlerResult(result_summary=result)
 
     async def fetch_message_context(job: SchedulerJobRecord) -> JobHandlerResult:

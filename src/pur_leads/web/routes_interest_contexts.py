@@ -24,6 +24,9 @@ from pur_leads.services.interest_context_drafts import (
 from pur_leads.services.interest_core_candidate_enhancement import (
     ENHANCE_INTEREST_CORE_CANDIDATES_JOB,
 )
+from pur_leads.services.interest_core_candidate_reviews import (
+    InterestCoreCandidateReviewService,
+)
 from pur_leads.services.interest_core_briefs import (
     GENERATE_INTEREST_CORE_BRIEF_JOB,
     InterestCoreBriefService,
@@ -105,6 +108,11 @@ class InterestCoreCandidateEnhanceRequest(BaseModel):
     route_role: str = "primary"
     max_tokens: int | None = Field(default=None, ge=1, le=32000)
     temperature: float | None = Field(default=None, ge=0.0, le=2.0)
+
+
+class InterestCoreCandidateReviewUpdateRequest(BaseModel):
+    status: str = Field(pattern="^(pending_review|approved|rejected|applied)$")
+    note: str | None = None
 
 
 @router.get("")
@@ -509,6 +517,7 @@ def enhance_interest_context_draft_with_llm(
             "job": _row(active_job),
             "progress": _candidate_enhancement_progress_from_row(active_job),
             "enhancement": _candidate_enhancement_payload(active_job),
+            "reviews": InterestCoreCandidateReviewService(session).latest_payload(context.id),
         }
     job = SchedulerService(session).enqueue(
         job_type=ENHANCE_INTEREST_CORE_CANDIDATES_JOB,
@@ -533,6 +542,7 @@ def enhance_interest_context_draft_with_llm(
         "job": _job_payload(job),
         "progress": _candidate_enhancement_progress(job),
         "enhancement": None,
+        "reviews": InterestCoreCandidateReviewService(session).latest_payload(context.id),
     }
 
 
@@ -546,13 +556,58 @@ def get_interest_context_draft_llm_enhancement_status(
     if context is None:
         raise HTTPException(status_code=404, detail="Interest context not found")
     job = _latest_candidate_enhancement_job(session, context.id)
+    review_payload = InterestCoreCandidateReviewService(session).latest_payload(context.id)
     return {
         "job": _row(job) if job else None,
         "progress": _candidate_enhancement_progress_from_row(job)
         if job
         else _empty_candidate_enhancement_progress(),
         "enhancement": _candidate_enhancement_payload(job) if job else None,
+        "reviews": review_payload,
     }
+
+
+@router.get("/{context_id}/candidate-reviews")
+def list_interest_core_candidate_reviews(
+    context_id: str,
+    _validated: SessionValidationResult = Depends(current_admin),
+    session: Session = Depends(get_session),
+) -> dict[str, Any]:
+    context = InterestContextService(session).repository.get(context_id)
+    if context is None:
+        raise HTTPException(status_code=404, detail="Interest context not found")
+    return jsonable_encoder(InterestCoreCandidateReviewService(session).latest_payload(context.id))
+
+
+@router.patch("/{context_id}/candidate-reviews/{review_id}")
+def update_interest_core_candidate_review(
+    context_id: str,
+    review_id: str,
+    payload: InterestCoreCandidateReviewUpdateRequest,
+    validated: SessionValidationResult = Depends(current_admin),
+    session: Session = Depends(get_session),
+) -> dict[str, Any]:
+    context = InterestContextService(session).repository.get(context_id)
+    if context is None:
+        raise HTTPException(status_code=404, detail="Interest context not found")
+    try:
+        review = InterestCoreCandidateReviewService(session).set_status(
+            review_id,
+            status=payload.status,
+            actor=_actor(validated),
+            note=payload.note,
+            context_id=context.id,
+        )
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Candidate review not found") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return jsonable_encoder(
+        {
+            "review": review.as_jsonable(),
+            "reviews": InterestCoreCandidateReviewService(session).latest_payload(context.id),
+        }
+    )
 
 
 @router.get("/{context_id}/briefs")

@@ -109,6 +109,7 @@ const LABELS = {
   interested: "интересуется",
   interest_context_seed: "ядро интересов",
   item: "сущность",
+  keep: "оставить",
   lead: "лид",
   lead_phrase: "признак запроса",
   lead_monitoring: "поиск лидов",
@@ -118,6 +119,7 @@ const LABELS = {
   manual: "вручную",
   manual_test: "ручной тест",
   maybe: "возможно",
+  merge: "объединить",
   muted: "скрыто",
   negative_phrase: "исключающий признак",
   new: "новый",
@@ -145,6 +147,7 @@ const LABELS = {
   since_date: "с даты",
   source_start: "как настроен источник",
   rejected: "отклонено",
+  reject: "отклонить",
   residential_complex: "жилой комплекс",
   running: "выполняется",
   service: "действие/сервис",
@@ -3739,6 +3742,9 @@ function initInterestContexts() {
     .querySelector("#interest-context-enhance-draft-llm")
     ?.addEventListener("click", () => enhanceInterestContextDraftWithLlm(state));
   document
+    .querySelector("#interest-context-llm-enhance-review")
+    ?.addEventListener("click", (event) => updateInterestCoreCandidateReviewStatus(event, state));
+  document
     .querySelector("#interest-context-open-raw-review")
     ?.addEventListener("click", () => loadInterestContextRawReview(state));
   document
@@ -4507,7 +4513,12 @@ async function enhanceInterestContextDraftWithLlm(state) {
         }),
       }
     );
-    renderInterestContextCandidateEnhancement(payload.progress, payload.job, payload.enhancement);
+    renderInterestContextCandidateEnhancement(
+      payload.progress,
+      payload.job,
+      payload.enhancement,
+      payload.reviews
+    );
     if (status) status.textContent = "LLM-улучшение кандидатов поставлено в очередь";
     scheduleInterestContextEnhancementPolling(state);
   } catch (error) {
@@ -4522,7 +4533,12 @@ async function loadInterestContextEnhancementStatus(state, { silent = false } = 
     const payload = await api(
       `/api/interest-contexts/${encodeURIComponent(state.selectedId)}/draft/enhance-llm/status`
     );
-    renderInterestContextCandidateEnhancement(payload.progress, payload.job, payload.enhancement);
+    renderInterestContextCandidateEnhancement(
+      payload.progress,
+      payload.job,
+      payload.enhancement,
+      payload.reviews
+    );
     if (isActiveCandidateEnhancementStatus(payload.progress?.status)) {
       scheduleInterestContextEnhancementPolling(state);
     } else {
@@ -4710,11 +4726,34 @@ function renderInterestContextDraft(progress, job, draft) {
   </section>`;
 }
 
-function renderInterestContextCandidateEnhancement(progress, job, enhancement) {
+async function updateInterestCoreCandidateReviewStatus(event, state) {
+  const button = event.target.closest("[data-review-id][data-review-status]");
+  if (!button || !state.selectedId) return;
+  const status = document.querySelector("#interest-context-status");
+  try {
+    await api(
+      `/api/interest-contexts/${encodeURIComponent(state.selectedId)}/candidate-reviews/${encodeURIComponent(button.dataset.reviewId)}`,
+      {
+        method: "PATCH",
+        body: JSON.stringify({
+          status: button.dataset.reviewStatus,
+          note: button.dataset.reviewNote || null,
+        }),
+      }
+    );
+    await loadInterestContextEnhancementStatus(state, { silent: true });
+    if (status) status.textContent = "Статус рекомендации обновлен";
+  } catch (error) {
+    if (status) status.textContent = error.message;
+  }
+}
+
+function renderInterestContextCandidateEnhancement(progress, job, enhancement, reviews) {
   const target = document.querySelector("#interest-context-llm-enhance-review");
   if (!target) return;
-  const status = String(progress?.status || "not_started");
-  if (status === "not_started" && !enhancement) {
+  const status = String(progress?.status || job?.status || "not_started");
+  const reviewItems = reviews?.items || [];
+  if (status === "not_started" && !enhancement && !reviewItems.length) {
     target.innerHTML = "";
     return;
   }
@@ -4748,11 +4787,76 @@ function renderInterestContextCandidateEnhancement(progress, job, enhancement) {
       ${renderOpsMetric("Добавлено", progress?.new_count || 0, "из брифа/evidence")}
       ${renderOpsMetric("Отклонено", progress?.rejected_count || 0, "как шум")}
     </div>
-    ${result?.summary ? `<p class="muted">${escapeHtml(result.summary)}</p>` : ""}
-    ${renderEnhancedCandidateSection("Улучшенные кандидаты", result.improved_candidates || [], renderImprovedCandidateRow)}
-    ${renderEnhancedCandidateSection("Новые кандидаты от LLM", result.new_candidates || [], renderNewCandidateRow)}
-    ${renderEnhancedCandidateSection("Кандидаты на отклонение", result.rejected_candidates || [], renderRejectedCandidateRow)}
+    ${renderCandidateReviewSummary(reviews)}
+    ${renderCandidateReviewSection(reviewItems)}
+    ${
+      reviewItems.length
+        ? ""
+        : `${result?.summary ? `<p class="muted">${escapeHtml(result.summary)}</p>` : ""}
+           ${renderEnhancedCandidateSection("Улучшенные кандидаты", result.improved_candidates || [], renderImprovedCandidateRow)}
+           ${renderEnhancedCandidateSection("Новые кандидаты от LLM", result.new_candidates || [], renderNewCandidateRow)}
+           ${renderEnhancedCandidateSection("Кандидаты на отклонение", result.rejected_candidates || [], renderRejectedCandidateRow)}`
+    }
   </section>`;
+}
+
+function renderCandidateReviewSummary(reviews) {
+  const summary = reviews?.summary;
+  if (!summary || !summary.total) return "";
+  return `<div class="prepare-progress-meta">
+    ${renderOpsMetric("Ревью-записи", summary.total || 0, "сохранены")}
+    ${renderOpsMetric("На проверке", summary.by_status?.pending_review || 0, "ожидают решения")}
+    ${renderOpsMetric("Одобрено", summary.by_status?.approved || 0, "принято оператором")}
+  </div>`;
+}
+
+function renderCandidateReviewSection(items) {
+  if (!items.length) return "";
+  const groups = [
+    ["improved", "Улучшенные кандидаты"],
+    ["new", "Новые кандидаты от LLM"],
+    ["rejected", "Кандидаты на отклонение"],
+  ];
+  return groups
+    .map(([type, title]) => {
+      const rows = items.filter((item) => item.recommendation_type === type);
+      if (!rows.length) return "";
+      return `<div class="draft-items">
+        <div class="section-head compact-section-head">
+          <h4>${escapeHtml(title)}</h4>
+          <span class="muted">${escapeHtml(String(rows.length))}</span>
+        </div>
+        <div class="table-list">${rows.slice(0, 160).map(renderCandidateReviewRow).join("")}</div>
+      </div>`;
+    })
+    .join("");
+}
+
+function renderCandidateReviewRow(item) {
+  const title = item.canonical_name || item.source_candidate_id || "кандидат";
+  const statusClass = item.status === "rejected" ? "is-danger" : "";
+  return `<div class="table-row draft-item-row">
+    <div>
+      <strong>${escapeHtml(title)}</strong>
+      <p class="muted">${escapeHtml(item.description || item.rationale || "")}</p>
+      <div class="badges">
+        ${badge(label(item.status || "pending_review"), statusClass)}
+        ${badge(label(item.decision || "needs_review"), item.decision === "reject" ? "is-danger" : "")}
+        ${item.category ? badge(item.category) : ""}
+        ${badge(label(item.confidence || "medium"))}
+        ${item.merge_into_candidate_id ? badge(`merge -> ${item.merge_into_candidate_id}`) : ""}
+      </div>
+      ${renderCandidateSignalLine("Сигналы", item.lead_signals_json)}
+      ${renderCandidateSignalLine("Синонимы", item.synonyms_json)}
+      ${renderCandidateSignalLine("Шум", item.noise_patterns_json)}
+      ${item.review_note ? `<p class="draft-evidence"><strong>Комментарий:</strong> ${escapeHtml(item.review_note)}</p>` : ""}
+    </div>
+    <div class="row-actions">
+      <button type="button" data-review-id="${escapeHtml(item.id)}" data-review-status="approved">Одобрить</button>
+      <button type="button" class="secondary-button" data-review-id="${escapeHtml(item.id)}" data-review-status="rejected">Отклонить</button>
+      <button type="button" class="secondary-button" data-review-id="${escapeHtml(item.id)}" data-review-status="pending_review">Вернуть</button>
+    </div>
+  </div>`;
 }
 
 function enhancementProgressHint(progress) {
