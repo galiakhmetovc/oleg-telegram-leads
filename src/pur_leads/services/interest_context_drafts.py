@@ -15,6 +15,7 @@ from sqlalchemy.orm import Session
 from pur_leads.core.ids import new_id
 from pur_leads.core.time import utc_now
 from pur_leads.models.interest_context_drafts import (
+    interest_core_candidate_reviews_table,
     interest_context_draft_items_table,
     interest_context_draft_runs_table,
 )
@@ -286,6 +287,7 @@ class InterestContextDraftService:
             }
         total = self._item_count_for_run(str(run["id"]))
         items = self._items_for_run(str(run["id"]), limit=limit, offset=offset)
+        self._attach_ai_review_status(items)
         return {
             "draft_run": dict(run),
             "items": items,
@@ -521,6 +523,36 @@ class InterestContextDraftService:
             ).scalar_one()
             or 0
         )
+
+    def _attach_ai_review_status(self, items: list[dict[str, Any]]) -> None:
+        item_ids = [str(item["id"]) for item in items if item.get("id")]
+        if not item_ids:
+            return
+        rows = (
+            self.session.execute(
+                select(interest_core_candidate_reviews_table)
+                .where(interest_core_candidate_reviews_table.c.source_candidate_id.in_(item_ids))
+                .order_by(desc(interest_core_candidate_reviews_table.c.updated_at))
+            )
+            .mappings()
+            .all()
+        )
+        by_candidate: dict[str, dict[str, Any]] = {}
+        for row in rows:
+            candidate_id = str(row["source_candidate_id"])
+            if candidate_id not in by_candidate:
+                by_candidate[candidate_id] = dict(row)
+        for item in items:
+            metadata = dict(item.get("metadata_json") or {})
+            review = by_candidate.get(str(item.get("id")))
+            if review is None:
+                metadata["ai_review_status"] = "not_checked"
+            else:
+                metadata["ai_review_status"] = review["status"]
+                metadata["ai_review_decision"] = review["decision"]
+                metadata["ai_review_type"] = review["recommendation_type"]
+                metadata["ai_review_id"] = review["id"]
+            item["metadata_json"] = metadata
 
     def _report_stage_start(
         self,

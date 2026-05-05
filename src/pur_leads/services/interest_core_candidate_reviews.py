@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 from typing import Any
 
-from sqlalchemy import delete, desc, func, insert, select, update
+from sqlalchemy import desc, func, insert, select, update
 from sqlalchemy.orm import Session
 
 from pur_leads.core.ids import new_id
@@ -13,6 +13,7 @@ from pur_leads.core.time import utc_now
 from pur_leads.models.interest_context_drafts import interest_core_candidate_reviews_table
 from pur_leads.models.scheduler import scheduler_jobs_table
 from pur_leads.services.audit import AuditService
+from pur_leads.services.interest_core_items import InterestCoreItemService
 from pur_leads.services.interest_core_candidate_enhancement import (
     ENHANCE_INTEREST_CORE_CANDIDATES_JOB,
 )
@@ -99,7 +100,6 @@ class InterestCoreCandidateReviewService:
                 .where(scheduler_jobs_table.c.job_type == ENHANCE_INTEREST_CORE_CANDIDATES_JOB)
                 .where(scheduler_jobs_table.c.scope_type == "interest_context")
                 .where(scheduler_jobs_table.c.scope_id == context_id)
-                .where(scheduler_jobs_table.c.status == "succeeded")
                 .order_by(desc(scheduler_jobs_table.c.created_at))
                 .limit(1)
             )
@@ -123,7 +123,7 @@ class InterestCoreCandidateReviewService:
         result = job.get("result_summary_json")
         if not isinstance(result, dict):
             return 0
-        return self.replace_from_enhancement_result(
+        return self.sync_from_enhancement_result(
             context_id=str(job["scope_id"]),
             enhancement_job_id=job_id,
             result_summary=result,
@@ -140,20 +140,29 @@ class InterestCoreCandidateReviewService:
         result_summary: dict[str, Any],
         actor: str,
     ) -> int:
+        return self.sync_from_enhancement_result(
+            context_id=context_id,
+            enhancement_job_id=enhancement_job_id,
+            result_summary=result_summary,
+            actor=actor,
+        )
+
+    def sync_from_enhancement_result(
+        self,
+        *,
+        context_id: str,
+        enhancement_job_id: str,
+        result_summary: dict[str, Any],
+        actor: str,
+    ) -> int:
         if result_summary.get("kind") != "interest_core_candidate_enhancement":
-            return 0
-        if result_summary.get("status") != "succeeded":
             return 0
         result = result_summary.get("result")
         if not isinstance(result, dict):
+            result = result_summary.get("partial_result")
+        if not isinstance(result, dict):
             return 0
         now = utc_now()
-        self.session.execute(
-            delete(interest_core_candidate_reviews_table).where(
-                interest_core_candidate_reviews_table.c.enhancement_job_id
-                == enhancement_job_id
-            )
-        )
         rows = _review_rows(
             context_id=context_id,
             enhancement_job_id=enhancement_job_id,
@@ -162,22 +171,61 @@ class InterestCoreCandidateReviewService:
             result_summary=result_summary,
             now=now,
         )
-        if rows:
-            self.session.execute(insert(interest_core_candidate_reviews_table), rows)
+        existing = self._existing_review_rows(enhancement_job_id)
+        inserted = 0
+        updated = 0
+        for row in rows:
+            key = _review_key(row)
+            current = existing.get(key)
+            if current is None:
+                self.session.execute(insert(interest_core_candidate_reviews_table), row)
+                inserted += 1
+                continue
+            if current.get("status") != "pending_review":
+                continue
+            values = {
+                field: row[field]
+                for field in (
+                    "canonical_name",
+                    "category",
+                    "decision",
+                    "merge_into_candidate_id",
+                    "confidence",
+                    "description",
+                    "synonyms_json",
+                    "lead_signals_json",
+                    "noise_patterns_json",
+                    "evidence_refs_json",
+                    "rationale",
+                    "metadata_json",
+                )
+            }
+            values["updated_at"] = now
+            self.session.execute(
+                update(interest_core_candidate_reviews_table)
+                .where(interest_core_candidate_reviews_table.c.id == current["id"])
+                .values(**values)
+            )
+            updated += 1
         self.session.commit()
         self.audit.record_change(
             actor=actor,
-            action="interest_core_candidate_reviews.replace_from_llm",
+            action="interest_core_candidate_reviews.sync_from_llm",
             entity_type="interest_context",
             entity_id=context_id,
             old_value_json=None,
             new_value_json={
                 "enhancement_job_id": enhancement_job_id,
-                "review_count": len(rows),
+                "review_count": self.review_count(
+                    context_id,
+                    enhancement_job_id=enhancement_job_id,
+                ),
+                "inserted": inserted,
+                "updated": updated,
                 "summary": _counts_from_result(result),
             },
         )
-        return len(rows)
+        return self.review_count(context_id, enhancement_job_id=enhancement_job_id)
 
     def list_reviews(
         self,
@@ -280,6 +328,15 @@ class InterestCoreCandidateReviewService:
         if context_id is not None and before.context_id != context_id:
             raise KeyError(review_id)
         now = utc_now()
+        applied_item_id = None
+        applied_at = before.applied_at
+        if status == "approved" and before.recommendation_type != "rejected":
+            item = InterestCoreItemService(self.session).apply_review(review_id, actor=actor)
+            applied_item_id = item.id
+            applied_at = now
+        metadata = dict(before.metadata_json or {})
+        if applied_item_id:
+            metadata["interest_core_item_id"] = applied_item_id
         self.session.execute(
             update(interest_core_candidate_reviews_table)
             .where(interest_core_candidate_reviews_table.c.id == review_id)
@@ -289,7 +346,8 @@ class InterestCoreCandidateReviewService:
                 reviewed_by=actor,
                 reviewed_at=now,
                 updated_at=now,
-                applied_at=now if status == "applied" else before.applied_at,
+                applied_at=applied_at,
+                metadata_json=metadata,
             )
         )
         self.session.commit()
@@ -302,9 +360,26 @@ class InterestCoreCandidateReviewService:
             entity_type="interest_core_candidate_review",
             entity_id=review_id,
             old_value_json={"status": before.status, "review_note": before.review_note},
-            new_value_json={"status": after.status, "review_note": after.review_note},
+            new_value_json={
+                "status": after.status,
+                "review_note": after.review_note,
+                "interest_core_item_id": applied_item_id,
+            },
         )
         return after
+
+    def _existing_review_rows(self, enhancement_job_id: str) -> dict[tuple[str, str], dict[str, Any]]:
+        rows = (
+            self.session.execute(
+                select(interest_core_candidate_reviews_table).where(
+                    interest_core_candidate_reviews_table.c.enhancement_job_id
+                    == enhancement_job_id
+                )
+            )
+            .mappings()
+            .all()
+        )
+        return {_review_key(dict(row)): dict(row) for row in rows}
 
     def _get(self, review_id: str) -> InterestCoreCandidateReviewRecord | None:
         row = (
@@ -469,6 +544,17 @@ def _base_row(
 
 def _record(row: Any) -> InterestCoreCandidateReviewRecord:
     return InterestCoreCandidateReviewRecord(**dict(row))
+
+
+def _review_key(row: dict[str, Any]) -> tuple[str, str]:
+    item_key = (
+        row.get("source_candidate_id")
+        or row.get("canonical_name")
+        or row.get("rationale")
+        or row.get("id")
+        or ""
+    )
+    return (str(row.get("recommendation_type") or ""), str(item_key).casefold())
 
 
 def _pagination(*, limit: int, offset: int, total: int) -> dict[str, Any]:

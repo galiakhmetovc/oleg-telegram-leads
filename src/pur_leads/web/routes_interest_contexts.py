@@ -27,6 +27,7 @@ from pur_leads.services.interest_core_candidate_enhancement import (
 from pur_leads.services.interest_core_candidate_reviews import (
     InterestCoreCandidateReviewService,
 )
+from pur_leads.services.interest_core_items import InterestCoreItemService
 from pur_leads.services.interest_core_briefs import (
     GENERATE_INTEREST_CORE_BRIEF_JOB,
     InterestCoreBriefService,
@@ -102,7 +103,7 @@ class InterestCoreBriefGenerateRequest(BaseModel):
 
 
 class InterestCoreCandidateEnhanceRequest(BaseModel):
-    max_items: int = Field(default=80, ge=1, le=300)
+    max_items: int = Field(default=1000, ge=1, le=5000)
     candidate_chunk_size: int = Field(default=10, ge=1, le=50)
     agent_key: str = "catalog_extractor"
     route_role: str = "primary"
@@ -604,6 +605,26 @@ def list_interest_core_candidate_reviews(
         raise HTTPException(status_code=404, detail="Interest context not found")
     return jsonable_encoder(
         InterestCoreCandidateReviewService(session).latest_payload(
+            context.id,
+            limit=max(1, min(limit, 100)),
+            offset=max(0, offset),
+        )
+    )
+
+
+@router.get("/{context_id}/core-items")
+def list_interest_core_items(
+    context_id: str,
+    limit: int = 10,
+    offset: int = 0,
+    _validated: SessionValidationResult = Depends(current_admin),
+    session: Session = Depends(get_session),
+) -> dict[str, Any]:
+    context = InterestContextService(session).repository.get(context_id)
+    if context is None:
+        raise HTTPException(status_code=404, detail="Interest context not found")
+    return jsonable_encoder(
+        InterestCoreItemService(session).latest_payload(
             context.id,
             limit=max(1, min(limit, 100)),
             offset=max(0, offset),

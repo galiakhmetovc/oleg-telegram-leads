@@ -676,7 +676,7 @@ def build_telegram_handler_registry(
             if route.temperature is not None
             else 0.0
         )
-        max_items = int(payload.get("max_items") or 80)
+        max_items = int(payload.get("max_items") or 1000)
         candidate_chunk_size = int(payload.get("candidate_chunk_size") or 10)
 
         scheduler.update_result_summary(
@@ -698,6 +698,13 @@ def build_telegram_handler_registry(
 
         def update_progress(progress_payload: dict[str, Any]) -> None:
             scheduler.update_result_summary(job.id, result_summary=progress_payload)
+            if isinstance(progress_payload.get("partial_result"), dict):
+                InterestCoreCandidateReviewService(session).sync_from_enhancement_result(
+                    context_id=job.scope_id,
+                    enhancement_job_id=job.id,
+                    result_summary=progress_payload,
+                    actor=actor,
+                )
 
         result = await InterestCoreCandidateEnhancementService(session).enhance_async(
             job.scope_id,
@@ -719,7 +726,7 @@ def build_telegram_handler_registry(
         )
         review_count = InterestCoreCandidateReviewService(
             session
-        ).replace_from_enhancement_result(
+        ).sync_from_enhancement_result(
             context_id=job.scope_id,
             enhancement_job_id=job.id,
             result_summary=result,

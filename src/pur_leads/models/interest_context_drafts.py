@@ -70,3 +70,26 @@ interest_core_candidate_reviews_table = Table(
     Column("created_at", DateTime(timezone=True), nullable=False),
     Column("updated_at", DateTime(timezone=True), nullable=False),
 )
+
+interest_core_items_table = Table(
+    "interest_core_items",
+    metadata,
+    Column("id", String(36), primary_key=True),
+    Column("context_id", String(36), nullable=False),
+    Column("source_review_id", String(36), nullable=True),
+    Column("source_candidate_id", String(80), nullable=True),
+    Column("item_type", String(64), nullable=False),
+    Column("canonical_name", String(300), nullable=False),
+    Column("category", String(160), nullable=True),
+    Column("description", Text, nullable=True),
+    Column("confidence", String(32), nullable=False),
+    Column("status", String(32), nullable=False),
+    Column("synonyms_json", JSON, nullable=True),
+    Column("lead_signals_json", JSON, nullable=True),
+    Column("noise_patterns_json", JSON, nullable=True),
+    Column("evidence_refs_json", JSON, nullable=True),
+    Column("metadata_json", JSON, nullable=True),
+    Column("created_by", String(160), nullable=False),
+    Column("created_at", DateTime(timezone=True), nullable=False),
+    Column("updated_at", DateTime(timezone=True), nullable=False),
+)

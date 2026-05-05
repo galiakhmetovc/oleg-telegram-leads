@@ -127,6 +127,7 @@ const LABELS = {
   none: "нет",
   normal: "обычный",
   not_lead: "не лид",
+  not_checked: "AI не проверял",
   open: "открыто",
   offer: "условие",
   other: "другое",
@@ -3722,10 +3723,12 @@ function initInterestContexts() {
     draftPollTimer: null,
     enhancePollTimer: null,
     briefPollTimer: null,
-    draftItemsLimit: 25,
+    draftItemsLimit: 10,
     draftItemsOffset: 0,
-    reviewItemsLimit: 25,
+    reviewItemsLimit: 10,
     reviewItemsOffset: 0,
+    coreItemsLimit: 10,
+    coreItemsOffset: 0,
   };
   document
     .querySelector("#interest-context-refresh")
@@ -3775,6 +3778,12 @@ function initInterestContexts() {
   document
     .querySelector("#interest-context-review-items-refresh")
     ?.addEventListener("click", () => loadInterestContextReviewItemsPage(state));
+  document
+    .querySelector("#interest-context-core-items-page")
+    ?.addEventListener("click", (event) => changeInterestContextCoreItemsPage(event, state));
+  document
+    .querySelector("#interest-context-core-items-refresh")
+    ?.addEventListener("click", () => loadInterestContextCoreItemsPage(state));
   document
     .querySelector("#interest-llm-provider-form")
     ?.addEventListener("submit", (event) => saveInterestLlmProvider(event));
@@ -3853,6 +3862,10 @@ async function loadInterestContextDetail(contextId, state) {
   if (state.step === "reviews") {
     state.reviewItemsOffset = 0;
     await loadInterestContextReviewItemsPage(state);
+  }
+  if (state.step === "items") {
+    state.coreItemsOffset = 0;
+    await loadInterestContextCoreItemsPage(state);
   }
   if (state.step === "llm") {
     await loadInterestCoreBriefStatus(state, { silent: true });
@@ -4595,7 +4608,7 @@ async function enhanceInterestContextDraftWithLlm(state) {
       {
         method: "POST",
         body: JSON.stringify({
-          max_items: 80,
+          max_items: 1000,
           candidate_chunk_size: 10,
           agent_key: "catalog_extractor",
           route_role: "primary",
@@ -4920,6 +4933,56 @@ function renderInterestContextReviewItemsPage(payload, state) {
   </section>`;
 }
 
+async function loadInterestContextCoreItemsPage(state) {
+  const target = document.querySelector("#interest-context-core-items-page");
+  const status = document.querySelector("#interest-context-status");
+  if (!target || !state.selectedId) return;
+  try {
+    const params = new URLSearchParams({
+      limit: String(state.coreItemsLimit),
+      offset: String(state.coreItemsOffset),
+    });
+    const payload = await api(
+      `/api/interest-contexts/${encodeURIComponent(state.selectedId)}/core-items?${params.toString()}`
+    );
+    renderInterestContextCoreItemsPage(payload, state);
+  } catch (error) {
+    target.innerHTML = `<div class="empty-state">${escapeHtml(error.message)}</div>`;
+    if (status) status.textContent = error.message;
+  }
+}
+
+function changeInterestContextCoreItemsPage(event, state) {
+  const button = event.target.closest("[data-core-page-action]");
+  if (!button) return;
+  const action = button.dataset.corePageAction;
+  if (action === "prev") {
+    state.coreItemsOffset = Math.max(0, state.coreItemsOffset - state.coreItemsLimit);
+  }
+  if (action === "next") {
+    state.coreItemsOffset += state.coreItemsLimit;
+  }
+  loadInterestContextCoreItemsPage(state);
+}
+
+function renderInterestContextCoreItemsPage(payload, state) {
+  const target = document.querySelector("#interest-context-core-items-page");
+  if (!target) return;
+  const items = payload.items || [];
+  const pagination = payload.pagination || { limit: state.coreItemsLimit, offset: 0, total: 0 };
+  target.innerHTML = `<section class="draft-review-section">
+    <div class="section-head">
+      <div>
+        <h3>Утвержденные элементы</h3>
+        <p class="muted">Это результат ручного approve. Следующий шаг - использовать эти элементы в поиске интересов и лидов.</p>
+      </div>
+      <div class="badges">${badge(`${pagination.total || 0} всего`)}</div>
+    </div>
+    ${items.length ? renderCoreItems(items, pagination) : '<div class="empty-state">Рабочее ядро пока пустое. Одобрите LLM-рекомендации.</div>'}
+    ${renderPageControls(pagination, "core")}
+  </section>`;
+}
+
 function renderInterestContextCandidateEnhancement(progress, job, enhancement, reviews) {
   const target = document.querySelector("#interest-context-llm-enhance-review");
   if (!target) return;
@@ -5036,6 +5099,7 @@ function renderCandidateReviewSection(items, pagination = null) {
 function renderCandidateReviewRow(item) {
   const title = item.canonical_name || item.source_candidate_id || "кандидат";
   const statusClass = item.status === "rejected" ? "is-danger" : "";
+  const coreItemId = item.metadata_json?.interest_core_item_id;
   return `<div class="table-row draft-item-row">
     <div>
       <strong>${escapeHtml(title)}</strong>
@@ -5050,6 +5114,7 @@ function renderCandidateReviewRow(item) {
       ${renderCandidateSignalLine("Сигналы", item.lead_signals_json)}
       ${renderCandidateSignalLine("Синонимы", item.synonyms_json)}
       ${renderCandidateSignalLine("Шум", item.noise_patterns_json)}
+      ${coreItemId ? `<p class="draft-evidence"><strong>Куда попал:</strong> рабочее ядро, item ${escapeHtml(coreItemId)}</p>` : ""}
       ${item.review_note ? `<p class="draft-evidence"><strong>Комментарий:</strong> ${escapeHtml(item.review_note)}</p>` : ""}
     </div>
     <div class="row-actions">
@@ -5057,6 +5122,37 @@ function renderCandidateReviewRow(item) {
       <button type="button" class="secondary-button" data-review-id="${escapeHtml(item.id)}" data-review-status="rejected">Отклонить</button>
       <button type="button" class="secondary-button" data-review-id="${escapeHtml(item.id)}" data-review-status="pending_review">Вернуть</button>
     </div>
+  </div>`;
+}
+
+function renderCoreItems(items, pagination) {
+  const shownText = pagination
+    ? `${pagination.offset + 1}-${Math.min(pagination.offset + items.length, pagination.total)} из ${pagination.total}`
+    : `${items.length} показано`;
+  return `<div class="draft-items">
+    <div class="section-head compact-section-head">
+      <h4>Рабочее ядро</h4>
+      <span class="muted">${escapeHtml(shownText)}</span>
+    </div>
+    <div class="table-list">${items
+      .map(
+        (item) => `<div class="table-row draft-item-row">
+          <div>
+            <strong>${escapeHtml(item.canonical_name || "элемент")}</strong>
+            <p class="muted">${escapeHtml(item.description || "")}</p>
+            <div class="badges">
+              ${badge(label(item.status || "active"))}
+              ${badge(label(item.confidence || "medium"))}
+              ${item.category ? badge(item.category) : ""}
+              ${item.source_review_id ? badge(`review ${item.source_review_id}`) : ""}
+            </div>
+            ${renderCandidateSignalLine("Сигналы", item.lead_signals_json)}
+            ${renderCandidateSignalLine("Синонимы", item.synonyms_json)}
+            ${renderCandidateSignalLine("Шум", item.noise_patterns_json)}
+          </div>
+        </div>`
+      )
+      .join("")}</div>
   </div>`;
 }
 
@@ -5131,7 +5227,12 @@ function renderPageControls(pagination, kind) {
   if (!pagination || pagination.total <= pagination.limit) return "";
   const from = pagination.total ? pagination.offset + 1 : 0;
   const to = Math.min(pagination.offset + pagination.limit, pagination.total);
-  const actionAttr = kind === "review" ? "data-review-page-action" : "data-draft-page-action";
+  const actionAttr =
+    kind === "review"
+      ? "data-review-page-action"
+      : kind === "core"
+        ? "data-core-page-action"
+        : "data-draft-page-action";
   return `<div class="queue-pagination">
     <span class="muted">${escapeHtml(`${from}-${to} из ${pagination.total}`)}</span>
     <div class="button-row">
@@ -5210,6 +5311,8 @@ function renderDraftItems(items, pagination = null) {
               ${badge(`score ${formatScore(item.score)}`)}
               ${badge(label(item.confidence || "medium"))}
               ${badge(label(item.status || "pending_review"))}
+              ${badge(label(metadata.ai_review_status || "not_checked"), metadata.ai_review_status === "rejected" ? "is-danger" : "")}
+              ${metadata.ai_review_decision ? badge(label(metadata.ai_review_decision)) : ""}
               ${metadata.uses_llm === false ? badge("без AI") : ""}
             </div>
             ${examples.length ? `<div class="draft-evidence">${examples.map((example) => `<p>${escapeHtml(example)}</p>`).join("")}</div>` : ""}
