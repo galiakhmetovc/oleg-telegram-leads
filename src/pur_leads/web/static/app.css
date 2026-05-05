@@ -549,6 +549,76 @@ md-text-button {
   gap: 8px;
 }
 
+.button-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.form-help {
+  margin-top: -4px;
+}
+
+.raw-review-panel:empty {
+  display: none;
+}
+
+.raw-review-section {
+  display: grid;
+  gap: 12px;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+
+.raw-review-summary {
+  padding: 0;
+  border-bottom: 0;
+  background: transparent;
+}
+
+.raw-review-grid {
+  display: grid;
+  grid-template-columns: minmax(300px, 0.95fr) minmax(360px, 1.05fr);
+  gap: 14px;
+}
+
+.raw-review-grid h4 {
+  margin: 0 0 8px;
+}
+
+.raw-review-run,
+.raw-review-message {
+  align-items: start;
+}
+
+.raw-review-message p {
+  overflow-wrap: anywhere;
+}
+
+.raw-review-files {
+  display: grid;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.raw-review-file {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 6px 8px;
+  border: 1px solid var(--line);
+  background: #ffffff;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.raw-review-file.is-missing {
+  border-color: rgba(173, 49, 49, 0.35);
+  color: var(--danger);
+}
+
 .artifacts-shell {
   min-height: 0;
 }
@@ -1402,6 +1472,7 @@ md-text-button {
   .sources-layout,
   .operations-layout,
   .artifacts-layout,
+  .interest-context-layout,
   .today-layout,
   .admin-layout,
   .onboarding-layout,
@@ -1448,6 +1519,14 @@ md-text-button {
 
   .resource-actions {
     justify-content: flex-start;
+  }
+
+  .button-row {
+    justify-content: flex-start;
+  }
+
+  .raw-review-grid {
+    grid-template-columns: 1fr;
   }
 
   .checkpoint-form {

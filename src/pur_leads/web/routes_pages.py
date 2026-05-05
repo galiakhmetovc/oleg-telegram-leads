@@ -298,9 +298,14 @@ def interest_contexts_page(
                         <input name="file" type="file" accept=".zip,application/zip" required>
                       </label>
                       <label class="material-checkbox-line">
-                        <input name="sync_source_messages" type="checkbox">
-                        Синхронизировать сообщения в рабочую таблицу
+                        <input name="sync_source_messages" type="checkbox" checked>
+                        Добавить сообщения в рабочую базу для поиска и анализа
                       </label>
+                      <p class="muted form-help">
+                        Оставьте включенным, чтобы после загрузки видеть сообщения в проверке данных
+                        и использовать их на следующих этапах. Если выключить, архив сохранится только
+                        как файл-источник.
+                      </p>
                       <md-filled-button type="submit">
                         <md-icon slot="icon">upload_file</md-icon>
                         Загрузить архив
@@ -315,11 +320,18 @@ def interest_contexts_page(
                   <section class="detail-section">
                     <div class="section-head">
                       <h3>Источники и raw-артефакты</h3>
-                      <md-filled-tonal-button id="interest-context-build-draft" type="button">
-                        Собрать черновик
-                      </md-filled-tonal-button>
+                      <div class="button-row">
+                        <md-filled-tonal-button id="interest-context-open-raw-review" type="button">
+                          <md-icon slot="icon">table_chart</md-icon>
+                          Проверить данные
+                        </md-filled-tonal-button>
+                        <md-filled-tonal-button id="interest-context-build-draft" type="button">
+                          Собрать черновик
+                        </md-filled-tonal-button>
+                      </div>
                     </div>
                     <div id="interest-context-source-list" class="resource-list" aria-live="polite"></div>
+                    <div id="interest-context-raw-review" class="raw-review-panel" aria-live="polite"></div>
                   </section>
                 </section>
                 <aside class="side-pane operations-signals" aria-label="Следующие шаги">

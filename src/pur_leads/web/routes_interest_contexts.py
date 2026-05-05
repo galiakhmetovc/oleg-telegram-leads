@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict
+import json
 from pathlib import Path
 from typing import Any
 import zipfile
@@ -10,12 +11,16 @@ import zipfile
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
 from fastapi.encoders import jsonable_encoder
 from pydantic import BaseModel, Field
-from sqlalchemy import select
+from sqlalchemy import desc, func, select
 from sqlalchemy.orm import Session
 
 from pur_leads.core.time import utc_now
 from pur_leads.core.tracing import current_trace_json
-from pur_leads.models.telegram_sources import telegram_raw_export_runs_table
+from pur_leads.models.telegram_sources import (
+    monitored_sources_table,
+    source_messages_table,
+    telegram_raw_export_runs_table,
+)
 from pur_leads.services.audit import AuditService
 from pur_leads.services.interest_contexts import (
     INTEREST_CONTEXT_SOURCE_PURPOSE,
@@ -91,6 +96,45 @@ def get_interest_context_detail(
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="Interest context not found") from exc
     return _detail_payload(detail)
+
+
+@router.get("/{context_id}/raw-review")
+def get_interest_context_raw_review(
+    context_id: str,
+    limit: int = 50,
+    _validated: SessionValidationResult = Depends(current_admin),
+    session: Session = Depends(get_session),
+) -> dict[str, Any]:
+    service = InterestContextService(session)
+    context = service.repository.get(context_id)
+    if context is None:
+        raise HTTPException(status_code=404, detail="Interest context not found")
+    source_rows = (
+        session.execute(
+            select(monitored_sources_table)
+            .where(monitored_sources_table.c.interest_context_id == context.id)
+            .order_by(monitored_sources_table.c.created_at)
+        )
+        .mappings()
+        .all()
+    )
+    source_ids = [str(row["id"]) for row in source_rows]
+    raw_runs = _raw_runs_for_sources(session, source_ids)
+    messages = _source_message_preview(session, source_ids, limit=max(1, min(limit, 200)))
+    preview_source = "source_messages"
+    if not messages:
+        messages = _jsonl_message_preview(raw_runs, limit=max(1, min(limit, 200)))
+        preview_source = "messages_jsonl"
+    return jsonable_encoder(
+        {
+            "context": asdict(context),
+            "summary": _raw_review_summary(session, source_ids, raw_runs),
+            "sources": [dict(row) for row in source_rows],
+            "raw_export_runs": [_raw_run_payload(row) for row in raw_runs],
+            "messages": messages,
+            "preview_source": preview_source,
+        }
+    )
 
 
 @router.post("/{context_id}/telegram-source")
@@ -310,6 +354,198 @@ def _detail_payload(detail: InterestContextDetail) -> dict[str, Any]:
             ],
         }
     )
+
+
+def _raw_runs_for_sources(session: Session, source_ids: list[str]) -> list[dict[str, Any]]:
+    if not source_ids:
+        return []
+    return [
+        dict(row)
+        for row in session.execute(
+            select(telegram_raw_export_runs_table)
+            .where(telegram_raw_export_runs_table.c.monitored_source_id.in_(source_ids))
+            .order_by(desc(telegram_raw_export_runs_table.c.started_at))
+        )
+        .mappings()
+        .all()
+    ]
+
+
+def _raw_review_summary(
+    session: Session,
+    source_ids: list[str],
+    raw_runs: list[dict[str, Any]],
+) -> dict[str, Any]:
+    if not source_ids:
+        return {
+            "source_count": 0,
+            "raw_export_run_count": 0,
+            "raw_message_count": 0,
+            "raw_attachment_count": 0,
+            "source_message_count": 0,
+            "date_from": None,
+            "date_to": None,
+            "failed_run_count": 0,
+            "missing_file_count": 0,
+        }
+    source_message_stats = (
+        session.execute(
+            select(
+                func.count(source_messages_table.c.id).label("message_count"),
+                func.min(source_messages_table.c.message_date).label("date_from"),
+                func.max(source_messages_table.c.message_date).label("date_to"),
+            ).where(source_messages_table.c.monitored_source_id.in_(source_ids))
+        )
+        .mappings()
+        .one()
+    )
+    files = [file for row in raw_runs for file in _raw_run_files(row)]
+    return {
+        "source_count": len(source_ids),
+        "raw_export_run_count": len(raw_runs),
+        "raw_message_count": sum(int(row.get("message_count") or 0) for row in raw_runs),
+        "raw_attachment_count": sum(int(row.get("attachment_count") or 0) for row in raw_runs),
+        "source_message_count": int(source_message_stats["message_count"] or 0),
+        "date_from": source_message_stats["date_from"],
+        "date_to": source_message_stats["date_to"],
+        "failed_run_count": sum(1 for row in raw_runs if row.get("status") == "failed"),
+        "missing_file_count": sum(1 for file in files if not file["exists"]),
+    }
+
+
+def _raw_run_payload(row: dict[str, Any]) -> dict[str, Any]:
+    return {
+        **row,
+        "files": _raw_run_files(row),
+        "sync_source_messages": bool(
+            ((row.get("metadata_json") or {}).get("desktop_import") or {}).get(
+                "sync_source_messages"
+            )
+        ),
+    }
+
+
+def _raw_run_files(row: dict[str, Any]) -> list[dict[str, Any]]:
+    return [
+        _file_payload("result_json", row.get("result_json_path")),
+        _file_payload("messages_jsonl", row.get("messages_jsonl_path")),
+        _file_payload("attachments_jsonl", row.get("attachments_jsonl_path")),
+        _file_payload("messages_parquet", row.get("messages_parquet_path")),
+        _file_payload("attachments_parquet", row.get("attachments_parquet_path")),
+        _file_payload("manifest", row.get("manifest_path")),
+    ]
+
+
+def _file_payload(kind: str, path_raw: str | None) -> dict[str, Any]:
+    path = Path(path_raw) if path_raw else None
+    exists = bool(path and path.exists())
+    return {
+        "kind": kind,
+        "path": str(path) if path else None,
+        "exists": exists,
+        "size_bytes": path.stat().st_size if exists and path.is_file() else None,
+    }
+
+
+def _source_message_preview(
+    session: Session,
+    source_ids: list[str],
+    *,
+    limit: int,
+) -> list[dict[str, Any]]:
+    if not source_ids:
+        return []
+    rows = (
+        session.execute(
+            select(source_messages_table)
+            .where(source_messages_table.c.monitored_source_id.in_(source_ids))
+            .order_by(
+                desc(source_messages_table.c.message_date),
+                desc(source_messages_table.c.telegram_message_id),
+            )
+            .limit(limit)
+        )
+        .mappings()
+        .all()
+    )
+    return [
+        {
+            "id": row["id"],
+            "source": "source_messages",
+            "monitored_source_id": row["monitored_source_id"],
+            "telegram_message_id": row["telegram_message_id"],
+            "sender_id": row["sender_id"],
+            "message_date": row["message_date"],
+            "text": _message_excerpt(row["text"], row["caption"]),
+            "has_media": row["has_media"],
+            "reply_to_message_id": row["reply_to_message_id"],
+            "classification_status": row["classification_status"],
+            "archive_pointer_id": row["archive_pointer_id"],
+        }
+        for row in rows
+    ]
+
+
+def _jsonl_message_preview(raw_runs: list[dict[str, Any]], *, limit: int) -> list[dict[str, Any]]:
+    messages: list[dict[str, Any]] = []
+    for run in raw_runs:
+        path_raw = run.get("messages_jsonl_path")
+        if not path_raw:
+            continue
+        path = Path(path_raw)
+        if not path.exists():
+            continue
+        with path.open("r", encoding="utf-8") as handle:
+            for line in handle:
+                if len(messages) >= limit:
+                    return messages
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    raw = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if raw.get("type") != "message":
+                    continue
+                messages.append(
+                    {
+                        "id": f"{run['id']}:{raw.get('id')}",
+                        "source": "messages_jsonl",
+                        "monitored_source_id": run.get("monitored_source_id"),
+                        "telegram_message_id": raw.get("id"),
+                        "sender_id": raw.get("from_id"),
+                        "message_date": raw.get("date"),
+                        "text": _message_excerpt(
+                            _telegram_text(raw.get("text")), raw.get("caption")
+                        ),
+                        "has_media": bool(raw.get("raw_media_json") or raw.get("media_type")),
+                        "reply_to_message_id": raw.get("reply_to_message_id"),
+                        "classification_status": None,
+                        "archive_pointer_id": run.get("id"),
+                    }
+                )
+    return messages
+
+
+def _telegram_text(value: Any) -> str | None:
+    if isinstance(value, str):
+        return value
+    if isinstance(value, list):
+        parts: list[str] = []
+        for item in value:
+            if isinstance(item, str):
+                parts.append(item)
+            elif isinstance(item, dict) and isinstance(item.get("text"), str):
+                parts.append(item["text"])
+        return "".join(parts) if parts else None
+    return None
+
+
+def _message_excerpt(text: Any, caption: Any) -> str:
+    raw = text if isinstance(text, str) and text else caption if isinstance(caption, str) else ""
+    normalized = " ".join(raw.split())
+    return normalized[:700]
 
 
 def _actor(validated: SessionValidationResult) -> str:

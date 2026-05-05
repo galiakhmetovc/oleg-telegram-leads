@@ -3721,6 +3721,9 @@ function initInterestContexts() {
   document
     .querySelector("#interest-context-build-draft")
     ?.addEventListener("click", () => buildInterestContextDraft(state));
+  document
+    .querySelector("#interest-context-open-raw-review")
+    ?.addEventListener("click", () => loadInterestContextRawReview(state));
   setInterestContextFormsEnabled(false);
   loadInterestContexts(state);
 }
@@ -3782,12 +3785,14 @@ function renderInterestContextEmptyDetail() {
   const description = document.querySelector("#interest-context-detail-description");
   const badges = document.querySelector("#interest-context-detail-badges");
   const sources = document.querySelector("#interest-context-source-list");
+  const rawReview = document.querySelector("#interest-context-raw-review");
   if (title) title.textContent = "Выберите контекст";
   if (description) {
     description.textContent = "Сначала создайте ядро интересов, затем добавьте Telegram-канал или архив.";
   }
   if (badges) badges.innerHTML = "";
   if (sources) sources.innerHTML = '<div class="empty-state">Источников пока нет</div>';
+  if (rawReview) rawReview.innerHTML = "";
 }
 
 function renderInterestContextDetail(detail) {
@@ -3830,6 +3835,9 @@ function renderInterestContextDetail(detail) {
           ${rawRun ? badge(label(rawRun.status || "unknown"), rawRun.status === "failed" ? "is-danger" : "") : ""}
         </div>
         <div class="resource-actions">
+          <md-filled-tonal-button type="button" data-open-raw-review>
+            Проверить данные
+          </md-filled-tonal-button>
           <md-outlined-button type="button" onclick="window.location.assign('/artifacts')">
             Артефакты
           </md-outlined-button>
@@ -3837,6 +3845,11 @@ function renderInterestContextDetail(detail) {
       </div>`;
     })
     .join("");
+  sources.querySelectorAll("[data-open-raw-review]").forEach((button) => {
+    button.addEventListener("click", () =>
+      loadInterestContextRawReview({ selectedId: detail.context?.id })
+    );
+  });
 }
 
 async function createInterestContext(event, state) {
@@ -3998,6 +4011,135 @@ async function buildInterestContextDraft(state) {
   }
 }
 
+async function loadInterestContextRawReview(state) {
+  const target = document.querySelector("#interest-context-raw-review");
+  const status = document.querySelector("#interest-context-status");
+  if (!state.selectedId) {
+    if (status) status.textContent = "Сначала выберите контекст";
+    return;
+  }
+  if (target) target.innerHTML = '<div class="empty-state">Загружаю проверку данных...</div>';
+  try {
+    const payload = await api(
+      `/api/interest-contexts/${encodeURIComponent(state.selectedId)}/raw-review`
+    );
+    renderInterestContextRawReview(payload);
+    if (status) status.textContent = "Проверка данных обновлена";
+  } catch (error) {
+    if (target) target.innerHTML = `<div class="empty-state">${escapeHtml(error.message)}</div>`;
+  }
+}
+
+function renderInterestContextRawReview(payload) {
+  const target = document.querySelector("#interest-context-raw-review");
+  if (!target) return;
+  const summary = payload.summary || {};
+  const runs = payload.raw_export_runs || [];
+  const messages = payload.messages || [];
+  target.innerHTML = `<section class="raw-review-section">
+    <div class="section-head">
+      <div>
+        <h3>Проверка данных контекста</h3>
+        <p class="muted">${escapeHtml(rawReviewScopeText(payload))}</p>
+      </div>
+      <md-outlined-button type="button" onclick="window.location.assign('/artifacts')">
+        Глобальные артефакты
+      </md-outlined-button>
+    </div>
+    <div class="operations-summary raw-review-summary">
+      <div class="ops-metric-row">
+      ${renderOpsMetric("Источники", summary.source_count || 0, "в этом контексте")}
+      ${renderOpsMetric("Запуски", summary.raw_export_run_count || 0, "raw export")}
+      ${renderOpsMetric("Сообщения", summary.raw_message_count || 0, "в raw/parquet")}
+      ${renderOpsMetric("Вложения", summary.raw_attachment_count || 0, "найдено")}
+      ${renderOpsMetric("Рабочая база", summary.source_message_count || 0, "сообщений для поиска")}
+      ${renderOpsMetric("Нет файла", summary.missing_file_count || 0, "пути без файла")}
+      </div>
+    </div>
+    <div class="raw-review-grid">
+      <section>
+        <h4>Raw/parquet файлы</h4>
+        ${renderRawReviewRuns(runs)}
+      </section>
+      <section>
+        <h4>Сообщения</h4>
+        ${renderRawReviewMessages(messages, payload.preview_source)}
+      </section>
+    </div>
+  </section>`;
+}
+
+function rawReviewScopeText(payload) {
+  const summary = payload.summary || {};
+  const dates = [time(summary.date_from), time(summary.date_to)].filter(Boolean).join(" - ");
+  const source =
+    payload.preview_source === "source_messages"
+      ? "примеры взяты из рабочей базы"
+      : "примеры взяты напрямую из messages.jsonl";
+  return dates ? `${source}; диапазон ${dates}` : source;
+}
+
+function renderRawReviewRuns(runs) {
+  if (!runs.length) return '<div class="empty-state">Raw-запусков пока нет</div>';
+  return `<div class="table-list">${runs
+    .map((run) => {
+      const files = run.files || [];
+      return `<div class="table-row raw-review-run">
+        <div>
+          <strong>${escapeHtml(run.title || run.username || run.source_ref || run.id)}</strong>
+          <p class="muted">${escapeHtml([run.export_format, time(run.started_at), `run ${run.id}`].filter(Boolean).join(" / "))}</p>
+          <div class="badges">
+            ${badge(label(run.status || "unknown"), run.status === "failed" ? "is-danger" : "")}
+            ${badge(run.sync_source_messages ? "рабочая база включена" : "только raw-файлы", run.sync_source_messages ? "" : "is-warn")}
+            ${badge(`${run.message_count || 0} сообщений`)}
+            ${badge(`${run.attachment_count || 0} вложений`)}
+          </div>
+          <div class="raw-review-files">${renderRawReviewFiles(files)}</div>
+        </div>
+      </div>`;
+    })
+    .join("")}</div>`;
+}
+
+function renderRawReviewFiles(files) {
+  if (!files.length) return "";
+  return files
+    .map(
+      (file) => `<div class="raw-review-file ${file.exists ? "" : "is-missing"}">
+        <span>${escapeHtml(label(file.kind || "file"))}</span>
+        <span>${escapeHtml(file.exists ? formatBytes(file.size_bytes || 0) : "нет файла")}</span>
+      </div>`
+    )
+    .join("");
+}
+
+function renderRawReviewMessages(messages, previewSource) {
+  if (!messages.length) {
+    return `<div class="empty-state">Сообщения не найдены. Если архив загружен без рабочей базы, проверьте raw-файлы в артефактах.</div>`;
+  }
+  const sourceNote =
+    previewSource === "source_messages"
+      ? "Показаны последние сообщения из рабочей базы."
+      : "Рабочая база пуста, показаны первые сообщения из messages.jsonl.";
+  return `<p class="muted">${escapeHtml(sourceNote)}</p>
+    <div class="table-list">${messages
+      .map(
+        (message) => `<div class="table-row raw-review-message">
+          <div>
+            <strong>#${escapeHtml(String(message.telegram_message_id || "н/д"))}</strong>
+            <p class="muted">${escapeHtml([time(message.message_date), message.sender_id].filter(Boolean).join(" / "))}</p>
+            <p>${escapeHtml(message.text || "без текста")}</p>
+            <div class="badges">
+              ${message.has_media ? badge("есть вложение") : ""}
+              ${message.reply_to_message_id ? badge(`reply ${message.reply_to_message_id}`) : ""}
+              ${message.classification_status ? badge(label(message.classification_status)) : ""}
+            </div>
+          </div>
+        </div>`
+      )
+      .join("")}</div>`;
+}
+
 function setInterestContextFormsEnabled(enabled) {
   ["#interest-context-telegram-source-form", "#interest-context-telegram-archive-form"].forEach(
     (selector) => {
@@ -4012,6 +4154,8 @@ function setInterestContextFormsEnabled(enabled) {
   );
   const draftButton = document.querySelector("#interest-context-build-draft");
   if (draftButton) draftButton.disabled = !enabled;
+  const rawReviewButton = document.querySelector("#interest-context-open-raw-review");
+  if (rawReviewButton) rawReviewButton.disabled = !enabled;
 }
 
 function openOnboardingResourceDialog(event) {
