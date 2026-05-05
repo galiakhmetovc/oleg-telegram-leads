@@ -479,6 +479,7 @@ def build_interest_context_draft(
 @router.get("/{context_id}/draft/status")
 def get_interest_context_draft_status(
     context_id: str,
+    item_limit: int = 1000,
     _validated: SessionValidationResult = Depends(current_admin),
     session: Session = Depends(get_session),
 ) -> dict[str, Any]:
@@ -489,8 +490,31 @@ def get_interest_context_draft_status(
     return {
         "job": _row(job) if job else None,
         "progress": _draft_progress_from_row(job) if job else _empty_draft_progress(),
-        "draft": InterestContextDraftService(session).latest_payload(context.id),
+        "draft": InterestContextDraftService(session).latest_payload(
+            context.id,
+            limit=max(0, min(item_limit, 1000)),
+        ),
     }
+
+
+@router.get("/{context_id}/draft/items")
+def list_interest_context_draft_items(
+    context_id: str,
+    limit: int = 25,
+    offset: int = 0,
+    _validated: SessionValidationResult = Depends(current_admin),
+    session: Session = Depends(get_session),
+) -> dict[str, Any]:
+    context = InterestContextService(session).repository.get(context_id)
+    if context is None:
+        raise HTTPException(status_code=404, detail="Interest context not found")
+    return jsonable_encoder(
+        InterestContextDraftService(session).latest_items_payload(
+            context.id,
+            limit=max(1, min(limit, 100)),
+            offset=max(0, offset),
+        )
+    )
 
 
 @router.post("/{context_id}/draft/enhance-llm")
@@ -570,13 +594,21 @@ def get_interest_context_draft_llm_enhancement_status(
 @router.get("/{context_id}/candidate-reviews")
 def list_interest_core_candidate_reviews(
     context_id: str,
+    limit: int = 25,
+    offset: int = 0,
     _validated: SessionValidationResult = Depends(current_admin),
     session: Session = Depends(get_session),
 ) -> dict[str, Any]:
     context = InterestContextService(session).repository.get(context_id)
     if context is None:
         raise HTTPException(status_code=404, detail="Interest context not found")
-    return jsonable_encoder(InterestCoreCandidateReviewService(session).latest_payload(context.id))
+    return jsonable_encoder(
+        InterestCoreCandidateReviewService(session).latest_payload(
+            context.id,
+            limit=max(1, min(limit, 100)),
+            offset=max(0, offset),
+        )
+    )
 
 
 @router.patch("/{context_id}/candidate-reviews/{review_id}")

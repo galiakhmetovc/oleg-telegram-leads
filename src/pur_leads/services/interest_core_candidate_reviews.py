@@ -59,18 +59,37 @@ class InterestCoreCandidateReviewService:
         self.session = session
         self.audit = AuditService(session)
 
-    def latest_payload(self, context_id: str) -> dict[str, Any]:
+    def latest_payload(
+        self,
+        context_id: str,
+        *,
+        limit: int = 300,
+        offset: int = 0,
+    ) -> dict[str, Any]:
         latest_job = self.latest_enhancement_job(context_id)
         if latest_job is not None:
             self.ensure_job_reviews(latest_job)
-        rows = self.list_reviews(
+        total = self.review_count(
             context_id,
             enhancement_job_id=str(latest_job["id"]) if latest_job is not None else None,
         )
+        rows = self.list_reviews(
+            context_id,
+            enhancement_job_id=str(latest_job["id"]) if latest_job is not None else None,
+            limit=limit,
+            offset=offset,
+        )
         return {
             "latest_job": dict(latest_job) if latest_job is not None else None,
-            "summary": _summary(rows),
+            "summary": {
+                **self.review_summary(
+                    context_id,
+                    enhancement_job_id=str(latest_job["id"]) if latest_job is not None else None,
+                ),
+                "page_count": len(rows),
+            },
             "items": [row.as_jsonable() for row in rows],
+            "pagination": _pagination(limit=limit, offset=offset, total=total),
         }
 
     def latest_enhancement_job(self, context_id: str) -> dict[str, Any] | None:
@@ -166,6 +185,7 @@ class InterestCoreCandidateReviewService:
         *,
         enhancement_job_id: str | None = None,
         limit: int = 300,
+        offset: int = 0,
     ) -> list[InterestCoreCandidateReviewRecord]:
         query = select(interest_core_candidate_reviews_table).where(
             interest_core_candidate_reviews_table.c.context_id == context_id
@@ -182,11 +202,66 @@ class InterestCoreCandidateReviewService:
                     interest_core_candidate_reviews_table.c.status,
                     desc(interest_core_candidate_reviews_table.c.created_at),
                 ).limit(max(1, limit))
+                .offset(max(0, offset))
             )
             .mappings()
             .all()
         )
         return [_record(row) for row in rows]
+
+    def review_count(
+        self,
+        context_id: str,
+        *,
+        enhancement_job_id: str | None = None,
+    ) -> int:
+        query = select(func.count()).select_from(interest_core_candidate_reviews_table).where(
+            interest_core_candidate_reviews_table.c.context_id == context_id
+        )
+        if enhancement_job_id:
+            query = query.where(
+                interest_core_candidate_reviews_table.c.enhancement_job_id
+                == enhancement_job_id
+            )
+        return int(self.session.execute(query).scalar_one() or 0)
+
+    def review_summary(
+        self,
+        context_id: str,
+        *,
+        enhancement_job_id: str | None = None,
+    ) -> dict[str, Any]:
+        base_filter = interest_core_candidate_reviews_table.c.context_id == context_id
+        filters = [base_filter]
+        if enhancement_job_id:
+            filters.append(
+                interest_core_candidate_reviews_table.c.enhancement_job_id
+                == enhancement_job_id
+            )
+        type_rows = (
+            self.session.execute(
+                select(
+                    interest_core_candidate_reviews_table.c.recommendation_type,
+                    func.count(),
+                )
+                .where(*filters)
+                .group_by(interest_core_candidate_reviews_table.c.recommendation_type)
+            )
+            .all()
+        )
+        status_rows = (
+            self.session.execute(
+                select(interest_core_candidate_reviews_table.c.status, func.count())
+                .where(*filters)
+                .group_by(interest_core_candidate_reviews_table.c.status)
+            )
+            .all()
+        )
+        return {
+            "total": sum(int(count) for _value, count in type_rows),
+            "by_type": {str(value): int(count) for value, count in type_rows},
+            "by_status": {str(value): int(count) for value, count in status_rows},
+        }
 
     def set_status(
         self,
@@ -396,18 +471,16 @@ def _record(row: Any) -> InterestCoreCandidateReviewRecord:
     return InterestCoreCandidateReviewRecord(**dict(row))
 
 
-def _summary(rows: list[InterestCoreCandidateReviewRecord]) -> dict[str, Any]:
-    result = {
-        "total": len(rows),
-        "by_type": {},
-        "by_status": {},
+def _pagination(*, limit: int, offset: int, total: int) -> dict[str, Any]:
+    safe_limit = max(1, int(limit))
+    safe_offset = max(0, int(offset))
+    safe_total = max(0, int(total))
+    return {
+        "limit": safe_limit,
+        "offset": safe_offset,
+        "total": safe_total,
+        "has_more": safe_offset + safe_limit < safe_total,
     }
-    for row in rows:
-        result["by_type"][row.recommendation_type] = (
-            result["by_type"].get(row.recommendation_type, 0) + 1
-        )
-        result["by_status"][row.status] = result["by_status"].get(row.status, 0) + 1
-    return result
 
 
 def _counts_from_result(result: dict[str, Any]) -> dict[str, int]:

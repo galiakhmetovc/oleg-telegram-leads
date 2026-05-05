@@ -3722,6 +3722,10 @@ function initInterestContexts() {
     draftPollTimer: null,
     enhancePollTimer: null,
     briefPollTimer: null,
+    draftItemsLimit: 25,
+    draftItemsOffset: 0,
+    reviewItemsLimit: 25,
+    reviewItemsOffset: 0,
   };
   document
     .querySelector("#interest-context-refresh")
@@ -3756,6 +3760,21 @@ function initInterestContexts() {
   document
     .querySelector("#interest-core-brief-generate")
     ?.addEventListener("click", () => generateInterestCoreBrief(state));
+  document
+    .querySelector("#interest-context-draft-items-page")
+    ?.addEventListener("click", (event) => changeInterestContextDraftItemsPage(event, state));
+  document
+    .querySelector("#interest-context-draft-items-refresh")
+    ?.addEventListener("click", () => loadInterestContextDraftItemsPage(state));
+  document
+    .querySelector("#interest-context-review-items-page")
+    ?.addEventListener("click", (event) => {
+      updateInterestCoreCandidateReviewStatus(event, state);
+      changeInterestContextReviewItemsPage(event, state);
+    });
+  document
+    .querySelector("#interest-context-review-items-refresh")
+    ?.addEventListener("click", () => loadInterestContextReviewItemsPage(state));
   document
     .querySelector("#interest-llm-provider-form")
     ?.addEventListener("submit", (event) => saveInterestLlmProvider(event));
@@ -3823,9 +3842,21 @@ async function loadInterestContextDetail(contextId, state) {
   state.detail = detail;
   renderInterestContextDetail(detail);
   await loadInterestContextPrepareStatus(state, { silent: true });
-  await loadInterestContextDraftStatus(state, { silent: true });
-  await loadInterestContextEnhancementStatus(state, { silent: true });
-  await loadInterestCoreBriefStatus(state, { silent: true });
+  if (state.step === "core") {
+    await loadInterestContextDraftStatus(state, { silent: true });
+    await loadInterestContextEnhancementStatus(state, { silent: true });
+  }
+  if (state.step === "candidates") {
+    state.draftItemsOffset = 0;
+    await loadInterestContextDraftItemsPage(state);
+  }
+  if (state.step === "reviews") {
+    state.reviewItemsOffset = 0;
+    await loadInterestContextReviewItemsPage(state);
+  }
+  if (state.step === "llm") {
+    await loadInterestCoreBriefStatus(state, { silent: true });
+  }
   if (state.step === "check") {
     await loadInterestContextRawReview(state);
   }
@@ -3931,7 +3962,7 @@ function interestContextStepHref(path, contextId) {
 }
 
 function updateInterestContextStepLinks(contextId) {
-  document.querySelectorAll("[data-interest-step-link], .interest-next-link").forEach((link) => {
+  document.querySelectorAll("[data-interest-step-link], .interest-next-link, .linked-row").forEach((link) => {
     const rawHref = link.getAttribute("href") || "/interest-contexts";
     const url = new URL(rawHref, window.location.origin);
     if (contextId) {
@@ -4463,8 +4494,12 @@ async function loadInterestContextDraftStatus(state, { silent = false } = {}) {
   const status = document.querySelector("#interest-context-status");
   if (!state.selectedId) return;
   try {
+    const target =
+      document.querySelector("#interest-context-draft-review") ||
+      document.querySelector("#interest-context-draft-screen");
+    const itemLimit = target?.dataset.summaryOnly === "true" ? 0 : 1000;
     const payload = await api(
-      `/api/interest-contexts/${encodeURIComponent(state.selectedId)}/draft/status`
+      `/api/interest-contexts/${encodeURIComponent(state.selectedId)}/draft/status?item_limit=${itemLimit}`
     );
     renderInterestContextDraft(payload.progress, payload.job, payload.draft);
     if (isActiveDraftStatus(payload.progress?.status)) {
@@ -4492,6 +4527,60 @@ function stopInterestContextDraftPolling(state) {
 
 function isActiveDraftStatus(status) {
   return ["queued", "running"].includes(String(status || ""));
+}
+
+async function loadInterestContextDraftItemsPage(state) {
+  const target = document.querySelector("#interest-context-draft-items-page");
+  const status = document.querySelector("#interest-context-status");
+  if (!target || !state.selectedId) return;
+  try {
+    const params = new URLSearchParams({
+      limit: String(state.draftItemsLimit),
+      offset: String(state.draftItemsOffset),
+    });
+    const payload = await api(
+      `/api/interest-contexts/${encodeURIComponent(state.selectedId)}/draft/items?${params.toString()}`
+    );
+    renderInterestContextDraftItemsPage(payload, state);
+  } catch (error) {
+    target.innerHTML = `<div class="empty-state">${escapeHtml(error.message)}</div>`;
+    if (status) status.textContent = error.message;
+  }
+}
+
+function changeInterestContextDraftItemsPage(event, state) {
+  const button = event.target.closest("[data-draft-page-action]");
+  if (!button) return;
+  const action = button.dataset.draftPageAction;
+  if (action === "prev") {
+    state.draftItemsOffset = Math.max(0, state.draftItemsOffset - state.draftItemsLimit);
+  }
+  if (action === "next") {
+    state.draftItemsOffset += state.draftItemsLimit;
+  }
+  loadInterestContextDraftItemsPage(state);
+}
+
+function renderInterestContextDraftItemsPage(payload, state) {
+  const target = document.querySelector("#interest-context-draft-items-page");
+  if (!target) return;
+  const items = payload.items || [];
+  const pagination = payload.pagination || { limit: state.draftItemsLimit, offset: 0, total: 0 };
+  const draftRun = payload.draft_run || null;
+  target.innerHTML = `<section class="draft-review-section">
+    <div class="section-head">
+      <div>
+        <h3>Кандидаты для ревью</h3>
+        <p class="muted">${escapeHtml(draftRun ? `Черновик ${label(draftRun.status || "draft")}` : "Черновик еще не сформирован")}</p>
+      </div>
+      <div class="badges">
+        ${badge(`${pagination.total || 0} всего`)}
+        ${draftRun?.algorithm_version ? badge(draftRun.algorithm_version) : ""}
+      </div>
+    </div>
+    ${renderDraftItems(items, pagination)}
+    ${renderPageControls(pagination, "draft")}
+  </section>`;
 }
 
 async function enhanceInterestContextDraftWithLlm(state) {
@@ -4696,6 +4785,31 @@ function renderInterestContextDraft(progress, job, draft) {
   const stageLabel = progress?.current_stage_label || "Сборка ядра интересов";
   const message = progress?.message || status;
   const stageResults = progress?.stage_results || [];
+  if (target.dataset.summaryOnly === "true") {
+    const contextId = document.body.dataset.interestContextId || "";
+    target.innerHTML = `<section class="draft-review-section">
+      <div class="section-head">
+        <div>
+          <h3>Статус ядра интересов</h3>
+          <p class="muted">${escapeHtml(message)}</p>
+        </div>
+        <div class="badges">
+          ${badge(label(status), status === "failed" ? "is-danger" : "")}
+          ${badge("без LLM")}
+          ${job?.id ? badge(`job ${job.id}`) : ""}
+        </div>
+      </div>
+      <div class="prepare-progress-meta">
+        ${renderOpsMetric("Кандидаты", progress?.candidate_count || 0, "в отдельной странице")}
+        ${renderOpsMetric("Raw-запуски", progress?.raw_export_run_count || 0, "в контексте")}
+        ${renderOpsMetric("Алгоритм", "rules", "NLP/POS/score")}
+      </div>
+      <div class="button-row">
+        <a class="button-link" href="${escapeHtml(interestContextStepHref("/interest-contexts/core/candidates", contextId))}">Открыть кандидатов</a>
+      </div>
+    </section>`;
+    return;
+  }
   target.innerHTML = `<section class="draft-review-section">
     <div class="section-head">
       <div>
@@ -4741,11 +4855,69 @@ async function updateInterestCoreCandidateReviewStatus(event, state) {
         }),
       }
     );
-    await loadInterestContextEnhancementStatus(state, { silent: true });
+    if (currentInterestStep() === "reviews") {
+      await loadInterestContextReviewItemsPage(state);
+    } else {
+      await loadInterestContextEnhancementStatus(state, { silent: true });
+    }
     if (status) status.textContent = "Статус рекомендации обновлен";
   } catch (error) {
     if (status) status.textContent = error.message;
   }
+}
+
+async function loadInterestContextReviewItemsPage(state) {
+  const target = document.querySelector("#interest-context-review-items-page");
+  const status = document.querySelector("#interest-context-status");
+  if (!target || !state.selectedId) return;
+  try {
+    const params = new URLSearchParams({
+      limit: String(state.reviewItemsLimit),
+      offset: String(state.reviewItemsOffset),
+    });
+    const payload = await api(
+      `/api/interest-contexts/${encodeURIComponent(state.selectedId)}/candidate-reviews?${params.toString()}`
+    );
+    renderInterestContextReviewItemsPage(payload, state);
+  } catch (error) {
+    target.innerHTML = `<div class="empty-state">${escapeHtml(error.message)}</div>`;
+    if (status) status.textContent = error.message;
+  }
+}
+
+function changeInterestContextReviewItemsPage(event, state) {
+  const button = event.target.closest("[data-review-page-action]");
+  if (!button) return;
+  const action = button.dataset.reviewPageAction;
+  if (action === "prev") {
+    state.reviewItemsOffset = Math.max(0, state.reviewItemsOffset - state.reviewItemsLimit);
+  }
+  if (action === "next") {
+    state.reviewItemsOffset += state.reviewItemsLimit;
+  }
+  loadInterestContextReviewItemsPage(state);
+}
+
+function renderInterestContextReviewItemsPage(payload, state) {
+  const target = document.querySelector("#interest-context-review-items-page");
+  if (!target) return;
+  const items = payload.items || [];
+  const pagination = payload.pagination || { limit: state.reviewItemsLimit, offset: 0, total: 0 };
+  target.innerHTML = `<section class="draft-review-section">
+    <div class="section-head">
+      <div>
+        <h3>Рекомендации на ревью</h3>
+        <p class="muted">Показаны только записи текущей страницы.</p>
+      </div>
+      <div class="badges">
+        ${badge(`${pagination.total || 0} всего`)}
+        ${payload.latest_job?.id ? badge(`job ${payload.latest_job.id}`) : ""}
+      </div>
+    </div>
+    ${renderCandidateReviewSummary(payload)}
+    ${items.length ? renderCandidateReviewSection(items, pagination) : '<div class="empty-state">LLM-рекомендаций пока нет</div>'}
+    ${renderPageControls(pagination, "review")}
+  </section>`;
 }
 
 function renderInterestContextCandidateEnhancement(progress, job, enhancement, reviews) {
@@ -4761,6 +4933,32 @@ function renderInterestContextCandidateEnhancement(progress, job, enhancement, r
   const overall = normalizePercent(progress?.overall_percent);
   const stage = normalizePercent(progress?.stage_percent);
   const message = progress?.message || status;
+  if (target.dataset.summaryOnly === "true") {
+    const contextId = document.body.dataset.interestContextId || "";
+    target.innerHTML = `<section class="draft-review-section">
+      <div class="section-head">
+        <div>
+          <h3>Статус LLM-рекомендаций</h3>
+          <p class="muted">${escapeHtml(message)}</p>
+        </div>
+        <div class="badges">
+          ${badge(label(status), status === "failed" ? "is-danger" : "")}
+          ${progress?.model ? badge(progress.model) : ""}
+          ${job?.id ? badge(`job ${job.id}`) : ""}
+        </div>
+      </div>
+      <div class="prepare-progress-meta">
+        ${renderOpsMetric("Улучшено", progress?.improved_count || 0, "из rule-based")}
+        ${renderOpsMetric("Добавлено", progress?.new_count || 0, "из брифа/evidence")}
+        ${renderOpsMetric("Отклонено", progress?.rejected_count || 0, "как шум")}
+      </div>
+      ${renderCandidateReviewSummary(reviews)}
+      <div class="button-row">
+        <a class="button-link" href="${escapeHtml(interestContextStepHref("/interest-contexts/core/reviews", contextId))}">Открыть LLM-рекомендации</a>
+      </div>
+    </section>`;
+    return;
+  }
   target.innerHTML = `<section class="draft-review-section">
     <div class="section-head">
       <div>
@@ -4810,8 +5008,11 @@ function renderCandidateReviewSummary(reviews) {
   </div>`;
 }
 
-function renderCandidateReviewSection(items) {
+function renderCandidateReviewSection(items, pagination = null) {
   if (!items.length) return "";
+  const shownText = pagination
+    ? `${pagination.offset + 1}-${Math.min(pagination.offset + items.length, pagination.total)} из ${pagination.total}`
+    : "";
   const groups = [
     ["improved", "Улучшенные кандидаты"],
     ["new", "Новые кандидаты от LLM"],
@@ -4824,7 +5025,7 @@ function renderCandidateReviewSection(items) {
       return `<div class="draft-items">
         <div class="section-head compact-section-head">
           <h4>${escapeHtml(title)}</h4>
-          <span class="muted">${escapeHtml(String(rows.length))}</span>
+          <span class="muted">${escapeHtml(shownText || String(rows.length))}</span>
         </div>
         <div class="table-list">${rows.slice(0, 160).map(renderCandidateReviewRow).join("")}</div>
       </div>`;
@@ -4926,6 +5127,20 @@ function renderCandidateSignalLine(title, items) {
   return `<p class="draft-evidence"><strong>${escapeHtml(title)}:</strong> ${escapeHtml(items.slice(0, 5).join("; "))}</p>`;
 }
 
+function renderPageControls(pagination, kind) {
+  if (!pagination || pagination.total <= pagination.limit) return "";
+  const from = pagination.total ? pagination.offset + 1 : 0;
+  const to = Math.min(pagination.offset + pagination.limit, pagination.total);
+  const actionAttr = kind === "review" ? "data-review-page-action" : "data-draft-page-action";
+  return `<div class="queue-pagination">
+    <span class="muted">${escapeHtml(`${from}-${to} из ${pagination.total}`)}</span>
+    <div class="button-row">
+      <button type="button" class="secondary-button" ${actionAttr}="prev" ${pagination.offset <= 0 ? "disabled" : ""}>Назад</button>
+      <button type="button" class="secondary-button" ${actionAttr}="next" ${pagination.has_more ? "" : "disabled"}>Дальше</button>
+    </div>
+  </div>`;
+}
+
 function initInterestContextDraftScreen() {
   const root = document.querySelector("#interest-context-draft-screen");
   const contextId = root?.dataset.contextId || "";
@@ -4966,14 +5181,17 @@ function renderDraftStageResults(stageResults) {
     .join("")}</div>`;
 }
 
-function renderDraftItems(items) {
+function renderDraftItems(items, pagination = null) {
   if (!items.length) {
     return '<div class="empty-state">Кандидатов пока нет. Запустите формирование ядра интересов после подготовки данных.</div>';
   }
+  const shownText = pagination
+    ? `${pagination.offset + 1}-${Math.min(pagination.offset + items.length, pagination.total)} из ${pagination.total}`
+    : `${items.length} показано`;
   return `<div class="draft-items">
     <div class="section-head compact-section-head">
       <h4>Кандидаты для ревью</h4>
-      <span class="muted">${escapeHtml(String(items.length))} показано</span>
+      <span class="muted">${escapeHtml(shownText)}</span>
     </div>
     <div class="table-list">${items
       .map((item) => {

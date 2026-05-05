@@ -197,6 +197,26 @@ def interest_context_core_page(
     return HTMLResponse(_interest_context_step_page("core"))
 
 
+@router.get("/interest-contexts/core/candidates", response_class=HTMLResponse)
+def interest_context_candidates_page(
+    request: Request,
+    auth_service: WebAuthService = Depends(get_auth_service),
+) -> Response:
+    if not _has_page_session(request, auth_service):
+        return RedirectResponse("/login", status_code=303)
+    return HTMLResponse(_interest_context_step_page("candidates"))
+
+
+@router.get("/interest-contexts/core/reviews", response_class=HTMLResponse)
+def interest_context_reviews_page(
+    request: Request,
+    auth_service: WebAuthService = Depends(get_auth_service),
+) -> Response:
+    if not _has_page_session(request, auth_service):
+        return RedirectResponse("/login", status_code=303)
+    return HTMLResponse(_interest_context_step_page("reviews"))
+
+
 @router.get("/interest-contexts/llm", response_class=HTMLResponse)
 def interest_context_llm_page(
     request: Request,
@@ -212,6 +232,8 @@ _INTEREST_CONTEXT_STEPS = (
     ("check", "/interest-contexts/check", "Проверка данных"),
     ("prepare", "/interest-contexts/prepare", "Подготовка данных"),
     ("core", "/interest-contexts/core", "Формирование ядра"),
+    ("candidates", "/interest-contexts/core/candidates", "Кандидаты"),
+    ("reviews", "/interest-contexts/core/reviews", "LLM-рекомендации"),
     ("llm", "/interest-contexts/llm", "LLM"),
 )
 
@@ -222,13 +244,17 @@ def _interest_context_step_page(step: str) -> str:
         "check": "Проверка данных",
         "prepare": "Подготовка данных",
         "core": "Формирование ядра",
+        "candidates": "Кандидаты ядра",
+        "reviews": "LLM-рекомендации",
         "llm": "LLM",
     }
     intro_by_step = {
         "load": "Добавьте Telegram-ссылку или ZIP-архив Telegram Desktop. На этом шаге сохраняем raw-данные без AI.",
         "check": "Проверьте, что raw/parquet, вложения и рабочая таблица собраны корректно.",
         "prepare": "Запустите нормализацию, локальный индекс, извлечение и ранжирование кандидатов.",
-        "core": "Сформируйте черновик ядра интересов и проверьте кандидатов перед дальнейшим улучшением.",
+        "core": "Сформируйте черновик ядра интересов и переходите к отдельным страницам ревью.",
+        "candidates": "Просматривайте rule-based кандидатов постранично, без длинного списка на рабочем экране.",
+        "reviews": "Разбирайте рекомендации LLM постранично: одобрить, отклонить или вернуть на ревью.",
         "llm": "Настройте и проверьте LLM-бриф: контекст, который будет передаваться моделям на следующих этапах.",
     }
     step = step if step in title_by_step else "load"
@@ -315,6 +341,8 @@ def _interest_context_step_body(step: str) -> str:
         "check": _interest_context_check_body,
         "prepare": _interest_context_prepare_body,
         "core": _interest_context_core_body,
+        "candidates": _interest_context_candidates_body,
+        "reviews": _interest_context_reviews_body,
         "llm": _interest_context_llm_body,
     }
     return bodies[step]()
@@ -495,15 +523,76 @@ def _interest_context_core_body() -> str:
                         </md-filled-tonal-button>
                       </div>
                     </div>
-                    <div id="interest-context-draft-review" class="draft-review-panel" aria-live="polite"></div>
-                    <div id="interest-context-llm-enhance-review" class="draft-review-panel" aria-live="polite"></div>
+                    <div id="interest-context-draft-review" class="draft-review-panel" data-summary-only="true" aria-live="polite"></div>
+                    <div id="interest-context-llm-enhance-review" class="draft-review-panel" data-summary-only="true" aria-live="polite"></div>
                   </section>
                   <section class="detail-section">
                     <div class="section-head">
-                      <h3>Источники</h3>
-                      <a class="interest-next-link" href="/interest-contexts/llm">Дальше: LLM</a>
+                      <h3>Страницы ревью</h3>
+                      <a class="interest-next-link" href="/interest-contexts/llm">LLM и бриф</a>
                     </div>
-                    <div id="interest-context-source-list" class="resource-list" aria-live="polite"></div>
+                    <div class="table-list">
+                      <a class="table-row linked-row" href="/interest-contexts/core/candidates">
+                        <div>
+                          <strong>Кандидаты ядра</strong>
+                          <p class="muted">Rule-based кандидаты с пагинацией по 25 строк.</p>
+                        </div>
+                        <span>Открыть</span>
+                      </a>
+                      <a class="table-row linked-row" href="/interest-contexts/core/reviews">
+                        <div>
+                          <strong>LLM-рекомендации</strong>
+                          <p class="muted">Одобрение и отклонение рекомендаций LLM отдельной страницей.</p>
+                        </div>
+                        <span>Открыть</span>
+                      </a>
+                    </div>
+                  </section>
+    """
+
+
+def _interest_context_candidates_body() -> str:
+    return """
+                  <section class="detail-section">
+                    <div class="section-head">
+                      <div>
+                        <h3>Кандидаты ядра</h3>
+                        <p class="muted">
+                          Постраничное ревью rule-based кандидатов. На этой странице не запускаются LLM-запросы.
+                        </p>
+                      </div>
+                      <div class="button-row">
+                        <md-outlined-button id="interest-context-draft-items-refresh" type="button">
+                          <md-icon slot="icon">refresh</md-icon>
+                          Обновить
+                        </md-outlined-button>
+                        <a class="interest-next-link" href="/interest-contexts/core/reviews">LLM-рекомендации</a>
+                      </div>
+                    </div>
+                    <div id="interest-context-draft-items-page" class="draft-review-panel" aria-live="polite"></div>
+                  </section>
+    """
+
+
+def _interest_context_reviews_body() -> str:
+    return """
+                  <section class="detail-section">
+                    <div class="section-head">
+                      <div>
+                        <h3>LLM-рекомендации</h3>
+                        <p class="muted">
+                          Постраничная проверка рекомендаций модели: одобрить, отклонить или вернуть на ревью.
+                        </p>
+                      </div>
+                      <div class="button-row">
+                        <md-outlined-button id="interest-context-review-items-refresh" type="button">
+                          <md-icon slot="icon">refresh</md-icon>
+                          Обновить
+                        </md-outlined-button>
+                        <a class="interest-next-link" href="/interest-contexts/core">Назад к формированию</a>
+                      </div>
+                    </div>
+                    <div id="interest-context-review-items-page" class="draft-review-panel" aria-live="polite"></div>
                   </section>
     """
 
@@ -618,7 +707,9 @@ def _interest_context_stage_hint(step: str) -> str:
         "load": "канал, чат или архив",
         "check": "raw/parquet, вложения, примеры",
         "prepare": "нормализация, индекс, сущности",
-        "core": "кандидаты ядра без LLM",
+        "core": "запуск и статус ядра",
+        "candidates": "rule-based список по страницам",
+        "reviews": "проверка LLM-рекомендаций",
         "llm": "бриф и будущие промпты",
     }[step]
 

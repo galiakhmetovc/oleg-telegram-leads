@@ -1646,6 +1646,16 @@ md-text-button {
   padding: 10px;
 }
 
+.linked-row {
+  color: var(--text);
+}
+
+.linked-row:hover {
+  border-color: var(--accent);
+  background: #f1faf5;
+  color: var(--text);
+}
+
 @media (max-width: 980px) {
   .inbox-layout,
   .catalog-layout,

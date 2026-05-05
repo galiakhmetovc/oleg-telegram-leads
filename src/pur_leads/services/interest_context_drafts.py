@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any
 
 import pyarrow.parquet as pq
-from sqlalchemy import desc, insert, select, update
+from sqlalchemy import desc, func, insert, select, update
 from sqlalchemy.orm import Session
 
 from pur_leads.core.ids import new_id
@@ -269,6 +269,30 @@ class InterestContextDraftService:
             "summary": run.get("output_summary_json"),
         }
 
+    def latest_items_payload(
+        self,
+        context_id: str,
+        *,
+        limit: int = 25,
+        offset: int = 0,
+    ) -> dict[str, Any]:
+        run = self._latest_run(context_id)
+        if run is None:
+            return {
+                "draft_run": None,
+                "items": [],
+                "summary": None,
+                "pagination": _pagination(limit=limit, offset=offset, total=0),
+            }
+        total = self._item_count_for_run(str(run["id"]))
+        items = self._items_for_run(str(run["id"]), limit=limit, offset=offset)
+        return {
+            "draft_run": dict(run),
+            "items": items,
+            "summary": run.get("output_summary_json"),
+            "pagination": _pagination(limit=limit, offset=offset, total=total),
+        }
+
     def _raw_export_runs(self, context_id: str) -> list[dict[str, Any]]:
         rows = (
             self.session.execute(
@@ -466,18 +490,37 @@ class InterestContextDraftService:
         )
         return dict(row) if row is not None else None
 
-    def _items_for_run(self, draft_run_id: str, *, limit: int) -> list[dict[str, Any]]:
+    def _items_for_run(
+        self,
+        draft_run_id: str,
+        *,
+        limit: int,
+        offset: int = 0,
+    ) -> list[dict[str, Any]]:
+        if limit <= 0:
+            return []
         rows = (
             self.session.execute(
                 select(interest_context_draft_items_table)
                 .where(interest_context_draft_items_table.c.draft_run_id == draft_run_id)
                 .order_by(desc(interest_context_draft_items_table.c.score))
                 .limit(max(1, limit))
+                .offset(max(0, offset))
             )
             .mappings()
             .all()
         )
         return [dict(row) for row in rows]
+
+    def _item_count_for_run(self, draft_run_id: str) -> int:
+        return int(
+            self.session.execute(
+                select(func.count())
+                .select_from(interest_context_draft_items_table)
+                .where(interest_context_draft_items_table.c.draft_run_id == draft_run_id)
+            ).scalar_one()
+            or 0
+        )
 
     def _report_stage_start(
         self,
@@ -656,3 +699,15 @@ def _percent(done: int, total: int) -> int:
     if total <= 0:
         return 100
     return max(0, min(100, round((done / total) * 100)))
+
+
+def _pagination(*, limit: int, offset: int, total: int) -> dict[str, Any]:
+    safe_limit = max(1, int(limit))
+    safe_offset = max(0, int(offset))
+    safe_total = max(0, int(total))
+    return {
+        "limit": safe_limit,
+        "offset": safe_offset,
+        "total": safe_total,
+        "has_more": safe_offset + safe_limit < safe_total,
+    }
