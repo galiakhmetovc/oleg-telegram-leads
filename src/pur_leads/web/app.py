@@ -38,6 +38,8 @@ from pur_leads.web.routes_quality import router as quality_router
 from pur_leads.web.routes_sources import router as sources_router
 from pur_leads.web.routes_today import router as today_router
 
+DEFAULT_BOOTSTRAP_ADMIN_PASSWORD = "purleadspassword"
+
 
 def create_app(
     *,
@@ -117,10 +119,13 @@ def create_app(
         if bootstrap_admin_password is not None
         else settings.bootstrap_admin_password
     )
+    resolved_bootstrap_password = (
+        _non_empty(configured_bootstrap_password) or DEFAULT_BOOTSTRAP_ADMIN_PASSWORD
+    )
     _ensure_bootstrap_admin(
         session_factory=session_factory,
         username=app.state.bootstrap_admin_username,
-        configured_password=_non_empty(configured_bootstrap_password),
+        configured_password=resolved_bootstrap_password,
         password_file=app.state.bootstrap_admin_password_file,
         telegram_bot_token=app.state.telegram_bot_token,
         session_duration_hours=app.state.web_session_duration_hours,
@@ -241,7 +246,11 @@ def _ensure_bootstrap_admin(
             session_duration_hours=session_duration_hours,
         )
         existing = auth_service.repository.get_user_by_local_username(username)
-        if existing is not None and not existing.must_change_password:
+        if (
+            existing is not None
+            and not existing.must_change_password
+            and configured_password is None
+        ):
             password_file.unlink(missing_ok=True)
             return
 
@@ -252,6 +261,8 @@ def _ensure_bootstrap_admin(
             username=username,
             password=password,
             reset_password_if_must_change=existing is not None and needs_file_write,
+            reset_existing_password=configured_password is not None,
+            must_change_password=False if configured_password is not None else True,
         )
         if needs_file_write:
             _write_bootstrap_password_file(password_file, username=username, password=password)

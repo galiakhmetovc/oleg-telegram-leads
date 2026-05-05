@@ -79,14 +79,19 @@ class WebAuthService:
         username: str,
         password: str,
         reset_password_if_must_change: bool = False,
+        reset_existing_password: bool = False,
+        must_change_password: bool = True,
     ) -> WebUserRecord:
         existing = self.repository.get_user_by_local_username(username)
         if existing is not None:
-            if reset_password_if_must_change and existing.must_change_password:
+            if reset_existing_password or (
+                reset_password_if_must_change and existing.must_change_password
+            ):
                 validate_password(password, username=username)
                 updated = self.repository.update_user(
                     existing.id,
                     password_hash=hash_password(password),
+                    must_change_password=must_change_password,
                     updated_at=utc_now(),
                 )
                 self.audit.record_change(
@@ -108,7 +113,7 @@ class WebAuthService:
             auth_type="local",
             local_username=username,
             password_hash=hash_password(password),
-            must_change_password=True,
+            must_change_password=must_change_password,
             role="admin",
             status="active",
             created_at=now,
