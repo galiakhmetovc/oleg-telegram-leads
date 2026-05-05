@@ -993,7 +993,8 @@ md-text-button {
   font-weight: 500;
 }
 
-.material-select-field select {
+.material-select-field select,
+.material-select-field input {
   min-height: 56px;
   width: 100%;
   padding: 0 12px;
@@ -1457,11 +1458,13 @@ md-text-button {
 }
 
 .single-column-form,
-.interest-source-form {
+.interest-source-form,
+.interest-llm-form {
   grid-template-columns: 1fr;
 }
 
-.interest-source-form {
+.interest-source-form,
+.interest-llm-form {
   align-items: stretch;
 }
 

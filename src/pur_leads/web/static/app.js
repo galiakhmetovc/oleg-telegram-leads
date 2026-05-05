@@ -3746,8 +3746,15 @@ function initInterestContexts() {
   document
     .querySelector("#interest-core-brief-generate")
     ?.addEventListener("click", () => generateInterestCoreBrief(state));
+  document
+    .querySelector("#interest-llm-provider-form")
+    ?.addEventListener("submit", (event) => saveInterestLlmProvider(event));
+  document
+    .querySelector("#interest-llm-refresh")
+    ?.addEventListener("click", () => loadInterestLlmConfig());
   setInterestContextFormsEnabled(false);
   loadInterestContexts(state);
+  loadInterestLlmConfig();
 }
 
 async function loadInterestContexts(state) {
@@ -4144,6 +4151,172 @@ async function loadInterestCoreBriefStatus(state, { silent = false } = {}) {
   } catch (error) {
     if (!silent && status) status.textContent = error.message;
   }
+}
+
+async function loadInterestLlmConfig() {
+  const target = document.querySelector("#interest-llm-provider-list");
+  if (!target) return;
+  try {
+    const registry = await api("/api/admin/ai-registry");
+    populateInterestLlmModelOptions(registry.models || []);
+    renderInterestLlmConfig(registry);
+  } catch (error) {
+    target.innerHTML = `<div class="empty-state">${escapeHtml(error.message)}</div>`;
+  }
+}
+
+function populateInterestLlmModelOptions(models) {
+  const datalist = document.querySelector("#interest-llm-model-options");
+  if (!datalist) return;
+  const languageModels = (models || [])
+    .filter((model) => model.model_type === "language")
+    .map((model) => model.provider_model_name)
+    .filter(Boolean);
+  const fallback = [
+    "GLM-4-Plus",
+    "GLM-5.1",
+    "GLM-5",
+    "GLM-4.7",
+    "GLM-4.5-Air",
+    "GLM-4.5-Flash",
+  ];
+  const values = [...new Set((languageModels.length ? languageModels : fallback).sort())];
+  datalist.innerHTML = values
+    .map((model) => `<option value="${escapeHtml(model)}"></option>`)
+    .join("");
+}
+
+function renderInterestLlmConfig(registry) {
+  const target = document.querySelector("#interest-llm-provider-list");
+  if (!target) return;
+  const providerById = Object.fromEntries(
+    (registry.providers || []).map((provider) => [provider.id, provider])
+  );
+  const accounts = (registry.accounts || [])
+    .filter((account) => account.enabled !== false)
+    .map((account) => ({
+      ...account,
+      provider_key: providerById[account.ai_provider_id]?.provider_key || "provider",
+    }));
+  const routes = (registry.routes || []).filter(
+    (route) => route.enabled !== false && route.agent_key === "catalog_extractor"
+  );
+  if (!accounts.length && !routes.length) {
+    target.innerHTML = '<div class="empty-state">LLM еще не подключен</div>';
+    return;
+  }
+  target.innerHTML = `
+    <div class="table-list">
+      ${accounts.map(renderInterestLlmAccountRow).join("")}
+      ${routes.map(renderInterestLlmRouteRow).join("")}
+    </div>`;
+}
+
+function renderInterestLlmAccountRow(account) {
+  return `<div class="table-row">
+    <div>
+      <strong>${escapeHtml(account.display_name || account.provider_account || "LLM provider")}</strong>
+      <p class="muted">${escapeHtml(account.provider_key || "provider")} / ${escapeHtml(account.base_url || "")}</p>
+    </div>
+    <span>${badge(account.enabled === false ? "отключен" : "подключен", account.enabled === false ? "is-warn" : "")}</span>
+  </div>`;
+}
+
+function renderInterestLlmRouteRow(route) {
+  return `<div class="table-row">
+    <div>
+      <strong>${escapeHtml(route.agent_key)} / ${escapeHtml(route.route_role)}</strong>
+      <p class="muted">${escapeHtml(route.provider_account || "аккаунт")} / ${escapeHtml(route.model || "модель")} / ${escapeHtml(route.model_profile || "профиль")}</p>
+    </div>
+    <span>${badge(`приоритет ${route.priority ?? "н/д"}`)}</span>
+  </div>`;
+}
+
+async function saveInterestLlmProvider(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const status = document.querySelector("#interest-llm-status");
+  const apiKey = String(formValue(form, "api_key") || "").trim();
+  const modelName = String(formValue(form, "model") || "").trim();
+  const displayName = formValue(form, "display_name") || "Z.AI";
+  const baseUrl = formValue(form, "base_url") || "https://api.z.ai/api/coding/paas/v4";
+  try {
+    if (status) status.textContent = apiKey ? "Сохраняю LLM-провайдера..." : "Обновляю модель...";
+    let registry;
+    let accountId = null;
+    if (apiKey) {
+      registry = await api("/api/onboarding/llm-provider", {
+        method: "POST",
+        body: JSON.stringify({
+          display_name: displayName,
+          base_url: baseUrl,
+          api_key: apiKey,
+        }),
+      });
+      accountId = registry.account?.id || firstEnabledZaiAccountId(registry);
+    } else {
+      registry = await api("/api/admin/ai-registry");
+      accountId = firstEnabledZaiAccountId(registry);
+      if (!accountId) {
+        throw new Error("Введите token для первого подключения LLM-провайдера.");
+      }
+    }
+    const model = findInterestLlmModel(registry.models || [], modelName);
+    if (!model) {
+      throw new Error(`Провайдер сохранен, но модель "${modelName}" не найдена в Z.AI registry.`);
+    }
+    if (!accountId) {
+      throw new Error("LLM-провайдер сохранен, но активный аккаунт Z.AI не найден.");
+    }
+    if (status) status.textContent = `Привязываю модель ${model.provider_model_name}...`;
+    await api("/api/admin/ai-agents/catalog_extractor/routes", {
+      method: "POST",
+      body: JSON.stringify({
+        model_id: model.id,
+        account_id: accountId,
+        route_role: "primary",
+        priority: 5,
+        enabled: true,
+        max_output_tokens: 4096,
+        temperature: 0.0,
+        thinking_mode: "off",
+        structured_output_required: Boolean(
+          model.supports_structured_output || model.supports_json_mode
+        ),
+      }),
+    });
+    const apiKeyField = form.querySelector('[name="api_key"]');
+    if (apiKeyField && "value" in apiKeyField) apiKeyField.value = "";
+    if (status) {
+      status.textContent = `LLM подключен: ${model.provider_model_name} для catalog_extractor / primary`;
+    }
+    await loadInterestLlmConfig();
+  } catch (error) {
+    if (status) status.textContent = error.message;
+  }
+}
+
+function firstEnabledZaiAccountId(registry) {
+  const providerById = Object.fromEntries(
+    (registry.providers || []).map((provider) => [provider.id, provider])
+  );
+  const account = (registry.accounts || []).find(
+    (item) =>
+      item.enabled !== false && providerById[item.ai_provider_id]?.provider_key === "zai"
+  );
+  return account?.id || null;
+}
+
+function findInterestLlmModel(models, modelName) {
+  const normalized = normalizeInterestLlmModelName(modelName);
+  return (models || []).find((model) => {
+    if (model.model_type !== "language") return false;
+    return normalizeInterestLlmModelName(model.provider_model_name) === normalized;
+  });
+}
+
+function normalizeInterestLlmModelName(value) {
+  return String(value || "").trim().toLowerCase();
 }
 
 function scheduleInterestCoreBriefPolling(state) {

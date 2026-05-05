@@ -506,6 +506,46 @@ def _interest_context_llm_body() -> str:
                   <section class="detail-section">
                     <div class="section-head">
                       <div>
+                        <h3>Подключение LLM</h3>
+                        <p class="muted">
+                          Сейчас подключаем Z.AI для генерации брифа и следующих LLM-этапов ядра интересов.
+                          Выбранная модель станет основным исполнителем `catalog_extractor / primary`.
+                        </p>
+                      </div>
+                      <md-outlined-button id="interest-llm-refresh" type="button">
+                        <md-icon slot="icon">refresh</md-icon>
+                        Обновить
+                      </md-outlined-button>
+                    </div>
+                    <form id="interest-llm-provider-form" class="material-form interest-llm-form">
+                      <md-outlined-text-field name="display_name" label="Название" value="Z.AI">
+                      </md-outlined-text-field>
+                      <md-outlined-text-field name="base_url" label="URL" required
+                        value="https://api.z.ai/api/coding/paas/v4">
+                      </md-outlined-text-field>
+                      <md-outlined-text-field name="api_key" label="Token" type="password"
+                        placeholder="z.ai API token">
+                      </md-outlined-text-field>
+                      <label class="material-select-field">
+                        Модель
+                        <input name="model" list="interest-llm-model-options" value="GLM-4-Plus" required>
+                        <datalist id="interest-llm-model-options"></datalist>
+                      </label>
+                      <p class="muted form-help">
+                        Token нужен для первого подключения или замены ключа. Если провайдер уже сохранен,
+                        можно оставить token пустым и поменять только модель.
+                      </p>
+                      <md-filled-button type="submit">
+                        <md-icon slot="icon">check_circle</md-icon>
+                        Сохранить LLM
+                      </md-filled-button>
+                    </form>
+                    <p id="interest-llm-status" class="status-line" role="status"></p>
+                    <div id="interest-llm-provider-list" class="resource-list" aria-live="polite"></div>
+                  </section>
+                  <section class="detail-section">
+                    <div class="section-head">
+                      <div>
                         <h3>LLM-бриф ядра интересов</h3>
                         <p class="muted">
                           Редактируемый контекст для моделей: чем занимается проект, что считать интересом,
@@ -2034,7 +2074,7 @@ def _page(*, page: str, title: str, main: str) -> str:
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans:wght@400;500;600;700&amp;display=swap">
-  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined&amp;icon_names=add,archive,article,check_circle,close,database,description,folder,forum,model_training,open_in_new,person,person_add,radio_button_unchecked,refresh,send,settings,smart_toy,storage,table_chart,upload_file,vpn_key&amp;display=block">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined&amp;icon_names=add,archive,article,check_circle,close,database,description,folder,forum,hub,model_training,open_in_new,person,person_add,radio_button_unchecked,refresh,send,settings,smart_toy,storage,table_chart,upload_file,vpn_key&amp;display=block">
   <link rel="stylesheet" href="/static/app.css">
 </head>
 <body data-page="{page}">
