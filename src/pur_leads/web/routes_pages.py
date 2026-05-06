@@ -3571,6 +3571,9 @@ def _has_page_session(request: Request, auth_service: WebAuthService) -> bool:
     return validated.user.role == "admin"
 
 
+ASSET_VERSION = "20260506-intent-batch-apply"
+
+
 def _page(*, page: str, title: str, main: str) -> str:
     return f"""<!doctype html>
 <html lang="ru">
@@ -3583,11 +3586,11 @@ def _page(*, page: str, title: str, main: str) -> str:
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans:wght@400;500;600;700&amp;display=swap">
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined&amp;icon_names=add,archive,article,auto_fix_high,check_circle,close,database,description,folder,forum,hub,model_training,open_in_new,person,person_add,radio_button_unchecked,refresh,search,send,settings,smart_toy,storage,table_chart,upload_file,vpn_key&amp;display=block">
-  <link rel="stylesheet" href="/static/app.css">
+  <link rel="stylesheet" href="/static/app.css?v={ASSET_VERSION}">
 </head>
 <body data-page="{page}">
   {main}
   <script type="module" src="/static/vendor/material-web.js"></script>
-  <script src="/static/app.js" defer></script>
+  <script src="/static/app.js?v={ASSET_VERSION}" defer></script>
 </body>
 </html>"""

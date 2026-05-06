@@ -5505,9 +5505,40 @@ function renderIntentRecommendationNextStep(payload, state) {
   const summary = payload.summary || {};
   const run = payload.run || {};
   if (run.batch_mode) {
+    const createdIntentRunId = run.created_intent_run?.id || "";
+    if (createdIntentRunId) {
+      return `<div class="explain-box">
+        <strong>AI-фильтр уже применен</strong>
+        <p>Все одобренные рекомендации из пачек собраны в общий фильтр и пересчитаны. Новый список намерений: ${escapeHtml(shortId(createdIntentRunId))}, сообщений: ${escapeHtml(String(run.created_intent_run?.match_count || 0))}.</p>
+        <div class="button-row">
+          <a class="button-link is-primary" href="${escapeHtml(interestContextStepHref("/interest-contexts/intent-matches", state.selectedId))}">Открыть новый список намерений</a>
+        </div>
+      </div>`;
+    }
+    if ((summary.approved || 0) > 0) {
+      return `<div class="explain-box">
+        <strong>Следующий шаг</strong>
+        <p>Одобрено ${escapeHtml(String(summary.approved || 0))} рекомендаций из ${escapeHtml(String(summary.batch_run_count || 0))} AI-пачек. Система создаст один общий фильтр поверх предыдущего фильтра и сразу применит его к тому же широкому списку.</p>
+        <div class="button-row">
+          <button class="button-link is-primary" type="button" data-apply-batched-ai-intent-filter="${escapeHtml(run.source_intent_run_id || run.id || "")}">
+            Создать и применить общий AI-фильтр
+          </button>
+        </div>
+        <p id="interest-intent-validation-recommendations-status" class="status-line" role="status"></p>
+      </div>`;
+    }
+    if ((summary.applied || 0) > 0 && run.created_layer_id) {
+      return `<div class="explain-box">
+        <strong>AI-фильтр создан</strong>
+        <p>Рекомендации уже перенесены в слой ${escapeHtml(shortId(run.created_layer_id))}. Если новый список еще не появился, примените фильтр на странице AI-фильтра.</p>
+        <div class="button-row">
+          <a class="button-link" href="${escapeHtml(interestContextStepHref("/interest-contexts/intent-ai-filter", state.selectedId))}">Открыть применение AI-фильтра</a>
+        </div>
+      </div>`;
+    }
     return `<div class="explain-box">
       <strong>Рекомендации из пачек</strong>
-      <p>Показаны рекомендации всех успешных AI-пачек для одного списка намерений. Одобрите безопасные рекомендации; общий AI-фильтр будет собираться следующим шагом из всех одобренных пачек.</p>
+      <p>Показаны рекомендации всех успешных AI-пачек для одного списка намерений. Одобрите безопасные рекомендации; общий AI-фильтр собирается только из одобренных пачек.</p>
     </div>`;
   }
   if (run.created_layer_id) {
@@ -5598,7 +5629,12 @@ function handleInterestIntentValidationRecommendationsClick(event, state) {
     return;
   }
   const statusButton = event.target.closest("[data-intent-validation-recommendation-status]");
-  if (statusButton) updateInterestIntentValidationRecommendation(statusButton, state);
+  if (statusButton) {
+    updateInterestIntentValidationRecommendation(statusButton, state);
+    return;
+  }
+  const applyBatchButton = event.target.closest("[data-apply-batched-ai-intent-filter]");
+  if (applyBatchButton) applyBatchedInterestIntentAiFilter(applyBatchButton, state);
 }
 
 async function updateInterestIntentValidationRecommendation(button, state) {
@@ -5620,6 +5656,36 @@ async function updateInterestIntentValidationRecommendation(button, state) {
   } catch (error) {
     button.disabled = false;
     if (line) line.textContent = error.message;
+  }
+}
+
+async function applyBatchedInterestIntentAiFilter(button, state) {
+  const runId = button.dataset.applyBatchedAiIntentFilter;
+  const status =
+    document.querySelector("#interest-intent-validation-recommendations-status") ||
+    document.querySelector("#interest-context-status");
+  if (!runId || !state.selectedId) return;
+  button.disabled = true;
+  try {
+    if (status) status.textContent = "Создаю общий AI-фильтр из одобренных пачек и пересчитываю сообщения...";
+    const payload = await api(
+      `/api/interest-contexts/${encodeURIComponent(state.selectedId)}/intent-runs/${encodeURIComponent(runId)}/validation-recommendations/apply`,
+      { method: "POST" }
+    );
+    state.selectedIntentRunId = payload.run?.id || null;
+    if (status) {
+      const exclusions = payload.summary?.exclusions || {};
+      const cleanedTotal = payload.summary?.cleaned_total || 0;
+      const semanticCleaned = exclusions.semantic_negative || 0;
+      const exactCleaned = exclusions.exact_operator_incorrect || 0;
+      const boosted = payload.summary?.positive_boosted_count || 0;
+      const appliedCount = payload.layer_result?.applied_recommendation_ids?.length || 0;
+      status.innerHTML = `Готово: применено ${escapeHtml(String(appliedCount))} рекомендаций. Было ${escapeHtml(String(payload.summary?.input_broad_match_count || 0))}, стало ${escapeHtml(String(payload.summary?.match_count || 0))}, очищено ${escapeHtml(String(cleanedTotal))}: ручные ${escapeHtml(String(exactCleaned))}, semantic ${escapeHtml(String(semanticCleaned))}. Усилено ${escapeHtml(String(boosted))}. <a href="${escapeHtml(interestContextStepHref("/interest-contexts/intent-matches", state.selectedId))}">Открыть сообщения намерений</a>`;
+    }
+    await loadInterestIntentValidationRecommendations(state);
+  } catch (error) {
+    button.disabled = false;
+    if (status) status.textContent = error.message;
   }
 }
 

@@ -263,6 +263,11 @@ class InterestIntentValidationService:
             ).scalar_one()
             or 0
         )
+        created_layer = self._latest_batch_layer_for_source_run(
+            context_id=context_id,
+            source_intent_run_id=source_intent_run_id,
+        )
+        created_layer_id = str(created_layer["id"]) if created_layer is not None else None
         run_payload = {
             "id": source_intent_run_id,
             "source_intent_run_id": source_intent_run_id,
@@ -270,8 +275,11 @@ class InterestIntentValidationService:
             "status": "batch",
             "batch_mode": True,
             "batch_run_count": run_count,
-            "created_layer_id": None,
-            "created_intent_run": None,
+            "created_layer_id": created_layer_id,
+            "created_intent_run": self._latest_intent_run_for_created_layer(
+                context_id,
+                created_layer_id,
+            ),
         }
         return {
             "run": run_payload,
@@ -607,6 +615,105 @@ class InterestIntentValidationService:
         self.session.commit()
         return {"layer": layer.as_jsonable(), "applied_recommendation_ids": recommendation_ids}
 
+    def create_layer_from_source_run_approved(
+        self,
+        source_intent_run_id: str,
+        *,
+        context_id: str,
+        actor: str,
+    ) -> dict[str, Any]:
+        source_intent_run = self._intent_run(context_id, source_intent_run_id)
+        if source_intent_run is None:
+            raise KeyError(source_intent_run_id)
+        run_ids_query = (
+            select(interest_intent_validation_runs_table.c.id)
+            .where(interest_intent_validation_runs_table.c.context_id == context_id)
+            .where(
+                interest_intent_validation_runs_table.c.source_intent_run_id
+                == source_intent_run_id
+            )
+            .where(interest_intent_validation_runs_table.c.status == "succeeded")
+        )
+        recommendations = [
+            dict(row)
+            for row in self.session.execute(
+                select(interest_intent_validation_recommendations_table)
+                .where(
+                    interest_intent_validation_recommendations_table.c.validation_run_id.in_(
+                        run_ids_query
+                    )
+                )
+                .where(interest_intent_validation_recommendations_table.c.status == "approved")
+                .order_by(interest_intent_validation_recommendations_table.c.created_at)
+            )
+            .mappings()
+            .all()
+        ]
+        existing_layer = self._latest_batch_layer_for_source_run(
+            context_id=context_id,
+            source_intent_run_id=source_intent_run_id,
+        )
+        if not recommendations:
+            if existing_layer is not None:
+                metadata = dict(existing_layer.get("metadata_json") or {})
+                return {
+                    "layer": dict(existing_layer),
+                    "applied_recommendation_ids": _string_list(
+                        metadata.get("approved_recommendation_ids")
+                    ),
+                    "validation_run_ids": _string_list(metadata.get("batch_validation_run_ids")),
+                    "reused": True,
+                }
+            raise ValueError("Нет одобренных рекомендаций для создания слоя")
+
+        base_layer = self._layer(str(source_intent_run["intent_layer_id"]))
+        values = self._layer_values_with_recommendations(base_layer, recommendations)
+        review_exclusions = self._incorrect_review_exclusions(
+            context_id=context_id,
+            source_intent_run_id=source_intent_run_id,
+        )
+        validation_run_ids = _merge_lists(
+            [],
+            [str(row["validation_run_id"]) for row in recommendations],
+        )
+        layer = InterestIntentLayerService(self.session).create_layer(
+            context_id=context_id,
+            actor=actor,
+            name=f"AI-фильтр по всем пачкам от {utc_now().strftime('%d.%m.%Y %H:%M')}",
+            description=(
+                "Повторная фильтрация намерений, созданная из всех одобренных "
+                f"AI-рекомендаций по batch-разметке source run {source_intent_run_id}."
+            ),
+            metadata_json={
+                "source": "interest_intent_validation_batches",
+                "source_intent_run_id": source_intent_run_id,
+                "base_intent_layer_id": base_layer["id"],
+                "approved_recommendation_ids": [row["id"] for row in recommendations],
+                "batch_validation_run_ids": validation_run_ids,
+                **review_exclusions,
+            },
+            **values,
+        )
+        now = utc_now()
+        recommendation_ids = [row["id"] for row in recommendations]
+        self.session.execute(
+            update(interest_intent_validation_recommendations_table)
+            .where(interest_intent_validation_recommendations_table.c.id.in_(recommendation_ids))
+            .values(status="applied", applied_at=now, updated_at=now)
+        )
+        self.session.execute(
+            update(interest_intent_validation_runs_table)
+            .where(interest_intent_validation_runs_table.c.id.in_(validation_run_ids))
+            .values(created_layer_id=layer.id, updated_at=now)
+        )
+        self.session.commit()
+        return {
+            "layer": layer.as_jsonable(),
+            "applied_recommendation_ids": recommendation_ids,
+            "validation_run_ids": validation_run_ids,
+            "reused": False,
+        }
+
     def ensure_created_layer_review_exclusions(
         self,
         validation_run_id: str,
@@ -908,6 +1015,32 @@ class InterestIntentValidationService:
             .first()
         )
         return dict(row) if row is not None else None
+
+    def _latest_batch_layer_for_source_run(
+        self,
+        *,
+        context_id: str,
+        source_intent_run_id: str,
+    ) -> dict[str, Any] | None:
+        rows = (
+            self.session.execute(
+                select(interest_intent_layers_table)
+                .where(interest_intent_layers_table.c.context_id == context_id)
+                .where(interest_intent_layers_table.c.status != "archived")
+                .order_by(desc(interest_intent_layers_table.c.created_at))
+                .limit(50)
+            )
+            .mappings()
+            .all()
+        )
+        for row in rows:
+            metadata = dict(row.get("metadata_json") or {})
+            if (
+                metadata.get("source") == "interest_intent_validation_batches"
+                and metadata.get("source_intent_run_id") == source_intent_run_id
+            ):
+                return dict(row)
+        return None
 
     def _context(self, context_id: str) -> dict[str, Any] | None:
         row = (
