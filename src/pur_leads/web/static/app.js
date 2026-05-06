@@ -5392,7 +5392,13 @@ async function generateInterestIntentValidation(event, state) {
     const runId = await ensureSelectedIntentRun(state);
     if (!runId) throw new Error("Сначала нужен запуск слоя намерений");
     if (status) status.textContent = "AI-валидация выполняется по запросу...";
-    const form = event.currentTarget;
+    const form =
+      event.currentTarget instanceof HTMLFormElement
+        ? event.currentTarget
+        : document.querySelector("#interest-intent-validation-form");
+    if (!(form instanceof HTMLFormElement)) {
+      throw new Error("Форма AI-валидации не найдена");
+    }
     const payload = await api(
       `/api/interest-contexts/${encodeURIComponent(state.selectedId)}/intent-runs/${encodeURIComponent(runId)}/validation-runs`,
       {
