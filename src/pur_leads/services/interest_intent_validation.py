@@ -211,11 +211,13 @@ class InterestIntentValidationService:
         temperature: float,
         max_tokens: int,
         max_reviews: int = 80,
+        review_offset: int = 0,
     ) -> dict[str, Any]:
         payload = self.build_validation_payload(
             context_id=context_id,
             source_intent_run_id=source_intent_run_id,
             max_reviews=max_reviews,
+            review_offset=review_offset,
         )
         if not payload["reviewed_matches"]:
             raise ValueError("Сначала разметьте хотя бы одно сообщение как правильное или неправильное")
@@ -239,6 +241,7 @@ class InterestIntentValidationService:
             "prompt_version": INTENT_VALIDATION_PROMPT_VERSION,
             "messages": [{"role": message.role, "content": message.content} for message in messages],
             "source_intent_run_id": source_intent_run_id,
+            "review_offset": review_offset,
             "review_count": len(payload["reviewed_matches"]),
         }
         self.session.execute(
@@ -347,6 +350,7 @@ class InterestIntentValidationService:
                 old_value_json=None,
                 new_value_json={
                     "source_intent_run_id": source_intent_run_id,
+                    "review_offset": review_offset,
                     "recommendation_count": len(inserted),
                 },
             )
@@ -373,6 +377,7 @@ class InterestIntentValidationService:
         context_id: str,
         source_intent_run_id: str,
         max_reviews: int,
+        review_offset: int = 0,
     ) -> dict[str, Any]:
         context = self._context(context_id)
         if context is None:
@@ -381,7 +386,12 @@ class InterestIntentValidationService:
         if run is None:
             raise KeyError(source_intent_run_id)
         layer = self._layer(str(run["intent_layer_id"]))
-        reviews = self._reviewed_matches(context_id, source_intent_run_id, max_reviews=max_reviews)
+        reviews = self._reviewed_matches(
+            context_id,
+            source_intent_run_id,
+            max_reviews=max_reviews,
+            review_offset=review_offset,
+        )
         correct_count = sum(1 for item in reviews if item["review"]["decision"] == "correct")
         incorrect_count = sum(1 for item in reviews if item["review"]["decision"] == "incorrect")
         brief = self._active_brief(context_id)
@@ -401,6 +411,8 @@ class InterestIntentValidationService:
                 "reviewed": len(reviews),
                 "correct": correct_count,
                 "incorrect": incorrect_count,
+                "review_offset": max(0, int(review_offset)),
+                "review_limit": max(1, int(max_reviews)),
                 "source_intent_run_id": source_intent_run_id,
                 "source_intent_layer_id": run["intent_layer_id"],
             },
@@ -914,6 +926,7 @@ class InterestIntentValidationService:
         source_intent_run_id: str,
         *,
         max_reviews: int,
+        review_offset: int = 0,
     ) -> list[dict[str, Any]]:
         reviews = self._latest_reviews_by_match_id(source_intent_run_id)
         if not reviews:
@@ -952,9 +965,9 @@ class InterestIntentValidationService:
                     "review": review,
                 }
             )
-            if len(reviewed) >= max_reviews:
-                break
-        return reviewed
+        safe_offset = max(0, int(review_offset))
+        safe_limit = max(1, int(max_reviews))
+        return reviewed[safe_offset : safe_offset + safe_limit]
 
     def _intent_match_rows(self, context_id: str, run_id: str) -> list[dict[str, Any]]:
         rows = (

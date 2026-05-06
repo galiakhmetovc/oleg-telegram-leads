@@ -204,6 +204,7 @@ class InterestIntentValidationRunRequest(BaseModel):
     agent_key: str = "catalog_extractor"
     route_role: str = "primary"
     max_reviews: int = Field(default=80, ge=1, le=500)
+    review_offset: int = Field(default=0, ge=0)
     max_tokens: int | None = Field(default=None, ge=1, le=32000)
     temperature: float | None = Field(default=None, ge=0.0, le=2.0)
 
@@ -1300,6 +1301,7 @@ async def generate_interest_intent_validation_run(
             else float(route.temperature or 0.0),
             max_tokens=payload.max_tokens or int(route.max_output_tokens or 4096),
             max_reviews=payload.max_reviews,
+            review_offset=payload.review_offset,
         )
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="Intent run not found") from exc
