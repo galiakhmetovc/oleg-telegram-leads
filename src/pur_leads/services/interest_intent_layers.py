@@ -4,9 +4,12 @@ from __future__ import annotations
 
 from collections import Counter
 from dataclasses import asdict, dataclass
+import json
+from pathlib import Path
 import re
 from typing import Any
 
+import pyarrow.parquet as pq
 from sqlalchemy import desc, func, insert, select, update
 from sqlalchemy.orm import Session
 
@@ -19,6 +22,7 @@ from pur_leads.models.interest_context_drafts import (
     interest_intent_analysis_runs_table,
     interest_intent_layers_table,
 )
+from pur_leads.models.telegram_sources import telegram_raw_export_runs_table
 from pur_leads.services.audit import AuditService
 
 
@@ -142,6 +146,22 @@ class InterestIntentMatchRecord:
 
     def as_jsonable(self) -> dict[str, Any]:
         return asdict(self)
+
+
+@dataclass(frozen=True)
+class _PreparedMessageText:
+    raw_text: str
+    clean_text: str
+    lemmas_text: str
+    source: str
+
+    @property
+    def search_text(self) -> str:
+        return " ".join(
+            part
+            for part in (self.raw_text, self.clean_text, self.lemmas_text)
+            if part.strip()
+        )
 
 
 class InterestIntentLayerService:
@@ -376,7 +396,7 @@ class InterestIntentLayerService:
                 run_id=run_id,
                 context_id=context_id,
                 layer=layer,
-                broad_analysis_run_id=broad_analysis_run_id,
+                broad_run=broad_run,
                 created_at=now,
             )
             if match_rows:
@@ -530,7 +550,7 @@ class InterestIntentLayerService:
         run_id: str,
         context_id: str,
         layer: InterestIntentLayerRecord,
-        broad_analysis_run_id: str,
+        broad_run: dict[str, Any],
         created_at: Any,
     ) -> list[dict[str, Any]]:
         config = _CompiledIntentLayer(layer)
@@ -539,14 +559,16 @@ class InterestIntentLayerService:
             self.session.execute(
                 select(interest_core_analysis_matches_table)
                 .where(interest_core_analysis_matches_table.c.context_id == context_id)
-                .where(interest_core_analysis_matches_table.c.run_id == broad_analysis_run_id)
+                .where(interest_core_analysis_matches_table.c.run_id == broad_run["id"])
                 .order_by(desc(interest_core_analysis_matches_table.c.score))
             )
             .mappings()
             .all()
         )
+        prepared_texts = self._prepared_texts_for_broad_rows(broad_run, rows)
         for row in rows:
-            match = config.match(row)
+            prepared_text = prepared_texts.get(int(row["telegram_message_id"]))
+            match = config.match(row, prepared_text=prepared_text)
             if match is None:
                 continue
             candidate = {
@@ -571,12 +593,13 @@ class InterestIntentLayerService:
                     "algorithm": "local_intent_layer_v1",
                     "intent_layer_id": layer.id,
                     "intent_layer_name": layer.name,
-                    "broad_analysis_run_id": broad_analysis_run_id,
+                    "broad_analysis_run_id": broad_run["id"],
                     "interest_core_match_id": row["id"],
                     "broad_score": float(row["score"] or 0),
                     "include_hits": match["include_hits"],
                     "context_hits": match["context_hits"],
                     "score_parts": match["score_parts"],
+                    "prepared_text": match["prepared_text"],
                     "core_item": row["canonical_name"],
                     "category": row["category"],
                 },
@@ -588,6 +611,56 @@ class InterestIntentLayerService:
         return sorted(best_by_message.values(), key=lambda item: item["score"], reverse=True)[
             : layer.max_results
         ]
+
+    def _prepared_texts_for_broad_rows(
+        self,
+        broad_run: dict[str, Any],
+        rows: list[Any],
+    ) -> dict[int, _PreparedMessageText]:
+        wanted_message_ids = {
+            int(row["telegram_message_id"]) for row in rows if row["telegram_message_id"] is not None
+        }
+        if not wanted_message_ids:
+            return {}
+        raw_run = (
+            self.session.execute(
+                select(telegram_raw_export_runs_table).where(
+                    telegram_raw_export_runs_table.c.id == broad_run["raw_export_run_id"]
+                )
+            )
+            .mappings()
+            .first()
+        )
+        if raw_run is None:
+            return {}
+        metadata = dict(raw_run["metadata_json"] or {})
+        text_normalization = metadata.get("text_normalization")
+        if not isinstance(text_normalization, dict):
+            return {}
+        path_value = text_normalization.get("texts_parquet_path")
+        if not path_value:
+            return {}
+        texts_path = _resolve_path(path_value)
+        if not texts_path.exists():
+            return {}
+        prepared: dict[int, _PreparedMessageText] = {}
+        parquet_file = pq.ParquetFile(texts_path)
+        for batch in parquet_file.iter_batches(batch_size=5000):
+            for row in batch.to_pylist():
+                telegram_message_id = row.get("telegram_message_id")
+                if telegram_message_id is None:
+                    continue
+                message_id = int(telegram_message_id)
+                if message_id not in wanted_message_ids:
+                    continue
+                lemmas = _json_list(row.get("lemmas_json"))
+                prepared[message_id] = _PreparedMessageText(
+                    raw_text=str(row.get("raw_text") or ""),
+                    clean_text=str(row.get("clean_text") or ""),
+                    lemmas_text=" ".join(str(lemma) for lemma in lemmas if str(lemma).strip()),
+                    source="text_normalization",
+                )
+        return prepared
 
     def _layer(self, layer_id: str) -> InterestIntentLayerRecord:
         row = (
@@ -639,8 +712,14 @@ class _CompiledIntentLayer:
         self.include_core_names = _casefold_set(layer.include_core_names_json)
         self.exclude_core_names = _casefold_set(layer.exclude_core_names_json)
 
-    def match(self, row: Any) -> dict[str, Any] | None:
-        text = str(row["message_text"] or "")
+    def match(
+        self,
+        row: Any,
+        *,
+        prepared_text: _PreparedMessageText | None = None,
+    ) -> dict[str, Any] | None:
+        raw_text = str(row["message_text"] or "")
+        text = prepared_text.search_text if prepared_text is not None else raw_text
         normalized_category = _fold(row["category"])
         normalized_name = _fold(row["canonical_name"])
         if self.include_categories and normalized_category not in self.include_categories:
@@ -673,6 +752,11 @@ class _CompiledIntentLayer:
                 "broad": round(broad_score * self.layer.broad_score_weight, 4),
                 "intent": round(intent_score, 4),
                 "context": round(context_score, 4),
+            },
+            "prepared_text": {
+                "source": prepared_text.source if prepared_text is not None else "raw_message_text",
+                "used_clean_text": bool(prepared_text and prepared_text.clean_text),
+                "used_lemmas": bool(prepared_text and prepared_text.lemmas_text),
             },
         }
 
@@ -707,8 +791,17 @@ def _clean_list(value: list[str] | None) -> list[str]:
 def _json_list(value: Any) -> list[Any]:
     if isinstance(value, list):
         return value
+    if isinstance(value, bytes):
+        value = value.decode("utf-8")
     if isinstance(value, str) and value.strip():
-        return [value]
+        stripped = value.strip()
+        if stripped.startswith("["):
+            try:
+                loaded = json.loads(stripped)
+            except json.JSONDecodeError:
+                return [stripped]
+            return loaded if isinstance(loaded, list) else [loaded]
+        return [stripped]
     return []
 
 
@@ -740,6 +833,11 @@ def _casefold_set(value: Any) -> set[str]:
 
 def _fold(value: Any) -> str:
     return str(value or "").casefold().replace("ё", "е").strip()
+
+
+def _resolve_path(value: Any) -> Path:
+    path = Path(str(value))
+    return path if path.is_absolute() else Path(".") / path
 
 
 def _truncate(value: str | None, limit: int) -> str | None:
