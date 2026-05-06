@@ -176,8 +176,13 @@ class InterestIntentValidationService:
             .mappings()
             .all()
         )
+        run_payload = run.as_jsonable()
+        run_payload["created_intent_run"] = self._latest_intent_run_for_created_layer(
+            context_id,
+            run.created_layer_id,
+        )
         return {
-            "run": run.as_jsonable(),
+            "run": run_payload,
             "items": items,
             "summary": {
                 "total": total,
@@ -673,6 +678,26 @@ class InterestIntentValidationService:
                 )
             result.append(row)
         return result
+
+    def _latest_intent_run_for_created_layer(
+        self,
+        context_id: str,
+        layer_id: str | None,
+    ) -> dict[str, Any] | None:
+        if not layer_id:
+            return None
+        row = (
+            self.session.execute(
+                select(interest_intent_analysis_runs_table)
+                .where(interest_intent_analysis_runs_table.c.context_id == context_id)
+                .where(interest_intent_analysis_runs_table.c.intent_layer_id == layer_id)
+                .order_by(desc(interest_intent_analysis_runs_table.c.created_at))
+                .limit(1)
+            )
+            .mappings()
+            .first()
+        )
+        return dict(row) if row is not None else None
 
     def _context(self, context_id: str) -> dict[str, Any] | None:
         row = (

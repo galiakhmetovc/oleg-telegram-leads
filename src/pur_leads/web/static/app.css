@@ -336,6 +336,29 @@ md-text-button {
   color: var(--accent-strong);
 }
 
+.button-link.is-primary {
+  border-color: var(--accent-strong);
+  background: var(--accent-strong);
+  color: #ffffff;
+}
+
+.button-link.is-primary:hover {
+  border-color: var(--accent-strong);
+  background: #176b4e;
+  color: #ffffff;
+}
+
+.button-link.is-large {
+  min-height: 48px;
+  padding: 0 22px;
+  font-size: 15px;
+}
+
+.button-link:disabled {
+  cursor: not-allowed;
+  opacity: 0.48;
+}
+
 .icon-button {
   width: 38px;
   padding: 0;
@@ -613,6 +636,11 @@ md-text-button {
   flex-wrap: wrap;
   gap: 8px;
   justify-content: flex-end;
+}
+
+.ai-filter-primary-action {
+  justify-content: flex-start;
+  margin-top: 12px;
 }
 
 .form-help {
