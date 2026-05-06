@@ -3766,6 +3766,7 @@ function initInterestContexts() {
     prepFeaturesOffset: 0,
     prepEntitiesLimit: 10,
     prepEntitiesOffset: 0,
+    selectedPrepRawRunId: new URLSearchParams(window.location.search).get("raw_export_run_id"),
   };
   document
     .querySelector("#interest-context-refresh")
@@ -3854,6 +3855,7 @@ function initInterestContexts() {
   document
     .querySelector("#interest-context-prep-entities")
     ?.addEventListener("click", (event) => changeInterestContextPrepEntitiesPage(event, state));
+  document.addEventListener("change", (event) => handleInterestPrepRunChange(event, state));
   document
     .querySelector("#interest-core-brief-form")
     ?.addEventListener("submit", (event) => saveManualInterestCoreBrief(event, state));
@@ -4960,6 +4962,15 @@ function renderInterestIntentMatchRow(item) {
       ].filter(Boolean).join("; "))}</p>
       <p class="draft-evidence"><strong>Подготовленный текст:</strong> ${escapeHtml(preparedTextExplanation(evidence.prepared_text))}</p>
       ${renderTelegramMessageLink(item)}
+      <div class="row-actions">
+        <md-outlined-button type="button" data-intent-feedback-action="preview" data-intent-match-id="${escapeHtml(item.id)}">
+          Проверить исключение
+        </md-outlined-button>
+        <md-outlined-button type="button" data-intent-feedback-action="not-interesting" data-intent-match-id="${escapeHtml(item.id)}">
+          Не интересно
+        </md-outlined-button>
+      </div>
+      <div id="intent-feedback-${escapeHtml(item.id)}" class="draft-evidence" aria-live="polite"></div>
     </div>
   </div>`;
 }
@@ -4973,6 +4984,11 @@ function preparedTextExplanation(prepared) {
 }
 
 function handleInterestIntentMatchesClick(event, state) {
+  const feedbackButton = event.target.closest("[data-intent-feedback-action]");
+  if (feedbackButton && state.selectedIntentRunId) {
+    handleIntentMatchFeedback(feedbackButton, state);
+    return;
+  }
   const pageButton = event.target.closest("[data-intent-matches-page-action]");
   if (!pageButton || !state.selectedIntentRunId) return;
   const action = pageButton.dataset.intentMatchesPageAction;
@@ -4983,6 +4999,51 @@ function handleInterestIntentMatchesClick(event, state) {
     state.intentMatchesOffset += state.intentMatchesLimit;
   }
   loadInterestIntentMatches(state, state.selectedIntentRunId);
+}
+
+async function handleIntentMatchFeedback(button, state) {
+  const matchId = button.dataset.intentMatchId;
+  const action = button.dataset.intentFeedbackAction;
+  const panel = document.querySelector(`#intent-feedback-${CSS.escape(matchId)}`);
+  if (!matchId || !panel) return;
+  try {
+    if (action === "not-interesting") {
+      await api(`/api/feedback/intent_match/${encodeURIComponent(matchId)}`, {
+        method: "POST",
+        body: JSON.stringify({
+          action: "not_lead",
+          reason_code: "not_relevant_intent",
+          feedback_scope: "classifier",
+          learning_effect: "negative_example",
+          application_status: "recorded",
+          comment: "Оператор отметил сообщение слоя намерений как неинтересное",
+          metadata_json: {
+            context_id: state.selectedId,
+            intent_run_id: state.selectedIntentRunId,
+          },
+        }),
+      });
+      panel.innerHTML = "Feedback записан. Ниже можно посмотреть безопасный preview exclusion до изменения слоя.";
+      await previewIntentMatchExclusion(matchId, state, panel);
+      return;
+    }
+    await previewIntentMatchExclusion(matchId, state, panel);
+  } catch (error) {
+    panel.textContent = error.message;
+  }
+}
+
+async function previewIntentMatchExclusion(matchId, state, panel) {
+  panel.textContent = "Считаю влияние exclusion...";
+  const payload = await api(
+    `/api/interest-contexts/${encodeURIComponent(state.selectedId)}/intent-runs/${encodeURIComponent(state.selectedIntentRunId)}/matches/${encodeURIComponent(matchId)}/exclude-preview`
+  );
+  const suggestions = payload.suggestions || [];
+  const samples = payload.removed_samples || [];
+  panel.innerHTML = `<strong>Preview exclusion:</strong> ${escapeHtml(payload.term || "нет предложения")}
+    <br>Уберет ${escapeHtml(String(payload.removed_count || 0))} из ${escapeHtml(String(payload.total_matches || 0))}; target ${payload.target_removed ? "будет убран" : "не будет убран"}.
+    ${suggestions.length ? `<br>Кандидаты: ${escapeHtml(suggestions.join("; "))}` : ""}
+    ${samples.length ? `<br>Примеры: ${samples.map((item) => item.message_url ? `<a href="${escapeHtml(item.message_url)}" target="_blank" rel="noreferrer">#${escapeHtml(String(item.telegram_message_id))}</a>` : `#${escapeHtml(String(item.telegram_message_id))}`).join(", ")}` : ""}`;
 }
 
 async function saveManualInterestCoreBrief(event, state) {
@@ -6489,6 +6550,7 @@ async function loadInterestContextPrepareTextsPage(state) {
       limit: String(state.prepTextsLimit),
       offset: String(state.prepTextsOffset),
     });
+    appendPrepRunParam(params, state);
     const payload = await api(
       `/api/interest-contexts/${encodeURIComponent(state.selectedId)}/prepare-data/texts?${params.toString()}`
     );
@@ -6518,6 +6580,7 @@ function renderInterestContextPrepareTexts(payload, state) {
   const pagination = payload.pagination || { limit: state.prepTextsLimit, offset: 0, total: 0 };
   const summary = payload.summary || {};
   target.innerHTML = `<section class="draft-review-section">
+    ${renderPrepareRunSelector(payload, state)}
     <div class="operations-summary raw-review-summary">
       <div class="ops-metric-row">
         ${renderOpsMetric("Строки", summary.total_rows || pagination.total || 0, "prepared documents")}
@@ -6550,6 +6613,56 @@ function renderPrepareTextRow(item) {
       ${renderTelegramMessageLink(item)}
     </div>
   </div>`;
+}
+
+function appendPrepRunParam(params, state) {
+  if (state?.selectedPrepRawRunId) {
+    params.set("raw_export_run_id", state.selectedPrepRawRunId);
+  }
+}
+
+function renderPrepareRunSelector(payload, state) {
+  const runs = payload.raw_runs || [];
+  const activeId = payload.raw_export_run?.id || state?.selectedPrepRawRunId || "";
+  if (state && activeId) state.selectedPrepRawRunId = activeId;
+  const current = payload.raw_export_run || {};
+  return `<div class="explain-box compact-explain-box">
+    <strong>Источник данных</strong>
+    <p class="muted">${escapeHtml([
+      current.title || current.username || current.source_ref || current.id || "raw-run не выбран",
+      current.message_count != null ? `${current.message_count} сообщений` : "",
+      current.attachment_count != null ? `${current.attachment_count} вложений` : "",
+      current.id ? `run ${current.id}` : "",
+    ].filter(Boolean).join(" / "))}</p>
+    ${runs.length ? `<label class="material-select-line">Raw-run
+      <select data-prep-run-select>
+        ${runs.map((run) => `<option value="${escapeHtml(run.id)}" ${run.id === activeId ? "selected" : ""}>${escapeHtml(prepareRunLabel(run))}</option>`).join("")}
+      </select>
+    </label>` : ""}
+  </div>`;
+}
+
+function prepareRunLabel(run) {
+  return [
+    run.title || run.username || run.source_ref || run.id,
+    run.message_count != null ? `${run.message_count} msg` : "",
+    run.attachment_count != null ? `${run.attachment_count} files` : "",
+  ]
+    .filter(Boolean)
+    .join(" / ");
+}
+
+function handleInterestPrepRunChange(event, state) {
+  const select = event.target.closest("[data-prep-run-select]");
+  if (!select) return;
+  state.selectedPrepRawRunId = select.value || null;
+  state.prepTextsOffset = 0;
+  state.prepFeaturesOffset = 0;
+  state.prepEntitiesOffset = 0;
+  if (state.step === "prepare_texts") loadInterestContextPrepareTextsPage(state);
+  if (state.step === "prepare_features") loadInterestContextPrepareFeaturesPage(state);
+  if (state.step === "prepare_aggregates") loadInterestContextPrepareAggregates(state);
+  if (state.step === "prepare_entities") loadInterestContextPrepareEntitiesPage(state);
 }
 
 function prepareDocumentTitle(item) {
@@ -6602,6 +6715,7 @@ async function searchInterestContextPrepared(state, form, selector, kind) {
   target.innerHTML = `<div class="empty-state">Ищу: ${escapeHtml(query)}...</div>`;
   try {
     const params = new URLSearchParams({ q: query, limit: "10" });
+    appendPrepRunParam(params, state);
     const payload = await api(
       `/api/interest-contexts/${encodeURIComponent(state.selectedId)}/prepare-data/search/${kind}?${params.toString()}`
     );
@@ -6618,6 +6732,7 @@ function renderInterestContextPreparedSearch(payload, selector, kind) {
   const items = payload.results || [];
   const metrics = payload.metrics || {};
   target.innerHTML = `<section class="draft-review-section">
+    ${renderPrepareRunSelector(payload, null)}
     <div class="operations-summary raw-review-summary">
       <div class="ops-metric-row">
         ${renderOpsMetric("Найдено", items.length, kind === "fts" ? "PostgreSQL FTS" : "Chroma")}
@@ -6657,6 +6772,7 @@ async function loadInterestContextPrepareFeaturesPage(state) {
       limit: String(state.prepFeaturesLimit),
       offset: String(state.prepFeaturesOffset),
     });
+    appendPrepRunParam(params, state);
     const payload = await api(
       `/api/interest-contexts/${encodeURIComponent(state.selectedId)}/prepare-data/features?${params.toString()}`
     );
@@ -6685,6 +6801,7 @@ function renderInterestContextPrepareFeatures(payload, state) {
   const items = payload.items || [];
   const pagination = payload.pagination || { limit: state.prepFeaturesLimit, offset: 0, total: 0 };
   target.innerHTML = `<section class="draft-review-section">
+    ${renderPrepareRunSelector(payload, state)}
     ${items.length ? `<div class="table-list">${items.map(renderPrepareFeatureRow).join("")}</div>` : '<div class="empty-state">Stage 3 еще не готов. Запустите подготовку данных.</div>'}
     ${renderPageControls(pagination, "prep-features")}
   </section>`;
@@ -6718,17 +6835,20 @@ async function loadInterestContextPrepareAggregates(state) {
   if (!target || !state.selectedId) return;
   target.innerHTML = '<div class="empty-state">Загружаю Stage 4...</div>';
   try {
+    const params = new URLSearchParams();
+    appendPrepRunParam(params, state);
+    const suffix = params.toString() ? `?${params.toString()}` : "";
     const payload = await api(
-      `/api/interest-contexts/${encodeURIComponent(state.selectedId)}/prepare-data/aggregates`
+      `/api/interest-contexts/${encodeURIComponent(state.selectedId)}/prepare-data/aggregates${suffix}`
     );
-    renderInterestContextPrepareAggregates(payload);
+    renderInterestContextPrepareAggregates(payload, state);
   } catch (error) {
     target.innerHTML = `<div class="empty-state">${escapeHtml(error.message)}</div>`;
     if (status) status.textContent = error.message;
   }
 }
 
-function renderInterestContextPrepareAggregates(payload) {
+function renderInterestContextPrepareAggregates(payload, state) {
   const target = document.querySelector("#interest-context-prep-aggregates");
   if (!target) return;
   const summary = payload.summary?.metrics || payload.summary || {};
@@ -6736,6 +6856,7 @@ function renderInterestContextPrepareAggregates(payload) {
   const urls = payload.urls || {};
   const quality = payload.source_quality || {};
   target.innerHTML = `<section class="draft-review-section">
+    ${renderPrepareRunSelector(payload, state)}
     <div class="operations-summary raw-review-summary">
       <div class="ops-metric-row">
         ${renderOpsMetric("Строки", summary.total_rows || 0, "features")}
@@ -6778,6 +6899,7 @@ async function loadInterestContextPrepareEntitiesPage(state) {
       limit: String(state.prepEntitiesLimit),
       offset: String(state.prepEntitiesOffset),
     });
+    appendPrepRunParam(params, state);
     const payload = await api(
       `/api/interest-contexts/${encodeURIComponent(state.selectedId)}/prepare-data/entities?${params.toString()}`
     );
@@ -6808,6 +6930,7 @@ function renderInterestContextPrepareEntities(payload, state) {
   const pagination =
     ranked.pagination || { limit: state.prepEntitiesLimit, offset: 0, total: 0 };
   target.innerHTML = `<section class="draft-review-section">
+    ${renderPrepareRunSelector(payload, state)}
     <div class="section-head compact-section-head">
       <h4>Ранжированные сущности</h4>
       <span class="muted">${escapeHtml(`${pagination.total || 0} всего`)}</span>

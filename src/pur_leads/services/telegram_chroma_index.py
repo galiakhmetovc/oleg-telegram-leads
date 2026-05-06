@@ -234,7 +234,7 @@ class TelegramChromaIndexService:
             local_hashing_dimensions=embedding_dimensions,
         )
         result = collection.query(
-            query_embeddings=embedder.embed_texts([query_text]),
+            query_embeddings=embedder.embed_texts([_query_embedding_text(query_text)]),
             n_results=max(1, n_results),
             include=["documents", "metadatas", "distances"],
         )
@@ -520,6 +520,28 @@ def _features(text: str) -> list[tuple[str, float]]:
     for first, second in zip(words, words[1:], strict=False):
         features.append((f"b:{first}:{second}", 0.75))
     return features
+
+
+def _query_embedding_text(text: str) -> str:
+    tokens = TOKEN_RE.findall(text.casefold().replace("ё", "е"))
+    if not tokens:
+        return text
+    lemmas: list[str] = []
+    try:
+        import pymorphy3
+
+        morph = pymorphy3.MorphAnalyzer()
+        lemmas = [morph.parse(token)[0].normal_form for token in tokens]
+    except Exception:
+        lemmas = [_simple_ru_stem(token) for token in tokens]
+    return " ".join([text, " ".join(lemmas)]).strip()
+
+
+def _simple_ru_stem(token: str) -> str:
+    for suffix in ("ами", "ями", "ого", "ему", "ыми", "ими", "ах", "ях", "ой", "ый", "ий", "ая", "ое", "ые", "ов", "ев", "ам", "ям", "ом", "ем", "а", "я", "ы", "и", "у", "ю", "е"):
+        if len(token) > len(suffix) + 3 and token.endswith(suffix):
+            return token[: -len(suffix)]
+    return token
 
 
 def _persistent_client(path: Path) -> Any:

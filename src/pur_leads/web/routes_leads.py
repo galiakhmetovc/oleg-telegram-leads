@@ -17,6 +17,7 @@ from pur_leads.models.catalog import (
     catalog_items_table,
     catalog_terms_table,
 )
+from pur_leads.models.interest_context_drafts import interest_intent_analysis_matches_table
 from pur_leads.models.leads import lead_clusters_table, lead_events_table, lead_matches_table
 from pur_leads.models.telegram_sources import sender_profiles_table, source_messages_table
 from pur_leads.services.lead_inbox import LeadInboxFilters, LeadInboxService
@@ -280,6 +281,7 @@ _FEEDBACK_TARGET_TYPE_ALIASES = {
     "sender": "sender_profile",
     "telegram_sender": "sender_profile",
     "message": "source_message",
+    "intent_match": "interest_intent_match",
 }
 
 _ALLOWED_FEEDBACK_TARGET_TYPES = {
@@ -291,6 +293,7 @@ _ALLOWED_FEEDBACK_TARGET_TYPES = {
     "category",
     "sender_profile",
     "source_message",
+    "interest_intent_match",
 }
 
 _ALLOWED_ROUTE_APPLICATION_STATUSES = {
@@ -331,4 +334,5 @@ _TARGET_ID_COLUMNS: dict[str, ColumnElement[Any]] = {
     "category": catalog_categories_table.c.id,
     "sender_profile": sender_profiles_table.c.id,
     "source_message": source_messages_table.c.id,
+    "interest_intent_match": interest_intent_analysis_matches_table.c.id,
 }

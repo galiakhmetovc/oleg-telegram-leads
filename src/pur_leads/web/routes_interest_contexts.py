@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import asdict
 import json
 from pathlib import Path
+import re
 from typing import Any
 import zipfile
 
@@ -16,6 +17,7 @@ from sqlalchemy.orm import Session
 
 from pur_leads.core.time import utc_now
 from pur_leads.core.tracing import current_trace_json
+from pur_leads.models.interest_context_drafts import interest_intent_analysis_matches_table
 from pur_leads.models.scheduler import scheduler_jobs_table
 from pur_leads.services.interest_context_drafts import (
     BUILD_INTEREST_CONTEXT_DRAFT_JOB,
@@ -312,12 +314,15 @@ def get_interest_context_prepare_data_status(
 @router.get("/{context_id}/prepare-data/texts")
 def list_interest_context_prepared_texts(
     context_id: str,
+    raw_export_run_id: str | None = None,
     limit: int = 10,
     offset: int = 0,
     _validated: SessionValidationResult = Depends(current_admin),
     session: Session = Depends(get_session),
 ) -> dict[str, Any]:
-    run = _prepared_raw_run(session, context_id, metadata_key="text_normalization")
+    run = _prepared_raw_run(
+        session, context_id, metadata_key="text_normalization", raw_export_run_id=raw_export_run_id
+    )
     safe_limit = max(1, min(limit, 100))
     safe_offset = max(0, offset)
     base = select(telegram_prepared_documents_table).where(
@@ -340,6 +345,7 @@ def list_interest_context_prepared_texts(
     return jsonable_encoder(
         {
             "raw_export_run": _raw_run_payload(run),
+            "raw_runs": _prepared_raw_runs_payload(session, context_id, "text_normalization"),
             "items": [_prepared_text_payload(dict(row)) for row in rows],
             "summary": _prepared_documents_summary(session, str(run["id"])),
             "pagination": _pagination(limit=safe_limit, offset=safe_offset, total=total),
@@ -350,12 +356,15 @@ def list_interest_context_prepared_texts(
 @router.get("/{context_id}/prepare-data/features")
 def list_interest_context_prepared_features(
     context_id: str,
+    raw_export_run_id: str | None = None,
     limit: int = 10,
     offset: int = 0,
     _validated: SessionValidationResult = Depends(current_admin),
     session: Session = Depends(get_session),
 ) -> dict[str, Any]:
-    run = _prepared_raw_run(session, context_id, metadata_key="feature_enrichment")
+    run = _prepared_raw_run(
+        session, context_id, metadata_key="feature_enrichment", raw_export_run_id=raw_export_run_id
+    )
     safe_limit = max(1, min(limit, 100))
     safe_offset = max(0, offset)
     base = (
@@ -380,6 +389,7 @@ def list_interest_context_prepared_features(
     return jsonable_encoder(
         {
             "raw_export_run": _raw_run_payload(run),
+            "raw_runs": _prepared_raw_runs_payload(session, context_id, "feature_enrichment"),
             "artifact": {
                 "kind": "postgres_table",
                 "table": "telegram_prepared_documents",
@@ -395,14 +405,18 @@ def list_interest_context_prepared_features(
 @router.get("/{context_id}/prepare-data/aggregates")
 def get_interest_context_prepared_aggregates(
     context_id: str,
+    raw_export_run_id: str | None = None,
     _validated: SessionValidationResult = Depends(current_admin),
     session: Session = Depends(get_session),
 ) -> dict[str, Any]:
-    run = _prepared_raw_run(session, context_id, metadata_key="aggregated_stats")
+    run = _prepared_raw_run(
+        session, context_id, metadata_key="aggregated_stats", raw_export_run_id=raw_export_run_id
+    )
     outputs = stage_outputs(session, str(run["id"]), "aggregated_stats")
     return jsonable_encoder(
         {
             "raw_export_run": _raw_run_payload(run),
+            "raw_runs": _prepared_raw_runs_payload(session, context_id, "aggregated_stats"),
             "summary": _stage_payload(outputs, "summary"),
             "ngrams": _stage_payload(outputs, "ngrams"),
             "entity_candidates": _stage_payload(outputs, "entity_candidates"),
@@ -415,12 +429,15 @@ def get_interest_context_prepared_aggregates(
 @router.get("/{context_id}/prepare-data/entities")
 def list_interest_context_prepared_entities(
     context_id: str,
+    raw_export_run_id: str | None = None,
     limit: int = 10,
     offset: int = 0,
     _validated: SessionValidationResult = Depends(current_admin),
     session: Session = Depends(get_session),
 ) -> dict[str, Any]:
-    run = _prepared_raw_run(session, context_id, metadata_key="entity_ranking")
+    run = _prepared_raw_run(
+        session, context_id, metadata_key="entity_ranking", raw_export_run_id=raw_export_run_id
+    )
     safe_limit = max(1, min(limit, 100))
     safe_offset = max(0, offset)
     extracted = _entity_rows_page(
@@ -440,6 +457,7 @@ def list_interest_context_prepared_entities(
     return jsonable_encoder(
         {
             "raw_export_run": _raw_run_payload(run),
+            "raw_runs": _prepared_raw_runs_payload(session, context_id, "entity_ranking"),
             "ranked_artifact": {"kind": "postgres_table", "table": "telegram_entity_candidates"},
             "extracted_artifact": {"kind": "postgres_table", "table": "telegram_entity_candidates"},
             "ranked": ranked,
@@ -452,11 +470,14 @@ def list_interest_context_prepared_entities(
 def search_interest_context_prepared_fts(
     context_id: str,
     q: str,
+    raw_export_run_id: str | None = None,
     limit: int = 10,
     _validated: SessionValidationResult = Depends(current_admin),
     session: Session = Depends(get_session),
 ) -> dict[str, Any]:
-    run = _prepared_raw_run(session, context_id, metadata_key="fts_index")
+    run = _prepared_raw_run(
+        session, context_id, metadata_key="fts_index", raw_export_run_id=raw_export_run_id
+    )
     payload = TelegramSearchService(session).query(
         str(run["id"]),
         query_text=q,
@@ -464,18 +485,27 @@ def search_interest_context_prepared_fts(
         include_fts=True,
         include_chroma=False,
     )
-    return jsonable_encoder({"raw_export_run": _raw_run_payload(run), **payload})
+    return jsonable_encoder(
+        {
+            "raw_export_run": _raw_run_payload(run),
+            "raw_runs": _prepared_raw_runs_payload(session, context_id, "fts_index"),
+            **payload,
+        }
+    )
 
 
 @router.get("/{context_id}/prepare-data/search/chroma")
 def search_interest_context_prepared_chroma(
     context_id: str,
     q: str,
+    raw_export_run_id: str | None = None,
     limit: int = 10,
     _validated: SessionValidationResult = Depends(current_admin),
     session: Session = Depends(get_session),
 ) -> dict[str, Any]:
-    run = _prepared_raw_run(session, context_id, metadata_key="chroma_index")
+    run = _prepared_raw_run(
+        session, context_id, metadata_key="chroma_index", raw_export_run_id=raw_export_run_id
+    )
     payload = TelegramSearchService(session).query(
         str(run["id"]),
         query_text=q,
@@ -483,7 +513,13 @@ def search_interest_context_prepared_chroma(
         include_fts=False,
         include_chroma=True,
     )
-    return jsonable_encoder({"raw_export_run": _raw_run_payload(run), **payload})
+    return jsonable_encoder(
+        {
+            "raw_export_run": _raw_run_payload(run),
+            "raw_runs": _prepared_raw_runs_payload(session, context_id, "chroma_index"),
+            **payload,
+        }
+    )
 
 
 @router.post("/{context_id}/telegram-source")
@@ -998,6 +1034,45 @@ def list_interest_intent_matches(
     return jsonable_encoder(payload)
 
 
+@router.get("/{context_id}/intent-runs/{run_id}/matches/{match_id}/exclude-preview")
+def preview_interest_intent_exclusion(
+    context_id: str,
+    run_id: str,
+    match_id: str,
+    term: str | None = None,
+    _validated: SessionValidationResult = Depends(current_admin),
+    session: Session = Depends(get_session),
+) -> dict[str, Any]:
+    target = _intent_match_row(session, context_id=context_id, run_id=run_id, match_id=match_id)
+    if target is None:
+        raise HTTPException(status_code=404, detail="Intent match not found")
+    suggestions = _intent_exclusion_suggestions(str(target["message_text"] or ""))
+    preview_term = str(term or (suggestions[0] if suggestions else "")).strip()
+    rows = _intent_match_rows_for_run(session, context_id=context_id, run_id=run_id)
+    removed = [
+        row
+        for row in rows
+        if preview_term and _plain_term_hits(preview_term, str(row["message_text"] or ""))
+    ]
+    return jsonable_encoder(
+        {
+            "match_id": match_id,
+            "run_id": run_id,
+            "suggestions": suggestions,
+            "term": preview_term,
+            "total_matches": len(rows),
+            "removed_count": len(removed),
+            "remaining_count": max(0, len(rows) - len(removed)),
+            "target_removed": any(str(row["id"]) == match_id for row in removed),
+            "removed_samples": [_intent_preview_payload(row) for row in removed[:10]],
+            "explanation": (
+                "Preview считает, сколько текущих сообщений слоя намерений исчезнет, "
+                "если добавить этот plain-text/lemma exclusion в слой. Изменение не применяется."
+            ),
+        }
+    )
+
+
 @router.post("/{context_id}/draft")
 def build_interest_context_draft(
     context_id: str,
@@ -1414,6 +1489,7 @@ def _prepared_raw_run(
     context_id: str,
     *,
     metadata_key: str,
+    raw_export_run_id: str | None = None,
 ) -> dict[str, Any]:
     context = InterestContextService(session).repository.get(context_id)
     if context is None:
@@ -1428,7 +1504,12 @@ def _prepared_raw_run(
         .mappings()
         .all()
     ]
-    for row in _raw_runs_for_sources(session, source_ids):
+    rows = _raw_runs_for_sources(session, source_ids)
+    if raw_export_run_id:
+        rows = [row for row in rows if str(row["id"]) == raw_export_run_id]
+        if not rows:
+            raise HTTPException(status_code=404, detail="Raw-run не найден в выбранном контексте")
+    for row in rows:
         if row.get("status") != "succeeded":
             continue
         metadata = row.get("metadata_json") if isinstance(row.get("metadata_json"), dict) else {}
@@ -1438,6 +1519,32 @@ def _prepared_raw_run(
         status_code=400,
         detail=f"Артефакт {metadata_key} еще не готов для выбранного контекста",
     )
+
+
+def _prepared_raw_runs_payload(
+    session: Session,
+    context_id: str,
+    metadata_key: str,
+) -> list[dict[str, Any]]:
+    context = InterestContextService(session).repository.get(context_id)
+    if context is None:
+        return []
+    source_ids = [
+        str(row["id"])
+        for row in session.execute(
+            select(monitored_sources_table.c.id).where(
+                monitored_sources_table.c.interest_context_id == context.id
+            )
+        )
+        .mappings()
+        .all()
+    ]
+    payload = []
+    for row in _raw_runs_for_sources(session, source_ids):
+        metadata = row.get("metadata_json") if isinstance(row.get("metadata_json"), dict) else {}
+        if row.get("status") == "succeeded" and isinstance(metadata.get(metadata_key), dict):
+            payload.append(_raw_run_payload(row))
+    return payload
 
 
 def _prepared_documents_summary(session: Session, raw_export_run_id: str) -> dict[str, Any]:
@@ -1583,6 +1690,134 @@ def _raw_runs_for_sources(session: Session, source_ids: list[str]) -> list[dict[
         .mappings()
         .all()
     ]
+
+
+def _intent_match_row(
+    session: Session,
+    *,
+    context_id: str,
+    run_id: str,
+    match_id: str,
+) -> dict[str, Any] | None:
+    rows = _intent_match_rows_for_run(session, context_id=context_id, run_id=run_id, match_id=match_id)
+    return rows[0] if rows else None
+
+
+def _intent_match_rows_for_run(
+    session: Session,
+    *,
+    context_id: str,
+    run_id: str,
+    match_id: str | None = None,
+) -> list[dict[str, Any]]:
+    query = (
+        select(
+            interest_intent_analysis_matches_table,
+            monitored_sources_table.c.username.label("_source_username"),
+            monitored_sources_table.c.input_ref.label("_source_input_ref"),
+            monitored_sources_table.c.telegram_id.label("_source_telegram_id"),
+        )
+        .join(
+            source_messages_table,
+            source_messages_table.c.id == interest_intent_analysis_matches_table.c.source_message_id,
+            isouter=True,
+        )
+        .join(
+            monitored_sources_table,
+            monitored_sources_table.c.id == source_messages_table.c.monitored_source_id,
+            isouter=True,
+        )
+        .where(interest_intent_analysis_matches_table.c.context_id == context_id)
+        .where(interest_intent_analysis_matches_table.c.run_id == run_id)
+        .order_by(desc(interest_intent_analysis_matches_table.c.score))
+    )
+    if match_id:
+        query = query.where(interest_intent_analysis_matches_table.c.id == match_id)
+    return [dict(row) for row in session.execute(query).mappings().all()]
+
+
+def _intent_preview_payload(row: dict[str, Any]) -> dict[str, Any]:
+    message_id = row.get("telegram_message_id")
+    username = str(row.get("_source_username") or "").strip().lstrip("@")
+    input_ref = str(row.get("_source_input_ref") or "")
+    if not username and "t.me/" in input_ref:
+        username = input_ref.split("t.me/", 1)[1].strip("/").split("/", 1)[0].lstrip("@")
+    telegram_id = str(row.get("_source_telegram_id") or "").strip()
+    message_url = None
+    if username and message_id is not None:
+        message_url = f"https://t.me/{username}/{message_id}"
+    elif telegram_id and message_id is not None:
+        internal_id = telegram_id.removeprefix("-100").lstrip("-")
+        if internal_id.isdigit():
+            message_url = f"https://t.me/c/{internal_id}/{message_id}"
+    return {
+        "id": row["id"],
+        "telegram_message_id": message_id,
+        "message_url": message_url,
+        "canonical_name": row.get("canonical_name"),
+        "score": row.get("score"),
+        "message_text": row.get("message_text"),
+    }
+
+
+def _intent_exclusion_suggestions(text: str) -> list[str]:
+    normalized = _plain_normalize(text)
+    tokens = [token for token in normalized.split() if len(token) >= 4 and token not in _PREVIEW_STOPWORDS]
+    phrases: list[str] = []
+    for size in (3, 2):
+        for index in range(0, max(0, len(tokens) - size + 1)):
+            phrase = " ".join(tokens[index : index + size])
+            if any(marker in phrase for marker in _DESIGN_SPECIFIC_MARKERS):
+                phrases.append(phrase)
+    phrases.extend(token for token in tokens if token in _DESIGN_SPECIFIC_MARKERS)
+    return list(dict.fromkeys(phrases))[:8]
+
+
+def _plain_term_hits(term: str, text: str) -> bool:
+    normalized_term = _plain_normalize(term)
+    normalized_text = _plain_normalize(text)
+    if not normalized_term or not normalized_text:
+        return False
+    return all(token in normalized_text for token in normalized_term.split())
+
+
+def _plain_normalize(value: str) -> str:
+    text = value.casefold().replace("ё", "е")
+    text = re.sub(r"https?://\S+|www\.\S+", " url ", text)
+    text = re.sub(r"[^0-9a-zа-я]+", " ", text)
+    return re.sub(r"\s+", " ", text).strip()
+
+
+_PREVIEW_STOPWORDS = {
+    "добрый",
+    "день",
+    "коллеги",
+    "пожалуйста",
+    "нужно",
+    "нужен",
+    "нужна",
+    "помогите",
+    "лучше",
+    "какой",
+    "какая",
+    "какие",
+    "ваши",
+    "наши",
+    "буду",
+}
+
+_DESIGN_SPECIFIC_MARKERS = {
+    "ниша",
+    "ниши",
+    "нишу",
+    "скала",
+    "скалы",
+    "рельеф",
+    "профиль",
+    "дизайн",
+    "дизайнер",
+    "размер",
+}
 
 
 def _latest_prepare_job(session: Session, context_id: str) -> dict[str, Any] | None:
