@@ -660,6 +660,7 @@ class InterestIntentLayerService:
                 )
                 .where(feedback_events_table.c.target_type == "interest_intent_match")
                 .where(feedback_events_table.c.action == "not_lead")
+                .where(feedback_events_table.c.application_status != "ignored")
                 .where(feedback_events_table.c.target_id.in_(match_ids))
                 .order_by(desc(feedback_events_table.c.created_at))
             )

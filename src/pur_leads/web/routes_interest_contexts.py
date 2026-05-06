@@ -13,7 +13,7 @@ import zipfile
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
 from fastapi.encoders import jsonable_encoder
 from pydantic import BaseModel, Field
-from sqlalchemy import delete, desc, func, select, update
+from sqlalchemy import desc, func, select, update
 from sqlalchemy.orm import Session
 
 from pur_leads.core.time import utc_now
@@ -1178,6 +1178,8 @@ def apply_interest_intent_exclusion(
     row = _intent_exclusion_feedback_row(session, context_id=context.id, feedback_id=feedback_id)
     if row is None:
         raise HTTPException(status_code=404, detail="Feedback item not found")
+    if row["application_status"] == "ignored":
+        raise HTTPException(status_code=400, detail="Feedback item was removed from exclusions")
     term = payload.term.strip()
     layer_row = (
         session.execute(
@@ -1255,12 +1257,32 @@ def delete_interest_intent_exclusion(
     row = _intent_exclusion_feedback_row(session, context_id=context.id, feedback_id=feedback_id)
     if row is None:
         raise HTTPException(status_code=404, detail="Feedback item not found")
+    if row["application_status"] == "ignored":
+        return {
+            "status": "deleted",
+            "feedback_id": feedback_id,
+            "intent_match_id": row["target_id"],
+        }
     if row["application_status"] == "applied" or row["applied_at"] is not None:
         raise HTTPException(
             status_code=400,
             detail="Исключение уже применено к слою. Удалять можно только непримененный feedback.",
         )
-    session.execute(delete(feedback_events_table).where(feedback_events_table.c.id == feedback_id))
+    now = utc_now()
+    metadata = row.get("metadata_json") if isinstance(row.get("metadata_json"), dict) else {}
+    metadata = {
+        **metadata,
+        "cancelled_exclusion": {
+            "cancelled_at": now.isoformat(),
+            "cancelled_by": _actor(validated),
+            "previous_application_status": row["application_status"],
+        },
+    }
+    session.execute(
+        update(feedback_events_table)
+        .where(feedback_events_table.c.id == feedback_id)
+        .values(application_status="ignored", metadata_json=metadata)
+    )
     AuditService(session).record_change(
         actor=_actor(validated),
         action="interest_intent_exclusion.delete_pending",
@@ -2089,6 +2111,7 @@ def _intent_exclusion_queue_payload(
             )
             .where(feedback_events_table.c.target_type == "interest_intent_match")
             .where(feedback_events_table.c.action == "not_lead")
+            .where(feedback_events_table.c.application_status != "ignored")
             .where(interest_intent_analysis_matches_table.c.context_id == context_id)
         ).scalar_one()
         or 0
@@ -2098,6 +2121,7 @@ def _intent_exclusion_queue_payload(
             _intent_exclusion_feedback_select()
             .where(feedback_events_table.c.target_type == "interest_intent_match")
             .where(feedback_events_table.c.action == "not_lead")
+            .where(feedback_events_table.c.application_status != "ignored")
             .where(interest_intent_analysis_matches_table.c.context_id == context_id)
             .order_by(desc(feedback_events_table.c.created_at))
             .limit(limit)
