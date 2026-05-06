@@ -194,3 +194,24 @@ def test_intent_layer_matches_context_pattern_against_stage2_lemmas(tmp_path):
         evidence = result["top_matches"][0]["evidence_json"]
         assert evidence["prepared_text"]["source"] == "text_normalization"
         assert evidence["context_hits"] == [r"\bдомофон\b"]
+
+        filtered_layer = service.create_layer(
+            context_id="context-1",
+            name="Домофоны без дизайнерского шума",
+            actor="admin",
+            include_patterns=[r"\bнужный\b"],
+            context_patterns=[r"\bдомофон\b"],
+            exclude_lemmas=["домофоны"],
+            require_include_match=True,
+            require_context_match=True,
+            min_score=0.5,
+        )
+
+        filtered = service.run_layer(
+            context_id="context-1",
+            layer_id=filtered_layer.id,
+            broad_analysis_run_id="broad-1",
+            actor="admin",
+        )
+
+        assert filtered["summary"]["match_count"] == 0

@@ -29,6 +29,11 @@ from pur_leads.models.telegram_sources import (
     telegram_raw_export_runs_table,
 )
 from pur_leads.services.audit import AuditService
+from pur_leads.services.telegram_chroma_index import (
+    DEFAULT_EMBEDDING_DIMENSIONS,
+    LocalHashingEmbedder,
+    TOKEN_RE,
+)
 
 
 DEFAULT_INTENT_INCLUDE_PATTERNS = [
@@ -143,6 +148,10 @@ class InterestIntentLayerRecord:
     include_patterns_json: Any
     context_patterns_json: Any
     exclude_patterns_json: Any
+    exclude_lemmas_json: Any
+    exclude_phrases_json: Any
+    semantic_negative_examples_json: Any
+    semantic_negative_threshold: float
     include_categories_json: Any
     exclude_categories_json: Any
     include_core_names_json: Any
@@ -219,6 +228,7 @@ class _PreparedMessageText:
     raw_text: str
     clean_text: str
     lemmas_text: str
+    lemmas: tuple[str, ...]
     source: str
 
     @property
@@ -293,6 +303,10 @@ class InterestIntentLayerService:
         include_patterns: list[str] | None = None,
         context_patterns: list[str] | None = None,
         exclude_patterns: list[str] | None = None,
+        exclude_lemmas: list[str] | None = None,
+        exclude_phrases: list[str] | None = None,
+        semantic_negative_examples: list[str] | None = None,
+        semantic_negative_threshold: float = 0.78,
         include_categories: list[str] | None = None,
         exclude_categories: list[str] | None = None,
         include_core_names: list[str] | None = None,
@@ -320,6 +334,10 @@ class InterestIntentLayerService:
                 include_patterns_json=_clean_list(include_patterns),
                 context_patterns_json=_clean_list(context_patterns),
                 exclude_patterns_json=_clean_list(exclude_patterns),
+                exclude_lemmas_json=_clean_list(exclude_lemmas),
+                exclude_phrases_json=_clean_list(exclude_phrases),
+                semantic_negative_examples_json=_clean_list(semantic_negative_examples),
+                semantic_negative_threshold=_score(semantic_negative_threshold, default=0.78),
                 include_categories_json=_clean_list(include_categories),
                 exclude_categories_json=_clean_list(exclude_categories),
                 include_core_names_json=_clean_list(include_core_names),
@@ -371,6 +389,9 @@ class InterestIntentLayerService:
             "include_patterns",
             "context_patterns",
             "exclude_patterns",
+            "exclude_lemmas",
+            "exclude_phrases",
+            "semantic_negative_examples",
             "include_categories",
             "exclude_categories",
             "include_core_names",
@@ -378,6 +399,10 @@ class InterestIntentLayerService:
         ):
             if field in values:
                 patch[f"{field}_json"] = _clean_list(values[field])
+        if "semantic_negative_threshold" in values:
+            patch["semantic_negative_threshold"] = _score(
+                values["semantic_negative_threshold"], default=0.78
+            )
         if "require_include_match" in values:
             patch["require_include_match"] = bool(values["require_include_match"])
         if "require_context_match" in values:
@@ -858,6 +883,7 @@ class InterestIntentLayerService:
                     raw_text=str(row.get("raw_text") or ""),
                     clean_text=str(row.get("clean_text") or ""),
                     lemmas_text=" ".join(str(lemma) for lemma in lemmas if str(lemma).strip()),
+                    lemmas=tuple(_fold(lemma) for lemma in lemmas if _fold(lemma)),
                     source="text_normalization",
                 )
         return prepared
@@ -907,6 +933,26 @@ class _CompiledIntentLayer:
         self.include_patterns = _compile_patterns(_json_list(layer.include_patterns_json))
         self.context_patterns = _compile_patterns(_json_list(layer.context_patterns_json))
         self.exclude_patterns = _compile_patterns(_json_list(layer.exclude_patterns_json))
+        self.exclude_lemma_rules = _compile_lemma_rules(_json_list(layer.exclude_lemmas_json))
+        self.exclude_phrase_rules = _compile_phrase_rules(_json_list(layer.exclude_phrases_json))
+        self.semantic_negative_examples = [
+            str(item).strip()
+            for item in _json_list(layer.semantic_negative_examples_json)
+            if str(item or "").strip()
+        ]
+        self.semantic_negative_threshold = _score(
+            layer.semantic_negative_threshold, default=0.78
+        )
+        self._semantic_embedder = (
+            LocalHashingEmbedder(dimensions=DEFAULT_EMBEDDING_DIMENSIONS)
+            if self.semantic_negative_examples
+            else None
+        )
+        self._semantic_negative_vectors = (
+            self._semantic_embedder.embed_texts(self.semantic_negative_examples)
+            if self._semantic_embedder is not None
+            else []
+        )
         self.include_categories = _casefold_set(layer.include_categories_json)
         self.exclude_categories = _casefold_set(layer.exclude_categories_json)
         self.include_core_names = _casefold_set(layer.include_core_names_json)
@@ -919,7 +965,8 @@ class _CompiledIntentLayer:
         prepared_text: _PreparedMessageText | None = None,
     ) -> dict[str, Any] | None:
         raw_text = str(row["message_text"] or "")
-        text = prepared_text.search_text if prepared_text is not None else raw_text
+        prepared = prepared_text or _prepared_from_raw(raw_text)
+        text = prepared.search_text
         normalized_category = _fold(row["category"])
         normalized_name = _fold(row["canonical_name"])
         if self.include_categories and normalized_category not in self.include_categories:
@@ -929,6 +976,12 @@ class _CompiledIntentLayer:
         if normalized_category in self.exclude_categories:
             return None
         if normalized_name in self.exclude_core_names:
+            return None
+        if _lemma_rule_hits(self.exclude_lemma_rules, prepared):
+            return None
+        if _phrase_rule_hits(self.exclude_phrase_rules, prepared):
+            return None
+        if self._semantic_negative_hits(prepared):
             return None
         if _pattern_hits(self.exclude_patterns, text):
             return None
@@ -954,11 +1007,26 @@ class _CompiledIntentLayer:
                 "context": round(context_score, 4),
             },
             "prepared_text": {
-                "source": prepared_text.source if prepared_text is not None else "raw_message_text",
-                "used_clean_text": bool(prepared_text and prepared_text.clean_text),
-                "used_lemmas": bool(prepared_text and prepared_text.lemmas_text),
+                "source": prepared.source,
+                "used_clean_text": bool(prepared.clean_text),
+                "used_lemmas": bool(prepared.lemmas_text),
             },
         }
+
+    def _semantic_negative_hits(self, prepared: _PreparedMessageText) -> list[str]:
+        if self._semantic_embedder is None or not self._semantic_negative_vectors:
+            return []
+        vector = self._semantic_embedder.embed_texts([prepared.search_text])[0]
+        hits: list[str] = []
+        for example, example_vector in zip(
+            self.semantic_negative_examples,
+            self._semantic_negative_vectors,
+            strict=False,
+        ):
+            score = _dot(vector, example_vector)
+            if score >= self.semantic_negative_threshold:
+                hits.append(f"{example}:{score:.3f}")
+        return hits[:5]
 
 
 def _intent_summary(
@@ -978,8 +1046,21 @@ def _intent_summary(
             "name": layer.name,
             "min_score": layer.min_score,
             "max_results": layer.max_results,
+            "exclude_lemmas_count": len(_json_list(layer.exclude_lemmas_json)),
+            "exclude_phrases_count": len(_json_list(layer.exclude_phrases_json)),
+            "semantic_negative_examples_count": len(
+                _json_list(layer.semantic_negative_examples_json)
+            ),
         },
     }
+
+
+def _score(value: Any, *, default: float) -> float:
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        number = default
+    return max(0.0, min(1.0, number))
 
 
 def _clean_list(value: list[str] | None) -> list[str]:
@@ -1025,6 +1106,80 @@ def _pattern_hits(patterns: list[tuple[str, re.Pattern[str]]], text: str) -> lis
         if pattern.search(text):
             hits.append(source)
     return hits[:10]
+
+
+def _compile_lemma_rules(values: list[Any]) -> list[tuple[str, tuple[str, ...]]]:
+    rules: list[tuple[str, tuple[str, ...]]] = []
+    for value in values:
+        text = str(value or "").strip()
+        lemmas = tuple(_normal_lemmas(text))
+        if text and lemmas:
+            rules.append((text, lemmas))
+    return rules
+
+
+def _compile_phrase_rules(values: list[Any]) -> list[tuple[str, tuple[str, ...]]]:
+    return _compile_lemma_rules(values)
+
+
+def _lemma_rule_hits(
+    rules: list[tuple[str, tuple[str, ...]]],
+    prepared: _PreparedMessageText,
+) -> list[str]:
+    if not rules:
+        return []
+    lemma_set = set(prepared.lemmas) or set(_normal_lemmas(prepared.search_text))
+    hits = []
+    for source, lemmas in rules:
+        if all(lemma in lemma_set for lemma in lemmas):
+            hits.append(source)
+    return hits[:10]
+
+
+def _phrase_rule_hits(
+    rules: list[tuple[str, tuple[str, ...]]],
+    prepared: _PreparedMessageText,
+) -> list[str]:
+    if not rules:
+        return []
+    lemmas = prepared.lemmas or tuple(_normal_lemmas(prepared.search_text))
+    text = f" {' '.join(lemmas)} "
+    hits = []
+    for source, phrase_lemmas in rules:
+        phrase = f" {' '.join(phrase_lemmas)} "
+        if phrase.strip() and phrase in text:
+            hits.append(source)
+    return hits[:10]
+
+
+def _prepared_from_raw(raw_text: str) -> _PreparedMessageText:
+    clean_text = " ".join(TOKEN_RE.findall(raw_text.casefold().replace("ё", "е")))
+    lemmas = tuple(_normal_lemmas(raw_text))
+    return _PreparedMessageText(
+        raw_text=raw_text,
+        clean_text=clean_text,
+        lemmas_text=" ".join(lemmas),
+        lemmas=lemmas,
+        source="raw_message_text",
+    )
+
+
+def _normal_lemmas(text: str) -> list[str]:
+    tokens = [_fold(token) for token in TOKEN_RE.findall(str(text or ""))]
+    tokens = [token for token in tokens if token]
+    if not tokens:
+        return []
+    try:
+        import pymorphy3
+
+        morph = pymorphy3.MorphAnalyzer()
+        return [_fold(morph.parse(token)[0].normal_form) for token in tokens]
+    except Exception:
+        return tokens
+
+
+def _dot(left: list[float], right: list[float]) -> float:
+    return sum(float(a) * float(b) for a, b in zip(left, right, strict=False))
 
 
 def _casefold_set(value: Any) -> set[str]:

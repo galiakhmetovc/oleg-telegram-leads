@@ -4728,6 +4728,10 @@ async function createInterestIntentLayer(event, state) {
         include_patterns: formLines(form, "include_patterns"),
         context_patterns: formLines(form, "context_patterns"),
         exclude_patterns: formLines(form, "exclude_patterns"),
+        exclude_lemmas: formLines(form, "exclude_lemmas"),
+        exclude_phrases: formLines(form, "exclude_phrases"),
+        semantic_negative_examples: formLines(form, "semantic_negative_examples"),
+        semantic_negative_threshold: formNumber(form, "semantic_negative_threshold", 0.78),
         exclude_core_names: formLines(form, "exclude_core_names"),
         include_categories: [],
         exclude_categories: [],
@@ -4785,6 +4789,15 @@ function renderInterestIntentLayerRow(item, state) {
   const excludeCount = Array.isArray(item.exclude_patterns_json)
     ? item.exclude_patterns_json.length
     : 0;
+  const excludeLemmaCount = Array.isArray(item.exclude_lemmas_json)
+    ? item.exclude_lemmas_json.length
+    : 0;
+  const excludePhraseCount = Array.isArray(item.exclude_phrases_json)
+    ? item.exclude_phrases_json.length
+    : 0;
+  const semanticNegativeCount = Array.isArray(item.semantic_negative_examples_json)
+    ? item.semantic_negative_examples_json.length
+    : 0;
   const contextCount = Array.isArray(item.context_patterns_json)
     ? item.context_patterns_json.length
     : 0;
@@ -4796,12 +4809,15 @@ function renderInterestIntentLayerRow(item, state) {
         ${badge(label(item.status || "active"))}
         ${badge(`include ${includeCount}`)}
         ${badge(`context ${contextCount}`)}
-        ${badge(`exclude ${excludeCount}`)}
+        ${badge(`lemma exclude ${excludeLemmaCount}`)}
+        ${badge(`phrase exclude ${excludePhraseCount}`)}
+        ${badge(`semantic- ${semanticNegativeCount}`)}
+        ${excludeCount ? badge(`advanced regex ${excludeCount}`, "is-warn") : ""}
         ${badge(`min ${formatScore(item.min_score)}`)}
         ${badge(`limit ${item.max_results || 0}`)}
       </div>
       <p class="draft-evidence"><strong>Источник:</strong> ${escapeHtml(selectedBroad ? `выбран широкий запуск ${selectedBroad}` : "выберите широкий запуск выше")}</p>
-      <p class="draft-evidence"><strong>Логика:</strong> include ищет действие/намерение, context подтверждает тематику, exclude отсекает шум, min score задает порог попадания.</p>
+      <p class="draft-evidence"><strong>Логика:</strong> include ищет действие/намерение, context подтверждает тематику, lemma/phrase/semantic exclusions отсекают шум по нормализованному тексту; advanced regex остается ручным fallback.</p>
     </div>
     <div class="button-column">
       <md-filled-tonal-button type="button" data-intent-layer-action="run" data-intent-layer-id="${escapeHtml(item.id)}">
@@ -5488,7 +5504,7 @@ function renderInterestIntentValidationRecommendationRow(item) {
         ${badge(`correct- ${preview.reviewed_correct_removed || 0}`, preview.reviewed_correct_removed ? "is-danger" : "")}
       </div>
       ${renderProposedChanges(changes)}
-      ${preview.removed_samples?.length ? `<p class="draft-evidence"><strong>Примеры, которые исчезнут:</strong> ${preview.removed_samples.map((sample) => `#${escapeHtml(String(sample.telegram_message_id || "н/д"))}`).join(", ")}</p>` : ""}
+      ${preview.removed_samples?.length ? `<p class="draft-evidence"><strong>Примеры, которые исчезнут:</strong> ${preview.removed_samples.map((sample) => `#${escapeHtml(String(sample.telegram_message_id || "н/д"))}${sample.remove_reasons?.length ? ` (${escapeHtml(sample.remove_reasons.slice(0, 2).join(", "))})` : ""}`).join(", ")}</p>` : ""}
     </div>
     <div class="row-actions">
       <md-filled-tonal-button type="button" data-intent-validation-recommendation-status="approved" data-recommendation-id="${escapeHtml(item.id)}" ${item.status === "applied" ? "disabled" : ""}>
@@ -5503,9 +5519,15 @@ function renderInterestIntentValidationRecommendationRow(item) {
 
 function renderProposedChanges(changes) {
   const parts = [
-    renderSmallArray("exclude", changes.exclude_patterns),
+    renderSmallArray("lemma exclusions", changes.exclude_lemmas),
+    renderSmallArray("phrase exclusions", changes.exclude_phrases),
+    renderSmallArray("semantic negative examples", changes.semantic_negative_examples),
+    changes.semantic_negative_threshold
+      ? `<p class="draft-evidence"><strong>semantic threshold:</strong> ${escapeHtml(String(changes.semantic_negative_threshold))}</p>`
+      : "",
     renderSmallArray("exclude core", changes.exclude_core_names),
     renderSmallArray("context", changes.context_patterns),
+    renderSmallArray("advanced regex", changes.exclude_patterns),
     changes.require_context_match === true
       ? '<p class="draft-evidence"><strong>require_context_match:</strong> true</p>'
       : "",

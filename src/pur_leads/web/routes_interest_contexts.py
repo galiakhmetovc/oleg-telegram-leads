@@ -146,6 +146,10 @@ class InterestIntentLayerRequest(BaseModel):
     include_patterns: list[str] = []
     context_patterns: list[str] = []
     exclude_patterns: list[str] = []
+    exclude_lemmas: list[str] = []
+    exclude_phrases: list[str] = []
+    semantic_negative_examples: list[str] = []
+    semantic_negative_threshold: float = Field(default=0.78, ge=0.0, le=1.0)
     include_categories: list[str] = []
     exclude_categories: list[str] = []
     include_core_names: list[str] = []
@@ -164,6 +168,10 @@ class InterestIntentLayerUpdateRequest(BaseModel):
     include_patterns: list[str] | None = None
     context_patterns: list[str] | None = None
     exclude_patterns: list[str] | None = None
+    exclude_lemmas: list[str] | None = None
+    exclude_phrases: list[str] | None = None
+    semantic_negative_examples: list[str] | None = None
+    semantic_negative_threshold: float | None = Field(default=None, ge=0.0, le=1.0)
     include_categories: list[str] | None = None
     exclude_categories: list[str] | None = None
     include_core_names: list[str] | None = None
@@ -997,6 +1005,10 @@ def create_interest_intent_layer(
             include_patterns=payload.include_patterns,
             context_patterns=payload.context_patterns,
             exclude_patterns=payload.exclude_patterns,
+            exclude_lemmas=payload.exclude_lemmas,
+            exclude_phrases=payload.exclude_phrases,
+            semantic_negative_examples=payload.semantic_negative_examples,
+            semantic_negative_threshold=payload.semantic_negative_threshold,
             include_categories=payload.include_categories,
             exclude_categories=payload.exclude_categories,
             include_core_names=payload.include_core_names,

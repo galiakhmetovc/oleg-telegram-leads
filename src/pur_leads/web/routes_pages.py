@@ -1571,7 +1571,29 @@ home assistant
 сигнализация</textarea>
                       </label>
                       <label>
-                        Исключающие условия, по одному на строку
+                        Исключающие леммы/слова, по одному на строку
+                        <textarea name="exclude_lemmas" rows="5">вакансия
+резюме
+продам
+продаю
+отдам
+аренда</textarea>
+                      </label>
+                      <label>
+                        Исключающие фразы после нормализации, по одной на строку
+                        <textarea name="exclude_phrases" rows="5">аренда рабочего места
+ищу дизайнера
+требуется дизайнер
+в команду</textarea>
+                      </label>
+                      <label>
+                        Семантические negative examples, по одному на строку
+                        <textarea name="semantic_negative_examples" rows="4">нужно определить размер ниши
+как лучше подсветить декоративную скалу
+подскажите профиль для дизайнерского решения</textarea>
+                      </label>
+                      <label>
+                        Advanced regex-исключения, по одному на строку
                         <textarea name="exclude_patterns" rows="5">вакансия
 резюме
 в команду
@@ -1600,6 +1622,8 @@ home assistant
                         <md-outlined-text-field name="broad_score_weight" label="Вес широкого слоя" type="number" value="0.45" step="0.01">
                         </md-outlined-text-field>
                         <md-outlined-text-field name="intent_hit_weight" label="Вес одного намерения" type="number" value="0.18" step="0.01">
+                        </md-outlined-text-field>
+                        <md-outlined-text-field name="semantic_negative_threshold" label="Порог semantic-negative" type="number" value="0.78" step="0.01">
                         </md-outlined-text-field>
                       </div>
                       <label class="material-checkbox-line">

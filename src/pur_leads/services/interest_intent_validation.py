@@ -8,6 +8,7 @@ import json
 import re
 from typing import Any
 
+import pyarrow.parquet as pq
 from sqlalchemy import desc, func, insert, select, update
 from sqlalchemy.orm import Session
 
@@ -15,6 +16,7 @@ from pur_leads.core.ids import new_id
 from pur_leads.core.time import utc_now
 from pur_leads.integrations.ai.chat import AiChatClient, AiChatMessage
 from pur_leads.models.interest_context_drafts import (
+    interest_core_analysis_runs_table,
     interest_core_items_table,
     interest_intent_analysis_matches_table,
     interest_intent_analysis_runs_table,
@@ -25,9 +27,21 @@ from pur_leads.models.interest_context_drafts import (
 from pur_leads.models.interest_contexts import interest_contexts_table
 from pur_leads.models.interest_core_briefs import interest_core_briefs_table
 from pur_leads.models.leads import feedback_events_table
+from pur_leads.models.telegram_sources import telegram_raw_export_runs_table
 from pur_leads.services.audit import AuditService
 from pur_leads.services.interest_core_briefs import parse_interest_core_brief_response
-from pur_leads.services.interest_intent_layers import InterestIntentLayerService
+from pur_leads.services.interest_intent_layers import (
+    InterestIntentLayerService,
+    _PreparedMessageText,
+    _compile_lemma_rules,
+    _compile_phrase_rules,
+    _json_list,
+    _lemma_rule_hits,
+    _phrase_rule_hits,
+    _prepared_from_raw,
+    _resolve_path,
+)
+from pur_leads.services.telegram_chroma_index import DEFAULT_EMBEDDING_DIMENSIONS, LocalHashingEmbedder
 
 INTENT_VALIDATION_PROMPT_VERSION = "interest-intent-validation-v1"
 REVIEW_ACTIONS = {
@@ -147,6 +161,11 @@ class InterestIntentValidationService:
             .mappings()
             .all()
         )
+        items = self._recommendation_rows_for_display(
+            context_id,
+            run.source_intent_run_id,
+            [dict(row) for row in rows],
+        )
         status_counts = Counter(
             str(row["status"])
             for row in self.session.execute(
@@ -159,7 +178,7 @@ class InterestIntentValidationService:
         )
         return {
             "run": run.as_jsonable(),
-            "items": [dict(row) for row in rows],
+            "items": items,
             "summary": {
                 "total": total,
                 "approved": status_counts.get("approved", 0),
@@ -260,6 +279,7 @@ class InterestIntentValidationService:
             )
             recommendations = parsed["recommendations"]
             match_rows = self._intent_match_rows(context_id, source_intent_run_id)
+            prepared_texts = self._prepared_texts_for_intent_run(source_intent_run_id, match_rows)
             reviews = self._latest_reviews_by_match_id(source_intent_run_id)
             inserted = []
             for recommendation in recommendations:
@@ -267,6 +287,7 @@ class InterestIntentValidationService:
                     match_rows=match_rows,
                     reviews_by_match_id=reviews,
                     proposed_changes=recommendation["proposed_changes"],
+                    prepared_texts=prepared_texts,
                 )
                 rec_id = new_id()
                 inserted.append(rec_id)
@@ -473,21 +494,58 @@ class InterestIntentValidationService:
         match_rows: list[dict[str, Any]],
         reviews_by_match_id: dict[str, dict[str, Any]],
         proposed_changes: dict[str, Any],
+        prepared_texts: dict[int, _PreparedMessageText] | None = None,
     ) -> dict[str, Any]:
+        proposed_changes = _effective_proposed_changes(proposed_changes)
         removed: list[dict[str, Any]] = []
+        exclude_lemma_rules = _compile_lemma_rules(_string_list(proposed_changes.get("exclude_lemmas")))
+        exclude_phrase_rules = _compile_phrase_rules(
+            _string_list(proposed_changes.get("exclude_phrases"))
+        )
+        semantic_negative_examples = _string_list(proposed_changes.get("semantic_negative_examples"))
+        semantic_negative_threshold = _optional_float(
+            proposed_changes.get("semantic_negative_threshold")
+        ) or 0.78
+        semantic_embedder = (
+            LocalHashingEmbedder(dimensions=DEFAULT_EMBEDDING_DIMENSIONS)
+            if semantic_negative_examples
+            else None
+        )
+        semantic_vectors = (
+            semantic_embedder.embed_texts(semantic_negative_examples)
+            if semantic_embedder is not None
+            else []
+        )
         exclude_patterns = _string_list(proposed_changes.get("exclude_patterns"))
         exclude_core_names = {_fold(item) for item in _string_list(proposed_changes.get("exclude_core_names"))}
         min_score = _optional_float(proposed_changes.get("min_score"))
         compiled_patterns = _compile_patterns(exclude_patterns)
         for row in match_rows:
             reasons = []
-            text = str(row.get("message_text") or "")
+            prepared = (prepared_texts or {}).get(int(row["telegram_message_id"])) or _prepared_from_raw(
+                str(row.get("message_text") or "")
+            )
+            text = prepared.search_text
             core_name = _fold(row.get("canonical_name"))
             if exclude_core_names and core_name in exclude_core_names:
                 reasons.append("exclude_core_name")
+            for source in _lemma_rule_hits(exclude_lemma_rules, prepared):
+                reasons.append(f"exclude_lemma:{source}")
+            for source in _phrase_rule_hits(exclude_phrase_rules, prepared):
+                reasons.append(f"exclude_phrase:{source}")
+            if semantic_embedder is not None and semantic_vectors:
+                vector = semantic_embedder.embed_texts([prepared.search_text])[0]
+                for example, example_vector in zip(
+                    semantic_negative_examples,
+                    semantic_vectors,
+                    strict=False,
+                ):
+                    score = _dot(vector, example_vector)
+                    if score >= semantic_negative_threshold:
+                        reasons.append(f"semantic_negative:{example}:{score:.3f}")
             for source, pattern in compiled_patterns:
                 if pattern.search(text):
-                    reasons.append(f"exclude_pattern:{source}")
+                    reasons.append(f"advanced_regex:{source}")
             if min_score is not None and float(row.get("score") or 0) < min_score:
                 reasons.append("min_score")
             if reasons:
@@ -527,6 +585,15 @@ class InterestIntentValidationService:
             "include_patterns": _string_list(base_layer.get("include_patterns_json")),
             "context_patterns": _string_list(base_layer.get("context_patterns_json")),
             "exclude_patterns": _string_list(base_layer.get("exclude_patterns_json")),
+            "exclude_lemmas": _string_list(base_layer.get("exclude_lemmas_json")),
+            "exclude_phrases": _string_list(base_layer.get("exclude_phrases_json")),
+            "semantic_negative_examples": _string_list(
+                base_layer.get("semantic_negative_examples_json")
+            ),
+            "semantic_negative_threshold": _optional_float(
+                base_layer.get("semantic_negative_threshold")
+            )
+            or 0.78,
             "include_categories": _string_list(base_layer.get("include_categories_json")),
             "exclude_categories": _string_list(base_layer.get("exclude_categories_json")),
             "include_core_names": _string_list(base_layer.get("include_core_names_json")),
@@ -539,7 +606,17 @@ class InterestIntentValidationService:
             "intent_hit_weight": float(base_layer["intent_hit_weight"]),
         }
         for row in rows:
-            changes = row["proposed_changes_json"] if isinstance(row["proposed_changes_json"], dict) else {}
+            changes = _effective_proposed_changes(row["proposed_changes_json"])
+            values["exclude_lemmas"] = _merge_lists(
+                values["exclude_lemmas"], _string_list(changes.get("exclude_lemmas"))
+            )
+            values["exclude_phrases"] = _merge_lists(
+                values["exclude_phrases"], _string_list(changes.get("exclude_phrases"))
+            )
+            values["semantic_negative_examples"] = _merge_lists(
+                values["semantic_negative_examples"],
+                _string_list(changes.get("semantic_negative_examples")),
+            )
             values["exclude_patterns"] = _merge_lists(
                 values["exclude_patterns"], _string_list(changes.get("exclude_patterns"))
             )
@@ -557,7 +634,45 @@ class InterestIntentValidationService:
                 values["min_score"] = max(values["min_score"], min_score)
             if changes.get("require_context_match") is True:
                 values["require_context_match"] = True
+            semantic_threshold = _optional_float(changes.get("semantic_negative_threshold"))
+            if semantic_threshold is not None:
+                values["semantic_negative_threshold"] = max(
+                    values["semantic_negative_threshold"], semantic_threshold
+                )
         return values
+
+    def _recommendation_rows_for_display(
+        self,
+        context_id: str,
+        source_intent_run_id: str,
+        rows: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        if not rows:
+            return []
+        match_rows: list[dict[str, Any]] | None = None
+        reviews: dict[str, dict[str, Any]] | None = None
+        prepared_texts: dict[int, _PreparedMessageText] | None = None
+        result = []
+        for row in rows:
+            original_changes = row["proposed_changes_json"] if isinstance(row.get("proposed_changes_json"), dict) else {}
+            effective_changes = _effective_proposed_changes(original_changes)
+            if effective_changes != original_changes:
+                if match_rows is None:
+                    match_rows = self._intent_match_rows(context_id, source_intent_run_id)
+                    reviews = self._latest_reviews_by_match_id(source_intent_run_id)
+                    prepared_texts = self._prepared_texts_for_intent_run(
+                        source_intent_run_id,
+                        match_rows,
+                    )
+                row["proposed_changes_json"] = effective_changes
+                row["impact_preview_json"] = self.preview_changes(
+                    match_rows=match_rows,
+                    reviews_by_match_id=reviews or {},
+                    proposed_changes=effective_changes,
+                    prepared_texts=prepared_texts,
+                )
+            result.append(row)
+        return result
 
     def _context(self, context_id: str) -> dict[str, Any] | None:
         row = (
@@ -678,11 +793,13 @@ class InterestIntentValidationService:
         if not reviews:
             return []
         rows = self._intent_match_rows(context_id, source_intent_run_id)
+        prepared_texts = self._prepared_texts_for_intent_run(source_intent_run_id, rows)
         reviewed = []
         for row in rows:
             review = reviews.get(str(row["id"]))
             if not review:
                 continue
+            prepared = prepared_texts.get(int(row["telegram_message_id"]))
             reviewed.append(
                 {
                     "match": {
@@ -698,6 +815,13 @@ class InterestIntentValidationService:
                         "broad_score": row["broad_score"],
                         "message_text": row["message_text"],
                         "evidence_json": row["evidence_json"],
+                        "prepared_text": {
+                            "clean_text": prepared.clean_text,
+                            "lemmas": list(prepared.lemmas),
+                            "source": prepared.source,
+                        }
+                        if prepared is not None
+                        else None,
                     },
                     "review": review,
                 }
@@ -718,6 +842,79 @@ class InterestIntentValidationService:
             .all()
         )
         return [dict(row) for row in rows]
+
+    def _prepared_texts_for_intent_run(
+        self,
+        source_intent_run_id: str,
+        rows: list[dict[str, Any]],
+    ) -> dict[int, _PreparedMessageText]:
+        wanted_message_ids = {
+            int(row["telegram_message_id"]) for row in rows if row.get("telegram_message_id") is not None
+        }
+        if not wanted_message_ids:
+            return {}
+        intent_run = self._intent_run_for_prepared_texts(source_intent_run_id)
+        if intent_run is None:
+            return {}
+        broad_run = (
+            self.session.execute(
+                select(interest_core_analysis_runs_table).where(
+                    interest_core_analysis_runs_table.c.id == intent_run["broad_analysis_run_id"]
+                )
+            )
+            .mappings()
+            .first()
+        )
+        if broad_run is None:
+            return {}
+        raw_run = (
+            self.session.execute(
+                select(telegram_raw_export_runs_table).where(
+                    telegram_raw_export_runs_table.c.id == broad_run["raw_export_run_id"]
+                )
+            )
+            .mappings()
+            .first()
+        )
+        if raw_run is None:
+            return {}
+        text_normalization = dict(raw_run["metadata_json"] or {}).get("text_normalization")
+        if not isinstance(text_normalization, dict) or not text_normalization.get("texts_parquet_path"):
+            return {}
+        texts_path = _resolve_path(text_normalization["texts_parquet_path"])
+        if not texts_path.exists():
+            return {}
+        prepared: dict[int, _PreparedMessageText] = {}
+        parquet_file = pq.ParquetFile(texts_path)
+        for batch in parquet_file.iter_batches(batch_size=5000):
+            for item in batch.to_pylist():
+                telegram_message_id = item.get("telegram_message_id")
+                if telegram_message_id is None:
+                    continue
+                message_id = int(telegram_message_id)
+                if message_id not in wanted_message_ids:
+                    continue
+                lemmas = _json_list(item.get("lemmas_json"))
+                prepared[message_id] = _PreparedMessageText(
+                    raw_text=str(item.get("raw_text") or ""),
+                    clean_text=str(item.get("clean_text") or ""),
+                    lemmas_text=" ".join(str(lemma) for lemma in lemmas if str(lemma).strip()),
+                    lemmas=tuple(_fold(lemma) for lemma in lemmas if _fold(lemma)),
+                    source="text_normalization",
+                )
+        return prepared
+
+    def _intent_run_for_prepared_texts(self, run_id: str) -> dict[str, Any] | None:
+        row = (
+            self.session.execute(
+                select(interest_intent_analysis_runs_table).where(
+                    interest_intent_analysis_runs_table.c.id == run_id
+                )
+            )
+            .mappings()
+            .first()
+        )
+        return dict(row) if row is not None else None
 
     def _latest_reviews_by_match_id(self, run_id: str) -> dict[str, dict[str, Any]]:
         rows = (
@@ -764,6 +961,10 @@ def render_intent_validation_prompt(payload: dict[str, Any]) -> str:
                 "include_patterns_json",
                 "context_patterns_json",
                 "exclude_patterns_json",
+                "exclude_lemmas_json",
+                "exclude_phrases_json",
+                "semantic_negative_examples_json",
+                "semantic_negative_threshold",
                 "include_categories_json",
                 "exclude_categories_json",
                 "include_core_names_json",
@@ -787,11 +988,15 @@ def render_intent_validation_prompt(payload: dict[str, Any]) -> str:
         '  "summary": {"diagnosis": string, "main_false_positive_patterns": [string], "risk_notes": [string]},\n'
         '  "recommendations": [\n'
         "    {\n"
-        '      "type": "add_exclude_pattern|exclude_core_name|add_context_pattern|require_context_match|increase_min_score|no_change",\n'
+        '      "type": "add_exclude_lemmas|add_exclude_phrase|add_semantic_negative_example|exclude_core_name|add_context_pattern|require_context_match|increase_min_score|advanced_regex|no_change",\n'
         '      "title": string,\n'
         '      "rationale": string,\n'
         '      "confidence": "high|medium|low",\n'
         '      "proposed_changes": {\n'
+        '        "exclude_lemmas": [string],\n'
+        '        "exclude_phrases": [string],\n'
+        '        "semantic_negative_examples": [string],\n'
+        '        "semantic_negative_threshold": number|null,\n'
         '        "exclude_patterns": [string],\n'
         '        "exclude_core_names": [string],\n'
         '        "exclude_categories": [string],\n'
@@ -805,6 +1010,9 @@ def render_intent_validation_prompt(payload: dict[str, Any]) -> str:
         "Правила:\n"
         "- Не предлагай широкие исключения, если они могут убрать correct-сообщения.\n"
         "- Если операторский комментарий объясняет, почему incorrect, используй его как главный сигнал.\n"
+        "- Предпочитай exclude_lemmas и exclude_phrases: они применяются по Stage 2 lemmas/clean_text, а не regex.\n"
+        "- semantic_negative_examples используй для типовых нерелевантных смыслов целыми короткими примерами.\n"
+        "- exclude_patterns это advanced-regex fallback; используй только если lemma/phrase недостаточно.\n"
         "- Предпочитай конкретные предметные исключения широким словам типа нужно/помогите.\n"
         "- Если данных мало, верни no_change или low confidence.\n\n"
         f"Данные:\n{json.dumps(compact_payload, ensure_ascii=False, default=str)}"
@@ -830,6 +1038,14 @@ def normalize_intent_validation_response(value: dict[str, Any]) -> dict[str, Any
                 "rationale": str(raw.get("rationale") or "").strip() or None,
                 "confidence": _confidence(raw.get("confidence")),
                 "proposed_changes": {
+                    "exclude_lemmas": _string_list(proposed.get("exclude_lemmas")),
+                    "exclude_phrases": _string_list(proposed.get("exclude_phrases")),
+                    "semantic_negative_examples": _string_list(
+                        proposed.get("semantic_negative_examples")
+                    ),
+                    "semantic_negative_threshold": _optional_float(
+                        proposed.get("semantic_negative_threshold")
+                    ),
                     "exclude_patterns": _string_list(proposed.get("exclude_patterns")),
                     "exclude_core_names": _string_list(proposed.get("exclude_core_names")),
                     "exclude_categories": _string_list(proposed.get("exclude_categories")),
@@ -881,6 +1097,50 @@ def _merge_lists(left: list[str], right: list[str]) -> list[str]:
     return result
 
 
+def _effective_proposed_changes(value: Any) -> dict[str, Any]:
+    changes = dict(value) if isinstance(value, dict) else {}
+    plain_exclusions, advanced_regex = _split_plain_and_regex(
+        _string_list(changes.get("exclude_patterns"))
+    )
+    lemma_exclusions = []
+    phrase_exclusions = []
+    for item in plain_exclusions:
+        if len(item.split()) <= 1:
+            lemma_exclusions.append(item)
+        else:
+            phrase_exclusions.append(item)
+    if lemma_exclusions:
+        changes["exclude_lemmas"] = _merge_lists(
+            _string_list(changes.get("exclude_lemmas")),
+            lemma_exclusions,
+        )
+    if phrase_exclusions:
+        changes["exclude_phrases"] = _merge_lists(
+            _string_list(changes.get("exclude_phrases")),
+            phrase_exclusions,
+        )
+    changes["exclude_patterns"] = advanced_regex
+    return changes
+
+
+def _split_plain_and_regex(values: list[str]) -> tuple[list[str], list[str]]:
+    plain = []
+    regex = []
+    for value in values:
+        text = str(value or "").strip()
+        if not text:
+            continue
+        if _looks_like_regex(text):
+            regex.append(text)
+        else:
+            plain.append(text)
+    return plain, regex
+
+
+def _looks_like_regex(value: str) -> bool:
+    return bool(re.search(r"[\\\[\]().|^$*+?{}]", value))
+
+
 def _optional_float(value: Any) -> float | None:
     try:
         if value is None or value == "":
@@ -899,6 +1159,10 @@ def _compile_patterns(values: list[str]) -> list[tuple[str, re.Pattern[str]]]:
         except re.error:
             patterns.append((value, re.compile(re.escape(value), re.IGNORECASE)))
     return patterns
+
+
+def _dot(left: list[float], right: list[float]) -> float:
+    return sum(float(a) * float(b) for a, b in zip(left, right, strict=False))
 
 
 def _fold(value: Any) -> str:

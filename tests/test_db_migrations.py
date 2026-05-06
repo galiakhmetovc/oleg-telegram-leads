@@ -96,7 +96,7 @@ def test_catalog_quality_review_migration_handles_partial_table_from_concurrent_
     with engine.connect() as connection:
         assert (
             connection.execute(text("select version_num from alembic_version")).scalar_one()
-            == "0042_telegram_analysis_postgres_outputs"
+            == "0045_structured_intent_conditions"
         )
         scheduler_sql = connection.execute(
             text("select sql from sqlite_master where type='table' and name='scheduler_jobs'")
