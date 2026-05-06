@@ -3571,7 +3571,7 @@ def _has_page_session(request: Request, auth_service: WebAuthService) -> bool:
     return validated.user.role == "admin"
 
 
-ASSET_VERSION = "20260506-intent-batch-apply"
+ASSET_VERSION = "20260506-large-archive-jobs"
 
 
 def _page(*, page: str, title: str, main: str) -> str:

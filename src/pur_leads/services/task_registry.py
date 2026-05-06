@@ -51,6 +51,19 @@ TASK_DEFINITIONS: tuple[dict[str, Any], ...] = (
         "status": "active",
     },
     {
+        "task_type": "import_telegram_desktop_archive",
+        "display_name": "Импорт архива Telegram Desktop",
+        "workload_class": "bulk",
+        "required_capabilities": ["worker", "local_parser", "local_storage"],
+        "parallelism_rule": (
+            "Архив сначала сохраняется HTTP-загрузкой, затем импортируется воркером; "
+            "для больших чатов не блокирует веб-запрос."
+        ),
+        "default_priority": 45,
+        "config_keys": ["worker_concurrency"],
+        "status": "active",
+    },
+    {
         "task_type": "prepare_interest_context_data",
         "display_name": "Подготовка данных ядра интересов",
         "workload_class": "bulk",

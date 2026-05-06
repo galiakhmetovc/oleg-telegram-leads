@@ -43,6 +43,7 @@ from pur_leads.services.catalog_sources import CatalogSourceService
 from pur_leads.services.classifier_snapshots import ClassifierSnapshotService
 from pur_leads.services.evaluation import EvaluationService
 from pur_leads.services.interest_context_drafts import InterestContextDraftService
+from pur_leads.services.interest_core_chat_analysis import InterestCoreChatAnalysisService
 from pur_leads.services.interest_core_candidate_enhancement import (
     ENHANCE_INTEREST_CORE_CANDIDATES_JOB,
     InterestCoreCandidateEnhancementService,
@@ -60,6 +61,10 @@ from pur_leads.services.notifications import NotificationPolicyService
 from pur_leads.services.resource_capacity import ResourceCapacityService
 from pur_leads.services.scheduler import SchedulerService
 from pur_leads.services.settings import SettingsService
+from pur_leads.services.telegram_desktop_import import (
+    IMPORT_TELEGRAM_DESKTOP_ARCHIVE_JOB,
+    TelegramDesktopArchiveImportService,
+)
 from pur_leads.services.tracing import TraceService
 from pur_leads.workers.message_context import MessageContextWorker
 from pur_leads.workers.telegram_access import TelegramAccessWorker
@@ -239,7 +244,7 @@ class WorkerRuntime:
         *,
         handlers: Mapping[str, JobHandler],
         worker_name: str = "worker",
-        lease_seconds: int = 300,
+        lease_seconds: int = 7200,
     ) -> None:
         self.session = session
         self.handlers = handlers
@@ -545,6 +550,105 @@ def build_telegram_handler_registry(
             progress=update_progress,
         )
         return JobHandlerResult(result_summary=result.as_jsonable())
+
+    async def import_telegram_desktop_archive(job: SchedulerJobRecord) -> JobHandlerResult:
+        if not job.scope_id:
+            raise ValueError("import_telegram_desktop_archive requires scope_id")
+        payload = job.payload_json if isinstance(job.payload_json, dict) else {}
+        archive_path = payload.get("stored_archive_path")
+        if not isinstance(archive_path, str) or not archive_path:
+            raise ValueError("import_telegram_desktop_archive requires payload.stored_archive_path")
+        actor = str(payload.get("requested_by") or "worker")
+        mode = str(payload.get("mode") or "interest_context_source")
+        sync_source_messages = bool(payload.get("sync_source_messages", False))
+        display_name = payload.get("display_name")
+        input_ref = str(display_name).strip() if display_name else None
+        metadata = (
+            payload.get("import_metadata") if isinstance(payload.get("import_metadata"), dict) else {}
+        )
+        source_role = (
+            metadata.get("interest_context", {}).get("source_role")
+            if isinstance(metadata.get("interest_context"), dict)
+            else None
+        )
+        source_title = str(input_ref or payload.get("original_filename") or Path(archive_path).name)
+
+        scheduler.update_result_summary(
+            job.id,
+            result_summary={
+                "kind": "telegram_desktop_archive_import",
+                "status": "running",
+                "mode": mode,
+                "current_stage": "raw_import",
+                "current_stage_label": "Импорт raw/parquet",
+                "overall_percent": 20,
+                "stage_percent": 20,
+                "message": "Архив принят воркером. Создаю raw/parquet и рабочие сообщения.",
+                "stored_archive_path": archive_path,
+            },
+        )
+        result = TelegramDesktopArchiveImportService(
+            session,
+            raw_root=raw_export_storage_path or "./data/raw",
+        ).import_archive(
+            archive_path,
+            input_ref=input_ref,
+            purpose=str(source_role or "interest_context_seed"),
+            interest_context_id=job.scope_id,
+            added_by=actor,
+            sync_source_messages=sync_source_messages,
+            import_metadata=metadata,
+        )
+        summary: dict[str, Any] = {
+            "kind": "telegram_desktop_archive_import",
+            "status": "running",
+            "mode": mode,
+            "current_stage": "analysis" if mode == "interest_core_analysis" else "done",
+            "current_stage_label": "Анализ по ядру"
+            if mode == "interest_core_analysis"
+            else "Готово",
+            "overall_percent": 75 if mode == "interest_core_analysis" else 100,
+            "stage_percent": 100,
+            "message": f"Raw/parquet готов: {result.message_count} сообщений",
+            "monitored_source_id": result.source.id,
+            "raw_export_run_id": result.raw_export.run_id,
+            "message_count": result.message_count,
+            "attachment_count": result.attachment_count,
+            "created_source_messages": result.created_source_messages,
+            "skipped_source_messages": result.skipped_source_messages,
+            "source": _json_ready(asdict(result.source)),
+            "import_result": result.as_jsonable(),
+        }
+        scheduler.update_result_summary(job.id, result_summary=_json_ready(summary))
+
+        if mode == "interest_core_analysis":
+            analysis = InterestCoreChatAnalysisService(session).analyze_raw_export(
+                context_id=job.scope_id,
+                monitored_source_id=result.source.id,
+                raw_export_run_id=result.raw_export.run_id,
+                actor=actor,
+                source_title=result.source.title or source_title,
+            )
+            summary = {
+                **summary,
+                "status": "succeeded",
+                "current_stage": "done",
+                "current_stage_label": "Готово",
+                "overall_percent": 100,
+                "stage_percent": 100,
+                "message": (
+                    "Анализ готов: "
+                    f"{analysis.get('summary', {}).get('match_count', 0)} совпадений"
+                ),
+                "analysis": analysis,
+            }
+        else:
+            summary = {**summary, "status": "succeeded"}
+
+        return JobHandlerResult(
+            checkpoint_after={"raw_export_run_id": result.raw_export.run_id},
+            result_summary=summary,
+        )
 
     async def build_interest_context_draft(job: SchedulerJobRecord) -> JobHandlerResult:
         if not job.scope_id:
@@ -853,6 +957,7 @@ def build_telegram_handler_registry(
         "poll_monitored_source": poll_monitored_source,
         "ingest_telegram_raw": ingest_telegram_raw,
         "export_telegram_raw": export_telegram_raw,
+        IMPORT_TELEGRAM_DESKTOP_ARCHIVE_JOB: import_telegram_desktop_archive,
         "prepare_interest_context_data": prepare_interest_context_data,
         "build_interest_context_draft": build_interest_context_draft,
         GENERATE_INTEREST_CORE_BRIEF_JOB: generate_interest_core_brief,

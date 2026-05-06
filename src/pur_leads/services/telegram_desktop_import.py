@@ -32,6 +32,7 @@ from pur_leads.services.telegram_raw_export import (
 from pur_leads.services.telegram_sources import TelegramSourceService
 
 DESKTOP_IMPORT_EXPORT_FORMAT = "telegram_desktop_json_v1"
+IMPORT_TELEGRAM_DESKTOP_ARCHIVE_JOB = "import_telegram_desktop_archive"
 SOURCE_MESSAGE_BATCH_SIZE = 1000
 
 

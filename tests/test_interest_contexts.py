@@ -5,6 +5,7 @@ from pathlib import Path
 import zipfile
 
 from fastapi.testclient import TestClient
+import pytest
 from sqlalchemy import inspect, select
 
 from pur_leads.db.engine import create_sqlite_engine
@@ -17,6 +18,7 @@ from pur_leads.models.telegram_sources import (
     monitored_sources_table,
     telegram_raw_export_runs_table,
 )
+from pur_leads.workers.runtime import WorkerRuntime, build_telegram_handler_registry
 from pur_leads.services.web_auth import WebAuthService
 from pur_leads.web.app import create_app
 
@@ -84,7 +86,8 @@ def test_interest_context_route_creates_seed_source_without_automatic_analysis(t
     assert job_row["payload_json"]["media"]["enabled"] is True
 
 
-def test_interest_context_uploads_telegram_archive_as_raw_seed_artifact(tmp_path):
+@pytest.mark.asyncio
+async def test_interest_context_uploads_telegram_archive_as_background_import_job(tmp_path):
     archive_path = _write_desktop_archive(tmp_path)
     fixture = _setup_app(tmp_path, raw_export_storage_path=tmp_path / "raw")
     client = fixture["client"]
@@ -101,29 +104,41 @@ def test_interest_context_uploads_telegram_archive_as_raw_seed_artifact(tmp_path
             files={"file": ("ChatExport.zip", archive_file, "application/zip")},
             headers={"x-request-id": "interest-upload-1"},
         )
-    detail_response = client.get(f"/api/interest-contexts/{context_id}")
-
     assert response.status_code == 200
     payload = response.json()
-    assert payload["result"]["message_count"] == 2
-    assert payload["source"]["interest_context_id"] == context_id
-    assert payload["source"]["source_purpose"] == "interest_context_seed"
-    assert payload["source"]["lead_detection_enabled"] is False
-    assert payload["source"]["catalog_ingestion_enabled"] is False
-    assert payload["raw_export_run"]["export_format"] == "telegram_desktop_json_v1"
-    assert Path(payload["result"]["messages_parquet_path"]).exists()
+    assert payload["mode"] == "async"
+    assert payload["job"]["job_type"] == "import_telegram_desktop_archive"
+    assert payload["job"]["scope_id"] == context_id
+    assert payload["progress"]["status"] == "queued"
     assert "initial-secret" not in json.dumps(payload)
 
-    detail = detail_response.json()
-    assert detail["sources"][0]["latest_raw_export_run"]["id"] == payload["raw_export_run"]["id"]
-    assert detail["sources"][0]["latest_raw_export_run"]["message_count"] == 2
+    with fixture["session_factory"]() as session:
+        runtime = WorkerRuntime(
+            session,
+            handlers=build_telegram_handler_registry(
+                session,
+                object(),
+                raw_export_storage_path=tmp_path / "raw",
+            ),
+            worker_name="test-worker",
+        )
+        run_result = await runtime.run_once()
+    assert run_result.status == "succeeded", run_result.message
 
     with fixture["session_factory"]() as session:
         raw_run = session.execute(select(telegram_raw_export_runs_table)).mappings().one()
         source = session.execute(select(monitored_sources_table)).mappings().one()
+        job_row = session.execute(select(scheduler_jobs_table)).mappings().one()
     assert raw_run["metadata_json"]["interest_context"]["id"] == context_id
     assert raw_run["metadata_json"]["trace"]["trace_id"] == response.headers["x-trace-id"]
+    assert raw_run["message_count"] == 2
+    assert raw_run["export_format"] == "telegram_desktop_json_v1"
+    assert Path(raw_run["messages_parquet_path"]).exists()
     assert source["interest_context_id"] == context_id
+    assert source["source_purpose"] == "interest_context_seed"
+    assert source["lead_detection_enabled"] is False
+    assert source["catalog_ingestion_enabled"] is False
+    assert job_row["result_summary_json"]["message_count"] == 2
 
 
 def test_interest_context_page_is_protected_and_empty_home_redirects_there(tmp_path):

@@ -68,10 +68,7 @@ from pur_leads.services.interest_contexts import (
     InterestContextService,
 )
 from pur_leads.services.scheduler import SchedulerService
-from pur_leads.services.telegram_desktop_import import (
-    DESKTOP_IMPORT_EXPORT_FORMAT,
-    TelegramDesktopArchiveImportService,
-)
+from pur_leads.services.telegram_desktop_import import IMPORT_TELEGRAM_DESKTOP_ARCHIVE_JOB
 from pur_leads.services.telegram_analysis_storage import (
     feature_rows as telegram_feature_rows,
     stage_outputs,
@@ -721,78 +718,68 @@ async def upload_telegram_archive_to_interest_context(
         upload_metadata["web_session_id"] = trace.get("web_session_id")
         upload_metadata["user_id"] = trace.get("user_id")
 
-    try:
-        result = TelegramDesktopArchiveImportService(
-            session,
-            raw_root=request.app.state.raw_export_storage_path,
-        ).import_archive(
-            stored_path,
-            input_ref=input_ref,
-            purpose=INTEREST_CONTEXT_SOURCE_PURPOSE,
-            interest_context_id=context_id,
-            added_by=actor,
-            sync_source_messages=sync_source_messages,
-            import_metadata={
-                "trace": trace,
-                "upload": upload_metadata,
-                "interest_context": {
-                    "id": context.id,
-                    "name": context.name,
-                    "source_role": INTEREST_CONTEXT_SOURCE_PURPOSE,
-                },
-            },
-        )
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-
+    import_metadata = {
+        "trace": trace,
+        "upload": upload_metadata,
+        "interest_context": {
+            "id": context.id,
+            "name": context.name,
+            "source_role": INTEREST_CONTEXT_SOURCE_PURPOSE,
+        },
+    }
+    job = SchedulerService(session).enqueue(
+        job_type=IMPORT_TELEGRAM_DESKTOP_ARCHIVE_JOB,
+        scope_type="interest_context",
+        scope_id=context.id,
+        priority="normal",
+        max_attempts=1,
+        idempotency_key=f"telegram-desktop-archive-import:{context.id}:{sha256}",
+        payload_json={
+            "mode": "interest_context_source",
+            "stored_archive_path": str(stored_path),
+            "original_filename": safe_name,
+            "content_type": file.content_type,
+            "display_name": input_ref,
+            "sync_source_messages": sync_source_messages,
+            "requested_by": actor,
+            "sha256": sha256,
+            "size_bytes": size_bytes,
+            "import_metadata": import_metadata,
+        },
+    )
     service.repository.update(context.id, updated_at=utc_now())
     session.commit()
     TraceService(session).record_child_span(
-        span_name="interest_context.import.telegram_desktop_archive",
+        span_name="interest_context.queue.telegram_desktop_archive_import",
         status="ok",
         started_at=upload_started_at,
         resource_type="interest_context",
         resource_id=context.id,
         attributes_json={
-            "monitored_source_id": result.source.id,
-            "raw_export_run_id": result.raw_export.run_id,
-            "message_count": result.message_count,
-            "attachment_count": result.attachment_count,
+            "scheduler_job_id": job.id,
             "stored_archive_path": str(stored_path),
             "sha256": sha256,
+            "size_bytes": size_bytes,
         },
     )
     AuditService(session).record_change(
         actor=actor,
-        action="interest_context.telegram_archive_uploaded",
+        action="interest_context.telegram_archive_import_queued",
         entity_type="interest_context",
         entity_id=context.id,
         old_value_json=None,
         new_value_json={
-            "monitored_source_id": result.source.id,
-            "raw_export_run_id": result.raw_export.run_id,
-            "message_count": result.message_count,
-            "attachment_count": result.attachment_count,
+            "scheduler_job_id": job.id,
             "stored_archive_path": str(stored_path),
+            "size_bytes": size_bytes,
         },
-    )
-    raw_run = (
-        session.execute(
-            select(telegram_raw_export_runs_table).where(
-                telegram_raw_export_runs_table.c.id == result.raw_export.run_id
-            )
-        )
-        .mappings()
-        .one()
     )
     return jsonable_encoder(
         {
-            "source": asdict(result.source),
-            "raw_export_run": {
-                **dict(raw_run),
-                "export_format": DESKTOP_IMPORT_EXPORT_FORMAT,
-            },
-            "result": result.as_jsonable(),
+            "mode": "async",
+            "job": _job_payload(job),
+            "progress": _archive_import_progress(job),
+            "upload": upload_metadata,
             "trace": trace,
         }
     )
@@ -845,90 +832,98 @@ async def upload_telegram_archive_for_interest_analysis(
         upload_metadata["web_session_id"] = trace.get("web_session_id")
         upload_metadata["user_id"] = trace.get("user_id")
 
-    try:
-        result = TelegramDesktopArchiveImportService(
-            session,
-            raw_root=request.app.state.raw_export_storage_path,
-        ).import_archive(
-            stored_path,
-            input_ref=input_ref,
-            purpose=INTEREST_CONTEXT_SOURCE_PURPOSE,
-            interest_context_id=context.id,
-            added_by=actor,
-            sync_source_messages=True,
-            import_metadata={
-                "trace": trace,
-                "upload": upload_metadata,
-                "interest_context": {
-                    "id": context.id,
-                    "name": context.name,
-                    "source_role": "interest_core_analysis",
-                },
-            },
-        )
-        analysis = InterestCoreChatAnalysisService(session).analyze_raw_export(
-            context_id=context.id,
-            monitored_source_id=result.source.id,
-            raw_export_run_id=result.raw_export.run_id,
-            actor=actor,
-            source_title=result.source.title or input_ref or safe_name,
-        )
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-
+    import_metadata = {
+        "trace": trace,
+        "upload": upload_metadata,
+        "interest_context": {
+            "id": context.id,
+            "name": context.name,
+            "source_role": "interest_core_analysis",
+        },
+    }
+    job = SchedulerService(session).enqueue(
+        job_type=IMPORT_TELEGRAM_DESKTOP_ARCHIVE_JOB,
+        scope_type="interest_context",
+        scope_id=context.id,
+        priority="normal",
+        max_attempts=1,
+        idempotency_key=f"telegram-desktop-archive-analysis:{context.id}:{sha256}",
+        payload_json={
+            "mode": "interest_core_analysis",
+            "stored_archive_path": str(stored_path),
+            "original_filename": safe_name,
+            "content_type": file.content_type,
+            "display_name": input_ref,
+            "sync_source_messages": True,
+            "requested_by": actor,
+            "sha256": sha256,
+            "size_bytes": size_bytes,
+            "import_metadata": import_metadata,
+        },
+    )
     service.repository.update(context.id, updated_at=utc_now())
     session.commit()
     TraceService(session).record_child_span(
-        span_name="interest_context.analysis.telegram_desktop_archive",
+        span_name="interest_context.queue.analysis_telegram_desktop_archive",
         status="ok",
         started_at=upload_started_at,
         resource_type="interest_context",
         resource_id=context.id,
         attributes_json={
-            "monitored_source_id": result.source.id,
-            "raw_export_run_id": result.raw_export.run_id,
-            "analysis_run_id": analysis.get("run", {}).get("id") if analysis.get("run") else None,
-            "message_count": result.message_count,
-            "attachment_count": result.attachment_count,
-            "match_count": analysis.get("summary", {}).get("match_count"),
+            "scheduler_job_id": job.id,
             "stored_archive_path": str(stored_path),
             "sha256": sha256,
+            "size_bytes": size_bytes,
         },
     )
     AuditService(session).record_change(
         actor=actor,
-        action="interest_context.analysis_archive_uploaded",
+        action="interest_context.analysis_archive_import_queued",
         entity_type="interest_context",
         entity_id=context.id,
         old_value_json=None,
         new_value_json={
-            "monitored_source_id": result.source.id,
-            "raw_export_run_id": result.raw_export.run_id,
-            "analysis": analysis.get("summary"),
+            "scheduler_job_id": job.id,
             "stored_archive_path": str(stored_path),
+            "size_bytes": size_bytes,
         },
-    )
-    raw_run = (
-        session.execute(
-            select(telegram_raw_export_runs_table).where(
-                telegram_raw_export_runs_table.c.id == result.raw_export.run_id
-            )
-        )
-        .mappings()
-        .one()
     )
     return jsonable_encoder(
         {
-            "source": asdict(result.source),
-            "raw_export_run": {
-                **dict(raw_run),
-                "export_format": DESKTOP_IMPORT_EXPORT_FORMAT,
-            },
-            "import_result": result.as_jsonable(),
-            "analysis": analysis,
+            "mode": "async",
+            "job": _job_payload(job),
+            "progress": _archive_import_progress(job),
+            "upload": upload_metadata,
             "trace": trace,
         }
     )
+
+
+@router.get("/{context_id}/telegram-archive/import-jobs/{job_id}")
+def get_interest_context_telegram_archive_import_job(
+    context_id: str,
+    job_id: str,
+    _validated: SessionValidationResult = Depends(current_admin),
+    session: Session = Depends(get_session),
+) -> dict[str, Any]:
+    context = InterestContextService(session).repository.get(context_id)
+    if context is None:
+        raise HTTPException(status_code=404, detail="Interest context not found")
+    row = (
+        session.execute(
+            select(scheduler_jobs_table)
+            .where(scheduler_jobs_table.c.id == job_id)
+            .where(scheduler_jobs_table.c.scope_type == "interest_context")
+            .where(scheduler_jobs_table.c.scope_id == context.id)
+            .where(scheduler_jobs_table.c.job_type == IMPORT_TELEGRAM_DESKTOP_ARCHIVE_JOB)
+        )
+        .mappings()
+        .first()
+    )
+    if row is None:
+        raise HTTPException(status_code=404, detail="Import job not found")
+    job = dict(row)
+    return jsonable_encoder({"job": job, "progress": _archive_import_progress_from_row(job)})
 
 
 @router.get("/{context_id}/analysis/runs")
@@ -2910,6 +2905,43 @@ def _job_payload(job: Any) -> dict[str, Any]:
 
 def _job_progress(job: Any) -> dict[str, Any]:
     return _job_progress_from_row(_job_payload(job))
+
+
+def _archive_import_progress(job: Any) -> dict[str, Any]:
+    return _archive_import_progress_from_row(_job_payload(job))
+
+
+def _archive_import_progress_from_row(job: dict[str, Any] | None) -> dict[str, Any]:
+    if not job:
+        return {
+            "kind": "telegram_desktop_archive_import",
+            "status": "not_started",
+            "current_stage": None,
+            "current_stage_label": "Не запускалось",
+            "overall_percent": 0,
+            "stage_percent": 0,
+            "message": "Импорт архива еще не запускался",
+        }
+    progress = job.get("result_summary_json")
+    if isinstance(progress, dict) and progress.get("kind") == "telegram_desktop_archive_import":
+        return _progress_with_actual_job_status(job, progress)
+    status = str(job.get("status") or "unknown")
+    payload = job.get("payload_json") if isinstance(job.get("payload_json"), dict) else {}
+    return {
+        "kind": "telegram_desktop_archive_import",
+        "status": status,
+        "mode": payload.get("mode"),
+        "current_stage": None,
+        "current_stage_label": "В очереди" if status == "queued" else status,
+        "overall_percent": 0,
+        "stage_percent": 0,
+        "message": "Архив загружен. Задача импорта ожидает воркер."
+        if status == "queued"
+        else job.get("last_error") or status,
+        "stored_archive_path": payload.get("stored_archive_path"),
+        "message_count": 0,
+        "attachment_count": 0,
+    }
 
 
 def _job_progress_from_row(job: dict[str, Any] | None) -> dict[str, Any]:

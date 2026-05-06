@@ -4375,15 +4375,27 @@ async function uploadInterestContextTelegramArchive(event, state) {
       }
     );
     form.reset();
-    if (status) {
-      status.textContent = `Архив загружен. Сообщений: ${payload.result?.message_count || 0}`;
+    if (payload.job?.id) {
+      if (status) status.textContent = "Архив загружен. Импорт поставлен в очередь...";
+      pollInterestContextArchiveImportJob(payload.job.id, state, {
+        statusSelector: "#interest-context-upload-status",
+        setProgress: setInterestContextUploadProgress,
+        onDone: async () => {
+          await loadInterestContexts(state);
+        },
+      });
+    } else {
+      if (status) {
+        status.textContent = `Архив загружен. Сообщений: ${payload.result?.message_count || 0}`;
+      }
+      await loadInterestContexts(state);
+      setInterestContextUploadProgress({ visible: false, value: 0, label: "0%" });
     }
-    await loadInterestContexts(state);
   } catch (error) {
     if (status) status.textContent = error.message;
+    setInterestContextUploadProgress({ visible: false, value: 0, label: "0%" });
   } finally {
     if (submitButton) submitButton.disabled = false;
-    setInterestContextUploadProgress({ visible: false, value: 0, label: "0%" });
   }
 }
 
@@ -4445,22 +4457,85 @@ async function uploadInterestAnalysisArchive(event, state) {
       }
     );
     form.reset();
-    const summary = payload.analysis?.summary || {};
-    const runId = payload.analysis?.run?.id || null;
-    state.selectedAnalysisRunId = runId;
-    state.analysisRunsOffset = 0;
-    state.analysisMatchesOffset = 0;
-    if (status) {
-      status.textContent = `Анализ готов: ${summary.match_count || 0} совпадений, ${summary.matched_message_count || 0} сообщений`;
+    if (payload.job?.id) {
+      if (status) status.textContent = "Архив загружен. Импорт и анализ поставлены в очередь...";
+      pollInterestContextArchiveImportJob(payload.job.id, state, {
+        statusSelector: "#interest-analysis-status",
+        setProgress: setInterestAnalysisUploadProgress,
+        onDone: async (progress) => {
+          const runId = progress.analysis?.run?.id || null;
+          state.selectedAnalysisRunId = runId;
+          state.analysisRunsOffset = 0;
+          state.analysisMatchesOffset = 0;
+          await loadInterestContexts(state);
+          await loadInterestAnalysisRuns(state);
+          if (runId) await loadInterestAnalysisMatches(state, runId);
+        },
+      });
+    } else {
+      const summary = payload.analysis?.summary || {};
+      const runId = payload.analysis?.run?.id || null;
+      state.selectedAnalysisRunId = runId;
+      state.analysisRunsOffset = 0;
+      state.analysisMatchesOffset = 0;
+      if (status) {
+        status.textContent = `Анализ готов: ${summary.match_count || 0} совпадений, ${summary.matched_message_count || 0} сообщений`;
+      }
+      await loadInterestContexts(state);
+      await loadInterestAnalysisRuns(state);
+      if (runId) await loadInterestAnalysisMatches(state, runId);
+      setInterestAnalysisUploadProgress({ visible: false, value: 0, label: "0%" });
     }
-    await loadInterestContexts(state);
-    await loadInterestAnalysisRuns(state);
-    if (runId) await loadInterestAnalysisMatches(state, runId);
   } catch (error) {
     if (status) status.textContent = error.message;
+    setInterestAnalysisUploadProgress({ visible: false, value: 0, label: "0%" });
   } finally {
     if (submitButton) submitButton.disabled = false;
-    setInterestAnalysisUploadProgress({ visible: false, value: 0, label: "0%" });
+  }
+}
+
+async function pollInterestContextArchiveImportJob(jobId, state, { statusSelector, setProgress, onDone }) {
+  const status = document.querySelector(statusSelector);
+  if (!jobId || !state.selectedId) return;
+  try {
+    const payload = await api(
+      `/api/interest-contexts/${encodeURIComponent(state.selectedId)}/telegram-archive/import-jobs/${encodeURIComponent(jobId)}`
+    );
+    const progress = payload.progress || {};
+    const jobStatus = payload.job?.status || progress.status || "";
+    const percent = Math.max(0, Math.min(100, Number(progress.overall_percent || 0)));
+    const isActive = jobStatus === "queued" || jobStatus === "running";
+    setProgress?.({
+      visible: isActive,
+      value: percent / 100,
+      label: isActive ? `${percent}%` : "",
+      indeterminate: jobStatus === "queued" || percent <= 0,
+    });
+    if (status) {
+      const message = progress.message || label(jobStatus || "unknown");
+      const counts =
+        progress.message_count != null && Number(progress.message_count) > 0
+          ? ` Сообщений: ${progress.message_count}. Вложений: ${progress.attachment_count || 0}.`
+          : "";
+      status.textContent = `${message}${counts}`;
+    }
+    if (jobStatus === "succeeded") {
+      setProgress?.({ visible: false, value: 0, label: "" });
+      await onDone?.(progress, payload);
+      return;
+    }
+    if (jobStatus === "failed") {
+      setProgress?.({ visible: false, value: 0, label: "" });
+      if (status) status.textContent = progress.message || payload.job?.last_error || "Импорт завершился ошибкой";
+      return;
+    }
+    window.setTimeout(
+      () => pollInterestContextArchiveImportJob(jobId, state, { statusSelector, setProgress, onDone }),
+      2000
+    );
+  } catch (error) {
+    setProgress?.({ visible: false, value: 0, label: "" });
+    if (status) status.textContent = error.message;
   }
 }
 
