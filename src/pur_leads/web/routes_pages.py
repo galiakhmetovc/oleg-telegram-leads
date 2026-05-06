@@ -2013,6 +2013,10 @@ def _interest_context_stage_hint(step: str) -> str:
         "intent_layers": "настройка фильтра",
         "intent_runs": "запуски фильтра",
         "intent_matches": "сообщения с намерением",
+        "intent_review": "ручная проверка",
+        "intent_ai_validation": "запуск по запросу",
+        "intent_ai_recommendations": "одобрение предложений",
+        "intent_ai_filter": "новый слой",
         "intent_exclusions": "feedback и влияние",
     }[step]
 
