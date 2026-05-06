@@ -1030,41 +1030,46 @@ class _CompiledIntentLayer:
         if telegram_message_id in self.excluded_telegram_message_ids and not positive_protected:
             self._record_exclusion("exact_operator_incorrect", row)
             return None
+        semantic_scores = self._semantic_scores(prepared)
+        semantic_negative_score = semantic_scores["negative_score"]
+        semantic_positive_score = semantic_scores["positive_score"]
+        semantic_positive_protected = (
+            semantic_positive_score >= self.semantic_positive_threshold
+            and semantic_positive_score >= semantic_negative_score + self.semantic_positive_margin
+        )
+        positive_signal = positive_protected or semantic_positive_protected
         normalized_category = _fold(row["category"])
         normalized_name = _fold(row["canonical_name"])
         if (
             self.include_categories
             and normalized_category not in self.include_categories
-            and not positive_protected
+            and not positive_signal
         ):
             self._record_exclusion("include_category_miss", row)
             return None
         if (
             self.include_core_names
             and normalized_name not in self.include_core_names
-            and not positive_protected
+            and not positive_signal
         ):
             self._record_exclusion("include_core_name_miss", row)
             return None
-        if normalized_category in self.exclude_categories and not positive_protected:
+        if normalized_category in self.exclude_categories and not positive_signal:
             self._record_exclusion("exclude_category", row)
             return None
-        if normalized_name in self.exclude_core_names and not positive_protected:
+        if normalized_name in self.exclude_core_names and not positive_signal:
             self._record_exclusion("exclude_core_name", row)
             return None
-        if _lemma_rule_hits(self.exclude_lemma_rules, prepared) and not positive_protected:
+        if _lemma_rule_hits(self.exclude_lemma_rules, prepared) and not positive_signal:
             self._record_exclusion("exclude_lemma", row)
             return None
-        if _phrase_rule_hits(self.exclude_phrase_rules, prepared) and not positive_protected:
+        if _phrase_rule_hits(self.exclude_phrase_rules, prepared) and not positive_signal:
             self._record_exclusion("exclude_phrase", row)
             return None
-        semantic_scores = self._semantic_scores(prepared)
-        semantic_negative_score = semantic_scores["negative_score"]
-        semantic_positive_score = semantic_scores["positive_score"]
         if (
             semantic_negative_score >= self.semantic_negative_threshold
             and semantic_negative_score >= semantic_positive_score + self.semantic_positive_margin
-            and not positive_protected
+            and not positive_signal
         ):
             self._record_exclusion(
                 "semantic_negative",
@@ -1076,15 +1081,15 @@ class _CompiledIntentLayer:
                 },
             )
             return None
-        if _pattern_hits(self.exclude_patterns, text) and not positive_protected:
+        if _pattern_hits(self.exclude_patterns, text) and not positive_signal:
             self._record_exclusion("advanced_regex", row)
             return None
         include_hits = _pattern_hits(self.include_patterns, text)
-        if self.layer.require_include_match and not include_hits and not positive_protected:
+        if self.layer.require_include_match and not include_hits and not positive_signal:
             self._record_exclusion("include_pattern_miss", row)
             return None
         context_hits = _pattern_hits(self.context_patterns, text)
-        if self.layer.require_context_match and not context_hits and not positive_protected:
+        if self.layer.require_context_match and not context_hits and not positive_signal:
             self._record_exclusion("context_pattern_miss", row)
             return None
         broad_score = float(row["score"] or 0)
@@ -1092,7 +1097,7 @@ class _CompiledIntentLayer:
         context_score = min(0.28, len(context_hits) * 0.14)
         positive_boost = (
             self.positive_score_boost
-            if positive_protected or semantic_positive_score >= self.semantic_positive_threshold
+            if positive_signal
             else 0.0
         )
         score = min(
@@ -1102,7 +1107,7 @@ class _CompiledIntentLayer:
             + context_score
             + positive_boost,
         )
-        if positive_protected and score < self.layer.min_score:
+        if positive_signal and score < self.layer.min_score:
             score = min(0.99, max(score, self.layer.min_score))
         if score < self.layer.min_score:
             self._record_exclusion("min_score", row)
@@ -1135,6 +1140,8 @@ class _CompiledIntentLayer:
             },
             "semantic_negative_score": round(semantic_negative_score, 4),
             "semantic_positive_score": round(semantic_positive_score, 4),
+            "semantic_positive_signal": bool(semantic_positive_protected),
+            "operator_positive_signal": bool(positive_protected),
             "positive_boost": round(positive_boost, 4),
         }
 

@@ -246,6 +246,13 @@ def test_ai_filter_metadata_excludes_semantic_false_positives_and_boosts_correct
             ["где", "можно", "заказать", "систему", "видеонаблюдения", "квартиры"],
             ["где", "можно", "заказать", "система", "видеонаблюдение", "квартира"],
         ),
+        (
+            "good-semantic",
+            718840,
+            "Где можно заказать систему видеонаблюдения для квартиры?",
+            ["где", "можно", "заказать", "систему", "видеонаблюдения", "квартиры"],
+            ["где", "можно", "заказать", "система", "видеонаблюдение", "квартира"],
+        ),
     ]
     pq.write_table(
         pa.Table.from_pylist(
@@ -423,9 +430,12 @@ def test_ai_filter_metadata_excludes_semantic_false_positives_and_boosts_correct
             actor="admin",
         )
 
-        assert result["summary"]["match_count"] == 1
-        assert result["top_matches"][0]["source_message_id"] == "good-protected"
+        assert result["summary"]["match_count"] == 2
+        assert {row["source_message_id"] for row in result["top_matches"]} == {
+            "good-protected",
+            "good-semantic",
+        }
         assert result["summary"]["exclusions"]["total"] == 2
         assert result["summary"]["exclusions"]["semantic_negative"] == 1
-        assert result["summary"]["positive_boosted_count"] == 1
-        assert result["top_matches"][0]["evidence_json"]["positive_boost"] > 0
+        assert result["summary"]["positive_boosted_count"] == 2
+        assert all(row["evidence_json"]["positive_boost"] > 0 for row in result["top_matches"])
