@@ -3723,7 +3723,7 @@ function initInterestContexts() {
     items: [],
     selectedId: new URLSearchParams(window.location.search).get("context_id"),
     detail: null,
-    step: stepRoot?.dataset.interestStep || "load",
+    step: stepRoot?.dataset.interestStep || "load_archive",
     preparePollTimer: null,
     draftPollTimer: null,
     enhancePollTimer: null,
@@ -3917,18 +3917,48 @@ async function loadInterestContextDetail(contextId, state) {
     state.coreItemsOffset = 0;
     await loadInterestContextCoreItemsPage(state);
   }
-  if (state.step === "analyze") {
+  if (state.step === "analysis_upload") {
     state.analysisRunsOffset = 0;
     state.analysisMatchesOffset = 0;
     state.selectedAnalysisRunId = null;
+  }
+  if (state.step === "analysis_runs") {
+    state.analysisRunsOffset = 0;
+    state.analysisMatchesOffset = 0;
+    state.selectedAnalysisRunId = null;
+    await loadInterestAnalysisRuns(state);
+  }
+  if (state.step === "analysis_matches") {
+    state.analysisRunsOffset = 0;
+    state.analysisMatchesOffset = 0;
+    state.selectedAnalysisRunId = null;
+    await loadInterestAnalysisRuns(state);
+    if (state.selectedAnalysisRunId) {
+      await loadInterestAnalysisMatches(state, state.selectedAnalysisRunId);
+    }
+  }
+  if (state.step === "intent_layers") {
+    state.analysisRunsOffset = 0;
+    state.selectedAnalysisRunId = null;
+    await loadInterestAnalysisRuns(state);
+    await loadInterestIntentLayers(state);
+  }
+  if (state.step === "intent_runs") {
     state.intentRunsOffset = 0;
     state.intentMatchesOffset = 0;
     state.selectedIntentRunId = null;
-    await loadInterestAnalysisRuns(state);
-    await loadInterestIntentLayers(state);
     await loadInterestIntentRuns(state);
   }
-  if (state.step === "llm") {
+  if (state.step === "intent_matches") {
+    state.intentRunsOffset = 0;
+    state.intentMatchesOffset = 0;
+    state.selectedIntentRunId = null;
+    await loadInterestIntentRuns(state);
+    if (state.selectedIntentRunId) {
+      await loadInterestIntentMatches(state, state.selectedIntentRunId);
+    }
+  }
+  if (state.step === "brief") {
     await loadInterestCoreBriefStatus(state, { silent: true });
   }
   if (state.step === "check") {
@@ -4035,7 +4065,7 @@ function renderInterestContextDetail(detail) {
 }
 
 function currentInterestStep() {
-  return document.querySelector("[data-interest-step]")?.dataset.interestStep || "load";
+  return document.querySelector("[data-interest-step]")?.dataset.interestStep || "load_archive";
 }
 
 function interestContextStepHref(path, contextId) {
@@ -4292,8 +4322,8 @@ function setInterestAnalysisUploadProgress({ visible, value = 0, label = "", ind
 async function loadInterestAnalysisRuns(state) {
   const target = document.querySelector("#interest-analysis-runs");
   const status = document.querySelector("#interest-analysis-status");
-  if (!target || !state.selectedId) return;
-  target.innerHTML = '<div class="empty-state">Загружаю запуски анализа...</div>';
+  if (!state.selectedId) return;
+  if (target) target.innerHTML = '<div class="empty-state">Загружаю запуски анализа...</div>';
   try {
     const params = new URLSearchParams({
       limit: String(state.analysisRunsLimit),
@@ -4302,7 +4332,6 @@ async function loadInterestAnalysisRuns(state) {
     const payload = await api(
       `/api/interest-contexts/${encodeURIComponent(state.selectedId)}/analysis/runs?${params.toString()}`
     );
-    renderInterestAnalysisRuns(payload, state);
     const firstRun = payload.items?.[0]?.id || null;
     const selectedStillVisible = (payload.items || []).some(
       (item) => item.id === state.selectedAnalysisRunId
@@ -4310,13 +4339,14 @@ async function loadInterestAnalysisRuns(state) {
     state.selectedAnalysisRunId = selectedStillVisible
       ? state.selectedAnalysisRunId
       : firstRun;
-    if (state.selectedAnalysisRunId) {
+    if (target) renderInterestAnalysisRuns(payload, state);
+    if (state.selectedAnalysisRunId && document.querySelector("#interest-analysis-matches")) {
       await loadInterestAnalysisMatches(state, state.selectedAnalysisRunId);
-    } else {
+    } else if (document.querySelector("#interest-analysis-matches")) {
       renderInterestAnalysisMatches(null, state);
     }
   } catch (error) {
-    target.innerHTML = `<div class="empty-state">${escapeHtml(error.message)}</div>`;
+    if (target) target.innerHTML = `<div class="empty-state">${escapeHtml(error.message)}</div>`;
     if (status) status.textContent = error.message;
   }
 }
@@ -4665,8 +4695,8 @@ async function deleteInterestIntentLayer(layerId, state) {
 async function loadInterestIntentRuns(state) {
   const target = document.querySelector("#interest-intent-runs");
   const status = document.querySelector("#interest-intent-status");
-  if (!target || !state.selectedId) return;
-  target.innerHTML = '<div class="empty-state">Загружаю запуски слоя намерений...</div>';
+  if (!state.selectedId) return;
+  if (target) target.innerHTML = '<div class="empty-state">Загружаю запуски слоя намерений...</div>';
   try {
     const params = new URLSearchParams({
       limit: String(state.intentRunsLimit),
@@ -4675,19 +4705,19 @@ async function loadInterestIntentRuns(state) {
     const payload = await api(
       `/api/interest-contexts/${encodeURIComponent(state.selectedId)}/intent-runs?${params.toString()}`
     );
-    renderInterestIntentRuns(payload, state);
     const firstRun = payload.items?.[0]?.id || null;
     const selectedStillVisible = (payload.items || []).some(
       (item) => item.id === state.selectedIntentRunId
     );
     state.selectedIntentRunId = selectedStillVisible ? state.selectedIntentRunId : firstRun;
-    if (state.selectedIntentRunId) {
+    if (target) renderInterestIntentRuns(payload, state);
+    if (state.selectedIntentRunId && document.querySelector("#interest-intent-matches")) {
       await loadInterestIntentMatches(state, state.selectedIntentRunId);
-    } else {
+    } else if (document.querySelector("#interest-intent-matches")) {
       renderInterestIntentMatches(null, state);
     }
   } catch (error) {
-    target.innerHTML = `<div class="empty-state">${escapeHtml(error.message)}</div>`;
+    if (target) target.innerHTML = `<div class="empty-state">${escapeHtml(error.message)}</div>`;
     if (status) status.textContent = error.message;
   }
 }

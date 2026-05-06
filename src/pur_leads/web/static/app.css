@@ -68,6 +68,7 @@ a {
 button {
   min-height: 38px;
   border: 1px solid var(--accent);
+  border-radius: 8px;
   background: var(--accent);
   color: #ffffff;
   padding: 0 14px;
@@ -113,6 +114,7 @@ textarea {
   background: #ffffff;
   color: var(--text);
   padding: 8px 10px;
+  border-radius: 8px;
 }
 
 label {
@@ -254,7 +256,7 @@ md-text-button {
 }
 
 .topbar {
-  min-height: 72px;
+  min-height: 76px;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -281,20 +283,28 @@ md-text-button {
 }
 
 .interest-step-nav {
-  max-width: min(900px, 100%);
+  max-width: min(1120px, 100%);
+  overflow-x: auto;
+  padding: 2px 0 4px;
+  scrollbar-width: thin;
 }
 
 .interest-step-link {
   min-height: 34px;
   align-items: center;
+  flex: 0 0 auto;
   padding: 0 10px;
   color: var(--muted);
-  border-bottom: 2px solid transparent;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: transparent;
+  white-space: nowrap;
 }
 
 .interest-step-link.is-active {
   color: var(--accent-strong);
-  border-color: var(--accent);
+  border-color: rgba(31, 122, 90, 0.32);
+  background: var(--surface-tonal);
 }
 
 .topbar nav button {
@@ -303,18 +313,23 @@ md-text-button {
   color: var(--text);
 }
 
-.button-link {
+.button-link,
+.interest-next-link {
   min-height: 38px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   padding: 0 14px;
   border: 1px solid var(--line);
+  border-radius: 8px;
   background: #ffffff;
   color: var(--text);
+  font-weight: 650;
+  white-space: nowrap;
 }
 
-.button-link:hover {
+.button-link:hover,
+.interest-next-link:hover {
   border-color: var(--accent);
   background: #f1faf5;
   color: var(--accent-strong);

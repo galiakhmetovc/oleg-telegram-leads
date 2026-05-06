@@ -164,7 +164,17 @@ def interest_contexts_page(
 ) -> Response:
     if not _has_page_session(request, auth_service):
         return RedirectResponse("/login", status_code=303)
-    return HTMLResponse(_interest_context_step_page("load"))
+    return HTMLResponse(_interest_context_step_page("load_archive"))
+
+
+@router.get("/interest-contexts/source-link", response_class=HTMLResponse)
+def interest_context_source_link_page(
+    request: Request,
+    auth_service: WebAuthService = Depends(get_auth_service),
+) -> Response:
+    if not _has_page_session(request, auth_service):
+        return RedirectResponse("/login", status_code=303)
+    return HTMLResponse(_interest_context_step_page("load_link"))
 
 
 @router.get("/interest-contexts/check", response_class=HTMLResponse)
@@ -234,7 +244,27 @@ def interest_context_analysis_page(
 ) -> Response:
     if not _has_page_session(request, auth_service):
         return RedirectResponse("/login", status_code=303)
-    return HTMLResponse(_interest_context_step_page("analyze"))
+    return HTMLResponse(_interest_context_step_page("analysis_upload"))
+
+
+@router.get("/interest-contexts/analyze/runs", response_class=HTMLResponse)
+def interest_context_analysis_runs_page(
+    request: Request,
+    auth_service: WebAuthService = Depends(get_auth_service),
+) -> Response:
+    if not _has_page_session(request, auth_service):
+        return RedirectResponse("/login", status_code=303)
+    return HTMLResponse(_interest_context_step_page("analysis_runs"))
+
+
+@router.get("/interest-contexts/analyze/matches", response_class=HTMLResponse)
+def interest_context_analysis_matches_page(
+    request: Request,
+    auth_service: WebAuthService = Depends(get_auth_service),
+) -> Response:
+    if not _has_page_session(request, auth_service):
+        return RedirectResponse("/login", status_code=303)
+    return HTMLResponse(_interest_context_step_page("analysis_matches"))
 
 
 @router.get("/interest-contexts/llm", response_class=HTMLResponse)
@@ -247,43 +277,104 @@ def interest_context_llm_page(
     return HTMLResponse(_interest_context_step_page("llm"))
 
 
+@router.get("/interest-contexts/brief", response_class=HTMLResponse)
+def interest_context_brief_page(
+    request: Request,
+    auth_service: WebAuthService = Depends(get_auth_service),
+) -> Response:
+    if not _has_page_session(request, auth_service):
+        return RedirectResponse("/login", status_code=303)
+    return HTMLResponse(_interest_context_step_page("brief"))
+
+
+@router.get("/interest-contexts/intent-layers", response_class=HTMLResponse)
+def interest_context_intent_layers_page(
+    request: Request,
+    auth_service: WebAuthService = Depends(get_auth_service),
+) -> Response:
+    if not _has_page_session(request, auth_service):
+        return RedirectResponse("/login", status_code=303)
+    return HTMLResponse(_interest_context_step_page("intent_layers"))
+
+
+@router.get("/interest-contexts/intent-runs", response_class=HTMLResponse)
+def interest_context_intent_runs_page(
+    request: Request,
+    auth_service: WebAuthService = Depends(get_auth_service),
+) -> Response:
+    if not _has_page_session(request, auth_service):
+        return RedirectResponse("/login", status_code=303)
+    return HTMLResponse(_interest_context_step_page("intent_runs"))
+
+
+@router.get("/interest-contexts/intent-matches", response_class=HTMLResponse)
+def interest_context_intent_matches_page(
+    request: Request,
+    auth_service: WebAuthService = Depends(get_auth_service),
+) -> Response:
+    if not _has_page_session(request, auth_service):
+        return RedirectResponse("/login", status_code=303)
+    return HTMLResponse(_interest_context_step_page("intent_matches"))
+
+
 _INTEREST_CONTEXT_STEPS = (
-    ("load", "/interest-contexts", "Загрузка данных"),
-    ("check", "/interest-contexts/check", "Проверка данных"),
-    ("prepare", "/interest-contexts/prepare", "Подготовка данных"),
-    ("core", "/interest-contexts/core", "Формирование ядра"),
-    ("candidates", "/interest-contexts/core/candidates", "Кандидаты"),
-    ("reviews", "/interest-contexts/core/reviews", "LLM-рекомендации"),
-    ("items", "/interest-contexts/core/items", "Рабочее ядро"),
-    ("analyze", "/interest-contexts/analyze", "Анализ чата"),
+    ("load_archive", "/interest-contexts", "Архив источника"),
+    ("load_link", "/interest-contexts/source-link", "Telegram-ссылка"),
+    ("check", "/interest-contexts/check", "Проверка raw"),
+    ("prepare", "/interest-contexts/prepare", "Подготовка"),
     ("llm", "/interest-contexts/llm", "LLM"),
+    ("brief", "/interest-contexts/brief", "Бриф"),
+    ("core", "/interest-contexts/core", "Сборка ядра"),
+    ("candidates", "/interest-contexts/core/candidates", "Кандидаты"),
+    ("reviews", "/interest-contexts/core/reviews", "Рекомендации"),
+    ("items", "/interest-contexts/core/items", "Рабочее ядро"),
+    ("analysis_upload", "/interest-contexts/analyze", "Архив чата"),
+    ("analysis_runs", "/interest-contexts/analyze/runs", "Запуски анализа"),
+    ("analysis_matches", "/interest-contexts/analyze/matches", "Широкие совпадения"),
+    ("intent_layers", "/interest-contexts/intent-layers", "Слои намерений"),
+    ("intent_runs", "/interest-contexts/intent-runs", "Запуски намерений"),
+    ("intent_matches", "/interest-contexts/intent-matches", "Сообщения намерений"),
 )
 
 
 def _interest_context_step_page(step: str) -> str:
     title_by_step = {
-        "load": "Загрузка данных",
-        "check": "Проверка данных",
+        "load_archive": "Архив источника интересов",
+        "load_link": "Telegram-ссылка источника",
+        "check": "Проверка raw-данных",
         "prepare": "Подготовка данных",
-        "core": "Формирование ядра",
+        "llm": "LLM-провайдер",
+        "brief": "Бриф ядра интересов",
+        "core": "Сборка ядра",
         "candidates": "Кандидаты ядра",
         "reviews": "LLM-рекомендации",
         "items": "Рабочее ядро",
-        "analyze": "Анализ чата",
-        "llm": "LLM",
+        "analysis_upload": "Архив чата для анализа",
+        "analysis_runs": "Запуски анализа",
+        "analysis_matches": "Широкие совпадения",
+        "intent_layers": "Слои намерений",
+        "intent_runs": "Запуски намерений",
+        "intent_matches": "Сообщения намерений",
     }
     intro_by_step = {
-        "load": "Добавьте Telegram-ссылку или ZIP-архив Telegram Desktop. На этом шаге сохраняем raw-данные без AI.",
+        "load_archive": "Загрузите ZIP-архив Telegram Desktop. На этом шаге сохраняем raw/parquet без AI.",
+        "load_link": "Добавьте Telegram-канал или чат по ссылке. Система поставит raw-выгрузку в очередь.",
         "check": "Проверьте, что raw/parquet, вложения и рабочая таблица собраны корректно.",
         "prepare": "Запустите нормализацию, локальный индекс, извлечение и ранжирование кандидатов.",
-        "core": "Сформируйте черновик ядра интересов и переходите к отдельным страницам ревью.",
+        "llm": "Подключите провайдера и модель. Это отдельный ресурс для LLM-этапов.",
+        "brief": "Сформируйте или отредактируйте объяснимый контекст для модели.",
+        "core": "Сформируйте rule-based черновик ядра. Этот экран не показывает длинные списки.",
         "candidates": "Просматривайте rule-based кандидатов постранично, без длинного списка на рабочем экране.",
         "reviews": "Разбирайте рекомендации LLM постранично: одобрить, отклонить или вернуть на ревью.",
         "items": "Здесь лежат элементы ядра интересов, которые оператор уже одобрил.",
-        "analyze": "Загрузите архив Telegram-чата и получите объяснимый анализ по рабочему ядру интересов.",
-        "llm": "Настройте и проверьте LLM-бриф: контекст, который будет передаваться моделям на следующих этапах.",
+        "analysis_upload": "Загрузите отдельный ZIP-архив чата, который надо проверить по рабочему ядру.",
+        "analysis_runs": "Выберите запуск широкого анализа. Это артефакт первого слоя совпадений.",
+        "analysis_matches": "Постранично смотрите сообщения, совпавшие с рабочим ядром интересов.",
+        "intent_layers": "Создайте или примените настраиваемый слой намерений поверх широкого анализа.",
+        "intent_runs": "Выберите запуск слоя намерений. Это отдельный проверяемый артефакт.",
+        "intent_matches": "Постранично смотрите сообщения, прошедшие слой намерений, и объяснение почему.",
     }
-    step = step if step in title_by_step else "load"
+    step = step if step in title_by_step else "load_archive"
     title = title_by_step[step]
     main = f"""
             <main class="workspace resources-workspace" data-interest-step="{step}">
@@ -363,25 +454,32 @@ def _interest_context_detail_header(intro: str) -> str:
 
 def _interest_context_step_body(step: str) -> str:
     bodies = {
-        "load": _interest_context_load_body,
+        "load_archive": _interest_context_archive_body,
+        "load_link": _interest_context_link_body,
         "check": _interest_context_check_body,
         "prepare": _interest_context_prepare_body,
         "core": _interest_context_core_body,
         "candidates": _interest_context_candidates_body,
         "reviews": _interest_context_reviews_body,
         "items": _interest_context_items_body,
-        "analyze": _interest_context_analysis_body,
+        "analysis_upload": _interest_context_analysis_upload_body,
+        "analysis_runs": _interest_context_analysis_runs_body,
+        "analysis_matches": _interest_context_analysis_matches_body,
         "llm": _interest_context_llm_body,
+        "brief": _interest_context_brief_body,
+        "intent_layers": _interest_context_intent_layers_body,
+        "intent_runs": _interest_context_intent_runs_body,
+        "intent_matches": _interest_context_intent_matches_body,
     }
     return bodies[step]()
 
 
-def _interest_context_load_body() -> str:
+def _interest_context_link_body() -> str:
     return """
                   <section class="detail-section">
                     <h3>Telegram-ссылка</h3>
                     <p class="muted">
-                      Источник ставится на raw-выгрузку: JSON/JSONL/parquet без AI, лидов и уведомлений.
+                      Один источник по ссылке или @username. Результат этого шага - source и raw export job.
                     </p>
                     <form id="interest-context-telegram-source-form" class="material-form interest-source-form">
                       <md-outlined-text-field name="input_ref" label="Ссылка или @username" required
@@ -434,9 +532,22 @@ def _interest_context_load_body() -> str:
                     </form>
                   </section>
                   <section class="detail-section">
+                    <div class="section-head">
+                      <h3>Следующий шаг</h3>
+                      <a class="interest-next-link" href="/interest-contexts/check">Проверить raw-данные</a>
+                    </div>
+                    <p class="muted">Когда raw-выгрузка завершится, проверьте parquet, вложения и примеры сообщений.</p>
+                  </section>
+    """
+
+
+def _interest_context_archive_body() -> str:
+    return """
+                  <section class="detail-section">
                     <h3>Архив Telegram Desktop</h3>
                     <p class="muted">
-                      Пользователь может сам выгрузить чат в Telegram Desktop, заархивировать папку и загрузить сюда.
+                      Один ZIP-архив источника интересов. Результат шага - raw/parquet и, при включенной галочке,
+                      рабочие сообщения для следующих этапов.
                     </p>
                     <form id="interest-context-telegram-archive-form" class="material-form interest-source-form">
                       <md-outlined-text-field name="display_name" label="Название архива"
@@ -468,10 +579,10 @@ def _interest_context_load_body() -> str:
                   </section>
                   <section class="detail-section">
                     <div class="section-head">
-                      <h3>Добавленные источники</h3>
-                      <a class="interest-next-link" href="/interest-contexts/check">Дальше: проверка данных</a>
+                      <h3>Следующий шаг</h3>
+                      <a class="interest-next-link" href="/interest-contexts/check">Проверить raw-данные</a>
                     </div>
-                    <div id="interest-context-source-list" class="resource-list" aria-live="polite"></div>
+                    <p class="muted">После загрузки проверьте, сколько сообщений и вложений попало в raw/parquet.</p>
                   </section>
     """
 
@@ -535,9 +646,9 @@ def _interest_context_core_body() -> str:
                   <section class="detail-section">
                     <div class="section-head">
                       <div>
-                        <h3>Формирование ядра интересов</h3>
+                        <h3>Rule-based сборка ядра</h3>
                         <p class="muted">
-                          Собирает кандидатов из подготовленных данных. Это rule-based этап без LLM.
+                          Одно действие: собрать черновик кандидатов из подготовленных данных. LLM здесь не используется.
                         </p>
                       </div>
                       <div class="button-row">
@@ -545,19 +656,14 @@ def _interest_context_core_body() -> str:
                           <md-icon slot="icon">hub</md-icon>
                           Сформировать ядро
                         </md-filled-button>
-                        <md-filled-tonal-button id="interest-context-enhance-draft-llm" type="button">
-                          <md-icon slot="icon">auto_fix_high</md-icon>
-                          Улучшить через LLM
-                        </md-filled-tonal-button>
                       </div>
                     </div>
                     <div id="interest-context-draft-review" class="draft-review-panel" data-summary-only="true" aria-live="polite"></div>
-                    <div id="interest-context-llm-enhance-review" class="draft-review-panel" data-summary-only="true" aria-live="polite"></div>
                   </section>
                   <section class="detail-section">
                     <div class="section-head">
-                      <h3>Страницы ревью</h3>
-                      <a class="interest-next-link" href="/interest-contexts/llm">LLM и бриф</a>
+                      <h3>Дальше по ядру</h3>
+                      <a class="interest-next-link" href="/interest-contexts/core/candidates">Открыть кандидатов</a>
                     </div>
                     <div class="table-list">
                       <a class="table-row linked-row" href="/interest-contexts/core/candidates">
@@ -570,7 +676,7 @@ def _interest_context_core_body() -> str:
                       <a class="table-row linked-row" href="/interest-contexts/core/reviews">
                         <div>
                           <strong>LLM-рекомендации</strong>
-                          <p class="muted">Одобрение и отклонение рекомендаций LLM отдельной страницей.</p>
+                          <p class="muted">Отдельный экран для запуска и ревью LLM-улучшения.</p>
                         </div>
                         <span>Открыть</span>
                       </a>
@@ -623,10 +729,14 @@ def _interest_context_reviews_body() -> str:
                       <div>
                         <h3>LLM-рекомендации</h3>
                         <p class="muted">
-                          Постраничная проверка рекомендаций модели: одобрить, отклонить или вернуть на ревью.
+                          Одно действие и один артефакт: прогнать кандидатов через LLM и разбирать рекомендации постранично.
                         </p>
                       </div>
                       <div class="button-row">
+                        <md-filled-tonal-button id="interest-context-enhance-draft-llm" type="button">
+                          <md-icon slot="icon">auto_fix_high</md-icon>
+                          Запустить LLM-рекомендации
+                        </md-filled-tonal-button>
                         <md-outlined-button id="interest-context-review-items-refresh" type="button">
                           <md-icon slot="icon">refresh</md-icon>
                           Обновить
@@ -666,7 +776,7 @@ def _interest_context_items_body() -> str:
     """
 
 
-def _interest_context_analysis_body() -> str:
+def _interest_context_analysis_upload_body() -> str:
     return """
                   <section class="detail-section">
                     <div class="section-head">
@@ -699,10 +809,22 @@ def _interest_context_analysis_body() -> str:
                   </section>
                   <section class="detail-section">
                     <div class="section-head">
+                      <h3>Следующий шаг</h3>
+                      <a class="interest-next-link" href="/interest-contexts/analyze/runs">Открыть запуски анализа</a>
+                    </div>
+                    <p class="muted">После загрузки откройте запуск анализа, затем отдельно смотрите найденные сообщения.</p>
+                  </section>
+    """
+
+
+def _interest_context_analysis_runs_body() -> str:
+    return """
+                  <section class="detail-section">
+                    <div class="section-head">
                       <div>
                         <h3>Запуски анализа</h3>
                         <p class="muted">
-                          Это первый слой: широкое совпадение сообщений с рабочим ядром интересов.
+                          Один артефакт: список широких запусков анализа по рабочему ядру.
                         </p>
                       </div>
                       <md-outlined-button id="interest-analysis-refresh" type="button">
@@ -714,11 +836,49 @@ def _interest_context_analysis_body() -> str:
                   </section>
                   <section class="detail-section">
                     <div class="section-head">
+                      <h3>Следующий шаг</h3>
+                      <a class="interest-next-link" href="/interest-contexts/analyze/matches">Открыть широкие совпадения</a>
+                    </div>
+                    <p class="muted">По умолчанию используется последний успешный запуск анализа.</p>
+                  </section>
+    """
+
+
+def _interest_context_analysis_matches_body() -> str:
+    return """
+                  <section class="detail-section">
+                    <div class="section-head">
                       <div>
-                        <h3>Слои намерений</h3>
+                        <h3>Широкие совпадения</h3>
                         <p class="muted">
-                          Это второй настраиваемый слой поверх широкого анализа: он сужает выборку по намерению
-                          оператора, например “ищет помощь”, “хочет заказать”, “сравнивает цену”.
+                          Один артефакт: сообщения, которые совпали с рабочим ядром интересов. Показ по 10 строк.
+                        </p>
+                      </div>
+                      <md-outlined-button id="interest-analysis-refresh" type="button">
+                        <md-icon slot="icon">refresh</md-icon>
+                        Обновить
+                      </md-outlined-button>
+                    </div>
+                    <div id="interest-analysis-matches" class="draft-review-panel" aria-live="polite"></div>
+                  </section>
+                  <section class="detail-section">
+                    <div class="section-head">
+                      <h3>Следующий шаг</h3>
+                      <a class="interest-next-link" href="/interest-contexts/intent-layers">Настроить слой намерений</a>
+                    </div>
+                    <p class="muted">Слой намерений сужает широкий список до сообщений с нужным типом намерения.</p>
+                  </section>
+    """
+
+
+def _interest_context_intent_layers_body() -> str:
+    return """
+                  <section class="detail-section">
+                    <div class="section-head">
+                      <div>
+                        <h3>Слой намерений</h3>
+                        <p class="muted">
+                          Один артефакт: настраиваемое правило, которое применяется к последнему широкому запуску анализа.
                         </p>
                       </div>
                       <md-outlined-button id="interest-intent-refresh" type="button">
@@ -799,34 +959,55 @@ def _interest_context_analysis_body() -> str:
                   </section>
                   <section class="detail-section">
                     <div class="section-head">
+                      <h3>Следующий шаг</h3>
+                      <a class="interest-next-link" href="/interest-contexts/intent-runs">Открыть запуски намерений</a>
+                    </div>
+                    <p class="muted">После применения слоя откройте отдельный список запусков намерений.</p>
+                  </section>
+    """
+
+
+def _interest_context_intent_runs_body() -> str:
+    return """
+                  <section class="detail-section">
+                    <div class="section-head">
                       <div>
                         <h3>Запуски слоя намерений</h3>
                         <p class="muted">
-                          Выберите широкий запуск выше, затем запустите нужный слой намерений.
+                          Один артефакт: история применений слоя намерений к широким запускам анализа.
                         </p>
                       </div>
+                      <md-outlined-button id="interest-intent-refresh" type="button">
+                        <md-icon slot="icon">refresh</md-icon>
+                        Обновить
+                      </md-outlined-button>
                     </div>
                     <div id="interest-intent-runs" class="draft-review-panel" aria-live="polite"></div>
                   </section>
                   <section class="detail-section">
                     <div class="section-head">
-                      <div>
-                        <h3>Сообщения широкого слоя</h3>
-                        <p class="muted">
-                          Показаны сообщения, элемент ядра, совпавшая фраза и локальный score.
-                        </p>
-                      </div>
+                      <h3>Следующий шаг</h3>
+                      <a class="interest-next-link" href="/interest-contexts/intent-matches">Открыть сообщения намерений</a>
                     </div>
-                    <div id="interest-analysis-matches" class="draft-review-panel" aria-live="polite"></div>
+                    <p class="muted">По умолчанию используется последний успешный запуск слоя намерений.</p>
                   </section>
+    """
+
+
+def _interest_context_intent_matches_body() -> str:
+    return """
                   <section class="detail-section">
                     <div class="section-head">
                       <div>
                         <h3>Сообщения слоя намерений</h3>
                         <p class="muted">
-                          Здесь должны появляться более узкие результаты после применения выбранного слоя намерений.
+                          Один артефакт: более узкий список сообщений с объяснением include/context/score.
                         </p>
                       </div>
+                      <md-outlined-button id="interest-intent-refresh" type="button">
+                        <md-icon slot="icon">refresh</md-icon>
+                        Обновить
+                      </md-outlined-button>
                     </div>
                     <div id="interest-intent-matches" class="draft-review-panel" aria-live="polite"></div>
                   </section>
@@ -877,11 +1058,23 @@ def _interest_context_llm_body() -> str:
                   </section>
                   <section class="detail-section">
                     <div class="section-head">
+                      <h3>Следующий шаг</h3>
+                      <a class="interest-next-link" href="/interest-contexts/brief">Открыть бриф</a>
+                    </div>
+                    <p class="muted">После подключения LLM сформируйте или вручную заполните бриф ядра интересов.</p>
+                  </section>
+    """
+
+
+def _interest_context_brief_body() -> str:
+    return """
+                  <section class="detail-section">
+                    <div class="section-head">
                       <div>
                         <h3>LLM-бриф ядра интересов</h3>
                         <p class="muted">
-                          Редактируемый контекст для моделей: чем занимается проект, что считать интересом,
-                          поводом связаться и шумом. Его можно ввести вручную или сформировать из подготовленных данных.
+                          Один артефакт: редактируемый контекст для моделей. Он объясняет, что считать интересом,
+                          поводом связаться и шумом.
                         </p>
                       </div>
                       <md-filled-tonal-button id="interest-core-brief-generate" type="button">
@@ -906,20 +1099,21 @@ def _interest_context_llm_body() -> str:
                   </section>
                   <section class="detail-section">
                     <div class="section-head">
-                      <h3>Источники контекста</h3>
+                      <h3>Следующий шаг</h3>
+                      <a class="interest-next-link" href="/interest-contexts/core">Собрать ядро</a>
                     </div>
-                    <div id="interest-context-source-list" class="resource-list" aria-live="polite"></div>
+                    <p class="muted">Бриф используется при LLM-рекомендациях и должен быть понятен оператору.</p>
                   </section>
     """
 
 
 def _interest_context_stage_panel(active_step: str) -> str:
     step_rows = "".join(
-        f"""<div class="table-row {"is-active" if step == active_step else ""}">
+        f"""<a class="table-row linked-row {"is-active" if step == active_step else ""}" data-interest-step-link="{step}" href="{path}">
                         <div><strong>{label}</strong><p class="muted">{_interest_context_stage_hint(step)}</p></div>
                         <span>{index}</span>
-                      </div>"""
-        for index, (step, _path, label) in enumerate(_INTEREST_CONTEXT_STEPS, start=1)
+                      </a>"""
+        for index, (step, path, label) in enumerate(_INTEREST_CONTEXT_STEPS, start=1)
     )
     return f"""
                 <aside class="side-pane operations-signals interest-stage-panel" aria-label="Сценарий">
@@ -940,15 +1134,22 @@ def _interest_context_stage_panel(active_step: str) -> str:
 
 def _interest_context_stage_hint(step: str) -> str:
     return {
-        "load": "канал, чат или архив",
+        "load_archive": "ZIP источника интересов",
+        "load_link": "канал или чат по ссылке",
         "check": "raw/parquet, вложения, примеры",
         "prepare": "нормализация, индекс, сущности",
+        "llm": "провайдер и модель",
+        "brief": "контекст для модели",
         "core": "запуск и статус ядра",
         "candidates": "rule-based список по страницам",
         "reviews": "проверка LLM-рекомендаций",
         "items": "утвержденное ядро",
-        "analyze": "ZIP чата и совпадения",
-        "llm": "бриф и будущие промпты",
+        "analysis_upload": "ZIP чата для проверки",
+        "analysis_runs": "запуски широкого слоя",
+        "analysis_matches": "сообщения широкого слоя",
+        "intent_layers": "настройка фильтра",
+        "intent_runs": "запуски фильтра",
+        "intent_matches": "сообщения с намерением",
     }[step]
 
 

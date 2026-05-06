@@ -39,8 +39,9 @@ def test_login_page_and_static_assets_are_served(tmp_path):
     assert "Noto+Sans" in login_response.text
     assert "Roboto" not in login_response.text
     assert "Material+Symbols+Outlined" in login_response.text
-    assert "icon_names=add,archive,article,check_circle,close,database" in login_response.text
-    assert "forum,model_training" in login_response.text
+    assert "icon_names=add,archive,article" in login_response.text
+    assert "model_training" in login_response.text
+    assert "forum" in login_response.text
     assert 'type="module" src="/static/vendor/material-web.js"' in login_response.text
     assert css_response.status_code == 200
     assert "grid-template-columns" in css_response.text
@@ -191,11 +192,12 @@ def test_workspace_admin_sections_are_protected_and_render_shells(tmp_path):
     assert "https://web.telegram.org/k/" in resources_response.text
     assert "https://my.telegram.org/auth?to=apps" in resources_response.text
     interest_contexts_response = client.get("/interest-contexts")
+    interest_source_link_response = client.get("/interest-contexts/source-link")
     assert interest_contexts_response.status_code == 200
     assert 'data-page="interest-contexts"' in interest_contexts_response.text
     assert 'id="interest-context-create-form"' in interest_contexts_response.text
-    assert 'id="interest-context-telegram-source-form"' in interest_contexts_response.text
     assert 'id="interest-context-telegram-archive-form"' in interest_contexts_response.text
+    assert 'id="interest-context-telegram-source-form"' in interest_source_link_response.text
     assert users_response.status_code == 200
     assert 'data-page="users"' in users_response.text
     assert 'id="telegram-admin-form"' in users_response.text
