@@ -3760,6 +3760,13 @@ function initInterestContexts() {
     intentMatchesLimit: 10,
     intentMatchesOffset: 0,
     selectedIntentRunId: null,
+    intentReviewLimit: 10,
+    intentReviewOffset: 0,
+    intentValidationRunsLimit: 10,
+    intentValidationRunsOffset: 0,
+    selectedIntentValidationRunId: null,
+    intentValidationRecommendationsLimit: 10,
+    intentValidationRecommendationsOffset: 0,
     intentExclusionsLimit: 10,
     intentExclusionsOffset: 0,
     prepTextsLimit: 10,
@@ -3815,6 +3822,35 @@ function initInterestContexts() {
   document
     .querySelector("#interest-intent-matches")
     ?.addEventListener("click", (event) => handleInterestIntentMatchesClick(event, state));
+  document
+    .querySelector("#interest-intent-review-refresh")
+    ?.addEventListener("click", () => loadInterestIntentReview(state));
+  document
+    .querySelector("#interest-intent-review")
+    ?.addEventListener("click", (event) => handleInterestIntentReviewClick(event, state));
+  document
+    .querySelector("#interest-intent-validation-form")
+    ?.addEventListener("submit", (event) => generateInterestIntentValidation(event, state));
+  document
+    .querySelector("#interest-intent-validation-runs-refresh")
+    ?.addEventListener("click", () => loadInterestIntentValidationRuns(state));
+  document
+    .querySelector("#interest-intent-validation-runs")
+    ?.addEventListener("click", (event) => handleInterestIntentValidationRunsClick(event, state));
+  document
+    .querySelector("#interest-intent-validation-recommendations-refresh")
+    ?.addEventListener("click", () => loadInterestIntentValidationRecommendations(state));
+  document
+    .querySelector("#interest-intent-validation-recommendations")
+    ?.addEventListener("click", (event) =>
+      handleInterestIntentValidationRecommendationsClick(event, state)
+    );
+  document
+    .querySelector("#interest-intent-ai-filter-refresh")
+    ?.addEventListener("click", () => loadInterestIntentAiFilter(state));
+  document
+    .querySelector("#interest-intent-ai-filter")
+    ?.addEventListener("click", (event) => handleInterestIntentAiFilterClick(event, state));
   document
     .querySelector("#interest-intent-exclusions-refresh")
     ?.addEventListener("click", () => loadInterestIntentExclusions(state));
@@ -4025,6 +4061,22 @@ async function loadInterestContextDetail(contextId, state) {
     if (state.selectedIntentRunId) {
       await loadInterestIntentMatches(state, state.selectedIntentRunId);
     }
+  }
+  if (state.step === "intent_review") {
+    state.intentReviewOffset = 0;
+    state.selectedIntentRunId = null;
+    await loadInterestIntentReview(state);
+  }
+  if (state.step === "intent_ai_validation") {
+    state.intentValidationRunsOffset = 0;
+    await loadInterestIntentValidationRuns(state);
+  }
+  if (state.step === "intent_ai_recommendations") {
+    state.intentValidationRecommendationsOffset = 0;
+    await loadInterestIntentValidationRecommendations(state);
+  }
+  if (state.step === "intent_ai_filter") {
+    await loadInterestIntentAiFilter(state);
   }
   if (state.step === "intent_exclusions") {
     state.intentExclusionsOffset = 0;
@@ -5195,6 +5247,452 @@ async function previewIntentMatchExclusion(matchId, state, panel) {
     ${samples.length ? `<br>Что еще зацепит: ${samples.map((item) => item.message_url ? `<a href="${escapeHtml(item.message_url)}" target="_blank" rel="noreferrer">#${escapeHtml(String(item.telegram_message_id))}</a>` : `#${escapeHtml(String(item.telegram_message_id))}`).join(", ")}` : ""}
     <br><a href="${escapeHtml(interestContextStepHref("/interest-contexts/intent-exclusions", state.selectedId))}">Открыть страницу применения исключений</a>
     <br><span class="muted">Изменение сейчас не применяется автоматически: сначала проверяем влияние, потом переносим условие в слой.</span>`;
+}
+
+async function ensureSelectedIntentRun(state) {
+  if (state.selectedIntentRunId) return state.selectedIntentRunId;
+  if (!state.selectedId) return null;
+  const payload = await api(
+    `/api/interest-contexts/${encodeURIComponent(state.selectedId)}/intent-runs?limit=1&offset=0`
+  );
+  state.selectedIntentRunId = payload.items?.[0]?.id || null;
+  return state.selectedIntentRunId;
+}
+
+async function loadInterestIntentReview(state) {
+  const target = document.querySelector("#interest-intent-review");
+  const status = document.querySelector("#interest-intent-status") || document.querySelector("#interest-context-status");
+  if (!target || !state.selectedId) return;
+  target.innerHTML = '<div class="empty-state">Загружаю сообщения для разметки...</div>';
+  try {
+    const runId = await ensureSelectedIntentRun(state);
+    if (!runId) {
+      target.innerHTML = '<div class="empty-state">Сначала нужен запуск слоя намерений.</div>';
+      return;
+    }
+    const params = new URLSearchParams({
+      limit: String(state.intentReviewLimit),
+      offset: String(state.intentReviewOffset),
+    });
+    const payload = await api(
+      `/api/interest-contexts/${encodeURIComponent(state.selectedId)}/intent-runs/${encodeURIComponent(runId)}/matches?${params.toString()}`
+    );
+    renderInterestIntentReview(payload, state);
+  } catch (error) {
+    target.innerHTML = `<div class="empty-state">${escapeHtml(error.message)}</div>`;
+    if (status) status.textContent = error.message;
+  }
+}
+
+function renderInterestIntentReview(payload, state) {
+  const target = document.querySelector("#interest-intent-review");
+  if (!target) return;
+  const items = payload.items || [];
+  const pagination =
+    payload.pagination || { limit: state.intentReviewLimit, offset: 0, total: 0 };
+  const reviewedCount = items.filter((item) => item.operator_review_json).length;
+  target.innerHTML = `<section class="draft-review-section">
+    <div class="operations-summary raw-review-summary">
+      <div class="ops-metric-row">
+        ${renderOpsMetric("На странице", items.length, "сообщений")}
+        ${renderOpsMetric("Размечено", reviewedCount, "на странице")}
+        ${renderOpsMetric("Run", shortId(payload.run?.id || ""), "слой намерений")}
+      </div>
+    </div>
+    ${items.length ? `<div class="table-list">${items.map(renderInterestIntentReviewRow).join("")}</div>` : '<div class="empty-state">Нет сообщений для разметки.</div>'}
+    ${renderPageControls(pagination, "intent-review")}
+  </section>`;
+}
+
+function renderInterestIntentReviewRow(item) {
+  const review = item.operator_review_json || null;
+  const decision = review?.decision || "not_reviewed";
+  return `<div class="table-row draft-item-row">
+    <div>
+      <strong>${escapeHtml(item.canonical_name || "элемент ядра")}</strong>
+      <p class="muted">${escapeHtml([`сообщение #${item.telegram_message_id || "н/д"}`, time(item.message_date), item.sender_id].filter(Boolean).join(" / "))}</p>
+      <p>${escapeHtml(shortText(item.message_text || "без текста", 520))}</p>
+      <div class="badges">
+        ${badge(decision === "correct" ? "правильное" : decision === "incorrect" ? "неправильное" : "не проверено", decision === "incorrect" ? "is-warn" : "")}
+        ${badge(`score ${formatScore(item.score)}`)}
+        ${badge(`широкий ${formatScore(item.broad_score)}`)}
+        ${item.category ? badge(item.category) : ""}
+      </div>
+      ${renderTelegramMessageLink(item)}
+      <label class="material-select-line">Комментарий к разметке
+        <input data-intent-review-comment="${escapeHtml(item.id)}" value="${escapeHtml(review?.comment || "")}" placeholder="Почему правильно или неправильно">
+      </label>
+      <div class="row-actions">
+        <md-filled-tonal-button type="button" data-intent-review-decision="correct" data-intent-match-id="${escapeHtml(item.id)}">
+          Правильное
+        </md-filled-tonal-button>
+        <md-outlined-button type="button" data-intent-review-decision="incorrect" data-intent-match-id="${escapeHtml(item.id)}">
+          Неправильное
+        </md-outlined-button>
+      </div>
+      <div id="intent-review-status-${escapeHtml(item.id)}" class="draft-evidence" aria-live="polite"></div>
+    </div>
+  </div>`;
+}
+
+function handleInterestIntentReviewClick(event, state) {
+  const pageButton = event.target.closest("[data-intent-review-page-action]");
+  if (pageButton) {
+    const action = pageButton.dataset.intentReviewPageAction;
+    if (action === "prev") {
+      state.intentReviewOffset = Math.max(0, state.intentReviewOffset - state.intentReviewLimit);
+    }
+    if (action === "next") {
+      state.intentReviewOffset += state.intentReviewLimit;
+    }
+    loadInterestIntentReview(state);
+    return;
+  }
+  const decisionButton = event.target.closest("[data-intent-review-decision]");
+  if (decisionButton) {
+    saveInterestIntentReview(decisionButton, state);
+  }
+}
+
+async function saveInterestIntentReview(button, state) {
+  const matchId = button.dataset.intentMatchId;
+  const decision = button.dataset.intentReviewDecision;
+  const status = document.querySelector(`#intent-review-status-${CSS.escape(matchId)}`);
+  const input = document.querySelector(`[data-intent-review-comment="${CSS.escape(matchId)}"]`);
+  if (!matchId || !decision || !state.selectedId) return;
+  button.disabled = true;
+  try {
+    const runId = await ensureSelectedIntentRun(state);
+    await api(
+      `/api/interest-contexts/${encodeURIComponent(state.selectedId)}/intent-runs/${encodeURIComponent(runId)}/matches/${encodeURIComponent(matchId)}/review`,
+      {
+        method: "POST",
+        body: JSON.stringify({ decision, comment: String(input?.value || "").trim() || null }),
+      }
+    );
+    if (status) status.textContent = decision === "correct" ? "Записано: правильное." : "Записано: неправильное.";
+    await loadInterestIntentReview(state);
+  } catch (error) {
+    button.disabled = false;
+    if (status) status.textContent = error.message;
+  }
+}
+
+async function loadInterestIntentValidationRuns(state) {
+  const target = document.querySelector("#interest-intent-validation-runs");
+  const status = document.querySelector("#interest-intent-validation-status") || document.querySelector("#interest-context-status");
+  if (!target || !state.selectedId) return;
+  target.innerHTML = '<div class="empty-state">Загружаю AI-запуски...</div>';
+  try {
+    const params = new URLSearchParams({
+      limit: String(state.intentValidationRunsLimit),
+      offset: String(state.intentValidationRunsOffset),
+    });
+    const payload = await api(
+      `/api/interest-contexts/${encodeURIComponent(state.selectedId)}/intent-validation-runs?${params.toString()}`
+    );
+    renderInterestIntentValidationRuns(payload, state);
+  } catch (error) {
+    target.innerHTML = `<div class="empty-state">${escapeHtml(error.message)}</div>`;
+    if (status) status.textContent = error.message;
+  }
+}
+
+function renderInterestIntentValidationRuns(payload, state) {
+  const target = document.querySelector("#interest-intent-validation-runs");
+  if (!target) return;
+  const items = payload.items || [];
+  const pagination =
+    payload.pagination || { limit: state.intentValidationRunsLimit, offset: 0, total: 0 };
+  const firstRun = items[0]?.id || state.selectedIntentValidationRunId;
+  if (!state.selectedIntentValidationRunId && firstRun) state.selectedIntentValidationRunId = firstRun;
+  target.innerHTML = `<section class="draft-review-section">
+    <div class="operations-summary raw-review-summary">
+      <div class="ops-metric-row">
+        ${renderOpsMetric("Запуски", pagination.total || 0, "AI-валидация")}
+        ${renderOpsMetric("На странице", items.length, "run")}
+      </div>
+    </div>
+    ${items.length ? `<div class="table-list">${items.map((item) => renderInterestIntentValidationRunRow(item, state)).join("")}</div>` : '<div class="empty-state">AI-валидация еще не запускалась.</div>'}
+    ${renderPageControls(pagination, "intent-validation-runs")}
+  </section>`;
+}
+
+function renderInterestIntentValidationRunRow(item, state) {
+  const active = item.id === state.selectedIntentValidationRunId ? "is-active" : "";
+  return `<button class="table-row linked-row analysis-run-row ${active}" type="button" data-intent-validation-run-id="${escapeHtml(item.id)}">
+    <div>
+      <strong>${escapeHtml(item.model || "AI-валидация")}</strong>
+      <p class="muted">${escapeHtml([time(item.created_at), `run ${item.id}`, `intent ${shortId(item.source_intent_run_id)}`].filter(Boolean).join(" / "))}</p>
+      <div class="badges">
+        ${badge(label(item.status || "unknown"), item.status === "failed" ? "is-danger" : "")}
+        ${badge(`${item.recommendation_count || 0} рекомендаций`)}
+        ${item.created_layer_id ? badge(`слой ${shortId(item.created_layer_id)}`) : ""}
+      </div>
+      ${item.error ? `<p class="draft-evidence"><strong>Ошибка:</strong> ${escapeHtml(item.error)}</p>` : ""}
+    </div>
+    <span>Открыть</span>
+  </button>`;
+}
+
+function handleInterestIntentValidationRunsClick(event, state) {
+  const pageButton = event.target.closest("[data-intent-validation-runs-page-action]");
+  if (pageButton) {
+    const action = pageButton.dataset.intentValidationRunsPageAction;
+    if (action === "prev") {
+      state.intentValidationRunsOffset = Math.max(
+        0,
+        state.intentValidationRunsOffset - state.intentValidationRunsLimit
+      );
+    }
+    if (action === "next") {
+      state.intentValidationRunsOffset += state.intentValidationRunsLimit;
+    }
+    loadInterestIntentValidationRuns(state);
+    return;
+  }
+  const runButton = event.target.closest("[data-intent-validation-run-id]");
+  if (!runButton) return;
+  state.selectedIntentValidationRunId = runButton.dataset.intentValidationRunId;
+  renderInterestIntentValidationRunSelection(state.selectedIntentValidationRunId);
+}
+
+function renderInterestIntentValidationRunSelection(runId) {
+  document.querySelectorAll("[data-intent-validation-run-id]").forEach((row) => {
+    row.classList.toggle("is-active", row.dataset.intentValidationRunId === runId);
+  });
+}
+
+async function generateInterestIntentValidation(event, state) {
+  event.preventDefault();
+  const status = document.querySelector("#interest-intent-validation-status") || document.querySelector("#interest-context-status");
+  if (!state.selectedId) return;
+  try {
+    const runId = await ensureSelectedIntentRun(state);
+    if (!runId) throw new Error("Сначала нужен запуск слоя намерений");
+    if (status) status.textContent = "AI-валидация выполняется по запросу...";
+    const form = event.currentTarget;
+    const payload = await api(
+      `/api/interest-contexts/${encodeURIComponent(state.selectedId)}/intent-runs/${encodeURIComponent(runId)}/validation-runs`,
+      {
+        method: "POST",
+        body: JSON.stringify({
+          max_reviews: Number(formValue(form, "max_reviews") || 80),
+          max_tokens: Number(formValue(form, "max_tokens") || 4096),
+          temperature: Number(formValue(form, "temperature") || 0),
+        }),
+      }
+    );
+    state.selectedIntentValidationRunId = payload.run?.id || null;
+    if (status) status.textContent = "AI-рекомендации сформированы.";
+    await loadInterestIntentValidationRuns(state);
+  } catch (error) {
+    if (status) status.textContent = error.message;
+  }
+}
+
+async function ensureSelectedIntentValidationRun(state) {
+  if (state.selectedIntentValidationRunId) return state.selectedIntentValidationRunId;
+  if (!state.selectedId) return null;
+  const payload = await api(
+    `/api/interest-contexts/${encodeURIComponent(state.selectedId)}/intent-validation-runs?limit=1&offset=0`
+  );
+  state.selectedIntentValidationRunId = payload.items?.[0]?.id || null;
+  return state.selectedIntentValidationRunId;
+}
+
+async function loadInterestIntentValidationRecommendations(state) {
+  const target = document.querySelector("#interest-intent-validation-recommendations");
+  const status = document.querySelector("#interest-context-status");
+  if (!target || !state.selectedId) return;
+  target.innerHTML = '<div class="empty-state">Загружаю AI-рекомендации...</div>';
+  try {
+    const runId = await ensureSelectedIntentValidationRun(state);
+    if (!runId) {
+      target.innerHTML = '<div class="empty-state">Сначала запустите AI-валидацию.</div>';
+      return;
+    }
+    const params = new URLSearchParams({
+      limit: String(state.intentValidationRecommendationsLimit),
+      offset: String(state.intentValidationRecommendationsOffset),
+    });
+    const payload = await api(
+      `/api/interest-contexts/${encodeURIComponent(state.selectedId)}/intent-validation-runs/${encodeURIComponent(runId)}/recommendations?${params.toString()}`
+    );
+    renderInterestIntentValidationRecommendations(payload, state);
+  } catch (error) {
+    target.innerHTML = `<div class="empty-state">${escapeHtml(error.message)}</div>`;
+    if (status) status.textContent = error.message;
+  }
+}
+
+function renderInterestIntentValidationRecommendations(payload, state) {
+  const target = document.querySelector("#interest-intent-validation-recommendations");
+  if (!target) return;
+  const items = payload.items || [];
+  const pagination =
+    payload.pagination || { limit: state.intentValidationRecommendationsLimit, offset: 0, total: 0 };
+  const summary = payload.summary || {};
+  target.innerHTML = `<section class="draft-review-section">
+    <div class="operations-summary raw-review-summary">
+      <div class="ops-metric-row">
+        ${renderOpsMetric("Всего", summary.total || 0, "рекомендаций")}
+        ${renderOpsMetric("Одобрено", summary.approved || 0, "готово к слою")}
+        ${renderOpsMetric("Ожидает", summary.pending_review || 0, "на ревью")}
+      </div>
+    </div>
+    ${items.length ? `<div class="table-list">${items.map(renderInterestIntentValidationRecommendationRow).join("")}</div>` : '<div class="empty-state">Рекомендаций пока нет.</div>'}
+    ${renderPageControls(pagination, "intent-validation-recommendations")}
+  </section>`;
+}
+
+function renderInterestIntentValidationRecommendationRow(item) {
+  const changes = item.proposed_changes_json || {};
+  const preview = item.impact_preview_json || {};
+  return `<div class="table-row draft-item-row">
+    <div>
+      <strong>${escapeHtml(item.title || item.recommendation_type)}</strong>
+      <p class="muted">${escapeHtml([label(item.recommendation_type), item.confidence, time(item.created_at)].filter(Boolean).join(" / "))}</p>
+      <p>${escapeHtml(item.rationale || "без объяснения")}</p>
+      <div class="badges">
+        ${badge(label(item.status || "pending_review"), item.status === "rejected" ? "is-danger" : item.status === "pending_review" ? "is-warn" : "")}
+        ${badge(`уберет ${preview.removed_count || 0}/${preview.total_matches || 0}`)}
+        ${badge(`wrong- ${preview.reviewed_incorrect_removed || 0}`)}
+        ${badge(`correct- ${preview.reviewed_correct_removed || 0}`, preview.reviewed_correct_removed ? "is-danger" : "")}
+      </div>
+      ${renderProposedChanges(changes)}
+      ${preview.removed_samples?.length ? `<p class="draft-evidence"><strong>Примеры, которые исчезнут:</strong> ${preview.removed_samples.map((sample) => `#${escapeHtml(String(sample.telegram_message_id || "н/д"))}`).join(", ")}</p>` : ""}
+    </div>
+    <div class="row-actions">
+      <md-filled-tonal-button type="button" data-intent-validation-recommendation-status="approved" data-recommendation-id="${escapeHtml(item.id)}" ${item.status === "applied" ? "disabled" : ""}>
+        Одобрить
+      </md-filled-tonal-button>
+      <md-outlined-button type="button" data-intent-validation-recommendation-status="rejected" data-recommendation-id="${escapeHtml(item.id)}" ${item.status === "applied" ? "disabled" : ""}>
+        Отклонить
+      </md-outlined-button>
+    </div>
+  </div>`;
+}
+
+function renderProposedChanges(changes) {
+  const parts = [
+    renderSmallArray("exclude", changes.exclude_patterns),
+    renderSmallArray("exclude core", changes.exclude_core_names),
+    renderSmallArray("context", changes.context_patterns),
+    changes.require_context_match === true
+      ? '<p class="draft-evidence"><strong>require_context_match:</strong> true</p>'
+      : "",
+    changes.min_score ? `<p class="draft-evidence"><strong>min_score:</strong> ${escapeHtml(String(changes.min_score))}</p>` : "",
+  ];
+  return parts.filter(Boolean).join("");
+}
+
+function handleInterestIntentValidationRecommendationsClick(event, state) {
+  const pageButton = event.target.closest("[data-intent-validation-recommendations-page-action]");
+  if (pageButton) {
+    const action = pageButton.dataset.intentValidationRecommendationsPageAction;
+    if (action === "prev") {
+      state.intentValidationRecommendationsOffset = Math.max(
+        0,
+        state.intentValidationRecommendationsOffset - state.intentValidationRecommendationsLimit
+      );
+    }
+    if (action === "next") {
+      state.intentValidationRecommendationsOffset += state.intentValidationRecommendationsLimit;
+    }
+    loadInterestIntentValidationRecommendations(state);
+    return;
+  }
+  const statusButton = event.target.closest("[data-intent-validation-recommendation-status]");
+  if (statusButton) updateInterestIntentValidationRecommendation(statusButton, state);
+}
+
+async function updateInterestIntentValidationRecommendation(button, state) {
+  const recommendationId = button.dataset.recommendationId;
+  const status = button.dataset.intentValidationRecommendationStatus;
+  const line = document.querySelector("#interest-context-status");
+  if (!recommendationId || !status || !state.selectedId) return;
+  button.disabled = true;
+  try {
+    await api(
+      `/api/interest-contexts/${encodeURIComponent(state.selectedId)}/intent-validation-recommendations/${encodeURIComponent(recommendationId)}`,
+      {
+        method: "PATCH",
+        body: JSON.stringify({ status }),
+      }
+    );
+    if (line) line.textContent = status === "approved" ? "Рекомендация одобрена." : "Рекомендация отклонена.";
+    await loadInterestIntentValidationRecommendations(state);
+  } catch (error) {
+    button.disabled = false;
+    if (line) line.textContent = error.message;
+  }
+}
+
+async function loadInterestIntentAiFilter(state) {
+  const target = document.querySelector("#interest-intent-ai-filter");
+  const status = document.querySelector("#interest-context-status");
+  if (!target || !state.selectedId) return;
+  target.innerHTML = '<div class="empty-state">Загружаю готовность AI-фильтра...</div>';
+  try {
+    const runId = await ensureSelectedIntentValidationRun(state);
+    if (!runId) {
+      target.innerHTML = '<div class="empty-state">Сначала запустите AI-валидацию и одобрите рекомендации.</div>';
+      return;
+    }
+    const payload = await api(
+      `/api/interest-contexts/${encodeURIComponent(state.selectedId)}/intent-validation-runs/${encodeURIComponent(runId)}/recommendations?limit=100&offset=0`
+    );
+    renderInterestIntentAiFilter(payload);
+  } catch (error) {
+    target.innerHTML = `<div class="empty-state">${escapeHtml(error.message)}</div>`;
+    if (status) status.textContent = error.message;
+  }
+}
+
+function renderInterestIntentAiFilter(payload) {
+  const target = document.querySelector("#interest-intent-ai-filter");
+  if (!target) return;
+  const summary = payload.summary || {};
+  const run = payload.run || {};
+  target.innerHTML = `<section class="draft-review-section">
+    <div class="operations-summary raw-review-summary">
+      <div class="ops-metric-row">
+        ${renderOpsMetric("Одобрено", summary.approved || 0, "рекомендаций")}
+        ${renderOpsMetric("Отклонено", summary.rejected || 0, "рекомендаций")}
+        ${renderOpsMetric("Слой", run.created_layer_id ? shortId(run.created_layer_id) : "еще нет", "результат")}
+      </div>
+    </div>
+    <div class="button-row">
+      <md-filled-button type="button" data-create-ai-intent-layer="${escapeHtml(run.id || "")}" ${summary.approved ? "" : "disabled"}>
+        <md-icon slot="icon">filter_alt</md-icon>
+        Создать новый AI-фильтр
+      </md-filled-button>
+    </div>
+  </section>`;
+}
+
+function handleInterestIntentAiFilterClick(event, state) {
+  const button = event.target.closest("[data-create-ai-intent-layer]");
+  if (button) createInterestIntentAiFilter(button, state);
+}
+
+async function createInterestIntentAiFilter(button, state) {
+  const runId = button.dataset.createAiIntentLayer;
+  const status = document.querySelector("#interest-context-status");
+  if (!runId || !state.selectedId) return;
+  button.disabled = true;
+  try {
+    await api(
+      `/api/interest-contexts/${encodeURIComponent(state.selectedId)}/intent-validation-runs/${encodeURIComponent(runId)}/create-layer`,
+      { method: "POST" }
+    );
+    if (status) status.textContent = "AI-фильтр создан как новый слой намерений.";
+    await loadInterestIntentAiFilter(state);
+  } catch (error) {
+    button.disabled = false;
+    if (status) status.textContent = error.message;
+  }
 }
 
 async function loadInterestIntentExclusions(state) {
@@ -6518,17 +7016,23 @@ function renderPageControls(pagination, kind) {
             ? "data-intent-runs-page-action"
             : kind === "intent-matches"
               ? "data-intent-matches-page-action"
-              : kind === "intent-exclusions"
-                ? "data-intent-exclusions-page-action"
-                : kind === "prep-texts"
-                  ? "data-prep-texts-page-action"
-                  : kind === "prep-features"
-                    ? "data-prep-features-page-action"
-                    : kind === "prep-entities"
-                      ? "data-prep-entities-page-action"
-                      : kind === "prep-ngrams"
-                        ? "data-prep-ngrams-page-action"
-                        : "data-draft-page-action";
+              : kind === "intent-review"
+                ? "data-intent-review-page-action"
+                : kind === "intent-validation-runs"
+                  ? "data-intent-validation-runs-page-action"
+                  : kind === "intent-validation-recommendations"
+                    ? "data-intent-validation-recommendations-page-action"
+                    : kind === "intent-exclusions"
+                      ? "data-intent-exclusions-page-action"
+                      : kind === "prep-texts"
+                        ? "data-prep-texts-page-action"
+                        : kind === "prep-features"
+                          ? "data-prep-features-page-action"
+                          : kind === "prep-entities"
+                            ? "data-prep-entities-page-action"
+                            : kind === "prep-ngrams"
+                              ? "data-prep-ngrams-page-action"
+                              : "data-draft-page-action";
   return `<div class="queue-pagination">
     <span class="muted">${escapeHtml(`${from}-${to} из ${pagination.total}`)}</span>
     <div class="button-row">

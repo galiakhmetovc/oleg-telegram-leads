@@ -16,6 +16,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import desc, func, select, update
 from sqlalchemy.orm import Session
 
+from pur_leads.core.config import load_settings
 from pur_leads.core.time import utc_now
 from pur_leads.core.tracing import current_trace_json
 from pur_leads.models.interest_context_drafts import (
@@ -37,10 +38,16 @@ from pur_leads.services.interest_core_candidate_reviews import (
 from pur_leads.services.interest_core_chat_analysis import InterestCoreChatAnalysisService
 from pur_leads.services.interest_core_items import InterestCoreItemService
 from pur_leads.services.interest_intent_layers import InterestIntentLayerService
+from pur_leads.services.interest_intent_validation import (
+    REVIEW_ACTIONS,
+    InterestIntentValidationService,
+)
+from pur_leads.services.ai_chat_clients import build_zai_chat_client_for_route, select_ai_route
 from pur_leads.services.interest_core_briefs import (
     GENERATE_INTEREST_CORE_BRIEF_JOB,
     InterestCoreBriefService,
 )
+from pur_leads.services.leads import LeadService
 from pur_leads.models.telegram_sources import (
     monitored_sources_table,
     source_messages_table,
@@ -176,6 +183,24 @@ class InterestIntentLayerRunRequest(BaseModel):
 
 class InterestIntentExclusionApplyRequest(BaseModel):
     term: str = Field(min_length=1, max_length=200)
+
+
+class InterestIntentMatchReviewRequest(BaseModel):
+    decision: str = Field(pattern="^(correct|incorrect)$")
+    comment: str | None = Field(default=None, max_length=2000)
+
+
+class InterestIntentValidationRunRequest(BaseModel):
+    agent_key: str = "catalog_extractor"
+    route_role: str = "primary"
+    max_reviews: int = Field(default=80, ge=1, le=500)
+    max_tokens: int | None = Field(default=None, ge=1, le=32000)
+    temperature: float | None = Field(default=None, ge=0.0, le=2.0)
+
+
+class InterestIntentValidationRecommendationUpdateRequest(BaseModel):
+    status: str = Field(pattern="^(pending_review|approved|rejected)$")
+    note: str | None = Field(default=None, max_length=2000)
 
 
 @router.get("")
@@ -1104,6 +1129,60 @@ def list_interest_intent_matches(
     return jsonable_encoder(payload)
 
 
+@router.post("/{context_id}/intent-runs/{run_id}/matches/{match_id}/review")
+def review_interest_intent_match(
+    context_id: str,
+    run_id: str,
+    match_id: str,
+    payload: InterestIntentMatchReviewRequest,
+    validated: SessionValidationResult = Depends(current_admin),
+    session: Session = Depends(get_session),
+) -> dict[str, Any]:
+    context = InterestContextService(session).repository.get(context_id)
+    if context is None:
+        raise HTTPException(status_code=404, detail="Interest context not found")
+    target = _intent_match_row(session, context_id=context.id, run_id=run_id, match_id=match_id)
+    if target is None:
+        raise HTTPException(status_code=404, detail="Intent match not found")
+    actor = _actor(validated)
+    session.execute(
+        update(feedback_events_table)
+        .where(feedback_events_table.c.target_type == "interest_intent_match")
+        .where(feedback_events_table.c.target_id == match_id)
+        .where(feedback_events_table.c.action.in_(list(REVIEW_ACTIONS.values())))
+        .where(feedback_events_table.c.application_status != "ignored")
+        .values(
+            application_status="ignored",
+            metadata_json={
+                "superseded_by_review": {
+                    "decision": payload.decision,
+                    "actor": actor,
+                    "at": utc_now().isoformat(),
+                }
+            },
+        )
+    )
+    action = REVIEW_ACTIONS[payload.decision]
+    feedback = LeadService(session).record_feedback(
+        target_type="interest_intent_match",
+        target_id=match_id,
+        action=action,
+        reason_code=f"operator_{payload.decision}",
+        feedback_scope="classifier",
+        learning_effect="positive_example" if payload.decision == "correct" else "negative_example",
+        application_status="recorded",
+        comment=payload.comment,
+        metadata_json={
+            "context_id": context.id,
+            "intent_run_id": run_id,
+            "intent_match_id": match_id,
+            "review_decision": payload.decision,
+        },
+        created_by=actor,
+    )
+    return {"review": jsonable_encoder(feedback)}
+
+
 @router.get("/{context_id}/intent-runs/{run_id}/matches/{match_id}/exclude-preview")
 def preview_interest_intent_exclusion(
     context_id: str,
@@ -1141,6 +1220,149 @@ def preview_interest_intent_exclusion(
             ),
         }
     )
+
+
+@router.get("/{context_id}/intent-validation-runs")
+def list_interest_intent_validation_runs(
+    context_id: str,
+    limit: int = 10,
+    offset: int = 0,
+    _validated: SessionValidationResult = Depends(current_admin),
+    session: Session = Depends(get_session),
+) -> dict[str, Any]:
+    context = InterestContextService(session).repository.get(context_id)
+    if context is None:
+        raise HTTPException(status_code=404, detail="Interest context not found")
+    return jsonable_encoder(
+        InterestIntentValidationService(session).latest_runs_payload(
+            context.id,
+            limit=max(1, min(limit, 100)),
+            offset=max(0, offset),
+        )
+    )
+
+
+@router.post("/{context_id}/intent-runs/{run_id}/validation-runs")
+async def generate_interest_intent_validation_run(
+    context_id: str,
+    run_id: str,
+    payload: InterestIntentValidationRunRequest,
+    validated: SessionValidationResult = Depends(current_admin),
+    session: Session = Depends(get_session),
+) -> dict[str, Any]:
+    context = InterestContextService(session).repository.get(context_id)
+    if context is None:
+        raise HTTPException(status_code=404, detail="Interest context not found")
+    route = select_ai_route(session, agent_key=payload.agent_key, route_role=payload.route_role)
+    if route is None:
+        raise HTTPException(
+            status_code=400,
+            detail=f"No AI route configured for {payload.agent_key}/{payload.route_role}",
+        )
+    settings = load_settings()
+    client = build_zai_chat_client_for_route(
+        session,
+        route=route,
+        settings=settings,
+        worker_name="web-intent-validation",
+        task_type="interest_intent_validation",
+        default_timeout_seconds=180.0,
+    )
+    try:
+        result = await InterestIntentValidationService(session).generate_recommendations(
+            context_id=context.id,
+            source_intent_run_id=run_id,
+            actor=_actor(validated),
+            client=client,
+            provider=route.provider,
+            model=route.model,
+            model_profile=route.model_profile,
+            ai_provider_account_id=route.provider_account_id,
+            ai_model_id=route.model_id,
+            ai_model_profile_id=route.model_profile_id,
+            ai_agent_route_id=route.route_id,
+            temperature=payload.temperature
+            if payload.temperature is not None
+            else float(route.temperature or 0.0),
+            max_tokens=payload.max_tokens or int(route.max_output_tokens or 4096),
+            max_reviews=payload.max_reviews,
+        )
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Intent run not found") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return jsonable_encoder(result)
+
+
+@router.get("/{context_id}/intent-validation-runs/{validation_run_id}/recommendations")
+def list_interest_intent_validation_recommendations(
+    context_id: str,
+    validation_run_id: str,
+    limit: int = 10,
+    offset: int = 0,
+    _validated: SessionValidationResult = Depends(current_admin),
+    session: Session = Depends(get_session),
+) -> dict[str, Any]:
+    context = InterestContextService(session).repository.get(context_id)
+    if context is None:
+        raise HTTPException(status_code=404, detail="Interest context not found")
+    return jsonable_encoder(
+        InterestIntentValidationService(session).recommendations_payload(
+            context.id,
+            validation_run_id=validation_run_id,
+            limit=max(1, min(limit, 100)),
+            offset=max(0, offset),
+        )
+    )
+
+
+@router.patch("/{context_id}/intent-validation-recommendations/{recommendation_id}")
+def update_interest_intent_validation_recommendation(
+    context_id: str,
+    recommendation_id: str,
+    payload: InterestIntentValidationRecommendationUpdateRequest,
+    validated: SessionValidationResult = Depends(current_admin),
+    session: Session = Depends(get_session),
+) -> dict[str, Any]:
+    context = InterestContextService(session).repository.get(context_id)
+    if context is None:
+        raise HTTPException(status_code=404, detail="Interest context not found")
+    try:
+        recommendation = InterestIntentValidationService(session).update_recommendation_status(
+            recommendation_id,
+            context_id=context.id,
+            status=payload.status,
+            actor=_actor(validated),
+            note=payload.note,
+        )
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Recommendation not found") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"recommendation": jsonable_encoder(recommendation)}
+
+
+@router.post("/{context_id}/intent-validation-runs/{validation_run_id}/create-layer")
+def create_interest_intent_validation_layer(
+    context_id: str,
+    validation_run_id: str,
+    validated: SessionValidationResult = Depends(current_admin),
+    session: Session = Depends(get_session),
+) -> dict[str, Any]:
+    context = InterestContextService(session).repository.get(context_id)
+    if context is None:
+        raise HTTPException(status_code=404, detail="Interest context not found")
+    try:
+        result = InterestIntentValidationService(session).create_layer_from_approved(
+            validation_run_id,
+            context_id=context.id,
+            actor=_actor(validated),
+        )
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Validation run not found") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return jsonable_encoder(result)
 
 
 @router.get("/{context_id}/intent-exclusions")

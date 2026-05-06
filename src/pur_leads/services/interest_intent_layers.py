@@ -208,6 +208,7 @@ class InterestIntentMatchRecord:
     created_at: Any
     message_url: str | None = None
     operator_feedback_json: Any = None
+    operator_review_json: Any = None
 
     def as_jsonable(self) -> dict[str, Any]:
         return asdict(self)
@@ -623,6 +624,7 @@ class InterestIntentLayerService:
         feedback_by_match_id = self._intent_match_feedback_by_match_id(
             [str(row["id"]) for row in rows]
         )
+        review_by_match_id = self._intent_match_review_by_match_id([str(row["id"]) for row in rows])
         return {
             "run": run.as_jsonable(),
             "items": [
@@ -630,6 +632,7 @@ class InterestIntentLayerService:
                     {
                         **dict(row),
                         "operator_feedback_json": feedback_by_match_id.get(str(row["id"])),
+                        "operator_review_json": review_by_match_id.get(str(row["id"])),
                     }
                 )
                 for row in rows
@@ -688,6 +691,58 @@ class InterestIntentLayerService:
                 "metadata_json": row["metadata_json"],
             }
         return feedback_by_match_id
+
+    def _intent_match_review_by_match_id(self, match_ids: list[str]) -> dict[str, dict[str, Any]]:
+        if not match_ids:
+            return {}
+        rows = (
+            self.session.execute(
+                select(
+                    feedback_events_table.c.id,
+                    feedback_events_table.c.target_id,
+                    feedback_events_table.c.action,
+                    feedback_events_table.c.reason_code,
+                    feedback_events_table.c.feedback_scope,
+                    feedback_events_table.c.learning_effect,
+                    feedback_events_table.c.application_status,
+                    feedback_events_table.c.comment,
+                    feedback_events_table.c.created_by,
+                    feedback_events_table.c.created_at,
+                    feedback_events_table.c.metadata_json,
+                )
+                .where(feedback_events_table.c.target_type == "interest_intent_match")
+                .where(
+                    feedback_events_table.c.action.in_(
+                        ["intent_match_correct", "intent_match_incorrect"]
+                    )
+                )
+                .where(feedback_events_table.c.application_status != "ignored")
+                .where(feedback_events_table.c.target_id.in_(match_ids))
+                .order_by(desc(feedback_events_table.c.created_at))
+            )
+            .mappings()
+            .all()
+        )
+        review_by_match_id: dict[str, dict[str, Any]] = {}
+        for row in rows:
+            target_id = str(row["target_id"])
+            if target_id in review_by_match_id:
+                continue
+            action = str(row["action"])
+            review_by_match_id[target_id] = {
+                "id": row["id"],
+                "decision": "correct" if action == "intent_match_correct" else "incorrect",
+                "action": action,
+                "reason_code": row["reason_code"],
+                "feedback_scope": row["feedback_scope"],
+                "learning_effect": row["learning_effect"],
+                "application_status": row["application_status"],
+                "comment": row["comment"],
+                "created_by": row["created_by"],
+                "created_at": row["created_at"],
+                "metadata_json": row["metadata_json"],
+            }
+        return review_by_match_id
 
     def _build_intent_matches(
         self,

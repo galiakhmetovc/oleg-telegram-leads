@@ -549,6 +549,46 @@ def interest_context_intent_matches_page(
     return HTMLResponse(_interest_context_step_page("intent_matches"))
 
 
+@router.get("/interest-contexts/intent-review", response_class=HTMLResponse)
+def interest_context_intent_review_page(
+    request: Request,
+    auth_service: WebAuthService = Depends(get_auth_service),
+) -> Response:
+    if not _has_page_session(request, auth_service):
+        return RedirectResponse("/login", status_code=303)
+    return HTMLResponse(_interest_context_step_page("intent_review"))
+
+
+@router.get("/interest-contexts/intent-ai-validation", response_class=HTMLResponse)
+def interest_context_intent_ai_validation_page(
+    request: Request,
+    auth_service: WebAuthService = Depends(get_auth_service),
+) -> Response:
+    if not _has_page_session(request, auth_service):
+        return RedirectResponse("/login", status_code=303)
+    return HTMLResponse(_interest_context_step_page("intent_ai_validation"))
+
+
+@router.get("/interest-contexts/intent-ai-recommendations", response_class=HTMLResponse)
+def interest_context_intent_ai_recommendations_page(
+    request: Request,
+    auth_service: WebAuthService = Depends(get_auth_service),
+) -> Response:
+    if not _has_page_session(request, auth_service):
+        return RedirectResponse("/login", status_code=303)
+    return HTMLResponse(_interest_context_step_page("intent_ai_recommendations"))
+
+
+@router.get("/interest-contexts/intent-ai-filter", response_class=HTMLResponse)
+def interest_context_intent_ai_filter_page(
+    request: Request,
+    auth_service: WebAuthService = Depends(get_auth_service),
+) -> Response:
+    if not _has_page_session(request, auth_service):
+        return RedirectResponse("/login", status_code=303)
+    return HTMLResponse(_interest_context_step_page("intent_ai_filter"))
+
+
 @router.get("/interest-contexts/intent-exclusions", response_class=HTMLResponse)
 def interest_context_intent_exclusions_page(
     request: Request,
@@ -582,6 +622,10 @@ _INTEREST_CONTEXT_STEPS = (
     ("intent_layers", "/interest-contexts/intent-layers", "Слои намерений"),
     ("intent_runs", "/interest-contexts/intent-runs", "Запуски намерений"),
     ("intent_matches", "/interest-contexts/intent-matches", "Сообщения намерений"),
+    ("intent_review", "/interest-contexts/intent-review", "Разметка"),
+    ("intent_ai_validation", "/interest-contexts/intent-ai-validation", "AI-валидация"),
+    ("intent_ai_recommendations", "/interest-contexts/intent-ai-recommendations", "AI-рекомендации"),
+    ("intent_ai_filter", "/interest-contexts/intent-ai-filter", "AI-фильтр"),
     ("intent_exclusions", "/interest-contexts/intent-exclusions", "Исключения"),
 )
 
@@ -611,6 +655,10 @@ def _interest_context_step_page(step: str) -> str:
         "intent_layers": "Слои намерений",
         "intent_runs": "Запуски намерений",
         "intent_matches": "Сообщения намерений",
+        "intent_review": "Разметка сообщений намерений",
+        "intent_ai_validation": "AI-валидация по разметке",
+        "intent_ai_recommendations": "Рекомендации AI",
+        "intent_ai_filter": "Создание AI-фильтра",
         "intent_exclusions": "Применение исключений",
     }
     intro_by_step = {
@@ -637,6 +685,10 @@ def _interest_context_step_page(step: str) -> str:
         "intent_layers": "Создайте или примените настраиваемый слой намерений поверх широкого анализа.",
         "intent_runs": "Выберите запуск слоя намерений. Это отдельный проверяемый артефакт.",
         "intent_matches": "Постранично смотрите сообщения, прошедшие слой намерений, и объяснение почему.",
+        "intent_review": "Помечайте сообщения как правильные или неправильные и оставляйте комментарии для обучения следующего фильтра.",
+        "intent_ai_validation": "Запускайте AI-валидацию вручную только после накопления операторской разметки.",
+        "intent_ai_recommendations": "Разбирайте предложения модели: одобрить или отклонить, видя impact preview.",
+        "intent_ai_filter": "Создавайте новый слой намерений только из одобренных AI-рекомендаций.",
         "intent_exclusions": "Применяйте исключения из feedback после проверки влияния на текущий запуск.",
     }
     step = step if step in title_by_step else "context"
@@ -735,6 +787,10 @@ def _interest_context_step_body(step: str) -> str:
         "intent_layers": _interest_context_intent_layers_body,
         "intent_runs": _interest_context_intent_runs_body,
         "intent_matches": _interest_context_intent_matches_body,
+        "intent_review": _interest_context_intent_review_body,
+        "intent_ai_validation": _interest_context_intent_ai_validation_body,
+        "intent_ai_recommendations": _interest_context_intent_ai_recommendations_body,
+        "intent_ai_filter": _interest_context_intent_ai_filter_body,
         "intent_exclusions": _interest_context_intent_exclusions_body,
     }
     return bodies[step]()
@@ -1634,6 +1690,144 @@ def _interest_context_intent_matches_body() -> str:
                       <a class="interest-next-link" href="/interest-contexts/intent-exclusions">Открыть исключения</a>
                     </div>
                     <p class="muted">Если оператор отметил сообщение как “Не интересно”, применяйте исключение отдельным явным действием.</p>
+                  </section>
+    """
+
+
+def _interest_context_intent_review_body() -> str:
+    return """
+                  <section class="detail-section">
+                    <div class="section-head">
+                      <div>
+                        <h3>Ручная разметка</h3>
+                        <p class="muted">
+                          Один артефакт: операторская оценка сообщений намерений. Каждое сообщение можно
+                          пометить как правильное или неправильное и оставить комментарий.
+                        </p>
+                      </div>
+                      <md-outlined-button id="interest-intent-review-refresh" type="button">
+                        <md-icon slot="icon">refresh</md-icon>
+                        Обновить
+                      </md-outlined-button>
+                    </div>
+                    <div class="explain-box">
+                      <strong>Как использовать</strong>
+                      <ul>
+                        <li>Правильное - сообщение действительно похоже на интересный запрос по ядру.</li>
+                        <li>Неправильное - сообщение попало в намерения, но не подходит; комментарий объясняет почему.</li>
+                        <li>Разметка не меняет слой сама. Она только готовит данные для следующей AI-валидации.</li>
+                      </ul>
+                    </div>
+                    <div id="interest-intent-review" class="draft-review-panel" aria-live="polite"></div>
+                  </section>
+                  <section class="detail-section">
+                    <div class="section-head">
+                      <h3>Следующий шаг</h3>
+                      <a class="interest-next-link" href="/interest-contexts/intent-ai-validation">Запустить AI-валидацию</a>
+                    </div>
+                    <p class="muted">AI-валидация запускается только вручную, когда разметки достаточно.</p>
+                  </section>
+    """
+
+
+def _interest_context_intent_ai_validation_body() -> str:
+    return """
+                  <section class="detail-section">
+                    <div class="section-head">
+                      <div>
+                        <h3>Запуск AI-валидации</h3>
+                        <p class="muted">
+                          Один артефакт: LLM-запуск, который получает ядро, текущий слой намерений,
+                          объяснения попаданий и ручную разметку correct/incorrect.
+                        </p>
+                      </div>
+                      <md-outlined-button id="interest-intent-validation-runs-refresh" type="button">
+                        <md-icon slot="icon">refresh</md-icon>
+                        Обновить
+                      </md-outlined-button>
+                    </div>
+                    <form id="interest-intent-validation-form" class="material-form single-column-form">
+                      <div class="form-grid">
+                        <md-outlined-text-field name="max_reviews" label="Сколько размеченных сообщений отдать модели" type="number" value="80">
+                        </md-outlined-text-field>
+                        <md-outlined-text-field name="max_tokens" label="Max tokens ответа" type="number" value="4096">
+                        </md-outlined-text-field>
+                        <md-outlined-text-field name="temperature" label="Temperature" type="number" value="0" step="0.1">
+                        </md-outlined-text-field>
+                      </div>
+                      <div class="button-row">
+                        <md-filled-button type="submit">
+                          <md-icon slot="icon">psychology</md-icon>
+                          Сформировать рекомендации
+                        </md-filled-button>
+                      </div>
+                    </form>
+                    <p id="interest-intent-validation-status" class="status-line" role="status"></p>
+                    <div id="interest-intent-validation-runs" class="draft-review-panel" aria-live="polite"></div>
+                  </section>
+                  <section class="detail-section">
+                    <div class="section-head">
+                      <h3>Следующий шаг</h3>
+                      <a class="interest-next-link" href="/interest-contexts/intent-ai-recommendations">Открыть рекомендации AI</a>
+                    </div>
+                    <p class="muted">После запуска разберите предложения постранично и одобрите только безопасные.</p>
+                  </section>
+    """
+
+
+def _interest_context_intent_ai_recommendations_body() -> str:
+    return """
+                  <section class="detail-section">
+                    <div class="section-head">
+                      <div>
+                        <h3>Рекомендации AI</h3>
+                        <p class="muted">
+                          Один артефакт: предложения модели с локальным preview. Они ничего не меняют,
+                          пока оператор их не одобрит.
+                        </p>
+                      </div>
+                      <md-outlined-button id="interest-intent-validation-recommendations-refresh" type="button">
+                        <md-icon slot="icon">refresh</md-icon>
+                        Обновить
+                      </md-outlined-button>
+                    </div>
+                    <div id="interest-intent-validation-recommendations" class="draft-review-panel" aria-live="polite"></div>
+                  </section>
+                  <section class="detail-section">
+                    <div class="section-head">
+                      <h3>Следующий шаг</h3>
+                      <a class="interest-next-link" href="/interest-contexts/intent-ai-filter">Создать AI-фильтр</a>
+                    </div>
+                    <p class="muted">Новый слой создается только из рекомендаций со статусом “одобрено”.</p>
+                  </section>
+    """
+
+
+def _interest_context_intent_ai_filter_body() -> str:
+    return """
+                  <section class="detail-section">
+                    <div class="section-head">
+                      <div>
+                        <h3>Создание AI-фильтра</h3>
+                        <p class="muted">
+                          Один артефакт: новый слой намерений, собранный из одобренных AI-рекомендаций.
+                          Старый слой остается как источник и не перезаписывается.
+                        </p>
+                      </div>
+                      <md-outlined-button id="interest-intent-ai-filter-refresh" type="button">
+                        <md-icon slot="icon">refresh</md-icon>
+                        Обновить
+                      </md-outlined-button>
+                    </div>
+                    <div class="explain-box">
+                      <strong>Что будет создано</strong>
+                      <ul>
+                        <li>Новый активный слой с копией текущих условий.</li>
+                        <li>Поверх копии добавятся только одобренные изменения: exclude/context/min_score.</li>
+                        <li>Чтобы увидеть результат, примените новый слой к широкому запуску на странице “Слои намерений”.</li>
+                      </ul>
+                    </div>
+                    <div id="interest-intent-ai-filter" class="draft-review-panel" aria-live="polite"></div>
                   </section>
     """
 
