@@ -5004,13 +5004,27 @@ function renderInterestIntentMatchRow(item) {
         <md-outlined-button type="button" data-intent-feedback-action="preview" data-intent-match-id="${escapeHtml(item.id)}">
           Проверить исключение
         </md-outlined-button>
-        <md-outlined-button type="button" data-intent-feedback-action="not-interesting" data-intent-match-id="${escapeHtml(item.id)}" ${feedback ? "disabled" : ""}>
-          ${feedback ? "Уже в исключениях" : "Не интересно"}
-        </md-outlined-button>
+        ${renderIntentFeedbackActionButton(item, feedback, feedbackApplied)}
       </div>
       <div id="intent-feedback-${escapeHtml(item.id)}" class="draft-evidence" aria-live="polite"></div>
     </div>
   </div>`;
+}
+
+function renderIntentFeedbackActionButton(item, feedback, feedbackApplied) {
+  if (!feedback) {
+    return `<md-outlined-button type="button" data-intent-feedback-action="not-interesting" data-intent-match-id="${escapeHtml(item.id)}">
+      Не интересно
+    </md-outlined-button>`;
+  }
+  if (feedbackApplied) {
+    return `<md-outlined-button type="button" disabled>
+      Исключение применено
+    </md-outlined-button>`;
+  }
+  return `<md-outlined-button type="button" data-intent-feedback-action="remove-exclusion" data-intent-match-id="${escapeHtml(item.id)}" data-intent-feedback-id="${escapeHtml(feedback.id)}">
+    Убрать из исключений
+  </md-outlined-button>`;
 }
 
 function renderIntentFeedbackState(feedback) {
@@ -5117,6 +5131,10 @@ async function handleIntentMatchFeedback(button, state) {
   const panel = document.querySelector(`#intent-feedback-${CSS.escape(matchId)}`);
   if (!matchId || !panel) return;
   try {
+    if (action === "remove-exclusion") {
+      await deleteInterestIntentExclusion(button, state);
+      return;
+    }
     if (action === "not-interesting") {
       await api(`/api/feedback/intent_match/${encodeURIComponent(matchId)}`, {
         method: "POST",
@@ -5218,6 +5236,11 @@ function handleInterestIntentExclusionsClick(event, state) {
   const applyButton = event.target.closest("[data-apply-intent-exclusion]");
   if (applyButton) {
     applyInterestIntentExclusion(applyButton, state);
+    return;
+  }
+  const deleteButton = event.target.closest("[data-delete-intent-exclusion]");
+  if (deleteButton) {
+    deleteInterestIntentExclusion(deleteButton, state, { reloadExclusions: true });
   }
 }
 
@@ -5279,6 +5302,9 @@ function renderInterestIntentExclusionRow(item) {
       <md-filled-tonal-button type="button" data-apply-intent-exclusion="${escapeHtml(feedback.id)}" ${applied ? "disabled" : ""}>
         Применить исключение
       </md-filled-tonal-button>
+      <md-outlined-button type="button" data-delete-intent-exclusion="${escapeHtml(feedback.id)}" ${applied ? "disabled" : ""}>
+        Удалить из очереди
+      </md-outlined-button>
     </div>
   </div>`;
 }
@@ -5300,6 +5326,32 @@ async function applyInterestIntentExclusion(button, state) {
     );
     if (status) status.textContent = "Исключение применено к слою. Перезапустите слой намерений для нового результата.";
     await loadInterestIntentExclusions(state);
+  } catch (error) {
+    button.disabled = false;
+    if (status) status.textContent = error.message;
+  }
+}
+
+async function deleteInterestIntentExclusion(button, state, options = {}) {
+  const feedbackId =
+    button.dataset.deleteIntentExclusion || button.dataset.intentFeedbackId || "";
+  const status =
+    document.querySelector("#interest-intent-status") || document.querySelector("#interest-context-status");
+  if (!feedbackId || !state.selectedId) return;
+  button.disabled = true;
+  try {
+    await api(
+      `/api/interest-contexts/${encodeURIComponent(state.selectedId)}/intent-exclusions/${encodeURIComponent(feedbackId)}`,
+      { method: "DELETE" }
+    );
+    if (status) status.textContent = "Непримененное исключение удалено из очереди.";
+    if (options.reloadExclusions) {
+      await loadInterestIntentExclusions(state);
+      return;
+    }
+    if (state.selectedIntentRunId) {
+      await loadInterestIntentMatches(state, state.selectedIntentRunId);
+    }
   } catch (error) {
     button.disabled = false;
     if (status) status.textContent = error.message;

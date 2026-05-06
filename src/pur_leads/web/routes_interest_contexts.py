@@ -13,7 +13,7 @@ import zipfile
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
 from fastapi.encoders import jsonable_encoder
 from pydantic import BaseModel, Field
-from sqlalchemy import desc, func, select, update
+from sqlalchemy import delete, desc, func, select, update
 from sqlalchemy.orm import Session
 
 from pur_leads.core.time import utc_now
@@ -1240,6 +1240,46 @@ def apply_interest_intent_exclusion(
             "next_step": "Перезапустите слой намерений, чтобы получить новый список сообщений.",
         }
     )
+
+
+@router.delete("/{context_id}/intent-exclusions/{feedback_id}")
+def delete_interest_intent_exclusion(
+    context_id: str,
+    feedback_id: str,
+    validated: SessionValidationResult = Depends(current_admin),
+    session: Session = Depends(get_session),
+) -> dict[str, Any]:
+    context = InterestContextService(session).repository.get(context_id)
+    if context is None:
+        raise HTTPException(status_code=404, detail="Interest context not found")
+    row = _intent_exclusion_feedback_row(session, context_id=context.id, feedback_id=feedback_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="Feedback item not found")
+    if row["application_status"] == "applied" or row["applied_at"] is not None:
+        raise HTTPException(
+            status_code=400,
+            detail="Исключение уже применено к слою. Удалять можно только непримененный feedback.",
+        )
+    session.execute(delete(feedback_events_table).where(feedback_events_table.c.id == feedback_id))
+    AuditService(session).record_change(
+        actor=_actor(validated),
+        action="interest_intent_exclusion.delete_pending",
+        entity_type="interest_intent_match",
+        entity_id=str(row["target_id"]),
+        old_value_json={
+            "feedback_id": feedback_id,
+            "application_status": row["application_status"],
+            "intent_layer_id": row["intent_layer_id"],
+            "intent_run_id": row["run_id"],
+        },
+        new_value_json=None,
+    )
+    session.commit()
+    return {
+        "status": "deleted",
+        "feedback_id": feedback_id,
+        "intent_match_id": row["target_id"],
+    }
 
 
 @router.post("/{context_id}/draft")
