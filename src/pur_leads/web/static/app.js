@@ -3739,7 +3739,7 @@ function initInterestContexts() {
     items: [],
     selectedId: new URLSearchParams(window.location.search).get("context_id"),
     detail: null,
-    step: stepRoot?.dataset.interestStep || "load_archive",
+    step: stepRoot?.dataset.interestStep || "context",
     preparePollTimer: null,
     draftPollTimer: null,
     enhancePollTimer: null,
@@ -4004,7 +4004,7 @@ function renderInterestContextEmptyDetail() {
   const intentMatches = document.querySelector("#interest-intent-matches");
   if (title) title.textContent = "Выберите контекст";
   if (description) {
-    description.textContent = "Сначала создайте ядро интересов, затем добавьте Telegram-канал или архив.";
+    description.textContent = "Сначала создайте контекст, затем загрузите архив источника для этого контекста.";
   }
   if (badges) badges.innerHTML = "";
   if (sources) sources.innerHTML = '<div class="empty-state">Источников пока нет</div>';
@@ -4039,7 +4039,7 @@ function renderInterestContextDetail(detail) {
   if (!sources) return;
   const sourceRows = detail.sources || [];
   if (!sourceRows.length) {
-    sources.innerHTML = '<div class="empty-state">Добавьте Telegram-ссылку или архив</div>';
+    sources.innerHTML = '<div class="empty-state">Загрузите архив источника для выбранного контекста</div>';
     return;
   }
   sources.innerHTML = sourceRows
@@ -4081,7 +4081,7 @@ function renderInterestContextDetail(detail) {
 }
 
 function currentInterestStep() {
-  return document.querySelector("[data-interest-step]")?.dataset.interestStep || "load_archive";
+  return document.querySelector("[data-interest-step]")?.dataset.interestStep || "context";
 }
 
 function interestContextStepHref(path, contextId) {
@@ -4414,6 +4414,7 @@ function renderInterestAnalysisRuns(payload, state) {
     return;
   }
   target.innerHTML = `<section class="draft-review-section">
+    <p class="muted">Каждая строка - отдельный широкий запуск: конкретный raw-run чата, версия рабочего ядра на момент запуска и результат локального matching.</p>
     <div class="operations-summary raw-review-summary">
       <div class="ops-metric-row">
         ${renderOpsMetric("Запуски", pagination.total || 0, "в этом контексте")}
@@ -4442,11 +4443,13 @@ function renderInterestAnalysisRunRow(item, state) {
       <p class="muted">${escapeHtml([time(item.created_at), `run ${item.id}`].filter(Boolean).join(" / "))}</p>
       <div class="badges">
         ${badge(label(item.status || "unknown"), item.status === "failed" ? "is-danger" : "")}
+        ${item.raw_export_run_id ? badge(`raw ${shortId(item.raw_export_run_id)}`) : ""}
         ${badge(`${item.message_count || 0} сообщений`)}
         ${badge(`${item.core_item_count || 0} элементов ядра`)}
         ${badge(`${item.match_count || 0} совпадений`)}
         ${badge(`${item.matched_message_count || 0} сообщений найдено`)}
       </div>
+      <p class="draft-evidence"><strong>Чем отличается:</strong> архив/чат ${escapeHtml(title)}, raw-run ${escapeHtml(item.raw_export_run_id || "н/д")}, алгоритм ${escapeHtml(summary.algorithm || "local_interest_core_match_v1")}.</p>
       ${renderAnalysisCounters(summary.by_category, "Категории")}
     </div>
     <span>Открыть</span>
@@ -4493,6 +4496,7 @@ function renderInterestAnalysisMatches(payload, state) {
       <h4>Сообщения из запуска ${escapeHtml(run.id || "")}</h4>
       <span class="muted">${escapeHtml(`${pagination.offset + 1}-${Math.min(pagination.offset + items.length, pagination.total)} из ${pagination.total}`)}</span>
     </div>
+    <p class="muted">Широкий слой объясняет, какой элемент рабочего ядра совпал с сообщением. Это вход для следующего, более строгого слоя намерений.</p>
     <div class="table-list">${items.map(renderInterestAnalysisMatchRow).join("")}</div>
     ${renderPageControls(pagination, "analysis-matches")}
   </section>`;
@@ -4512,8 +4516,21 @@ function renderInterestAnalysisMatchRow(item) {
         ${item.matched_text ? badge(`совпало: ${item.matched_text}`) : ""}
       </div>
       ${renderAnalysisEvidence(evidence)}
+      ${renderTelegramMessageLink(item)}
     </div>
   </div>`;
+}
+
+function renderTelegramMessageLink(item) {
+  const url = item.message_url || item.telegram_message_url || item.evidence_json?.message_url || "";
+  return url
+    ? `<p class="draft-evidence"><a href="${escapeHtml(url)}" target="_blank" rel="noreferrer">Открыть сообщение в Telegram</a></p>`
+    : "";
+}
+
+function shortId(value) {
+  const text = String(value || "");
+  return text.length > 8 ? text.slice(0, 8) : text;
 }
 
 function renderAnalysisEvidence(evidence) {
@@ -4609,6 +4626,7 @@ function renderInterestIntentLayers(payload, state) {
     return;
   }
   target.innerHTML = `<section class="draft-review-section">
+    <p class="muted">Сохраненные слои - это настраиваемые правила второго уровня. Их можно применить к выбранному широкому запуску анализа.</p>
     <div class="table-list">${items.map((item) => renderInterestIntentLayerRow(item, state)).join("")}</div>
   </section>`;
 }
@@ -4637,6 +4655,7 @@ function renderInterestIntentLayerRow(item, state) {
         ${badge(`limit ${item.max_results || 0}`)}
       </div>
       <p class="draft-evidence"><strong>Источник:</strong> ${escapeHtml(selectedBroad ? `выбран широкий запуск ${selectedBroad}` : "выберите широкий запуск выше")}</p>
+      <p class="draft-evidence"><strong>Логика:</strong> include ищет действие/намерение, context подтверждает тематику, exclude отсекает шум, min score задает порог попадания.</p>
     </div>
     <div class="button-column">
       <md-filled-tonal-button type="button" data-intent-layer-action="run" data-intent-layer-id="${escapeHtml(item.id)}">
@@ -4748,6 +4767,7 @@ function renderInterestIntentRuns(payload, state) {
     return;
   }
   target.innerHTML = `<section class="draft-review-section">
+    <p class="muted">Каждый запуск намерений - это конкретный слой, примененный к конкретному широкому запуску. Сравнивайте layer/run id и счетчики входных совпадений.</p>
     <div class="operations-summary raw-review-summary">
       <div class="ops-metric-row">
         ${renderOpsMetric("Запуски", pagination.total || 0, "слои намерений")}
@@ -4770,10 +4790,13 @@ function renderInterestIntentRunRow(item, state) {
       <p class="muted">${escapeHtml([time(item.created_at), `run ${item.id}`].filter(Boolean).join(" / "))}</p>
       <div class="badges">
         ${badge(label(item.status || "unknown"), item.status === "failed" ? "is-danger" : "")}
+        ${item.intent_layer_id ? badge(`layer ${shortId(item.intent_layer_id)}`) : ""}
+        ${item.broad_analysis_run_id ? badge(`broad ${shortId(item.broad_analysis_run_id)}`) : ""}
         ${badge(`${item.broad_match_count || 0} входных совпадений`)}
         ${badge(`${item.match_count || 0} намерений`)}
         ${badge(`${item.matched_message_count || 0} сообщений`)}
       </div>
+      <p class="draft-evidence"><strong>Чем отличается:</strong> слой ${escapeHtml(item.intent_layer_id || "н/д")} применен к широкому запуску ${escapeHtml(item.broad_analysis_run_id || "н/д")}.</p>
       ${renderAnalysisCounters(summary.by_category, "Категории")}
     </div>
     <span>Открыть</span>
@@ -4847,6 +4870,7 @@ function renderInterestIntentMatches(payload, state) {
       <h4>Сообщения из слоя ${escapeHtml(run.id || "")}</h4>
       <span class="muted">${escapeHtml(`${pagination.offset + 1}-${Math.min(pagination.offset + items.length, pagination.total)} из ${pagination.total}`)}</span>
     </div>
+    <p class="muted">Здесь показаны только сообщения, которые прошли второй слой: широкий интерес плюс признаки намерения, контекст и порог score.</p>
     <div class="table-list">${items.map(renderInterestIntentMatchRow).join("")}</div>
     ${renderPageControls(pagination, "intent-matches")}
   </section>`;
@@ -4874,8 +4898,18 @@ function renderInterestIntentMatchRow(item) {
         `намерение ${formatScore(scoreParts.intent || 0)}`,
         scoreParts.context ? `контекст ${formatScore(scoreParts.context)}` : "",
       ].filter(Boolean).join("; "))}</p>
+      <p class="draft-evidence"><strong>Подготовленный текст:</strong> ${escapeHtml(preparedTextExplanation(evidence.prepared_text))}</p>
+      ${renderTelegramMessageLink(item)}
     </div>
   </div>`;
+}
+
+function preparedTextExplanation(prepared) {
+  if (!prepared || typeof prepared !== "object") return "использован raw message_text";
+  const parts = [prepared.source || "unknown"];
+  if (prepared.used_clean_text) parts.push("clean_text");
+  if (prepared.used_lemmas) parts.push("lemmas");
+  return parts.join(" / ");
 }
 
 function handleInterestIntentMatchesClick(event, state) {
@@ -5241,9 +5275,14 @@ async function buildInterestContextDraft(state) {
     return;
   }
   try {
+    const maxItemsField = document.querySelector("#interest-context-draft-max-items");
+    const maxItemsValue = Number.parseInt(maxItemsField?.value || "1000", 10);
+    const maxItems = Number.isFinite(maxItemsValue)
+      ? Math.max(10, Math.min(10000, maxItemsValue))
+      : 1000;
     const payload = await api(`/api/interest-contexts/${encodeURIComponent(state.selectedId)}/draft`, {
       method: "POST",
-      body: JSON.stringify({ max_items: 1000 }),
+      body: JSON.stringify({ max_items: maxItems }),
     });
     renderInterestContextDraft(payload.progress, payload.job, payload.draft);
     if (status) status.textContent = "Сборка ядра интересов поставлена в очередь";
@@ -6089,11 +6128,20 @@ function renderDraftStageResults(stageResults) {
         <div>
           <strong>${escapeHtml(result.stage_label || result.stage || "этап")}</strong>
           <p class="muted">${escapeHtml(metricText || result.raw_export_run_id || "готово")}</p>
+          <p class="draft-evidence"><strong>Роль:</strong> ${escapeHtml(draftStageExplanation(result.stage || result.stage_label))}</p>
         </div>
         <span>${badge("готово")}</span>
       </div>`;
     })
     .join("")}</div>`;
+}
+
+function draftStageExplanation(stage) {
+  const key = String(stage || "").toLowerCase();
+  if (key.includes("entity") || key.includes("сущ")) return "вытащить термины-кандидаты из подготовленного текста";
+  if (key.includes("rank") || key.includes("ранж")) return "очистить шум и отсортировать кандидатов по полезности";
+  if (key.includes("draft") || key.includes("кандид")) return "создать черновые элементы, которые можно ревьюить постранично";
+  return "промежуточный шаг сборки ядра из подготовленных данных";
 }
 
 function renderDraftItems(items, pagination = null) {
@@ -6123,12 +6171,15 @@ function renderDraftItems(items, pagination = null) {
             <div class="badges">
               ${badge(label(item.item_type || "term"))}
               ${badge(`score ${formatScore(item.score)}`)}
+              ${badge(`${item.evidence_count || evidence.length || 0} evidence`)}
+              ${badge(`${item.source_message_count || 0} сообщений`)}
               ${badge(label(item.confidence || "medium"))}
               ${badge(label(item.status || "pending_review"))}
               ${badge(label(metadata.ai_review_status || "not_checked"), metadata.ai_review_status === "rejected" ? "is-danger" : "")}
               ${metadata.ai_review_decision ? badge(label(metadata.ai_review_decision)) : ""}
               ${metadata.uses_llm === false ? badge("без AI") : ""}
             </div>
+            <p class="draft-evidence"><strong>Почему кандидат здесь:</strong> score = частота + POS/entity pattern + подтверждения из источников - штрафы за шум.</p>
             ${examples.length ? `<div class="draft-evidence">${examples.map((example) => `<p>${escapeHtml(example)}</p>`).join("")}</div>` : ""}
           </div>
         </div>`;
@@ -6157,14 +6208,22 @@ function renderProgressLine(labelText, percent, hint) {
 
 function renderPrepareStageResults(stageResults) {
   if (!stageResults.length) return "";
-  const rows = stageResults.slice(-6);
+  const rows = stageResults.slice(-8);
   return `<div class="table-list prepare-stage-results">${rows
     .map((result) => {
       const metrics = result.metrics || {};
       const metricText = [
         metrics.total_messages ? `${metrics.total_messages} сообщений` : "",
+        metrics.total_rows ? `${metrics.total_rows} строк` : "",
+        metrics.rows_with_text ? `${metrics.rows_with_text} с текстом` : "",
+        metrics.normalized_rows ? `${metrics.normalized_rows} нормализовано` : "",
+        metrics.total_tokens ? `${metrics.total_tokens} токенов` : "",
         metrics.indexed_documents ? `${metrics.indexed_documents} документов в индексе` : "",
         metrics.collection_count ? `${metrics.collection_count} Chroma` : "",
+        metrics.feature_rows ? `${metrics.feature_rows} features` : "",
+        metrics.entity_rows ? `${metrics.entity_rows} сущностей` : "",
+        metrics.ranked_entity_rows ? `${metrics.ranked_entity_rows} ранжировано` : "",
+        metrics.candidate_count ? `${metrics.candidate_count} кандидатов` : "",
       ]
         .filter(Boolean)
         .join(" / ");
@@ -6172,11 +6231,56 @@ function renderPrepareStageResults(stageResults) {
         <div>
           <strong>${escapeHtml(result.stage_label || result.stage || "этап")}</strong>
           <p class="muted">${escapeHtml(metricText || result.raw_export_run_id || "")}</p>
+          <p class="draft-evidence"><strong>Что сделано:</strong> ${escapeHtml(prepareStageExplanation(result.stage || result.stage_label))}</p>
+          ${renderPrepareStageArtifactLine(metrics)}
         </div>
         <span>${badge("готово")}</span>
       </div>`;
     })
     .join("")}</div>`;
+}
+
+function prepareStageExplanation(stage) {
+  const key = String(stage || "").toLowerCase();
+  if (key.includes("text") || key.includes("normal") || key.includes("stage_2")) {
+    return "raw_text сохранен, clean_text очищен, построены tokens/lemmas/POS и token-map";
+  }
+  if (key.includes("index") || key.includes("chroma") || key.includes("embedding")) {
+    return "подготовленный текст добавлен в локальный поиск и семантический индекс local_hashing_v1";
+  }
+  if (key.includes("feature") || key.includes("stage_3")) {
+    return "добавлены признаки сообщения: язык, вопрос/решение, ссылки, PII и технический score";
+  }
+  if (key.includes("stat") || key.includes("stage_4") || key.includes("aggregate")) {
+    return "посчитаны агрегаты по источникам, n-граммам, частотам, ссылкам и качеству данных";
+  }
+  if (key.includes("entity") || key.includes("stage_5")) {
+    return "извлечены сущности по POS-паттернам и подготовлены кандидаты для ранжирования";
+  }
+  if (key.includes("rank")) {
+    return "сущности очищены от шума, получили score и порядок для сборки ядра";
+  }
+  return "промежуточный артефакт подготовки данных";
+}
+
+function renderPrepareStageArtifactLine(metrics) {
+  const paths = [
+    metrics.texts_parquet_path ? `texts.parquet: ${shortPath(metrics.texts_parquet_path)}` : "",
+    metrics.report_path ? `отчет: ${shortPath(metrics.report_path)}` : "",
+    metrics.entities_parquet_path ? `entities.parquet: ${shortPath(metrics.entities_parquet_path)}` : "",
+    metrics.ranked_entities_parquet_path
+      ? `ranked.parquet: ${shortPath(metrics.ranked_entities_parquet_path)}`
+      : "",
+  ].filter(Boolean);
+  return paths.length
+    ? `<p class="draft-evidence"><strong>Артефакты:</strong> ${escapeHtml(paths.join("; "))}</p>`
+    : "";
+}
+
+function shortPath(value) {
+  const text = String(value || "");
+  if (text.length <= 76) return text;
+  return `...${text.slice(-73)}`;
 }
 
 function normalizePercent(value) {
@@ -6190,7 +6294,7 @@ function renderInterestContextRawReview(payload) {
   if (!target) return;
   const summary = payload.summary || {};
   const runs = payload.raw_export_runs || [];
-  const messages = payload.messages || [];
+  const messages = (payload.messages || []).slice(0, 3);
   target.innerHTML = `<section class="raw-review-section">
     <div class="section-head">
       <div>
@@ -6211,10 +6315,11 @@ function renderInterestContextRawReview(payload) {
     <div class="raw-review-grid">
       <section>
         <h4>Raw/parquet файлы</h4>
+        <p class="muted">Каждая строка ниже - отдельный raw-run: конкретная загрузка архива и ее файлы на диске.</p>
         ${renderRawReviewRuns(runs)}
       </section>
       <section>
-        <h4>Сообщения</h4>
+        <h4>Короткая выборка сообщений</h4>
         ${renderRawReviewMessages(messages, payload.preview_source)}
       </section>
     </div>
@@ -6258,11 +6363,22 @@ function renderRawReviewFiles(files) {
   return files
     .map(
       (file) => `<div class="raw-review-file ${file.exists ? "" : "is-missing"}">
-        <span>${escapeHtml(label(file.kind || "file"))}</span>
+        <span>${escapeHtml(rawReviewFileLabel(file.kind || "file"))}</span>
         <span>${escapeHtml(file.exists ? formatBytes(file.size_bytes || 0) : "нет файла")}</span>
       </div>`
     )
     .join("");
+}
+
+function rawReviewFileLabel(kind) {
+  const labels = {
+    messages_jsonl: "messages.jsonl - сырые сообщения",
+    messages_parquet: "messages.parquet - табличный формат",
+    attachments_jsonl: "attachments.jsonl - вложения",
+    attachments_parquet: "attachments.parquet - вложения таблицей",
+    media: "скачанный файл",
+  };
+  return labels[kind] || label(kind || "file");
 }
 
 function renderRawReviewMessages(messages, previewSource) {
@@ -6271,8 +6387,8 @@ function renderRawReviewMessages(messages, previewSource) {
   }
   const sourceNote =
     previewSource === "source_messages"
-      ? "Показаны последние сообщения из рабочей базы."
-      : "Рабочая база пуста, показаны первые сообщения из messages.jsonl.";
+      ? "Показаны 3 последних сообщения из рабочей таблицы выбранного контекста. Это не полный список."
+      : "Рабочая таблица пуста, показаны 3 первых сообщения из messages.jsonl выбранного raw-run.";
   return `<p class="muted">${escapeHtml(sourceNote)}</p>
     <div class="table-list">${messages
       .map(
@@ -6286,6 +6402,7 @@ function renderRawReviewMessages(messages, previewSource) {
               ${message.reply_to_message_id ? badge(`reply ${message.reply_to_message_id}`) : ""}
               ${message.classification_status ? badge(label(message.classification_status)) : ""}
             </div>
+            ${message.message_url ? `<p class="draft-evidence"><a href="${escapeHtml(message.message_url)}" target="_blank" rel="noreferrer">Открыть сообщение в Telegram</a></p>` : ""}
           </div>
         </div>`
       )

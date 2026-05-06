@@ -197,12 +197,14 @@ def test_workspace_admin_sections_are_protected_and_render_shells(tmp_path):
     assert "https://web.telegram.org/k/" in resources_response.text
     assert "https://my.telegram.org/auth?to=apps" in resources_response.text
     interest_contexts_response = client.get("/interest-contexts")
-    interest_source_link_response = client.get("/interest-contexts/source-link")
+    interest_source_archive_response = client.get("/interest-contexts/source-archive")
+    interest_source_link_response = client.get("/interest-contexts/source-link", follow_redirects=False)
     assert interest_contexts_response.status_code == 200
     assert 'data-page="interest-contexts"' in interest_contexts_response.text
     assert 'id="interest-context-create-form"' in interest_contexts_response.text
-    assert 'id="interest-context-telegram-archive-form"' in interest_contexts_response.text
-    assert 'id="interest-context-telegram-source-form"' in interest_source_link_response.text
+    assert 'id="interest-context-telegram-archive-form"' in interest_source_archive_response.text
+    assert interest_source_link_response.status_code == 303
+    assert interest_source_link_response.headers["location"] == "/interest-contexts/source-archive"
     assert help_response.status_code == 200
     assert 'data-page="help"' in help_response.text
     assert "Что делает продукт" in help_response.text

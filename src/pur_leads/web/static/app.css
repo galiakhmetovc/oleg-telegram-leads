@@ -619,6 +619,38 @@ md-text-button {
   margin-top: -4px;
 }
 
+.context-selector-note {
+  margin: 2px 0 8px;
+}
+
+.explain-box {
+  display: grid;
+  gap: 8px;
+  padding: 10px 12px;
+  border-left: 3px solid rgba(22, 119, 75, 0.32);
+  background: #f7faf8;
+  color: var(--text);
+}
+
+.explain-box strong {
+  font-size: 13px;
+}
+
+.explain-box ul {
+  margin: 0;
+  padding-left: 18px;
+  color: var(--muted);
+}
+
+.explain-box li {
+  margin: 4px 0;
+  line-height: 1.42;
+}
+
+.button-row md-outlined-text-field {
+  width: min(190px, 100%);
+}
+
 .raw-review-panel:empty {
   display: none;
 }

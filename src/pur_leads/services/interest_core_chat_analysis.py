@@ -64,6 +64,7 @@ class InterestCoreAnalysisMatchRecord:
     score: float
     evidence_json: Any
     created_at: Any
+    message_url: str | None = None
 
     def as_jsonable(self) -> dict[str, Any]:
         return asdict(self)
@@ -263,7 +264,16 @@ class InterestCoreChatAnalysisService:
         )
         rows = (
             self.session.execute(
-                select(interest_core_analysis_matches_table)
+                select(
+                    interest_core_analysis_matches_table,
+                    source_messages_table.c.raw_metadata_json.label("_source_raw_metadata_json"),
+                )
+                .join(
+                    source_messages_table,
+                    source_messages_table.c.id
+                    == interest_core_analysis_matches_table.c.source_message_id,
+                    isouter=True,
+                )
                 .where(interest_core_analysis_matches_table.c.context_id == context_id)
                 .where(interest_core_analysis_matches_table.c.run_id == run_id)
                 .order_by(
@@ -548,7 +558,17 @@ def _run_record(row: Any) -> InterestCoreAnalysisRunRecord:
 
 
 def _match_record(row: Any) -> InterestCoreAnalysisMatchRecord:
-    return InterestCoreAnalysisMatchRecord(**dict(row))
+    payload = dict(row)
+    raw_metadata = payload.pop("_source_raw_metadata_json", None)
+    payload["message_url"] = _message_url_from_metadata(raw_metadata)
+    return InterestCoreAnalysisMatchRecord(**payload)
+
+
+def _message_url_from_metadata(value: Any) -> str | None:
+    if not isinstance(value, dict):
+        return None
+    message_url = value.get("message_url")
+    return str(message_url) if isinstance(message_url, str) and message_url.strip() else None
 
 
 def _pagination(*, limit: int, offset: int, total: int) -> dict[str, Any]:

@@ -133,7 +133,8 @@ def test_interest_context_page_is_protected_and_empty_home_redirects_there(tmp_p
     _login(client)
     home_response = client.get("/", follow_redirects=False)
     page_response = client.get("/interest-contexts")
-    source_link_response = client.get("/interest-contexts/source-link")
+    source_archive_response = client.get("/interest-contexts/source-archive")
+    source_link_response = client.get("/interest-contexts/source-link", follow_redirects=False)
     llm_page_response = client.get("/interest-contexts/llm")
     brief_page_response = client.get("/interest-contexts/brief")
     analysis_page_response = client.get("/interest-contexts/analyze")
@@ -147,8 +148,9 @@ def test_interest_context_page_is_protected_and_empty_home_redirects_there(tmp_p
     assert page_response.status_code == 200
     assert 'data-page="interest-contexts"' in page_response.text
     assert 'id="interest-context-create-form"' in page_response.text
-    assert 'id="interest-context-telegram-archive-form"' in page_response.text
-    assert 'id="interest-context-telegram-source-form"' in source_link_response.text
+    assert 'id="interest-context-telegram-archive-form"' in source_archive_response.text
+    assert source_link_response.status_code == 303
+    assert source_link_response.headers["location"] == "/interest-contexts/source-archive"
     assert 'id="interest-llm-provider-form"' in llm_page_response.text
     assert 'id="interest-core-brief-form"' in brief_page_response.text
     assert 'id="interest-analysis-archive-form"' in analysis_page_response.text

@@ -205,6 +205,7 @@ def help_page(
                   <section id="scenario" class="help-section">
                     <h2>Основной сценарий</h2>
                     <ol class="help-steps">
+                      <li><strong>Контекст</strong><span>Создайте или выберите отдельное ядро интересов. Все следующие данные привязываются к нему.</span></li>
                       <li><strong>Архив источника</strong><span>Загрузите ZIP Telegram Desktop с каналом или чатом, который описывает интересы пользователя.</span></li>
                       <li><strong>Проверка raw</strong><span>Проверьте, сколько сообщений, вложений и parquet/raw-файлов создалось.</span></li>
                       <li><strong>Подготовка</strong><span>Запустите нормализацию, локальный индекс, извлечение сущностей, очистку и ранжирование.</span></li>
@@ -244,13 +245,7 @@ def help_page(
                         <tbody>
                           <tr><td>Название архива</td><td>Архив источника / Архив чата</td><td>Человеческое имя загрузки.</td><td>Помогает отличать запуски и артефакты.</td></tr>
                           <tr><td>Добавить сообщения в рабочую базу</td><td>Архив источника</td><td>Синхронизирует сообщения из raw/parquet в таблицу для поиска.</td><td>Если выключить, архив сохранится, но следующие этапы не увидят сообщения как рабочий источник.</td></tr>
-                          <tr><td>Ссылка или @username</td><td>Telegram-ссылка</td><td>Публичный канал/чат или username.</td><td>По нему создается источник и raw export job.</td></tr>
-                          <tr><td>Диапазон</td><td>Telegram-ссылка</td><td>С самого начала, за N дней, с даты, с сообщения, с чекпоинта.</td><td>Ограничивает, какие сообщения попадут в raw-выгрузку.</td></tr>
-                          <tr><td>Размер пачки</td><td>Telegram-ссылка</td><td>Сколько сообщений читать за один запрос.</td><td>Больше пачка быстрее, но выше риск упереться в лимиты Telegram.</td></tr>
-                          <tr><td>Максимум сообщений</td><td>Telegram-ссылка</td><td>Жесткий предел сообщений для выгрузки.</td><td>Полезно для тестов и демо, чтобы не читать весь чат.</td></tr>
-                          <tr><td>Скачать вложения</td><td>Telegram-ссылка</td><td>Разрешает скачивать медиа.</td><td>Если выключено, остается metadata/ссылка, но файл не скачивается.</td></tr>
-                          <tr><td>Документы</td><td>Telegram-ссылка</td><td>Скачивать только документы.</td><td>Видео и лишнее медиа можно не тянуть в каталог.</td></tr>
-                          <tr><td>Лимит файла</td><td>Telegram-ссылка</td><td>Максимальный размер одного вложения.</td><td>Защищает диск и время обработки.</td></tr>
+                          <tr><td>Лимит кандидатов</td><td>Сборка ядра</td><td>Сколько верхних rule-based кандидатов взять из ранжированного списка.</td><td>Меньше лимит - быстрее ревью, больше лимит - меньше риск пропустить редкие темы.</td></tr>
                           <tr><td>URL / Token / Модель</td><td>LLM</td><td>Данные провайдера и выбранная модель.</td><td>Создает маршрут `catalog_extractor / primary`, который использует бриф и рекомендации.</td></tr>
                           <tr><td>Бриф</td><td>Бриф</td><td>Текстовое описание интересов и границ.</td><td>Передается в LLM-этапы, чтобы модель не придумывала домен заново.</td></tr>
                           <tr><td>Минимальный score</td><td>Слой намерений</td><td>Порог попадания сообщения в слой.</td><td>Выше порог - меньше, но точнее сообщений.</td></tr>
@@ -331,6 +326,16 @@ def interest_contexts_page(
 ) -> Response:
     if not _has_page_session(request, auth_service):
         return RedirectResponse("/login", status_code=303)
+    return HTMLResponse(_interest_context_step_page("context"))
+
+
+@router.get("/interest-contexts/source-archive", response_class=HTMLResponse)
+def interest_context_source_archive_page(
+    request: Request,
+    auth_service: WebAuthService = Depends(get_auth_service),
+) -> Response:
+    if not _has_page_session(request, auth_service):
+        return RedirectResponse("/login", status_code=303)
     return HTMLResponse(_interest_context_step_page("load_archive"))
 
 
@@ -341,7 +346,7 @@ def interest_context_source_link_page(
 ) -> Response:
     if not _has_page_session(request, auth_service):
         return RedirectResponse("/login", status_code=303)
-    return HTMLResponse(_interest_context_step_page("load_link"))
+    return RedirectResponse("/interest-contexts/source-archive", status_code=303)
 
 
 @router.get("/interest-contexts/check", response_class=HTMLResponse)
@@ -485,8 +490,8 @@ def interest_context_intent_matches_page(
 
 
 _INTEREST_CONTEXT_STEPS = (
-    ("load_archive", "/interest-contexts", "Архив источника"),
-    ("load_link", "/interest-contexts/source-link", "Telegram-ссылка"),
+    ("context", "/interest-contexts", "Контекст"),
+    ("load_archive", "/interest-contexts/source-archive", "Архив источника"),
     ("check", "/interest-contexts/check", "Проверка raw"),
     ("prepare", "/interest-contexts/prepare", "Подготовка"),
     ("llm", "/interest-contexts/llm", "LLM"),
@@ -506,6 +511,7 @@ _INTEREST_CONTEXT_STEPS = (
 
 def _interest_context_step_page(step: str) -> str:
     title_by_step = {
+        "context": "Контекст интересов",
         "load_archive": "Архив источника интересов",
         "load_link": "Telegram-ссылка источника",
         "check": "Проверка raw-данных",
@@ -524,7 +530,8 @@ def _interest_context_step_page(step: str) -> str:
         "intent_matches": "Сообщения намерений",
     }
     intro_by_step = {
-        "load_archive": "Загрузите ZIP-архив Telegram Desktop. На этом шаге сохраняем raw/parquet без AI.",
+        "context": "Создайте или выберите контекст. Дальше все источники, ядро, анализ и намерения привязаны к нему.",
+        "load_archive": "Выберите контекст слева и загрузите ZIP-архив Telegram Desktop. На этом шаге сохраняем raw/parquet без AI.",
         "load_link": "Добавьте Telegram-канал или чат по ссылке. Система поставит raw-выгрузку в очередь.",
         "check": "Проверьте, что raw/parquet, вложения и рабочая таблица собраны корректно.",
         "prepare": "Запустите нормализацию, локальный индекс, извлечение и ранжирование кандидатов.",
@@ -541,7 +548,7 @@ def _interest_context_step_page(step: str) -> str:
         "intent_runs": "Выберите запуск слоя намерений. Это отдельный проверяемый артефакт.",
         "intent_matches": "Постранично смотрите сообщения, прошедшие слой намерений, и объяснение почему.",
     }
-    step = step if step in title_by_step else "load_archive"
+    step = step if step in title_by_step else "context"
     title = title_by_step[step]
     main = f"""
             <main class="workspace resources-workspace" data-interest-step="{step}">
@@ -589,18 +596,11 @@ def _interest_context_context_panel() -> str:
                       Обновить
                     </md-outlined-button>
                   </div>
-                  <form id="interest-context-create-form" class="material-form single-column-form">
-                    <md-outlined-text-field name="name" label="Название" required
-                      placeholder="Например, ПУР умный дом">
-                    </md-outlined-text-field>
-                    <md-outlined-text-field name="description" label="Описание" type="textarea"
-                      placeholder="Какие интересы, задачи и источники сюда входят">
-                    </md-outlined-text-field>
-                    <md-filled-button type="submit">
-                      <md-icon slot="icon">add</md-icon>
-                      Создать
-                    </md-filled-button>
-                  </form>
+                  <p class="muted context-selector-note">
+                    Выбранный контекст прокидывается во все следующие шаги: raw, подготовку, бриф,
+                    ядро, анализ чатов и слой намерений.
+                  </p>
+                  <a class="button-link" href="/interest-contexts">Создать или выбрать контекст</a>
                   <div id="interest-context-list" class="queue-list" aria-live="polite"></div>
                   <p id="interest-context-status" class="status-line" role="status"></p>
                 </aside>
@@ -621,6 +621,7 @@ def _interest_context_detail_header(intro: str) -> str:
 
 def _interest_context_step_body(step: str) -> str:
     bodies = {
+        "context": _interest_context_create_body,
         "load_archive": _interest_context_archive_body,
         "load_link": _interest_context_link_body,
         "check": _interest_context_check_body,
@@ -639,6 +640,44 @@ def _interest_context_step_body(step: str) -> str:
         "intent_matches": _interest_context_intent_matches_body,
     }
     return bodies[step]()
+
+
+def _interest_context_create_body() -> str:
+    return """
+                  <section class="detail-section">
+                    <div class="section-head">
+                      <div>
+                        <h3>Создание контекста</h3>
+                        <p class="muted">
+                          Контекст - это отдельное ядро интересов пользователя. К нему привязываются источники,
+                          подготовленные данные, LLM-бриф, утвержденное ядро и все последующие анализы.
+                        </p>
+                      </div>
+                    </div>
+                    <form id="interest-context-create-form" class="material-form single-column-form">
+                      <md-outlined-text-field name="name" label="Название" required
+                        placeholder="Например, ПУР умный дом">
+                      </md-outlined-text-field>
+                      <md-outlined-text-field name="description" label="Описание" type="textarea"
+                        placeholder="Какие интересы, задачи и источники сюда входят">
+                      </md-outlined-text-field>
+                      <md-filled-button type="submit">
+                        <md-icon slot="icon">add</md-icon>
+                        Создать контекст
+                      </md-filled-button>
+                    </form>
+                  </section>
+                  <section class="detail-section">
+                    <div class="section-head">
+                      <h3>Следующий шаг</h3>
+                      <a class="interest-next-link" href="/interest-contexts/source-archive">Загрузить архив источника</a>
+                    </div>
+                    <p class="muted">
+                      При загрузке архива будет использован контекст, выбранный в левой колонке. Если контекстов несколько,
+                      сначала выберите нужный, затем переходите к архиву.
+                    </p>
+                  </section>
+    """
 
 
 def _interest_context_link_body() -> str:
@@ -713,9 +752,18 @@ def _interest_context_archive_body() -> str:
                   <section class="detail-section">
                     <h3>Архив Telegram Desktop</h3>
                     <p class="muted">
-                      Один ZIP-архив источника интересов. Результат шага - raw/parquet и, при включенной галочке,
-                      рабочие сообщения для следующих этапов.
+                      Один ZIP-архив источника интересов. Он будет привязан к выбранному контексту слева.
+                      Результат шага - raw/parquet и, при включенной галочке, рабочие сообщения для следующих этапов.
                     </p>
+                    <div class="explain-box">
+                      <strong>Что будет создано</strong>
+                      <ul>
+                        <li>Raw-run: проверяемый запуск импорта конкретного архива.</li>
+                        <li>messages.jsonl и messages.parquet: один раз сохраненная выгрузка сообщений без AI.</li>
+                        <li>attachments.jsonl: список вложений и ссылки на файлы, если они были в архиве.</li>
+                        <li>Рабочая таблица сообщений: включается галочкой ниже, нужна для проверки, подготовки и анализа.</li>
+                      </ul>
+                    </div>
                     <form id="interest-context-telegram-archive-form" class="material-form interest-source-form">
                       <md-outlined-text-field name="display_name" label="Название архива"
                         placeholder="Экспорт Telegram">
@@ -761,13 +809,22 @@ def _interest_context_check_body() -> str:
                       <div>
                         <h3>Raw/parquet и рабочая таблица</h3>
                         <p class="muted">
-                          Проверяем количество сообщений, вложений, raw-запуски, наличие файлов и примеры сообщений.
+                          Проверяем количество сообщений, вложений, raw-запуски, наличие файлов и короткие примеры.
+                          Полный список сообщений здесь намеренно не показываем.
                         </p>
                       </div>
                       <md-filled-tonal-button id="interest-context-open-raw-review" type="button">
                         <md-icon slot="icon">table_chart</md-icon>
                         Обновить проверку
                       </md-filled-tonal-button>
+                    </div>
+                    <div class="explain-box">
+                      <strong>Как читать этот экран</strong>
+                      <ul>
+                        <li>Raw/parquet файлы относятся к конкретному raw-run и показывают, что физически лежит на диске.</li>
+                        <li>Примеры сообщений относятся либо к рабочей таблице, либо к messages.jsonl, если рабочая таблица пуста.</li>
+                        <li>Если есть "Нет файла", значит путь записан в metadata, но файла на диске сейчас нет.</li>
+                      </ul>
                     </div>
                     <div id="interest-context-raw-review" class="raw-review-panel" aria-live="polite"></div>
                   </section>
@@ -796,6 +853,16 @@ def _interest_context_prepare_body() -> str:
                         Подготовить данные
                       </md-filled-button>
                     </div>
+                    <div class="explain-box">
+                      <strong>Что именно делает подготовка</strong>
+                      <ul>
+                        <li>Stage 2: сохраняет raw_text, строит clean_text, tokens, lemmas, POS-теги и token-map.</li>
+                        <li>Индекс: кладет подготовленный текст в локальный поиск и Chroma-совместимый слой local_hashing_v1.</li>
+                        <li>Stage 3: добавляет признаки сообщения: язык, вопрос, решение, ссылки, PII, технический score.</li>
+                        <li>Stage 4: считает агрегаты по текстам, n-граммам, источникам и качеству данных.</li>
+                        <li>Stage 5: извлекает сущности по POS-паттернам и ранжирует кандидатов для ядра.</li>
+                      </ul>
+                    </div>
                     <div id="interest-context-prepare-progress" class="prepare-progress-panel" aria-live="polite"></div>
                   </section>
                   <section class="detail-section">
@@ -819,11 +886,23 @@ def _interest_context_core_body() -> str:
                         </p>
                       </div>
                       <div class="button-row">
+                        <md-outlined-text-field id="interest-context-draft-max-items" label="Лимит кандидатов"
+                          type="number" value="1000" min="10" step="10">
+                        </md-outlined-text-field>
                         <md-filled-button id="interest-context-build-draft" type="button">
                           <md-icon slot="icon">hub</md-icon>
                           Сформировать ядро
                         </md-filled-button>
                       </div>
+                    </div>
+                    <div class="explain-box">
+                      <strong>Как собирается ядро</strong>
+                      <ul>
+                        <li>Вход: результаты подготовки Stage 5 - очищенные и ранжированные сущности из сообщений и документов.</li>
+                        <li>Правила: POS-паттерны NOUN/PROPN/ADJ+NOUN, частотность, evidence из источников, штрафы за шум.</li>
+                        <li>Лимит 1000 - верхняя граница кандидатов из ранжированного списка, чтобы не тащить весь шум. Сейчас его можно поменять перед запуском.</li>
+                        <li>Результат: черновые кандидаты. После approve они становятся рабочим ядром и влияют на анализ чатов.</li>
+                      </ul>
                     </div>
                     <div id="interest-context-draft-review" class="draft-review-panel" data-summary-only="true" aria-live="polite"></div>
                   </section>
@@ -883,6 +962,14 @@ def _interest_context_candidates_body() -> str:
                         </md-outlined-button>
                         <a class="interest-next-link" href="/interest-contexts/core/reviews">LLM-рекомендации</a>
                       </div>
+                    </div>
+                    <div class="explain-box">
+                      <strong>Связь с правилами</strong>
+                      <ul>
+                        <li>Score показывает, насколько кандидат подтвержден частотой, POS-паттерном и evidence.</li>
+                        <li>Evidence - примеры сообщений или документов, из которых кандидат появился.</li>
+                        <li>AI status показывает, проходил ли кандидат отдельную LLM-проверку на странице рекомендаций.</li>
+                      </ul>
                     </div>
                     <div id="interest-context-draft-items-page" class="draft-review-panel" aria-live="polite"></div>
                   </section>
@@ -991,13 +1078,22 @@ def _interest_context_analysis_runs_body() -> str:
                       <div>
                         <h3>Запуски анализа</h3>
                         <p class="muted">
-                          Один артефакт: список широких запусков анализа по рабочему ядру.
+                          Один артефакт: список широких запусков анализа по рабочему ядру. Разные запуски
+                          отличаются архивом чата, raw-run, версией ядра и временем запуска.
                         </p>
                       </div>
                       <md-outlined-button id="interest-analysis-refresh" type="button">
                         <md-icon slot="icon">refresh</md-icon>
                         Обновить
                       </md-outlined-button>
+                    </div>
+                    <div class="explain-box">
+                      <strong>Почему запусков может быть несколько</strong>
+                      <ul>
+                        <li>Вы загрузили один и тот же чат повторно или другой архив чата.</li>
+                        <li>Рабочее ядро изменилось после approve/reject кандидатов.</li>
+                        <li>Анализ был запущен повторно для аудита или сравнения результата.</li>
+                      </ul>
                     </div>
                     <div id="interest-analysis-runs" class="draft-review-panel" aria-live="polite"></div>
                   </section>
@@ -1026,6 +1122,15 @@ def _interest_context_analysis_matches_body() -> str:
                         Обновить
                       </md-outlined-button>
                     </div>
+                    <div class="explain-box">
+                      <strong>Как работает широкий слой</strong>
+                      <ul>
+                        <li>Берется каждое сообщение из выбранного запуска анализа.</li>
+                        <li>Текст сопоставляется с утвержденными элементами ядра: названиями, синонимами, сигналами и шумовыми словами.</li>
+                        <li>Используются нормализованный текст и леммы, поэтому формы слов вроде "домофоны" и "домофон" должны связываться.</li>
+                        <li>Это еще не лид. Это широкий список сообщений, которые вообще относятся к интересам.</li>
+                      </ul>
+                    </div>
                     <div id="interest-analysis-matches" class="draft-review-panel" aria-live="polite"></div>
                   </section>
                   <section class="detail-section">
@@ -1045,13 +1150,24 @@ def _interest_context_intent_layers_body() -> str:
                       <div>
                         <h3>Слой намерений</h3>
                         <p class="muted">
-                          Один артефакт: настраиваемое правило, которое применяется к последнему широкому запуску анализа.
+                          Один артефакт: настраиваемое правило второго слоя. Оно сужает широкий список
+                          до сообщений с нужным намерением.
                         </p>
                       </div>
                       <md-outlined-button id="interest-intent-refresh" type="button">
                         <md-icon slot="icon">refresh</md-icon>
                         Обновить
                       </md-outlined-button>
+                    </div>
+                    <div class="explain-box">
+                      <strong>Что означают паттерны</strong>
+                      <ul>
+                        <li>Включающие паттерны - признаки намерения: "ищу", "нужно", "подскажите", "купить", "сколько стоит". Без них сообщение обычно не считается запросом.</li>
+                        <li>Контекстные паттерны - предметная область: камеры, домофон, умный дом, электрика, реле, датчики. Они подтверждают, что намерение относится к нужной теме.</li>
+                        <li>Исключающие паттерны - шум: вакансии, резюме, объявления "продам/отдам" и похожие нерелевантные сообщения.</li>
+                        <li>Исключить элементы ядра - слишком общие элементы, которые дают много ложных совпадений.</li>
+                        <li>Паттерны ниже - стартовая настройка системы, не LLM-магия. Их можно редактировать перед сохранением слоя.</li>
+                      </ul>
                     </div>
                     <form id="interest-intent-layer-form" class="material-form single-column-form">
                       <md-outlined-text-field name="name" label="Название слоя" required
@@ -1142,12 +1258,21 @@ def _interest_context_intent_runs_body() -> str:
                         <h3>Запуски слоя намерений</h3>
                         <p class="muted">
                           Один артефакт: история применений слоя намерений к широким запускам анализа.
+                          Разные запуски могут отличаться слоем, широким запуском и настройками паттернов.
                         </p>
                       </div>
                       <md-outlined-button id="interest-intent-refresh" type="button">
                         <md-icon slot="icon">refresh</md-icon>
                         Обновить
                       </md-outlined-button>
+                    </div>
+                    <div class="explain-box">
+                      <strong>Почему запусков может быть несколько</strong>
+                      <ul>
+                        <li>Один слой применили к разным широким запускам анализа.</li>
+                        <li>Слой изменили: паттерны, веса, минимальный score или лимит результатов.</li>
+                        <li>Запуск повторили после изменения рабочего ядра.</li>
+                      </ul>
                     </div>
                     <div id="interest-intent-runs" class="draft-review-panel" aria-live="polite"></div>
                   </section>
@@ -1249,6 +1374,14 @@ def _interest_context_brief_body() -> str:
                         Сформировать из источников
                       </md-filled-tonal-button>
                     </div>
+                    <div class="explain-box">
+                      <strong>Можно редактировать</strong>
+                      <ul>
+                        <li>Измените текст в поле "Бриф" и нажмите "Сохранить вручную".</li>
+                        <li>Активная версия брифа влияет на следующие LLM-рекомендации по кандидатам.</li>
+                        <li>Старые raw/parquet, кандидаты и уже принятые элементы ядра не переписываются автоматически.</li>
+                      </ul>
+                    </div>
                     <form id="interest-core-brief-form" class="material-form single-column-form">
                       <md-outlined-text-field id="interest-core-brief-text" name="brief_text"
                         label="Бриф" type="textarea"
@@ -1287,7 +1420,7 @@ def _interest_context_stage_panel(active_step: str) -> str:
                   <section>
                     <h2>Сценарий</h2>
                     <p class="muted">
-                      Идем последовательно от сырых данных к проверяемому ядру интересов.
+                      Идем последовательно: контекст, источник, raw, подготовка, ядро, анализ и намерения.
                     </p>
                   </section>
                   <section>
@@ -1301,6 +1434,7 @@ def _interest_context_stage_panel(active_step: str) -> str:
 
 def _interest_context_stage_hint(step: str) -> str:
     return {
+        "context": "создать и выбрать",
         "load_archive": "ZIP источника интересов",
         "load_link": "канал или чат по ссылке",
         "check": "raw/parquet, вложения, примеры",
