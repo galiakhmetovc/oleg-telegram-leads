@@ -6,7 +6,7 @@ from datetime import date, datetime
 import json
 from typing import Any
 
-from sqlalchemy import delete, insert, select, update
+from sqlalchemy import delete, insert, null, select, update
 from sqlalchemy.orm import Session
 
 from pur_leads.core.time import utc_now
@@ -68,18 +68,18 @@ def replace_document_features(
     session.execute(
         update(telegram_prepared_documents_table)
         .where(telegram_prepared_documents_table.c.raw_export_run_id == raw_export_run_id)
-        .values(feature_json=None, updated_at=now)
+        .values(feature_json=null(), updated_at=now)
     )
     for row in feature_rows_payload:
         prepared_document_id = row.get("prepared_document_id")
-        if not prepared_document_id:
-            continue
-        result = session.execute(
-            update(telegram_prepared_documents_table)
-            .where(telegram_prepared_documents_table.c.id == str(prepared_document_id))
-            .where(telegram_prepared_documents_table.c.raw_export_run_id == raw_export_run_id)
-            .values(feature_json=_json_ready(row), updated_at=now)
+        query = update(telegram_prepared_documents_table).where(
+            telegram_prepared_documents_table.c.raw_export_run_id == raw_export_run_id
         )
+        if prepared_document_id:
+            query = query.where(telegram_prepared_documents_table.c.id == str(prepared_document_id))
+        else:
+            query = _feature_identity_query(query, row)
+        result = session.execute(query.values(feature_json=_json_ready(row), updated_at=now))
         updated += int(result.rowcount or 0)
     return updated
 
@@ -220,6 +220,23 @@ def ranked_entity_rows(
         query = query.limit(max(1, limit)).offset(max(0, offset))
     rows = session.execute(query).mappings().all()
     return [_entity_payload(dict(row)) for row in rows]
+
+
+def _feature_identity_query(query: Any, row: dict[str, Any]) -> Any:
+    entity_type = str(row.get("entity_type") or "")
+    query = query.where(telegram_prepared_documents_table.c.entity_type == entity_type)
+    query = query.where(
+        telegram_prepared_documents_table.c.telegram_message_id
+        == int(row.get("telegram_message_id") or 0)
+    )
+    query = query.where(telegram_prepared_documents_table.c.row_index == int(row.get("row_index") or 0))
+    query = query.where(
+        telegram_prepared_documents_table.c.chunk_index == int(row.get("chunk_index") or 0)
+    )
+    artifact_id = str(row.get("artifact_id") or "")
+    if entity_type == "telegram_artifact":
+        query = query.where(telegram_prepared_documents_table.c.artifact_id == artifact_id)
+    return query
 
 
 def _prepared_row_payload(row: dict[str, Any]) -> dict[str, Any]:

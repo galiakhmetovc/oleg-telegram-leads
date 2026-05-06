@@ -139,7 +139,6 @@ def _prepared_row(
         "normalization_status": str(row.get("normalization_status") or "normalized"),
         "normalization_error": row.get("normalization_error"),
         "payload_json": _payload(row),
-        "feature_json": None,
         "created_at": now,
         "updated_at": now,
     }
