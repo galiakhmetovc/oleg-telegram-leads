@@ -533,15 +533,8 @@ def _query_embedding_text(text: str) -> str:
         morph = pymorphy3.MorphAnalyzer()
         lemmas = [morph.parse(token)[0].normal_form for token in tokens]
     except Exception:
-        lemmas = [_simple_ru_stem(token) for token in tokens]
+        lemmas = []
     return " ".join([text, " ".join(lemmas)]).strip()
-
-
-def _simple_ru_stem(token: str) -> str:
-    for suffix in ("ами", "ями", "ого", "ему", "ыми", "ими", "ах", "ях", "ой", "ый", "ий", "ая", "ое", "ые", "ов", "ев", "ам", "ям", "ом", "ем", "а", "я", "ы", "и", "у", "ю", "е"):
-        if len(token) > len(suffix) + 3 and token.endswith(suffix):
-            return token[: -len(suffix)]
-    return token
 
 
 def _persistent_client(path: Path) -> Any:
