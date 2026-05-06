@@ -566,11 +566,7 @@ def build_telegram_handler_registry(
         metadata = (
             payload.get("import_metadata") if isinstance(payload.get("import_metadata"), dict) else {}
         )
-        source_role = (
-            metadata.get("interest_context", {}).get("source_role")
-            if isinstance(metadata.get("interest_context"), dict)
-            else None
-        )
+        source_purpose = str(payload.get("source_purpose") or "interest_context_seed")
         source_title = str(input_ref or payload.get("original_filename") or Path(archive_path).name)
 
         scheduler.update_result_summary(
@@ -593,7 +589,7 @@ def build_telegram_handler_registry(
         ).import_archive(
             archive_path,
             input_ref=input_ref,
-            purpose=str(source_role or "interest_context_seed"),
+            purpose=source_purpose,
             interest_context_id=job.scope_id,
             added_by=actor,
             sync_source_messages=sync_source_messages,

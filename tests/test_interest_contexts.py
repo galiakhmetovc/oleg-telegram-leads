@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 import zipfile
+from datetime import UTC, datetime
 
 from fastapi.testclient import TestClient
 import pytest
@@ -14,6 +15,10 @@ from pur_leads.db.session import create_session_factory
 from pur_leads.models.interest_core_briefs import interest_core_briefs_table
 from pur_leads.models.interest_contexts import interest_contexts_table
 from pur_leads.models.scheduler import scheduler_jobs_table
+from pur_leads.models.interest_context_drafts import (
+    interest_core_analysis_runs_table,
+    interest_core_items_table,
+)
 from pur_leads.models.telegram_sources import (
     monitored_sources_table,
     telegram_raw_export_runs_table,
@@ -139,6 +144,78 @@ async def test_interest_context_uploads_telegram_archive_as_background_import_jo
     assert source["lead_detection_enabled"] is False
     assert source["catalog_ingestion_enabled"] is False
     assert job_row["result_summary_json"]["message_count"] == 2
+
+
+@pytest.mark.asyncio
+async def test_interest_context_analysis_archive_import_uses_seed_source_purpose(tmp_path):
+    archive_path = _write_desktop_archive(tmp_path)
+    fixture = _setup_app(tmp_path, raw_export_storage_path=tmp_path / "raw")
+    client = fixture["client"]
+    _login(client)
+    context_id = client.post(
+        "/api/interest-contexts",
+        json={"name": "Архив для анализа"},
+    ).json()["context"]["id"]
+    with fixture["session_factory"]() as session:
+        session.execute(
+            interest_core_items_table.insert().values(
+                id="core-camera",
+                context_id=context_id,
+                source_review_id=None,
+                source_candidate_id=None,
+                item_type="interest",
+                canonical_name="камера",
+                category="безопасность",
+                description="Камеры и видеонаблюдение",
+                confidence="high",
+                status="active",
+                synonyms_json=["камера", "dahua"],
+                lead_signals_json=["нужна камера"],
+                noise_patterns_json=[],
+                evidence_refs_json=[],
+                metadata_json={},
+                created_by="admin",
+                created_at=datetime(2026, 5, 6, tzinfo=UTC),
+                updated_at=datetime(2026, 5, 6, tzinfo=UTC),
+            )
+        )
+        session.commit()
+
+    with archive_path.open("rb") as archive_file:
+        response = client.post(
+            f"/api/interest-contexts/{context_id}/analysis/telegram-archive",
+            data={"display_name": "Экспорт Telegram для анализа"},
+            files={"file": ("ChatExport.zip", archive_file, "application/zip")},
+            headers={"x-request-id": "interest-analysis-upload-1"},
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["mode"] == "async"
+    assert payload["job"]["payload_json"]["mode"] == "interest_core_analysis"
+    assert payload["job"]["payload_json"]["source_purpose"] == "interest_context_seed"
+
+    with fixture["session_factory"]() as session:
+        runtime = WorkerRuntime(
+            session,
+            handlers=build_telegram_handler_registry(
+                session,
+                object(),
+                raw_export_storage_path=tmp_path / "raw",
+            ),
+            worker_name="test-worker",
+        )
+        run_result = await runtime.run_once()
+    assert run_result.status == "succeeded", run_result.message
+
+    with fixture["session_factory"]() as session:
+        source = session.execute(select(monitored_sources_table)).mappings().one()
+        analysis_run = session.execute(select(interest_core_analysis_runs_table)).mappings().one()
+        job_row = session.execute(select(scheduler_jobs_table)).mappings().one()
+    assert source["source_purpose"] == "interest_context_seed"
+    assert analysis_run["match_count"] >= 1
+    assert job_row["result_summary_json"]["mode"] == "interest_core_analysis"
+    assert job_row["result_summary_json"]["status"] == "succeeded"
 
 
 def test_interest_context_page_is_protected_and_empty_home_redirects_there(tmp_path):

@@ -736,6 +736,7 @@ async def upload_telegram_archive_to_interest_context(
         idempotency_key=f"telegram-desktop-archive-import:{context.id}:{sha256}",
         payload_json={
             "mode": "interest_context_source",
+            "source_purpose": INTEREST_CONTEXT_SOURCE_PURPOSE,
             "stored_archive_path": str(stored_path),
             "original_filename": safe_name,
             "content_type": file.content_type,
@@ -850,6 +851,7 @@ async def upload_telegram_archive_for_interest_analysis(
         idempotency_key=f"telegram-desktop-archive-analysis:{context.id}:{sha256}",
         payload_json={
             "mode": "interest_core_analysis",
+            "source_purpose": INTEREST_CONTEXT_SOURCE_PURPOSE,
             "stored_archive_path": str(stored_path),
             "original_filename": safe_name,
             "content_type": file.content_type,
