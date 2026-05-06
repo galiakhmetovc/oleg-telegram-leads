@@ -188,6 +188,10 @@ class InterestIntentLayerRunRequest(BaseModel):
     broad_analysis_run_id: str = Field(min_length=1)
 
 
+class ProjectOpportunityRunRequest(BaseModel):
+    broad_analysis_run_id: str = Field(min_length=1)
+
+
 class InterestIntentExclusionApplyRequest(BaseModel):
     term: str = Field(min_length=1, max_length=200)
 
@@ -1095,6 +1099,49 @@ def run_interest_intent_layer(
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return jsonable_encoder(result)
+
+
+@router.post("/{context_id}/project-opportunities/runs")
+def run_project_opportunities(
+    context_id: str,
+    payload: ProjectOpportunityRunRequest,
+    validated: SessionValidationResult = Depends(current_admin),
+    session: Session = Depends(get_session),
+) -> dict[str, Any]:
+    context = InterestContextService(session).repository.get(context_id)
+    if context is None:
+        raise HTTPException(status_code=404, detail="Interest context not found")
+    try:
+        result = InterestIntentLayerService(session).run_project_opportunities(
+            context_id=context.id,
+            broad_analysis_run_id=payload.broad_analysis_run_id,
+            actor=_actor(validated),
+        )
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Broad analysis run not found") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return jsonable_encoder(result)
+
+
+@router.get("/{context_id}/project-opportunities/runs")
+def list_project_opportunity_runs(
+    context_id: str,
+    limit: int = 10,
+    offset: int = 0,
+    _validated: SessionValidationResult = Depends(current_admin),
+    session: Session = Depends(get_session),
+) -> dict[str, Any]:
+    context = InterestContextService(session).repository.get(context_id)
+    if context is None:
+        raise HTTPException(status_code=404, detail="Interest context not found")
+    return jsonable_encoder(
+        InterestIntentLayerService(session).project_opportunity_runs_payload(
+            context.id,
+            limit=max(1, min(limit, 100)),
+            offset=max(0, offset),
+        )
+    )
 
 
 @router.get("/{context_id}/intent-runs")

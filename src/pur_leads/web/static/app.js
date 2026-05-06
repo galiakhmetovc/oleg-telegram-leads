@@ -3760,6 +3760,11 @@ function initInterestContexts() {
     intentMatchesLimit: 10,
     intentMatchesOffset: 0,
     selectedIntentRunId: null,
+    projectOpportunityRunsLimit: 10,
+    projectOpportunityRunsOffset: 0,
+    projectOpportunityMatchesLimit: 10,
+    projectOpportunityMatchesOffset: 0,
+    selectedProjectOpportunityRunId: null,
     intentReviewLimit: 10,
     intentReviewOffset: 0,
     intentValidationRunsLimit: 10,
@@ -3822,6 +3827,22 @@ function initInterestContexts() {
   document
     .querySelector("#interest-intent-matches")
     ?.addEventListener("click", (event) => handleInterestIntentMatchesClick(event, state));
+  document
+    .querySelector("#interest-project-opportunities-refresh")
+    ?.addEventListener("click", () => loadInterestProjectOpportunities(state));
+  document
+    .querySelector("#interest-project-opportunities-run")
+    ?.addEventListener("click", () => runInterestProjectOpportunities(state));
+  document
+    .querySelector("#interest-project-opportunities-runs")
+    ?.addEventListener("click", (event) =>
+      handleInterestProjectOpportunityRunsClick(event, state)
+    );
+  document
+    .querySelector("#interest-project-opportunities-matches")
+    ?.addEventListener("click", (event) =>
+      handleInterestProjectOpportunityMatchesClick(event, state)
+    );
   document
     .querySelector("#interest-intent-review-refresh")
     ?.addEventListener("click", () => loadInterestIntentReview(state));
@@ -4061,6 +4082,15 @@ async function loadInterestContextDetail(contextId, state) {
     if (state.selectedIntentRunId) {
       await loadInterestIntentMatches(state, state.selectedIntentRunId);
     }
+  }
+  if (state.step === "project_opportunities") {
+    state.analysisRunsOffset = 0;
+    state.projectOpportunityRunsOffset = 0;
+    state.projectOpportunityMatchesOffset = 0;
+    state.selectedAnalysisRunId = null;
+    state.selectedProjectOpportunityRunId = null;
+    await loadInterestAnalysisRuns(state);
+    await loadInterestProjectOpportunities(state);
   }
   if (state.step === "intent_review") {
     state.intentReviewOffset = 0;
@@ -5269,6 +5299,240 @@ function handleInterestIntentMatchesClick(event, state) {
     state.intentMatchesOffset += state.intentMatchesLimit;
   }
   loadInterestIntentMatches(state, state.selectedIntentRunId);
+}
+
+async function loadInterestProjectOpportunities(state) {
+  await loadInterestProjectOpportunityRuns(state);
+  if (state.selectedProjectOpportunityRunId) {
+    await loadInterestProjectOpportunityMatches(state, state.selectedProjectOpportunityRunId);
+  } else {
+    renderInterestProjectOpportunityMatches(null, state);
+  }
+}
+
+async function runInterestProjectOpportunities(state) {
+  const status = document.querySelector("#interest-project-opportunities-status");
+  if (!state.selectedId) {
+    if (status) status.textContent = "Сначала выберите контекст";
+    return;
+  }
+  if (!state.selectedAnalysisRunId) {
+    if (status) status.textContent = "Сначала выберите широкий тематический запуск";
+    return;
+  }
+  try {
+    if (status) status.textContent = "Ищу проектные возможности...";
+    const payload = await api(
+      `/api/interest-contexts/${encodeURIComponent(state.selectedId)}/project-opportunities/runs`,
+      {
+        method: "POST",
+        body: JSON.stringify({ broad_analysis_run_id: state.selectedAnalysisRunId }),
+      }
+    );
+    state.selectedProjectOpportunityRunId = payload.run?.id || null;
+    state.projectOpportunityRunsOffset = 0;
+    state.projectOpportunityMatchesOffset = 0;
+    if (status) {
+      status.textContent = `Готово: ${payload.summary?.match_count || 0} проектных возможностей, ${payload.summary?.matched_message_count || 0} сообщений`;
+    }
+    await loadInterestProjectOpportunities(state);
+  } catch (error) {
+    if (status) status.textContent = error.message;
+  }
+}
+
+async function loadInterestProjectOpportunityRuns(state) {
+  const target = document.querySelector("#interest-project-opportunities-runs");
+  const status = document.querySelector("#interest-project-opportunities-status");
+  if (!target || !state.selectedId) return;
+  target.innerHTML = '<div class="empty-state">Загружаю запуски проектных возможностей...</div>';
+  try {
+    const params = new URLSearchParams({
+      limit: String(state.projectOpportunityRunsLimit),
+      offset: String(state.projectOpportunityRunsOffset),
+    });
+    const payload = await api(
+      `/api/interest-contexts/${encodeURIComponent(state.selectedId)}/project-opportunities/runs?${params.toString()}`
+    );
+    const projectItems = payload.items || [];
+    const selectedStillVisible = projectItems.some(
+      (item) => item.id === state.selectedProjectOpportunityRunId
+    );
+    state.selectedProjectOpportunityRunId = selectedStillVisible
+      ? state.selectedProjectOpportunityRunId
+      : projectItems[0]?.id || null;
+    renderInterestProjectOpportunityRuns(payload, state);
+  } catch (error) {
+    target.innerHTML = `<div class="empty-state">${escapeHtml(error.message)}</div>`;
+    if (status) status.textContent = error.message;
+  }
+}
+
+function renderInterestProjectOpportunityRuns(payload, state) {
+  const target = document.querySelector("#interest-project-opportunities-runs");
+  if (!target) return;
+  const items = payload.items || [];
+  if (!items.length) {
+    target.innerHTML =
+      '<div class="empty-state">Запусков проектных возможностей пока нет. Выберите широкий тематический запуск и нажмите “Найти проектные возможности”.</div>';
+    return;
+  }
+  const pagination = {
+    ...(payload.pagination || {}),
+    limit: payload.pagination?.limit || state.projectOpportunityRunsLimit,
+    offset: payload.pagination?.offset || state.projectOpportunityRunsOffset,
+    total: payload.pagination?.total || items.length,
+  };
+  target.innerHTML = `<section class="draft-review-section">
+    <div class="operations-summary raw-review-summary">
+      <div class="ops-metric-row">
+        ${renderOpsMetric("Запуски", pagination.total, "проектные возможности")}
+        ${renderOpsMetric("На странице", items.length, "запусков")}
+        ${renderOpsMetric("Последний", items[0]?.match_count || 0, "сообщений")}
+        ${renderOpsMetric("Broad", shortId(items[0]?.broad_analysis_run_id || ""), "источник")}
+      </div>
+    </div>
+    <div class="table-list">${items.map((item) => renderInterestProjectOpportunityRunRow(item, state)).join("")}</div>
+    ${renderPageControls(pagination, "project-opportunity-runs")}
+  </section>`;
+}
+
+function renderInterestProjectOpportunityRunRow(item, state) {
+  const summary = item.summary_json || {};
+  const active = item.id === state.selectedProjectOpportunityRunId ? "is-active" : "";
+  return `<button class="table-row linked-row analysis-run-row ${active}" type="button" data-project-opportunity-run-id="${escapeHtml(item.id)}">
+    <div>
+      <strong>${escapeHtml(item.source_title || "Проектные возможности")}</strong>
+      <p class="muted">${escapeHtml([time(item.created_at), `run ${item.id}`].filter(Boolean).join(" / "))}</p>
+      <div class="badges">
+        ${badge(label(item.status || "unknown"))}
+        ${badge(`${item.broad_match_count || 0} входных тематических`)}
+        ${badge(`${item.match_count || 0} возможностей`)}
+        ${badge(`${item.matched_message_count || 0} сообщений`)}
+        ${badge(`broad ${shortId(item.broad_analysis_run_id || "")}`)}
+      </div>
+      ${renderAnalysisCounters(summary.by_opportunity_type, "Типы возможностей")}
+      ${renderAnalysisCounters(summary.by_category, "Категории")}
+    </div>
+    <span>Открыть</span>
+  </button>`;
+}
+
+function handleInterestProjectOpportunityRunsClick(event, state) {
+  const pageButton = event.target.closest("[data-project-opportunity-runs-page-action]");
+  if (pageButton) {
+    const action = pageButton.dataset.projectOpportunityRunsPageAction;
+    if (action === "prev") {
+      state.projectOpportunityRunsOffset = Math.max(
+        0,
+        state.projectOpportunityRunsOffset - state.projectOpportunityRunsLimit
+      );
+    }
+    if (action === "next") {
+      state.projectOpportunityRunsOffset += state.projectOpportunityRunsLimit;
+    }
+    loadInterestProjectOpportunityRuns(state);
+    return;
+  }
+  const runButton = event.target.closest("[data-project-opportunity-run-id]");
+  if (!runButton) return;
+  state.selectedProjectOpportunityRunId = runButton.dataset.projectOpportunityRunId;
+  state.projectOpportunityMatchesOffset = 0;
+  loadInterestProjectOpportunityMatches(state, state.selectedProjectOpportunityRunId);
+}
+
+async function loadInterestProjectOpportunityMatches(state, runId) {
+  const target = document.querySelector("#interest-project-opportunities-matches");
+  const status = document.querySelector("#interest-project-opportunities-status");
+  if (!target || !state.selectedId || !runId) return;
+  target.innerHTML = '<div class="empty-state">Загружаю сообщения проектных возможностей...</div>';
+  try {
+    const params = new URLSearchParams({
+      limit: String(state.projectOpportunityMatchesLimit),
+      offset: String(state.projectOpportunityMatchesOffset),
+    });
+    const payload = await api(
+      `/api/interest-contexts/${encodeURIComponent(state.selectedId)}/intent-runs/${encodeURIComponent(runId)}/matches?${params.toString()}`
+    );
+    renderInterestProjectOpportunityMatches(payload, state);
+  } catch (error) {
+    target.innerHTML = `<div class="empty-state">${escapeHtml(error.message)}</div>`;
+    if (status) status.textContent = error.message;
+  }
+}
+
+function renderInterestProjectOpportunityMatches(payload, state) {
+  const target = document.querySelector("#interest-project-opportunities-matches");
+  if (!target) return;
+  if (!payload) {
+    target.innerHTML = '<div class="empty-state">Запуск проектных возможностей еще не выбран.</div>';
+    return;
+  }
+  const items = payload.items || [];
+  const pagination =
+    payload.pagination || { limit: state.projectOpportunityMatchesLimit, offset: 0, total: 0 };
+  if (!items.length) {
+    target.innerHTML = '<div class="empty-state">В выбранном запуске проектных возможностей нет.</div>';
+    return;
+  }
+  target.innerHTML = `<section class="draft-review-section">
+    <div class="section-head compact-section-head">
+      <h4>Сообщения из запуска ${escapeHtml(shortId(payload.run?.id || ""))}</h4>
+      <span class="muted">${escapeHtml(`${pagination.offset + 1}-${Math.min(pagination.offset + items.length, pagination.total)} из ${pagination.total}`)}</span>
+    </div>
+    <div class="table-list">${items.map((item) => renderInterestProjectOpportunityMatchRow(item, state)).join("")}</div>
+    ${renderPageControls(pagination, "project-opportunity-matches")}
+  </section>`;
+}
+
+function renderInterestProjectOpportunityMatchRow(item, state) {
+  const evidence = item.evidence_json || {};
+  const opportunity = evidence.opportunity || {};
+  const parts = evidence.score_parts || {};
+  return `<div class="table-row draft-item-row">
+    <div>
+      <strong>${escapeHtml(opportunity.operator_summary || item.canonical_name || "проектная возможность")}</strong>
+      <p class="muted">${escapeHtml([`сообщение #${item.telegram_message_id || "н/д"}`, time(item.message_date), item.sender_id].filter(Boolean).join(" / "))}</p>
+      <p>${escapeHtml(shortText(item.message_text || "без текста", 620))}</p>
+      <div class="badges">
+        ${badge(opportunity.decision === "yes" ? "возможность" : "возможно")}
+        ${badge(label(opportunity.opportunity_type || "unknown"))}
+        ${badge(`final ${formatScore(item.score)}`)}
+        ${badge(`тема ${formatScore(parts.topic || item.broad_score || 0)}`)}
+        ${badge(`проект ${formatScore(parts.project || 0)}`)}
+        ${badge(`ПУР ${formatScore(parts.pur_fit || 0)}`)}
+        ${badge(`коммерция ${formatScore(parts.commercial || 0)}`)}
+        ${parts.reject ? badge(`шум ${formatScore(parts.reject)}`, "is-warn") : ""}
+      </div>
+      <p class="draft-evidence"><strong>Почему найдено:</strong> ${escapeHtml([
+        opportunity.project_hits?.length ? `проект: ${opportunity.project_hits.slice(0, 5).join(", ")}` : "",
+        opportunity.pur_fit_hits?.length ? `ПУР: ${opportunity.pur_fit_hits.slice(0, 5).join(", ")}` : "",
+        opportunity.commercial_hits?.length ? `действие: ${opportunity.commercial_hits.slice(0, 5).join(", ")}` : "",
+      ].filter(Boolean).join("; "))}</p>
+      ${opportunity.reject_hits?.length ? `<p class="draft-evidence"><strong>Что мешало:</strong> ${escapeHtml(opportunity.reject_hits.slice(0, 6).join(", "))}</p>` : ""}
+      <p class="draft-evidence"><strong>Скоринг:</strong> topic ${escapeHtml(formatScore(opportunity.topic_score || parts.topic || 0))}; project ${escapeHtml(formatScore(opportunity.project_score || parts.project || 0))}; pur_fit ${escapeHtml(formatScore(opportunity.pur_fit_score || parts.pur_fit || 0))}; commercial ${escapeHtml(formatScore(opportunity.commercial_intent_score || parts.commercial || 0))}; reject ${escapeHtml(formatScore(opportunity.reject_score || parts.reject || 0))}.</p>
+      ${renderTelegramMessageLink(item)}
+      <div class="row-actions">
+        <a class="interest-next-link" href="${escapeHtml(interestContextStepHref("/interest-contexts/intent-review", state.selectedId))}">Разметить</a>
+      </div>
+    </div>
+  </div>`;
+}
+
+function handleInterestProjectOpportunityMatchesClick(event, state) {
+  const pageButton = event.target.closest("[data-project-opportunity-matches-page-action]");
+  if (!pageButton || !state.selectedProjectOpportunityRunId) return;
+  const action = pageButton.dataset.projectOpportunityMatchesPageAction;
+  if (action === "prev") {
+    state.projectOpportunityMatchesOffset = Math.max(
+      0,
+      state.projectOpportunityMatchesOffset - state.projectOpportunityMatchesLimit
+    );
+  }
+  if (action === "next") {
+    state.projectOpportunityMatchesOffset += state.projectOpportunityMatchesLimit;
+  }
+  loadInterestProjectOpportunityMatches(state, state.selectedProjectOpportunityRunId);
 }
 
 async function ensureSelectedIntentRun(state) {
@@ -7199,36 +7463,25 @@ function renderPageControls(pagination, kind) {
   if (!pagination || pagination.total <= pagination.limit) return "";
   const from = pagination.total ? pagination.offset + 1 : 0;
   const to = Math.min(pagination.offset + pagination.limit, pagination.total);
-  const actionAttr =
-    kind === "review"
-      ? "data-review-page-action"
-      : kind === "core"
-        ? "data-core-page-action"
-        : kind === "analysis-runs"
-        ? "data-analysis-runs-page-action"
-        : kind === "analysis-matches"
-          ? "data-analysis-matches-page-action"
-          : kind === "intent-runs"
-            ? "data-intent-runs-page-action"
-            : kind === "intent-matches"
-              ? "data-intent-matches-page-action"
-              : kind === "intent-review"
-                ? "data-intent-review-page-action"
-                : kind === "intent-validation-runs"
-                  ? "data-intent-validation-runs-page-action"
-                  : kind === "intent-validation-recommendations"
-                    ? "data-intent-validation-recommendations-page-action"
-                    : kind === "intent-exclusions"
-                      ? "data-intent-exclusions-page-action"
-                      : kind === "prep-texts"
-                        ? "data-prep-texts-page-action"
-                        : kind === "prep-features"
-                          ? "data-prep-features-page-action"
-                          : kind === "prep-entities"
-                            ? "data-prep-entities-page-action"
-                            : kind === "prep-ngrams"
-                              ? "data-prep-ngrams-page-action"
-                              : "data-draft-page-action";
+  const actionAttrs = {
+    review: "data-review-page-action",
+    core: "data-core-page-action",
+    "analysis-runs": "data-analysis-runs-page-action",
+    "analysis-matches": "data-analysis-matches-page-action",
+    "intent-runs": "data-intent-runs-page-action",
+    "intent-matches": "data-intent-matches-page-action",
+    "intent-review": "data-intent-review-page-action",
+    "intent-validation-runs": "data-intent-validation-runs-page-action",
+    "intent-validation-recommendations": "data-intent-validation-recommendations-page-action",
+    "intent-exclusions": "data-intent-exclusions-page-action",
+    "prep-texts": "data-prep-texts-page-action",
+    "prep-features": "data-prep-features-page-action",
+    "prep-entities": "data-prep-entities-page-action",
+    "prep-ngrams": "data-prep-ngrams-page-action",
+    "project-opportunity-runs": "data-project-opportunity-runs-page-action",
+    "project-opportunity-matches": "data-project-opportunity-matches-page-action",
+  };
+  const actionAttr = actionAttrs[kind] || "data-draft-page-action";
   return `<div class="queue-pagination">
     <span class="muted">${escapeHtml(`${from}-${to} из ${pagination.total}`)}</span>
     <div class="button-row">

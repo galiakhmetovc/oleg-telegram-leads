@@ -137,6 +137,136 @@ DEFAULT_INTENT_EXCLUDED_CORE_NAMES = [
     "затраты",
 ]
 
+PROJECT_OPPORTUNITY_PROFILE = "pur_designer_project_opportunity_v1"
+
+PROJECT_OPPORTUNITY_PROJECT_TERMS = [
+    "проект",
+    "объект",
+    "заказчик",
+    "клиент",
+    "квартира",
+    "дом",
+    "коттедж",
+    "таунхаус",
+    "ремонт",
+    "стройка",
+    "чертеж",
+    "план",
+    "планировка",
+    "смета",
+    "гардеробная",
+    "детская",
+    "кухня",
+    "санузел",
+    "ванная",
+    "спальня",
+]
+
+PROJECT_OPPORTUNITY_PUR_TERMS = [
+    "умный дом",
+    "home assistant",
+    "автоматизация",
+    "сценарий",
+    "алиса",
+    "яндекс",
+    "электрика",
+    "щит",
+    "автомат",
+    "реле",
+    "диммер",
+    "слаботочка",
+    "кабель",
+    "провод",
+    "вывод",
+    "розетка",
+    "выключатель",
+    "датчик",
+    "протечка",
+    "термостат",
+    "климат",
+    "кондиционирование",
+    "камера",
+    "видеокамера",
+    "видеонаблюдение",
+    "домофон",
+    "контроль доступа",
+    "скуд",
+    "замок",
+    "сигнализация",
+    "охрана",
+    "wi-fi",
+    "wifi",
+    "сеть",
+    "роутер",
+    "интернет",
+    "штора",
+    "карниз",
+    "жалюзи",
+]
+
+PROJECT_OPPORTUNITY_COMMERCIAL_TERMS = [
+    "нужен",
+    "нужна",
+    "нужно",
+    "нужны",
+    "подскажите",
+    "посоветуйте",
+    "помогите",
+    "подобрать",
+    "предусмотреть",
+    "спроектировать",
+    "рассчитать",
+    "смета",
+    "стоимость",
+    "цена",
+    "сколько стоит",
+    "бюджет",
+    "заказать",
+    "купить",
+    "установить",
+    "подключить",
+    "смонтировать",
+    "поставить",
+    "кто делает",
+    "кто может",
+    "ищу",
+    "хочет",
+]
+
+PROJECT_OPPORTUNITY_REJECT_TERMS = [
+    "ниша",
+    "профиль",
+    "трек",
+    "трековый",
+    "светильник",
+    "натяжной",
+    "eurokraab",
+    "раковина",
+    "ванна",
+    "унитаз",
+    "плитка",
+    "обои",
+    "столешница",
+    "камень",
+    "мебель",
+    "фасад",
+    "archicad",
+    "архикад",
+    "визуализатор",
+    "визуализация",
+    "рендер",
+    "3d",
+    "видеокарта",
+    "процессор",
+    "системник",
+    "компьютер",
+    "коллаж",
+    "вакансия",
+    "резюме",
+    "ищу дизайнера",
+    "ищу архитектора",
+]
+
 
 @dataclass(frozen=True)
 class InterestIntentLayerRecord:
@@ -240,6 +370,14 @@ class _PreparedMessageText:
         )
 
 
+@dataclass(frozen=True)
+class _LexiconTerm:
+    source: str
+    folded: str
+    is_phrase: bool
+    lemmas: tuple[str, ...]
+
+
 class InterestIntentLayerService:
     """Manage and execute configurable intent layers."""
 
@@ -276,6 +414,81 @@ class InterestIntentLayerService:
             require_context_match=False,
             min_score=0.55,
             max_results=3000,
+        )
+
+    def ensure_project_opportunity_layer(
+        self,
+        context_id: str,
+        *,
+        actor: str,
+    ) -> InterestIntentLayerRecord:
+        rows = (
+            self.session.execute(
+                select(interest_intent_layers_table)
+                .where(interest_intent_layers_table.c.context_id == context_id)
+                .where(interest_intent_layers_table.c.status != "archived")
+                .order_by(desc(interest_intent_layers_table.c.created_at))
+            )
+            .mappings()
+            .all()
+        )
+        for row in rows:
+            metadata = row["metadata_json"] if isinstance(row["metadata_json"], dict) else {}
+            if metadata.get("opportunity_profile") == PROJECT_OPPORTUNITY_PROFILE:
+                return _layer_record(row)
+        return self.create_layer(
+            context_id=context_id,
+            name="Проектные возможности для ПУР",
+            description=(
+                "Специальный слой для чата дизайнеров: ищет не обычный лид, а проект, "
+                "где ПУР может помочь оборудованием, инженерией, интеграцией или консультацией."
+            ),
+            actor=actor,
+            include_patterns=PROJECT_OPPORTUNITY_COMMERCIAL_TERMS,
+            context_patterns=PROJECT_OPPORTUNITY_PUR_TERMS,
+            exclude_patterns=[],
+            exclude_lemmas=[],
+            exclude_phrases=[],
+            semantic_negative_examples=[
+                "Нужно определить размер ниши для подсветки декоративной скалы.",
+                "Подскажите профиль для натяжного потолка или декоративной подсветки.",
+                "Ищу 3D визуализатора, видеокарту или системник для Archicad.",
+                "Нужна раковина, столешница, мебель, плитка или отделочные материалы.",
+            ],
+            semantic_negative_threshold=0.82,
+            require_include_match=False,
+            require_context_match=False,
+            min_score=0.48,
+            max_results=3000,
+            broad_score_weight=0.15,
+            intent_hit_weight=0.08,
+            metadata_json={
+                "opportunity_profile": PROJECT_OPPORTUNITY_PROFILE,
+                "profile_version": "1.0",
+                "profile_title": "Проектные возможности для ПУР в чате дизайнеров",
+                "project_terms": PROJECT_OPPORTUNITY_PROJECT_TERMS,
+                "pur_fit_terms": PROJECT_OPPORTUNITY_PUR_TERMS,
+                "commercial_terms": PROJECT_OPPORTUNITY_COMMERCIAL_TERMS,
+                "reject_terms": PROJECT_OPPORTUNITY_REJECT_TERMS,
+                "min_pur_fit_score": 0.35,
+                "min_project_or_commercial_score": 0.2,
+            },
+        )
+
+    def run_project_opportunities(
+        self,
+        *,
+        context_id: str,
+        broad_analysis_run_id: str,
+        actor: str,
+    ) -> dict[str, Any]:
+        layer = self.ensure_project_opportunity_layer(context_id, actor=actor)
+        layer = self._refresh_project_opportunity_review_feedback(layer, actor=actor)
+        return self.run_layer(
+            context_id=context_id,
+            layer_id=layer.id,
+            broad_analysis_run_id=broad_analysis_run_id,
+            actor=actor,
         )
 
     def list_layers(self, context_id: str, *, actor: str | None = None) -> dict[str, Any]:
@@ -439,6 +652,112 @@ class InterestIntentLayerService:
     def archive_layer(self, layer_id: str, *, context_id: str, actor: str) -> None:
         self.update_layer(layer_id, context_id=context_id, actor=actor, values={"status": "archived"})
 
+    def _refresh_project_opportunity_review_feedback(
+        self,
+        layer: InterestIntentLayerRecord,
+        *,
+        actor: str,
+    ) -> InterestIntentLayerRecord:
+        metadata = dict(layer.metadata_json or {}) if isinstance(layer.metadata_json, dict) else {}
+        if metadata.get("opportunity_profile") != PROJECT_OPPORTUNITY_PROFILE:
+            return layer
+        feedback = self._context_intent_review_feedback(layer.context_id)
+        merged_metadata = {
+            **metadata,
+            "positive_source_message_ids": _merge_string_lists(
+                metadata.get("positive_source_message_ids"),
+                feedback["positive_source_message_ids"],
+            ),
+            "positive_telegram_message_ids": _merge_string_lists(
+                metadata.get("positive_telegram_message_ids"),
+                feedback["positive_telegram_message_ids"],
+            ),
+            "excluded_source_message_ids": _merge_string_lists(
+                metadata.get("excluded_source_message_ids"),
+                feedback["excluded_source_message_ids"],
+            ),
+            "excluded_telegram_message_ids": _merge_string_lists(
+                metadata.get("excluded_telegram_message_ids"),
+                feedback["excluded_telegram_message_ids"],
+            ),
+            "operator_review_counts": feedback["operator_review_counts"],
+            "operator_review_feedback_refreshed_at": utc_now().isoformat(),
+        }
+        if merged_metadata == metadata:
+            return layer
+        self.session.execute(
+            update(interest_intent_layers_table)
+            .where(interest_intent_layers_table.c.id == layer.id)
+            .values(metadata_json=merged_metadata, updated_at=utc_now())
+        )
+        self.session.commit()
+        self.audit.record_change(
+            actor=actor,
+            action="interest_intent_layer.feedback_refresh",
+            entity_type="interest_context",
+            entity_id=layer.context_id,
+            old_value_json={"layer_id": layer.id},
+            new_value_json={
+                "layer_id": layer.id,
+                "positive_count": len(merged_metadata["positive_telegram_message_ids"]),
+                "negative_count": len(merged_metadata["excluded_telegram_message_ids"]),
+            },
+        )
+        return self._layer(layer.id)
+
+    def _context_intent_review_feedback(self, context_id: str) -> dict[str, Any]:
+        rows = (
+            self.session.execute(
+                select(
+                    feedback_events_table.c.action,
+                    interest_intent_analysis_matches_table.c.source_message_id,
+                    interest_intent_analysis_matches_table.c.telegram_message_id,
+                )
+                .join(
+                    interest_intent_analysis_matches_table,
+                    interest_intent_analysis_matches_table.c.id == feedback_events_table.c.target_id,
+                )
+                .where(feedback_events_table.c.target_type == "interest_intent_match")
+                .where(feedback_events_table.c.application_status != "ignored")
+                .where(interest_intent_analysis_matches_table.c.context_id == context_id)
+                .where(
+                    feedback_events_table.c.action.in_(
+                        ["intent_match_correct", "intent_match_incorrect", "not_lead"]
+                    )
+                )
+            )
+            .mappings()
+            .all()
+        )
+        positive_source_ids: list[str] = []
+        positive_telegram_ids: list[str] = []
+        negative_source_ids: list[str] = []
+        negative_telegram_ids: list[str] = []
+        counts: Counter[str] = Counter()
+        for row in rows:
+            action = str(row["action"] or "")
+            counts["correct" if action == "intent_match_correct" else "incorrect"] += 1
+            source_id = str(row["source_message_id"] or "")
+            telegram_id = str(row["telegram_message_id"] or "")
+            if action == "intent_match_correct":
+                positive_source_ids.append(source_id)
+                positive_telegram_ids.append(telegram_id)
+            else:
+                negative_source_ids.append(source_id)
+                negative_telegram_ids.append(telegram_id)
+        positive_telegram_set = {item for item in positive_telegram_ids if item}
+        return {
+            "positive_source_message_ids": _dedupe_strings(positive_source_ids),
+            "positive_telegram_message_ids": _dedupe_strings(positive_telegram_ids),
+            "excluded_source_message_ids": _dedupe_strings(negative_source_ids),
+            "excluded_telegram_message_ids": [
+                item
+                for item in _dedupe_strings(negative_telegram_ids)
+                if item not in positive_telegram_set
+            ],
+            "operator_review_counts": dict(counts),
+        }
+
     def run_layer(
         self,
         *,
@@ -577,6 +896,61 @@ class InterestIntentLayerService:
             self.session.execute(
                 select(interest_intent_analysis_runs_table)
                 .where(interest_intent_analysis_runs_table.c.context_id == context_id)
+                .order_by(desc(interest_intent_analysis_runs_table.c.created_at))
+                .limit(safe_limit)
+                .offset(safe_offset)
+            )
+            .mappings()
+            .all()
+        )
+        return {
+            "summary": {
+                "total": total,
+                "page_count": len(rows),
+                "latest_match_count": int(rows[0]["match_count"] or 0) if rows else 0,
+                "latest_matched_message_count": int(rows[0]["matched_message_count"] or 0)
+                if rows
+                else 0,
+            },
+            "items": [_run_record(row).as_jsonable() for row in rows],
+            "pagination": _pagination(limit=safe_limit, offset=safe_offset, total=total),
+        }
+
+    def project_opportunity_runs_payload(
+        self,
+        context_id: str,
+        *,
+        limit: int = 10,
+        offset: int = 0,
+    ) -> dict[str, Any]:
+        safe_limit = max(1, min(100, int(limit)))
+        safe_offset = max(0, int(offset))
+        layer_ids = self._project_opportunity_layer_ids(context_id)
+        if not layer_ids:
+            return {
+                "summary": {
+                    "total": 0,
+                    "page_count": 0,
+                    "latest_match_count": 0,
+                    "latest_matched_message_count": 0,
+                },
+                "items": [],
+                "pagination": _pagination(limit=safe_limit, offset=safe_offset, total=0),
+            }
+        total = int(
+            self.session.execute(
+                select(func.count())
+                .select_from(interest_intent_analysis_runs_table)
+                .where(interest_intent_analysis_runs_table.c.context_id == context_id)
+                .where(interest_intent_analysis_runs_table.c.intent_layer_id.in_(layer_ids))
+            ).scalar_one()
+            or 0
+        )
+        rows = (
+            self.session.execute(
+                select(interest_intent_analysis_runs_table)
+                .where(interest_intent_analysis_runs_table.c.context_id == context_id)
+                .where(interest_intent_analysis_runs_table.c.intent_layer_id.in_(layer_ids))
                 .order_by(desc(interest_intent_analysis_runs_table.c.created_at))
                 .limit(safe_limit)
                 .offset(safe_offset)
@@ -835,6 +1209,11 @@ class InterestIntentLayerService:
                     "positive_boost": match["positive_boost"],
                     "core_item": row["canonical_name"],
                     "category": row["category"],
+                    **(
+                        {"opportunity": match["opportunity"]}
+                        if isinstance(match.get("opportunity"), dict)
+                        else {}
+                    ),
                 },
                 "created_at": created_at,
             }
@@ -925,6 +1304,26 @@ class InterestIntentLayerService:
         )
         return _run_record(row) if row is not None else None
 
+    def _project_opportunity_layer_ids(self, context_id: str) -> list[str]:
+        rows = (
+            self.session.execute(
+                select(
+                    interest_intent_layers_table.c.id,
+                    interest_intent_layers_table.c.metadata_json,
+                )
+                .where(interest_intent_layers_table.c.context_id == context_id)
+                .where(interest_intent_layers_table.c.status != "archived")
+            )
+            .mappings()
+            .all()
+        )
+        layer_ids: list[str] = []
+        for row in rows:
+            metadata = row["metadata_json"] if isinstance(row["metadata_json"], dict) else {}
+            if metadata.get("opportunity_profile") == PROJECT_OPPORTUNITY_PROFILE:
+                layer_ids.append(str(row["id"]))
+        return layer_ids
+
     def _broad_run(self, run_id: str) -> dict[str, Any] | None:
         row = (
             self.session.execute(
@@ -942,6 +1341,23 @@ class _CompiledIntentLayer:
     def __init__(self, layer: InterestIntentLayerRecord) -> None:
         self.layer = layer
         metadata = layer.metadata_json if isinstance(layer.metadata_json, dict) else {}
+        self.opportunity_profile = str(metadata.get("opportunity_profile") or "")
+        self.opportunity_project_terms = _compile_lexicon_terms(
+            _string_items(metadata.get("project_terms") or PROJECT_OPPORTUNITY_PROJECT_TERMS)
+        )
+        self.opportunity_pur_fit_terms = _compile_lexicon_terms(
+            _string_items(metadata.get("pur_fit_terms") or PROJECT_OPPORTUNITY_PUR_TERMS)
+        )
+        self.opportunity_commercial_terms = _compile_lexicon_terms(
+            _string_items(metadata.get("commercial_terms") or PROJECT_OPPORTUNITY_COMMERCIAL_TERMS)
+        )
+        self.opportunity_reject_terms = _compile_lexicon_terms(
+            _string_items(metadata.get("reject_terms") or PROJECT_OPPORTUNITY_REJECT_TERMS)
+        )
+        self.min_pur_fit_score = _score(metadata.get("min_pur_fit_score"), default=0.35)
+        self.min_project_or_commercial_score = _score(
+            metadata.get("min_project_or_commercial_score"), default=0.2
+        )
         self.include_patterns = _compile_patterns(_json_list(layer.include_patterns_json))
         self.context_patterns = _compile_patterns(_json_list(layer.context_patterns_json))
         self.exclude_patterns = _compile_patterns(_json_list(layer.exclude_patterns_json))
@@ -1069,6 +1485,7 @@ class _CompiledIntentLayer:
         if (
             semantic_negative_score >= self.semantic_negative_threshold
             and semantic_negative_score >= semantic_positive_score + self.semantic_positive_margin
+            and self.opportunity_profile != PROJECT_OPPORTUNITY_PROFILE
             and not positive_signal
         ):
             self._record_exclusion(
@@ -1084,6 +1501,15 @@ class _CompiledIntentLayer:
         if _pattern_hits(self.exclude_patterns, text) and not positive_signal:
             self._record_exclusion("advanced_regex", row)
             return None
+        if self.opportunity_profile == PROJECT_OPPORTUNITY_PROFILE:
+            return self._match_project_opportunity(
+                row,
+                prepared=prepared,
+                positive_signal=positive_signal,
+                semantic_negative_score=semantic_negative_score,
+                semantic_positive_score=semantic_positive_score,
+                semantic_scores=semantic_scores,
+            )
         include_hits = _pattern_hits(self.include_patterns, text)
         if self.layer.require_include_match and not include_hits and not positive_signal:
             self._record_exclusion("include_pattern_miss", row)
@@ -1143,6 +1569,161 @@ class _CompiledIntentLayer:
             "semantic_positive_signal": bool(semantic_positive_protected),
             "operator_positive_signal": bool(positive_protected),
             "positive_boost": round(positive_boost, 4),
+        }
+
+    def _match_project_opportunity(
+        self,
+        row: Any,
+        *,
+        prepared: _PreparedMessageText,
+        positive_signal: bool,
+        semantic_negative_score: float,
+        semantic_positive_score: float,
+        semantic_scores: dict[str, Any],
+    ) -> dict[str, Any] | None:
+        project_hits = _lexicon_hits(prepared, self.opportunity_project_terms)
+        pur_fit_hits = _lexicon_hits(prepared, self.opportunity_pur_fit_terms)
+        commercial_hits = _lexicon_hits(prepared, self.opportunity_commercial_terms)
+        reject_hits = _lexicon_hits(prepared, self.opportunity_reject_terms)
+        category_boost = _opportunity_category_boost(row)
+        broad_score = float(row["score"] or 0)
+        topic_score = max(0.0, min(1.0, broad_score))
+        project_score = min(1.0, len(project_hits) * 0.22)
+        pur_fit_score = min(1.0, len(pur_fit_hits) * 0.2 + category_boost)
+        commercial_score = min(1.0, len(commercial_hits) * 0.18)
+        reject_score = min(1.0, len(reject_hits) * 0.16)
+        if (
+            semantic_negative_score >= self.semantic_negative_threshold
+            and semantic_negative_score > semantic_positive_score + self.semantic_positive_margin
+        ):
+            reject_score = max(reject_score, min(1.0, semantic_negative_score))
+        protected = positive_signal
+        reject_penalty = 0.18 if pur_fit_score >= 0.65 and project_score >= 0.2 else 0.38
+        final_score = (
+            topic_score * 0.15
+            + project_score * 0.25
+            + pur_fit_score * 0.35
+            + commercial_score * 0.25
+            - reject_score * reject_penalty
+        )
+        if protected:
+            final_score += self.positive_score_boost
+        final_score = max(0.0, min(0.99, final_score))
+        reject_reason = _opportunity_reject_reason(
+            reject_hits=reject_hits,
+            pur_fit_score=pur_fit_score,
+            project_score=project_score,
+            commercial_score=commercial_score,
+        )
+        if pur_fit_score < self.min_pur_fit_score and not protected:
+            self._record_exclusion(
+                "opportunity_pur_fit_miss",
+                row,
+                {
+                    "pur_fit_score": round(pur_fit_score, 4),
+                    "project_score": round(project_score, 4),
+                    "commercial_score": round(commercial_score, 4),
+                    "reject_reason": reject_reason,
+                },
+            )
+            return None
+        if (
+            max(project_score, commercial_score) < self.min_project_or_commercial_score
+            and not protected
+        ):
+            self._record_exclusion(
+                "opportunity_project_context_miss",
+                row,
+                {
+                    "pur_fit_score": round(pur_fit_score, 4),
+                    "project_score": round(project_score, 4),
+                    "commercial_score": round(commercial_score, 4),
+                    "reject_reason": reject_reason,
+                },
+            )
+            return None
+        if reject_score >= 0.48 and pur_fit_score < 0.65 and not protected:
+            self._record_exclusion(
+                "opportunity_designer_noise",
+                row,
+                {
+                    "reject_score": round(reject_score, 4),
+                    "reject_reason": reject_reason,
+                    "reject_hits": reject_hits[:8],
+                },
+            )
+            return None
+        if final_score < self.layer.min_score and not protected:
+            self._record_exclusion(
+                "opportunity_min_score",
+                row,
+                {
+                    "final_score": round(final_score, 4),
+                    "pur_fit_score": round(pur_fit_score, 4),
+                    "project_score": round(project_score, 4),
+                    "commercial_score": round(commercial_score, 4),
+                    "reject_score": round(reject_score, 4),
+                    "reject_reason": reject_reason,
+                },
+            )
+            return None
+        if protected and final_score < self.layer.min_score:
+            final_score = min(0.99, self.layer.min_score)
+        opportunity_type = _opportunity_type(pur_fit_hits, row)
+        if protected:
+            self.positive_boosted_count += 1
+            self._record_positive_boost(
+                row,
+                {
+                    "semantic_positive_score": round(semantic_positive_score, 4),
+                    "semantic_negative_score": round(semantic_negative_score, 4),
+                    "positive_boost": round(self.positive_score_boost, 4),
+                    "semantic_positive_example": semantic_scores.get("positive_example"),
+                },
+            )
+        return {
+            "include_hits": commercial_hits,
+            "context_hits": pur_fit_hits,
+            "score": round(final_score, 4),
+            "score_parts": {
+                "topic": round(topic_score, 4),
+                "project": round(project_score, 4),
+                "pur_fit": round(pur_fit_score, 4),
+                "commercial": round(commercial_score, 4),
+                "reject": round(reject_score, 4),
+                "positive_boost": round(self.positive_score_boost if protected else 0.0, 4),
+            },
+            "prepared_text": {
+                "source": prepared.source,
+                "used_clean_text": bool(prepared.clean_text),
+                "used_lemmas": bool(prepared.lemmas_text),
+            },
+            "semantic_negative_score": round(semantic_negative_score, 4),
+            "semantic_positive_score": round(semantic_positive_score, 4),
+            "semantic_positive_signal": bool(protected and not positive_signal),
+            "operator_positive_signal": bool(positive_signal),
+            "positive_boost": round(self.positive_score_boost if protected else 0.0, 4),
+            "opportunity": {
+                "profile": PROJECT_OPPORTUNITY_PROFILE,
+                "decision": "yes" if final_score >= 0.62 else "maybe",
+                "opportunity_type": opportunity_type,
+                "topic_score": round(topic_score, 4),
+                "project_score": round(project_score, 4),
+                "pur_fit_score": round(pur_fit_score, 4),
+                "commercial_intent_score": round(commercial_score, 4),
+                "reject_score": round(reject_score, 4),
+                "reject_reason": None if reject_score < 0.48 or pur_fit_score >= 0.65 else reject_reason,
+                "project_hits": project_hits[:10],
+                "pur_fit_hits": pur_fit_hits[:10],
+                "commercial_hits": commercial_hits[:10],
+                "reject_hits": reject_hits[:10],
+                "operator_summary": _opportunity_summary(
+                    opportunity_type=opportunity_type,
+                    pur_fit_hits=pur_fit_hits,
+                    project_hits=project_hits,
+                    commercial_hits=commercial_hits,
+                ),
+            },
         }
 
     def _semantic_scores(self, prepared: _PreparedMessageText) -> dict[str, Any]:
@@ -1219,6 +1800,16 @@ def _intent_summary(
     message_ids = {row["source_message_id"] for row in match_rows}
     by_category = Counter(str(row["category"] or "без категории") for row in match_rows)
     by_core_item = Counter(str(row["canonical_name"] or row["interest_core_item_id"]) for row in match_rows)
+    by_opportunity_type = Counter(
+        str((row.get("evidence_json") or {}).get("opportunity", {}).get("opportunity_type"))
+        for row in match_rows
+        if isinstance((row.get("evidence_json") or {}).get("opportunity"), dict)
+    )
+    by_opportunity_decision = Counter(
+        str((row.get("evidence_json") or {}).get("opportunity", {}).get("decision"))
+        for row in match_rows
+        if isinstance((row.get("evidence_json") or {}).get("opportunity"), dict)
+    )
     exclusion_counts = dict(compiled_layer.exclusion_counts)
     exclusion_total = sum(exclusion_counts.values())
     cleaned_total = max(0, int(broad_match_count) - len(match_rows))
@@ -1247,6 +1838,8 @@ def _intent_summary(
         "positive_boosted_samples": compiled_layer.positive_boosted_samples,
         "by_category": dict(by_category.most_common(20)),
         "top_core_items": dict(by_core_item.most_common(20)),
+        "by_opportunity_type": dict(by_opportunity_type.most_common(20)),
+        "by_opportunity_decision": dict(by_opportunity_decision.most_common(20)),
         "algorithm": "local_intent_layer_v1",
         "intent_layer": {
             "id": layer.id,
@@ -1288,6 +1881,22 @@ def _merge_casefold_strings(left: list[str], right: list[str]) -> list[str]:
         if key and key not in seen:
             result.append(item)
             seen.add(key)
+    return result
+
+
+def _dedupe_strings(value: Any) -> list[str]:
+    return _merge_string_lists(value, [])
+
+
+def _merge_string_lists(left: Any, right: Any) -> list[str]:
+    result: list[str] = []
+    seen: set[str] = set()
+    for source in (_json_list(left), _json_list(right)):
+        for item in source:
+            clean = str(item or "").strip()
+            if clean and clean not in seen:
+                result.append(clean)
+                seen.add(clean)
     return result
 
 
@@ -1372,6 +1981,116 @@ def _phrase_rule_hits(
         if phrase.strip() and phrase in text:
             hits.append(source)
     return hits[:10]
+
+
+def _compile_lexicon_terms(terms: list[str]) -> list[_LexiconTerm]:
+    compiled: list[_LexiconTerm] = []
+    seen: set[str] = set()
+    for term in terms:
+        source = str(term or "").strip()
+        if not source:
+            continue
+        folded = _fold(source)
+        if not folded or folded in seen:
+            continue
+        seen.add(folded)
+        compiled.append(
+            _LexiconTerm(
+                source=source,
+                folded=folded,
+                is_phrase=bool(" " in folded or "-" in folded),
+                lemmas=tuple(_normal_lemmas(folded)),
+            )
+        )
+    return compiled
+
+
+def _lexicon_hits(prepared: _PreparedMessageText, terms: list[_LexiconTerm]) -> list[str]:
+    text = _fold(prepared.search_text)
+    lemmas_text = _fold(prepared.lemmas_text)
+    token_set = set(TOKEN_RE.findall(text))
+    lemma_set = set(prepared.lemmas) or set(_normal_lemmas(prepared.search_text))
+    hits: list[str] = []
+    for term in terms:
+        if term.is_phrase:
+            lemma_phrase = " ".join(term.lemmas)
+            if term.folded in text or (lemma_phrase and lemma_phrase in lemmas_text):
+                hits.append(term.source)
+            continue
+        if (
+            term.folded in token_set
+            or term.folded in lemma_set
+            or any(lemma in lemma_set for lemma in term.lemmas)
+        ):
+            hits.append(term.source)
+    return list(dict.fromkeys(hits))[:20]
+
+
+def _opportunity_category_boost(row: Any) -> float:
+    category = _fold(row["category"])
+    canonical_name = _fold(row["canonical_name"])
+    text = f"{category} {canonical_name}"
+    if any(
+        token in text
+        for token in (
+            "автоматизация",
+            "безопасность",
+            "инфраструктура",
+            "электр",
+            "камер",
+            "домофон",
+            "видеонаблюдение",
+        )
+    ):
+        return 0.15
+    return 0.0
+
+
+def _opportunity_reject_reason(
+    *,
+    reject_hits: list[str],
+    pur_fit_score: float,
+    project_score: float,
+    commercial_score: float,
+) -> str | None:
+    if pur_fit_score < 0.35:
+        return "not_pur_scope"
+    if max(project_score, commercial_score) < 0.2:
+        return "no_project_or_action"
+    folded_hits = {_fold(hit) for hit in reject_hits}
+    if folded_hits & {"архикад", "archicad", "визуализатор", "визуализация", "рендер", "3d"}:
+        return "software_or_visualization"
+    if folded_hits & {"раковина", "ванна", "унитаз", "плитка", "обои", "столешница", "камень", "мебель"}:
+        return "materials_or_furniture_only"
+    if folded_hits & {"ниша", "профиль", "трек", "трековый", "светильник", "натяжной"}:
+        return "interior_lighting_only"
+    return "designer_noise"
+
+
+def _opportunity_type(pur_fit_hits: list[str], row: Any) -> str:
+    text = _fold(" ".join([*pur_fit_hits, str(row["canonical_name"] or ""), str(row["category"] or "")]))
+    if any(token in text for token in ("камера", "видеокамера", "видеонаблюдение", "домофон", "скуд", "замок")):
+        return "equipment_or_security"
+    if any(token in text for token in ("умный дом", "home assistant", "автоматизация", "алиса", "яндекс", "сценарий")):
+        return "integration"
+    if any(token in text for token in ("электрика", "щит", "кабель", "провод", "вывод", "реле", "диммер")):
+        return "engineering_consulting"
+    if any(token in text for token in ("wi-fi", "wifi", "сеть", "роутер", "интернет")):
+        return "infrastructure"
+    return "partner_referral"
+
+
+def _opportunity_summary(
+    *,
+    opportunity_type: str,
+    pur_fit_hits: list[str],
+    project_hits: list[str],
+    commercial_hits: list[str],
+) -> str:
+    subject = ", ".join(pur_fit_hits[:3]) or "тема ПУР"
+    project = ", ".join(project_hits[:2]) or "проектный контекст"
+    action = ", ".join(commercial_hits[:2]) or "возможный следующий шаг"
+    return f"{opportunity_type}: {subject}; контекст: {project}; действие: {action}"
 
 
 def _prepared_from_raw(raw_text: str) -> _PreparedMessageText:

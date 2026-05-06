@@ -629,6 +629,16 @@ def interest_context_intent_matches_page(
     return HTMLResponse(_interest_context_step_page("intent_matches"))
 
 
+@router.get("/interest-contexts/project-opportunities", response_class=HTMLResponse)
+def interest_context_project_opportunities_page(
+    request: Request,
+    auth_service: WebAuthService = Depends(get_auth_service),
+) -> Response:
+    if not _has_page_session(request, auth_service):
+        return RedirectResponse("/login", status_code=303)
+    return HTMLResponse(_interest_context_step_page("project_opportunities"))
+
+
 @router.get("/interest-contexts/intent-review", response_class=HTMLResponse)
 def interest_context_intent_review_page(
     request: Request,
@@ -702,6 +712,7 @@ _INTEREST_CONTEXT_STEPS = (
     ("intent_layers", "/interest-contexts/intent-layers", "Слои намерений"),
     ("intent_runs", "/interest-contexts/intent-runs", "Запуски намерений"),
     ("intent_matches", "/interest-contexts/intent-matches", "Сообщения намерений"),
+    ("project_opportunities", "/interest-contexts/project-opportunities", "Проектные возможности"),
     ("intent_review", "/interest-contexts/intent-review", "Разметка"),
     ("intent_ai_validation", "/interest-contexts/intent-ai-validation", "AI-валидация"),
     ("intent_ai_recommendations", "/interest-contexts/intent-ai-recommendations", "AI-рекомендации"),
@@ -734,6 +745,7 @@ def _interest_context_step_page(step: str) -> str:
         "intent_layers": "Слои намерений",
         "intent_runs": "Запуски намерений",
         "intent_matches": "Сообщения намерений",
+        "project_opportunities": "Проектные возможности",
         "intent_review": "Разметка сообщений намерений",
         "intent_ai_validation": "AI-валидация по разметке",
         "intent_ai_recommendations": "Рекомендации AI",
@@ -764,6 +776,7 @@ def _interest_context_step_page(step: str) -> str:
         "intent_layers": "Создайте или примените настраиваемый слой намерений поверх широкого тематического анализа.",
         "intent_runs": "Выберите запуск слоя намерений. Это отдельный проверяемый артефакт.",
         "intent_matches": "Постранично смотрите сообщения, прошедшие слой намерений, и объяснение почему.",
+        "project_opportunities": "Для чата дизайнеров ищем проектные возможности: где ПУР может помочь оборудованием, инженерией, интеграцией или консультацией.",
         "intent_review": "Помечайте сообщения как правильные или неправильные и оставляйте комментарии для обучения следующего фильтра.",
         "intent_ai_validation": "Запускайте AI-валидацию вручную только после накопления операторской разметки.",
         "intent_ai_recommendations": "Разбирайте предложения модели: одобрить или отклонить, видя impact preview.",
@@ -866,6 +879,7 @@ def _interest_context_step_body(step: str) -> str:
         "intent_layers": _interest_context_intent_layers_body,
         "intent_runs": _interest_context_intent_runs_body,
         "intent_matches": _interest_context_intent_matches_body,
+        "project_opportunities": _interest_context_project_opportunities_body,
         "intent_review": _interest_context_intent_review_body,
         "intent_ai_validation": _interest_context_intent_ai_validation_body,
         "intent_ai_recommendations": _interest_context_intent_ai_recommendations_body,
@@ -1797,6 +1811,70 @@ def _interest_context_intent_matches_body() -> str:
     """
 
 
+def _interest_context_project_opportunities_body() -> str:
+    return """
+                  <section class="detail-section">
+                    <div class="section-head">
+                      <div>
+                        <h3>Проектные возможности</h3>
+                        <p class="muted">
+                          Один артефакт: список сообщений из чата дизайнеров, где ПУР может практически помочь
+                          оборудованием, инженерией, интеграцией или консультацией.
+                        </p>
+                      </div>
+                      <md-outlined-button id="interest-project-opportunities-refresh" type="button">
+                        <md-icon slot="icon">refresh</md-icon>
+                        Обновить
+                      </md-outlined-button>
+                    </div>
+                    <div class="explain-box">
+                      <strong>Чем отличается от слоя намерений</strong>
+                      <ul>
+                        <li>Ищем не “хочу купить”, а проектный повод для ПУР: объект, заказчик, чертежи, инженерка, оборудование или интеграция.</li>
+                        <li>Score разбит на части: тема, проектный контекст, применимость ПУР, коммерческий повод и дизайнерский шум.</li>
+                        <li>Декоративные ниши, профили, раковины, мебель, визуализация и софт дизайнера отсекаются как нерелевантный профиль источника.</li>
+                        <li>Результат сохраняется как обычный intent run, поэтому его можно размечать и дообучать через существующий feedback.</li>
+                      </ul>
+                    </div>
+                    <div class="button-row">
+                      <md-filled-button id="interest-project-opportunities-run" type="button">
+                        <md-icon slot="icon">workspaces</md-icon>
+                        Найти проектные возможности
+                      </md-filled-button>
+                    </div>
+                    <p id="interest-project-opportunities-status" class="status-line" role="status"></p>
+                    <section class="draft-review-section">
+                      <div class="section-head compact-section-head">
+                        <h4>1. Выберите широкий тематический запуск</h4>
+                        <span class="muted">обычно это запуск по архиву чата дизайнеров</span>
+                      </div>
+                      <div id="interest-analysis-runs" class="draft-review-panel" aria-live="polite"></div>
+                    </section>
+                    <section class="draft-review-section">
+                      <div class="section-head compact-section-head">
+                        <h4>2. Запуски проектных возможностей</h4>
+                        <span class="muted">отдельные результаты специального профиля</span>
+                      </div>
+                      <div id="interest-project-opportunities-runs" class="draft-review-panel" aria-live="polite"></div>
+                    </section>
+                    <section class="draft-review-section">
+                      <div class="section-head compact-section-head">
+                        <h4>3. Сообщения проектных возможностей</h4>
+                        <span class="muted">по 10 сообщений на странице</span>
+                      </div>
+                      <div id="interest-project-opportunities-matches" class="draft-review-panel" aria-live="polite"></div>
+                    </section>
+                  </section>
+                  <section class="detail-section">
+                    <div class="section-head">
+                      <h3>Следующий шаг</h3>
+                      <a class="interest-next-link" href="/interest-contexts/intent-review">Открыть разметку</a>
+                    </div>
+                    <p class="muted">Проверяйте именно этот слой: “интересно ПУР / не интересно ПУР” с причиной.</p>
+                  </section>
+    """
+
+
 def _interest_context_intent_review_body() -> str:
     return """
                   <section class="detail-section">
@@ -2116,6 +2194,7 @@ def _interest_context_stage_hint(step: str) -> str:
         "intent_layers": "настройка фильтра",
         "intent_runs": "запуски фильтра",
         "intent_matches": "сообщения с намерением",
+        "project_opportunities": "проектная применимость",
         "intent_review": "ручная проверка",
         "intent_ai_validation": "запуск по запросу",
         "intent_ai_recommendations": "одобрение предложений",

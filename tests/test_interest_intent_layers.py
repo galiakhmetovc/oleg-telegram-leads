@@ -220,6 +220,272 @@ def test_intent_layer_matches_context_pattern_against_stage2_lemmas(tmp_path):
         assert filtered["summary"]["match_count"] == 0
 
 
+def test_project_opportunity_layer_keeps_pur_projects_and_filters_designer_noise(tmp_path):
+    engine = create_sqlite_engine(tmp_path / "test.db")
+    upgrade_database(engine)
+    session_factory = create_session_factory(engine)
+    now = datetime(2026, 5, 6, 8, 0, tzinfo=UTC)
+    texts_path = tmp_path / "processed" / "texts.parquet"
+    texts_path.parent.mkdir(parents=True)
+    messages = [
+        (
+            "good-smart-home",
+            608336,
+            "Заказчик хочет систему умного дома от Яндекс. Влияет ли это на чертежи электрики?",
+            ["заказчик", "хочет", "систему", "умного", "дома", "яндекс", "чертежи", "электрики"],
+            ["заказчик", "хотеть", "система", "умный", "дом", "яндекс", "чертеж", "электрика"],
+            "автоматизация",
+            "умный дом",
+        ),
+        (
+            "good-engineering",
+            608337,
+            "Для гардеробной нужны выводы проводов под подсветку, как предусмотреть?",
+            ["для", "гардеробной", "нужны", "выводы", "проводов", "под", "подсветку"],
+            ["для", "гардеробная", "нужный", "вывод", "провод", "под", "подсветка"],
+            "инфраструктура",
+            "электрика",
+        ),
+        (
+            "reviewed-switches",
+            608338,
+            "Коллеги, подскажите, куда поехать посмотреть выключатели?",
+            ["коллеги", "подскажите", "куда", "поехать", "посмотреть", "выключатели"],
+            ["коллега", "подсказать", "куда", "поехать", "посмотреть", "выключатель"],
+            "автоматизация",
+            "утренний_режим",
+        ),
+        (
+            "bad-niche",
+            719012,
+            "Добрый день. Нужно определить размер ниши для подсветки скалы.",
+            ["нужно", "определить", "размер", "ниши", "подсветки", "скалы"],
+            ["нужно", "определить", "размер", "ниша", "подсветка", "скала"],
+            "автоматизация",
+            "управление подсветкой",
+        ),
+        (
+            "bad-visualization",
+            719013,
+            "Ищу 3D визуализатора со знанием Archicad для проекта интерьера.",
+            ["ищу", "3d", "визуализатора", "archicad", "проекта", "интерьера"],
+            ["искать", "3d", "визуализатор", "archicad", "проект", "интерьер"],
+            "автоматизация",
+            "автоматизация",
+        ),
+    ]
+    pq.write_table(
+        pa.Table.from_pylist(
+            [
+                {
+                    "export_run_id": "raw-1",
+                    "monitored_source_id": "source-1",
+                    "telegram_message_id": telegram_message_id,
+                    "row_index": index,
+                    "date": now.isoformat(),
+                    "message_url": f"https://t.me/chat_mila_kolpakova/{telegram_message_id}",
+                    "raw_text": text,
+                    "clean_text": " ".join(tokens),
+                    "normalization_lang": "ru",
+                    "tokens_json": json.dumps(tokens, ensure_ascii=False),
+                    "lemmas_json": json.dumps(lemmas, ensure_ascii=False),
+                    "pos_tags_json": json.dumps(["NOUN"] * len(tokens)),
+                    "token_map_json": json.dumps([]),
+                    "token_count": len(tokens),
+                    "has_text": True,
+                    "normalization_status": "normalized",
+                    "normalization_error": None,
+                    "raw_message_json": "{}",
+                }
+                for index, (_, telegram_message_id, text, tokens, lemmas, _, _) in enumerate(
+                    messages, start=1
+                )
+            ]
+        ),
+        texts_path,
+    )
+    with session_factory() as session:
+        session.execute(
+            insert(monitored_sources_table).values(
+                id="source-1",
+                source_kind="telegram_group",
+                telegram_id="-1001",
+                username="chat_mila_kolpakova",
+                title="Чат дизайнеров",
+                invite_link_hash=None,
+                input_ref="ChatLeads",
+                source_purpose="interest_context_seed",
+                interest_context_id="context-1",
+                assigned_userbot_account_id=None,
+                priority="normal",
+                status="active",
+                lead_detection_enabled=False,
+                catalog_ingestion_enabled=False,
+                phase_enabled=True,
+                start_mode="from_beginning",
+                start_message_id=None,
+                start_recent_limit=None,
+                start_recent_days=None,
+                historical_backfill_policy="none",
+                checkpoint_message_id=None,
+                checkpoint_date=None,
+                last_preview_at=None,
+                preview_message_count=None,
+                next_poll_at=None,
+                poll_interval_seconds=60,
+                last_success_at=None,
+                last_error_at=None,
+                last_error=None,
+                added_by="admin",
+                activated_by=None,
+                activated_at=None,
+                created_at=now,
+                updated_at=now,
+            )
+        )
+        session.execute(
+            insert(telegram_raw_export_runs_table).values(
+                id="raw-1",
+                monitored_source_id="source-1",
+                source_ref="ChatLeads",
+                source_kind="telegram_group",
+                telegram_id="-1001",
+                username="chat_mila_kolpakova",
+                title="Чат дизайнеров",
+                export_format="telegram_desktop_json",
+                output_dir=str(tmp_path),
+                result_json_path=str(tmp_path / "result.json"),
+                messages_jsonl_path=str(tmp_path / "messages.jsonl"),
+                attachments_jsonl_path=str(tmp_path / "attachments.jsonl"),
+                messages_parquet_path=str(tmp_path / "messages.parquet"),
+                attachments_parquet_path=str(tmp_path / "attachments.parquet"),
+                manifest_path=str(tmp_path / "manifest.json"),
+                message_count=len(messages),
+                attachment_count=0,
+                status="succeeded",
+                error=None,
+                started_at=now,
+                finished_at=now,
+                metadata_json={"text_normalization": {"texts_parquet_path": str(texts_path)}},
+                created_at=now,
+            )
+        )
+        session.execute(
+            insert(interest_core_analysis_runs_table).values(
+                id="broad-1",
+                context_id="context-1",
+                monitored_source_id="source-1",
+                raw_export_run_id="raw-1",
+                status="succeeded",
+                source_title="Чат дизайнеров",
+                message_count=len(messages),
+                core_item_count=2,
+                matched_message_count=len(messages),
+                match_count=len(messages),
+                summary_json={"algorithm": "test"},
+                created_by="admin",
+                started_at=now,
+                finished_at=now,
+                created_at=now,
+                updated_at=now,
+            )
+        )
+        session.execute(
+            insert(interest_core_analysis_matches_table),
+            [
+                {
+                    "id": f"broad-match-{index}",
+                    "run_id": "broad-1",
+                    "context_id": "context-1",
+                    "source_message_id": source_message_id,
+                    "interest_core_item_id": "core-1",
+                    "telegram_message_id": telegram_message_id,
+                    "message_date": now,
+                    "sender_id": "user-1",
+                    "message_text": text,
+                    "canonical_name": canonical_name,
+                    "category": category,
+                    "matched_text": canonical_name,
+                    "match_kind": "synonym",
+                    "score": 0.82,
+                    "evidence_json": {},
+                    "created_at": now,
+                }
+                for index, (
+                    source_message_id,
+                    telegram_message_id,
+                    text,
+                    _tokens,
+                    _lemmas,
+                    category,
+                    canonical_name,
+                ) in enumerate(messages, start=1)
+            ],
+        )
+        session.execute(
+            insert(interest_intent_analysis_matches_table).values(
+                id="old-reviewed-match",
+                run_id="old-run",
+                context_id="context-1",
+                intent_layer_id="old-layer",
+                source_message_id="reviewed-switches",
+                interest_core_match_id="old-broad-match",
+                interest_core_item_id="core-1",
+                telegram_message_id=608338,
+                message_date=now,
+                sender_id="user-1",
+                message_text="Коллеги, подскажите, куда поехать посмотреть выключатели?",
+                canonical_name="утренний_режим",
+                category="автоматизация",
+                matched_text="выключатели",
+                match_kind="intent_rule",
+                score=0.41,
+                broad_score=0.99,
+                evidence_json={},
+                created_at=now,
+            )
+        )
+        session.execute(
+            insert(feedback_events_table).values(
+                id="feedback-reviewed-switches",
+                target_type="interest_intent_match",
+                target_id="old-reviewed-match",
+                action="intent_match_correct",
+                reason_code="manual",
+                feedback_scope="message",
+                learning_effect="include",
+                application_status="recorded",
+                applied_entity_type=None,
+                applied_entity_id=None,
+                applied_at=None,
+                comment="оператор отметил как полезное",
+                created_by="admin",
+                created_at=now,
+                metadata_json={},
+            )
+        )
+        service = InterestIntentLayerService(session)
+
+        result = service.run_project_opportunities(
+            context_id="context-1",
+            broad_analysis_run_id="broad-1",
+            actor="admin",
+        )
+
+        matched_ids = {row["source_message_id"] for row in result["top_matches"]}
+        assert matched_ids == {"good-smart-home", "good-engineering", "reviewed-switches"}
+        assert result["summary"]["match_count"] == 3
+        assert result["summary"]["exclusions"]["opportunity_pur_fit_miss"] >= 1
+        assert result["summary"]["by_opportunity_type"]
+        assert result["summary"]["positive_boosted_count"] == 1
+        for row in result["top_matches"]:
+            opportunity = row["evidence_json"]["opportunity"]
+            assert opportunity["profile"] == "pur_designer_project_opportunity_v1"
+            assert opportunity["pur_fit_score"] >= 0.35
+            if row["source_message_id"] != "reviewed-switches":
+                assert row["evidence_json"]["score_parts"]["project"] > 0
+
+
 def test_ai_filter_metadata_excludes_semantic_false_positives_and_boosts_correct(tmp_path):
     engine = create_sqlite_engine(tmp_path / "test.db")
     upgrade_database(engine)
