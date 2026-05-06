@@ -347,6 +347,19 @@ Lead-related records include:
 A lead answers: **where does the current data match the user's interest
 context?**
 
+Lead detection is not the first matching layer. The product uses:
+
+- broad Interest Core matching: does the fragment concern the user's context at
+  all;
+- configurable Intent Layers: what narrower intention is visible in the matched
+  fragment, such as asking for help, looking for a supplier, comparing price, or
+  planning implementation;
+- lead creation/notification later: whether this intent should become an
+  operational lead, task, notification, or CRM follow-up.
+
+This keeps intent definitions auditable and editable without changing the
+Interest Core itself.
+
 ### 15. CRM Memory
 
 Memory about customers and follow-up work.

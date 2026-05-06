@@ -142,6 +142,12 @@ Chat analytics pipeline:
   business brief before later candidate/catalog/lead prompts use it. Current
   prompt version is `interest-core-brief-v1`; output is an editable active/draft
   version in `interest_core_briefs`.
+- Interest chat analysis is split into two layers. The first layer is broad,
+  local matching against approved Interest Core items. The second layer is a
+  configurable **Intent Layer** over that broad run: operators can tune include
+  patterns, exclude patterns, excluded core items/categories, score weights,
+  threshold, and result limit. This keeps “sales lead” as one possible intent
+  configuration instead of hardcoding it into the core matcher.
 
 Catalog and examples:
 

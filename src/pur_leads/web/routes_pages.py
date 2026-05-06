@@ -702,7 +702,7 @@ def _interest_context_analysis_body() -> str:
                       <div>
                         <h3>Запуски анализа</h3>
                         <p class="muted">
-                          Каждый запуск связан с конкретным загруженным архивом и версией рабочего ядра на момент анализа.
+                          Это первый слой: широкое совпадение сообщений с рабочим ядром интересов.
                         </p>
                       </div>
                       <md-outlined-button id="interest-analysis-refresh" type="button">
@@ -715,13 +715,106 @@ def _interest_context_analysis_body() -> str:
                   <section class="detail-section">
                     <div class="section-head">
                       <div>
-                        <h3>Найденные сообщения</h3>
+                        <h3>Слои намерений</h3>
+                        <p class="muted">
+                          Это второй настраиваемый слой поверх широкого анализа: он сужает выборку по намерению
+                          оператора, например “ищет помощь”, “хочет заказать”, “сравнивает цену”.
+                        </p>
+                      </div>
+                      <md-outlined-button id="interest-intent-refresh" type="button">
+                        <md-icon slot="icon">refresh</md-icon>
+                        Обновить
+                      </md-outlined-button>
+                    </div>
+                    <form id="interest-intent-layer-form" class="material-form single-column-form">
+                      <md-outlined-text-field name="name" label="Название слоя" required
+                        value="Намерение: запрос помощи, покупки или заказа">
+                      </md-outlined-text-field>
+                      <md-outlined-text-field name="description" label="Описание" type="textarea"
+                        value="Сообщение не просто касается ядра, а содержит явный запрос, вопрос, поиск исполнителя, цены, покупки или консультации.">
+                      </md-outlined-text-field>
+                      <label>
+                        Включающие паттерны, по одному на строку
+                        <textarea name="include_patterns" rows="7">\\bищу\\b|\\bищем\\b
+\\bнужен\\b|\\bнужна\\b|\\bнужно\\b|\\bнужны\\b
+\\bподскажите\\b|\\bпосоветуйте\\b|\\bпомогите\\b
+\\bгде\\s+(купить|заказать|найти)\\b
+\\bкупить\\b|\\bзаказать\\b|\\bпоставить\\b|\\bустановить\\b|\\bподключить\\b|\\bсмонтировать\\b|\\bсделать\\b
+\\bстоимость\\b|\\bцена\\b|\\bсколько\\s+стоит\\b|\\bбюджет\\b|\\bсмета\\b
+\\bкто\\s+(может|делает|занимается|ставил|устанавливал)\\b</textarea>
+                      </label>
+                      <label>
+                        Исключающие паттерны, по одному на строку
+                        <textarea name="exclude_patterns" rows="5">#?ваканси[яи]\\b|\\bрезюме\\b|\\bв\\s+команду\\b
+\\bтребуется\\s+(дизайнер|архитектор|визуализатор|комплектатор|менеджер|чертежник|проектировщик)\\b
+\\bпродам\\b|\\bпродаю\\b|\\bотдам\\b|\\bаренда\\s+рабочего\\s+места\\b</textarea>
+                      </label>
+                      <label>
+                        Исключить элементы ядра, по одному на строку
+                        <textarea name="exclude_core_names" rows="5">консультирование
+клиенты
+комплексное проектирование
+детали_проекта
+проектирование
+смета
+сроки_реализации</textarea>
+                      </label>
+                      <div class="form-grid">
+                        <md-outlined-text-field name="min_score" label="Минимальный score" type="number" value="0.55" step="0.01">
+                        </md-outlined-text-field>
+                        <md-outlined-text-field name="max_results" label="Максимум результатов" type="number" value="3000">
+                        </md-outlined-text-field>
+                        <md-outlined-text-field name="broad_score_weight" label="Вес широкого слоя" type="number" value="0.45" step="0.01">
+                        </md-outlined-text-field>
+                        <md-outlined-text-field name="intent_hit_weight" label="Вес одного намерения" type="number" value="0.18" step="0.01">
+                        </md-outlined-text-field>
+                      </div>
+                      <label class="material-checkbox-line">
+                        <input name="require_include_match" type="checkbox" checked>
+                        Требовать совпадение с включающим паттерном
+                      </label>
+                      <div class="button-row">
+                        <md-filled-button type="submit">
+                          <md-icon slot="icon">add</md-icon>
+                          Добавить слой
+                        </md-filled-button>
+                      </div>
+                    </form>
+                    <p id="interest-intent-status" class="status-line" role="status"></p>
+                    <div id="interest-intent-layers" class="draft-review-panel" aria-live="polite"></div>
+                  </section>
+                  <section class="detail-section">
+                    <div class="section-head">
+                      <div>
+                        <h3>Запуски слоя намерений</h3>
+                        <p class="muted">
+                          Выберите широкий запуск выше, затем запустите нужный слой намерений.
+                        </p>
+                      </div>
+                    </div>
+                    <div id="interest-intent-runs" class="draft-review-panel" aria-live="polite"></div>
+                  </section>
+                  <section class="detail-section">
+                    <div class="section-head">
+                      <div>
+                        <h3>Сообщения широкого слоя</h3>
                         <p class="muted">
                           Показаны сообщения, элемент ядра, совпавшая фраза и локальный score.
                         </p>
                       </div>
                     </div>
                     <div id="interest-analysis-matches" class="draft-review-panel" aria-live="polite"></div>
+                  </section>
+                  <section class="detail-section">
+                    <div class="section-head">
+                      <div>
+                        <h3>Сообщения слоя намерений</h3>
+                        <p class="muted">
+                          Здесь должны появляться более узкие результаты после применения выбранного слоя намерений.
+                        </p>
+                      </div>
+                    </div>
+                    <div id="interest-intent-matches" class="draft-review-panel" aria-live="polite"></div>
                   </section>
     """
 

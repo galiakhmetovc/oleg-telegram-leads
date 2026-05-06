@@ -29,6 +29,7 @@ from pur_leads.services.interest_core_candidate_reviews import (
 )
 from pur_leads.services.interest_core_chat_analysis import InterestCoreChatAnalysisService
 from pur_leads.services.interest_core_items import InterestCoreItemService
+from pur_leads.services.interest_intent_layers import InterestIntentLayerService
 from pur_leads.services.interest_core_briefs import (
     GENERATE_INTEREST_CORE_BRIEF_JOB,
     InterestCoreBriefService,
@@ -116,6 +117,43 @@ class InterestCoreCandidateEnhanceRequest(BaseModel):
 class InterestCoreCandidateReviewUpdateRequest(BaseModel):
     status: str = Field(pattern="^(pending_review|approved|rejected|applied)$")
     note: str | None = None
+
+
+class InterestIntentLayerRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=200)
+    description: str | None = None
+    include_patterns: list[str] = []
+    exclude_patterns: list[str] = []
+    include_categories: list[str] = []
+    exclude_categories: list[str] = []
+    include_core_names: list[str] = []
+    exclude_core_names: list[str] = []
+    require_include_match: bool = True
+    min_score: float = Field(default=0.55, ge=0.0, le=1.0)
+    max_results: int = Field(default=3000, ge=1, le=20000)
+    broad_score_weight: float = Field(default=0.45, ge=0.0, le=1.0)
+    intent_hit_weight: float = Field(default=0.18, ge=0.0, le=1.0)
+
+
+class InterestIntentLayerUpdateRequest(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=200)
+    description: str | None = None
+    include_patterns: list[str] | None = None
+    exclude_patterns: list[str] | None = None
+    include_categories: list[str] | None = None
+    exclude_categories: list[str] | None = None
+    include_core_names: list[str] | None = None
+    exclude_core_names: list[str] | None = None
+    require_include_match: bool | None = None
+    min_score: float | None = Field(default=None, ge=0.0, le=1.0)
+    max_results: int | None = Field(default=None, ge=1, le=20000)
+    broad_score_weight: float | None = Field(default=None, ge=0.0, le=1.0)
+    intent_hit_weight: float | None = Field(default=None, ge=0.0, le=1.0)
+    status: str | None = Field(default=None, pattern="^(active|disabled|archived)$")
+
+
+class InterestIntentLayerRunRequest(BaseModel):
+    broad_analysis_run_id: str = Field(min_length=1)
 
 
 @router.get("")
@@ -607,6 +645,169 @@ def list_interest_core_analysis_matches(
         )
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="Analysis run not found") from exc
+    return jsonable_encoder(payload)
+
+
+@router.get("/{context_id}/intent-layers")
+def list_interest_intent_layers(
+    context_id: str,
+    validated: SessionValidationResult = Depends(current_admin),
+    session: Session = Depends(get_session),
+) -> dict[str, Any]:
+    context = InterestContextService(session).repository.get(context_id)
+    if context is None:
+        raise HTTPException(status_code=404, detail="Interest context not found")
+    return jsonable_encoder(
+        InterestIntentLayerService(session).list_layers(context.id, actor=_actor(validated))
+    )
+
+
+@router.post("/{context_id}/intent-layers")
+def create_interest_intent_layer(
+    context_id: str,
+    payload: InterestIntentLayerRequest,
+    validated: SessionValidationResult = Depends(current_admin),
+    session: Session = Depends(get_session),
+) -> dict[str, Any]:
+    context = InterestContextService(session).repository.get(context_id)
+    if context is None:
+        raise HTTPException(status_code=404, detail="Interest context not found")
+    try:
+        layer = InterestIntentLayerService(session).create_layer(
+            context_id=context.id,
+            name=payload.name,
+            description=payload.description,
+            actor=_actor(validated),
+            include_patterns=payload.include_patterns,
+            exclude_patterns=payload.exclude_patterns,
+            include_categories=payload.include_categories,
+            exclude_categories=payload.exclude_categories,
+            include_core_names=payload.include_core_names,
+            exclude_core_names=payload.exclude_core_names,
+            require_include_match=payload.require_include_match,
+            min_score=payload.min_score,
+            max_results=payload.max_results,
+            broad_score_weight=payload.broad_score_weight,
+            intent_hit_weight=payload.intent_hit_weight,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return jsonable_encoder({"layer": layer.as_jsonable()})
+
+
+@router.patch("/{context_id}/intent-layers/{layer_id}")
+def update_interest_intent_layer(
+    context_id: str,
+    layer_id: str,
+    payload: InterestIntentLayerUpdateRequest,
+    validated: SessionValidationResult = Depends(current_admin),
+    session: Session = Depends(get_session),
+) -> dict[str, Any]:
+    context = InterestContextService(session).repository.get(context_id)
+    if context is None:
+        raise HTTPException(status_code=404, detail="Interest context not found")
+    values = payload.model_dump(exclude_unset=True)
+    try:
+        layer = InterestIntentLayerService(session).update_layer(
+            layer_id,
+            context_id=context.id,
+            actor=_actor(validated),
+            values=values,
+        )
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Intent layer not found") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return jsonable_encoder({"layer": layer.as_jsonable()})
+
+
+@router.delete("/{context_id}/intent-layers/{layer_id}")
+def archive_interest_intent_layer(
+    context_id: str,
+    layer_id: str,
+    validated: SessionValidationResult = Depends(current_admin),
+    session: Session = Depends(get_session),
+) -> dict[str, Any]:
+    context = InterestContextService(session).repository.get(context_id)
+    if context is None:
+        raise HTTPException(status_code=404, detail="Interest context not found")
+    try:
+        InterestIntentLayerService(session).archive_layer(
+            layer_id,
+            context_id=context.id,
+            actor=_actor(validated),
+        )
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Intent layer not found") from exc
+    return {"ok": True}
+
+
+@router.post("/{context_id}/intent-layers/{layer_id}/runs")
+def run_interest_intent_layer(
+    context_id: str,
+    layer_id: str,
+    payload: InterestIntentLayerRunRequest,
+    validated: SessionValidationResult = Depends(current_admin),
+    session: Session = Depends(get_session),
+) -> dict[str, Any]:
+    context = InterestContextService(session).repository.get(context_id)
+    if context is None:
+        raise HTTPException(status_code=404, detail="Interest context not found")
+    try:
+        result = InterestIntentLayerService(session).run_layer(
+            context_id=context.id,
+            layer_id=layer_id,
+            broad_analysis_run_id=payload.broad_analysis_run_id,
+            actor=_actor(validated),
+        )
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Intent layer or broad run not found") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return jsonable_encoder(result)
+
+
+@router.get("/{context_id}/intent-runs")
+def list_interest_intent_runs(
+    context_id: str,
+    limit: int = 10,
+    offset: int = 0,
+    _validated: SessionValidationResult = Depends(current_admin),
+    session: Session = Depends(get_session),
+) -> dict[str, Any]:
+    context = InterestContextService(session).repository.get(context_id)
+    if context is None:
+        raise HTTPException(status_code=404, detail="Interest context not found")
+    return jsonable_encoder(
+        InterestIntentLayerService(session).latest_runs_payload(
+            context.id,
+            limit=max(1, min(limit, 100)),
+            offset=max(0, offset),
+        )
+    )
+
+
+@router.get("/{context_id}/intent-runs/{run_id}/matches")
+def list_interest_intent_matches(
+    context_id: str,
+    run_id: str,
+    limit: int = 10,
+    offset: int = 0,
+    _validated: SessionValidationResult = Depends(current_admin),
+    session: Session = Depends(get_session),
+) -> dict[str, Any]:
+    context = InterestContextService(session).repository.get(context_id)
+    if context is None:
+        raise HTTPException(status_code=404, detail="Interest context not found")
+    try:
+        payload = InterestIntentLayerService(session).list_matches(
+            context_id=context.id,
+            run_id=run_id,
+            limit=max(1, min(limit, 100)),
+            offset=max(0, offset),
+        )
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Intent run not found") from exc
     return jsonable_encoder(payload)
 
 

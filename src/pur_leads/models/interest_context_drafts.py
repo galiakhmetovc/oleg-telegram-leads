@@ -1,6 +1,6 @@
 """Interest context draft knowledge tables."""
 
-from sqlalchemy import Column, DateTime, Float, Integer, JSON, MetaData, String, Table, Text
+from sqlalchemy import Boolean, Column, DateTime, Float, Integer, JSON, MetaData, String, Table, Text
 
 metadata = MetaData()
 
@@ -132,6 +132,76 @@ interest_core_analysis_matches_table = Table(
     Column("matched_text", String(500), nullable=True),
     Column("match_kind", String(64), nullable=False),
     Column("score", Float, nullable=False),
+    Column("evidence_json", JSON, nullable=True),
+    Column("created_at", DateTime(timezone=True), nullable=False),
+)
+
+interest_intent_layers_table = Table(
+    "interest_intent_layers",
+    metadata,
+    Column("id", String(36), primary_key=True),
+    Column("context_id", String(36), nullable=False),
+    Column("name", String(200), nullable=False),
+    Column("description", Text, nullable=True),
+    Column("status", String(32), nullable=False),
+    Column("include_patterns_json", JSON, nullable=True),
+    Column("exclude_patterns_json", JSON, nullable=True),
+    Column("include_categories_json", JSON, nullable=True),
+    Column("exclude_categories_json", JSON, nullable=True),
+    Column("include_core_names_json", JSON, nullable=True),
+    Column("exclude_core_names_json", JSON, nullable=True),
+    Column("require_include_match", Boolean, nullable=False),
+    Column("min_score", Float, nullable=False),
+    Column("max_results", Integer, nullable=False),
+    Column("broad_score_weight", Float, nullable=False),
+    Column("intent_hit_weight", Float, nullable=False),
+    Column("metadata_json", JSON, nullable=True),
+    Column("created_by", String(160), nullable=False),
+    Column("created_at", DateTime(timezone=True), nullable=False),
+    Column("updated_at", DateTime(timezone=True), nullable=False),
+)
+
+interest_intent_analysis_runs_table = Table(
+    "interest_intent_analysis_runs",
+    metadata,
+    Column("id", String(36), primary_key=True),
+    Column("context_id", String(36), nullable=False),
+    Column("intent_layer_id", String(36), nullable=False),
+    Column("broad_analysis_run_id", String(36), nullable=False),
+    Column("status", String(32), nullable=False),
+    Column("source_title", String(255), nullable=True),
+    Column("source_message_count", Integer, nullable=False),
+    Column("broad_match_count", Integer, nullable=False),
+    Column("matched_message_count", Integer, nullable=False),
+    Column("match_count", Integer, nullable=False),
+    Column("summary_json", JSON, nullable=True),
+    Column("created_by", String(160), nullable=False),
+    Column("started_at", DateTime(timezone=True), nullable=False),
+    Column("finished_at", DateTime(timezone=True), nullable=True),
+    Column("created_at", DateTime(timezone=True), nullable=False),
+    Column("updated_at", DateTime(timezone=True), nullable=False),
+)
+
+interest_intent_analysis_matches_table = Table(
+    "interest_intent_analysis_matches",
+    metadata,
+    Column("id", String(36), primary_key=True),
+    Column("run_id", String(36), nullable=False),
+    Column("context_id", String(36), nullable=False),
+    Column("intent_layer_id", String(36), nullable=False),
+    Column("source_message_id", String(36), nullable=False),
+    Column("interest_core_match_id", String(36), nullable=False),
+    Column("interest_core_item_id", String(36), nullable=False),
+    Column("telegram_message_id", Integer, nullable=False),
+    Column("message_date", DateTime(timezone=True), nullable=False),
+    Column("sender_id", String(80), nullable=True),
+    Column("message_text", Text, nullable=True),
+    Column("canonical_name", String(300), nullable=True),
+    Column("category", String(160), nullable=True),
+    Column("matched_text", String(500), nullable=True),
+    Column("match_kind", String(64), nullable=False),
+    Column("score", Float, nullable=False),
+    Column("broad_score", Float, nullable=False),
     Column("evidence_json", JSON, nullable=True),
     Column("created_at", DateTime(timezone=True), nullable=False),
 )

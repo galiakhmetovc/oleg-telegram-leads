@@ -133,6 +133,8 @@ def test_interest_context_page_is_protected_and_empty_home_redirects_there(tmp_p
     _login(client)
     home_response = client.get("/", follow_redirects=False)
     page_response = client.get("/interest-contexts")
+    llm_page_response = client.get("/interest-contexts/llm")
+    analysis_page_response = client.get("/interest-contexts/analyze")
     js_response = client.get("/static/app.js")
 
     assert denied_response.status_code == 303
@@ -144,7 +146,8 @@ def test_interest_context_page_is_protected_and_empty_home_redirects_there(tmp_p
     assert 'id="interest-context-create-form"' in page_response.text
     assert 'id="interest-context-telegram-source-form"' in page_response.text
     assert 'id="interest-context-telegram-archive-form"' in page_response.text
-    assert 'id="interest-core-brief-form"' in page_response.text
+    assert 'id="interest-core-brief-form"' in llm_page_response.text
+    assert 'id="interest-intent-layer-form"' in analysis_page_response.text
     assert "initInterestContexts" in js_response.text
 
 

@@ -1468,6 +1468,23 @@ md-text-button {
   align-items: stretch;
 }
 
+.single-column-form textarea {
+  min-height: 92px;
+}
+
+.form-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.button-column {
+  display: grid;
+  align-content: start;
+  justify-items: stretch;
+  gap: 8px;
+}
+
 .operations-shell {
   min-height: 0;
   display: grid;
@@ -1689,6 +1706,7 @@ md-text-button {
 
   .inline-form,
   .material-form,
+  .form-grid,
   .catalog-form-grid,
   .catalog-form-grid-three,
   .catalog-raw-ingest-grid {

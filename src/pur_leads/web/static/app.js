@@ -3739,6 +3739,11 @@ function initInterestContexts() {
     analysisMatchesLimit: 10,
     analysisMatchesOffset: 0,
     selectedAnalysisRunId: null,
+    intentRunsLimit: 10,
+    intentRunsOffset: 0,
+    intentMatchesLimit: 10,
+    intentMatchesOffset: 0,
+    selectedIntentRunId: null,
   };
   document
     .querySelector("#interest-context-refresh")
@@ -3764,6 +3769,24 @@ function initInterestContexts() {
   document
     .querySelector("#interest-analysis-matches")
     ?.addEventListener("click", (event) => handleInterestAnalysisMatchesClick(event, state));
+  document
+    .querySelector("#interest-intent-layer-form")
+    ?.addEventListener("submit", (event) => createInterestIntentLayer(event, state));
+  document
+    .querySelector("#interest-intent-refresh")
+    ?.addEventListener("click", () => {
+      loadInterestIntentLayers(state);
+      loadInterestIntentRuns(state);
+    });
+  document
+    .querySelector("#interest-intent-layers")
+    ?.addEventListener("click", (event) => handleInterestIntentLayersClick(event, state));
+  document
+    .querySelector("#interest-intent-runs")
+    ?.addEventListener("click", (event) => handleInterestIntentRunsClick(event, state));
+  document
+    .querySelector("#interest-intent-matches")
+    ?.addEventListener("click", (event) => handleInterestIntentMatchesClick(event, state));
   document
     .querySelector("#interest-context-build-draft")
     ?.addEventListener("click", () => buildInterestContextDraft(state));
@@ -3898,7 +3921,12 @@ async function loadInterestContextDetail(contextId, state) {
     state.analysisRunsOffset = 0;
     state.analysisMatchesOffset = 0;
     state.selectedAnalysisRunId = null;
+    state.intentRunsOffset = 0;
+    state.intentMatchesOffset = 0;
+    state.selectedIntentRunId = null;
     await loadInterestAnalysisRuns(state);
+    await loadInterestIntentLayers(state);
+    await loadInterestIntentRuns(state);
   }
   if (state.step === "llm") {
     await loadInterestCoreBriefStatus(state, { silent: true });
@@ -3925,6 +3953,9 @@ function renderInterestContextEmptyDetail() {
   const briefText = document.querySelector("#interest-core-brief-text");
   const analysisRuns = document.querySelector("#interest-analysis-runs");
   const analysisMatches = document.querySelector("#interest-analysis-matches");
+  const intentLayers = document.querySelector("#interest-intent-layers");
+  const intentRuns = document.querySelector("#interest-intent-runs");
+  const intentMatches = document.querySelector("#interest-intent-matches");
   if (title) title.textContent = "Выберите контекст";
   if (description) {
     description.textContent = "Сначала создайте ядро интересов, затем добавьте Telegram-канал или архив.";
@@ -3940,6 +3971,9 @@ function renderInterestContextEmptyDetail() {
   if (briefText) briefText.value = "";
   if (analysisRuns) analysisRuns.innerHTML = "";
   if (analysisMatches) analysisMatches.innerHTML = "";
+  if (intentLayers) intentLayers.innerHTML = "";
+  if (intentRuns) intentRuns.innerHTML = "";
+  if (intentMatches) intentMatches.innerHTML = "";
 }
 
 function renderInterestContextDetail(detail) {
@@ -4455,6 +4489,352 @@ function renderAnalysisCounters(value, title) {
   const items = Object.entries(value).slice(0, 4);
   if (!items.length) return "";
   return `<p class="draft-evidence"><strong>${escapeHtml(title)}:</strong> ${escapeHtml(items.map(([key, count]) => `${key}: ${count}`).join("; "))}</p>`;
+}
+
+const formLines = (form, name) =>
+  String(formValue(form, name) || "")
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+
+const formNumber = (form, name, fallback) => {
+  const value = Number.parseFloat(formValue(form, name));
+  return Number.isFinite(value) ? value : fallback;
+};
+
+async function createInterestIntentLayer(event, state) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const status = document.querySelector("#interest-intent-status");
+  if (!state.selectedId) {
+    if (status) status.textContent = "Сначала выберите контекст";
+    return;
+  }
+  try {
+    await api(`/api/interest-contexts/${encodeURIComponent(state.selectedId)}/intent-layers`, {
+      method: "POST",
+      body: JSON.stringify({
+        name: formValue(form, "name"),
+        description: formValue(form, "description") || null,
+        include_patterns: formLines(form, "include_patterns"),
+        exclude_patterns: formLines(form, "exclude_patterns"),
+        exclude_core_names: formLines(form, "exclude_core_names"),
+        include_categories: [],
+        exclude_categories: [],
+        include_core_names: [],
+        require_include_match: formChecked(form, "require_include_match"),
+        min_score: formNumber(form, "min_score", 0.55),
+        max_results: Math.max(1, Math.round(formNumber(form, "max_results", 3000))),
+        broad_score_weight: formNumber(form, "broad_score_weight", 0.45),
+        intent_hit_weight: formNumber(form, "intent_hit_weight", 0.18),
+      }),
+    });
+    if (status) status.textContent = "Слой намерений добавлен";
+    await loadInterestIntentLayers(state);
+  } catch (error) {
+    if (status) status.textContent = error.message;
+  }
+}
+
+async function loadInterestIntentLayers(state) {
+  const target = document.querySelector("#interest-intent-layers");
+  const status = document.querySelector("#interest-intent-status");
+  if (!target || !state.selectedId) return;
+  target.innerHTML = '<div class="empty-state">Загружаю слои намерений...</div>';
+  try {
+    const payload = await api(
+      `/api/interest-contexts/${encodeURIComponent(state.selectedId)}/intent-layers`
+    );
+    renderInterestIntentLayers(payload, state);
+  } catch (error) {
+    target.innerHTML = `<div class="empty-state">${escapeHtml(error.message)}</div>`;
+    if (status) status.textContent = error.message;
+  }
+}
+
+function renderInterestIntentLayers(payload, state) {
+  const target = document.querySelector("#interest-intent-layers");
+  if (!target) return;
+  const items = payload.items || [];
+  if (!items.length) {
+    target.innerHTML = '<div class="empty-state">Слоев намерений пока нет.</div>';
+    return;
+  }
+  target.innerHTML = `<section class="draft-review-section">
+    <div class="table-list">${items.map((item) => renderInterestIntentLayerRow(item, state)).join("")}</div>
+  </section>`;
+}
+
+function renderInterestIntentLayerRow(item, state) {
+  const selectedBroad = state.selectedAnalysisRunId;
+  const includeCount = Array.isArray(item.include_patterns_json)
+    ? item.include_patterns_json.length
+    : 0;
+  const excludeCount = Array.isArray(item.exclude_patterns_json)
+    ? item.exclude_patterns_json.length
+    : 0;
+  return `<div class="table-row draft-item-row">
+    <div>
+      <strong>${escapeHtml(item.name || "Слой намерений")}</strong>
+      <p class="muted">${escapeHtml(item.description || "без описания")}</p>
+      <div class="badges">
+        ${badge(label(item.status || "active"))}
+        ${badge(`include ${includeCount}`)}
+        ${badge(`exclude ${excludeCount}`)}
+        ${badge(`min ${formatScore(item.min_score)}`)}
+        ${badge(`limit ${item.max_results || 0}`)}
+      </div>
+      <p class="draft-evidence"><strong>Источник:</strong> ${escapeHtml(selectedBroad ? `выбран широкий запуск ${selectedBroad}` : "выберите широкий запуск выше")}</p>
+    </div>
+    <div class="button-column">
+      <md-filled-tonal-button type="button" data-intent-layer-action="run" data-intent-layer-id="${escapeHtml(item.id)}">
+        <md-icon slot="icon">filter_alt</md-icon>
+        Применить
+      </md-filled-tonal-button>
+      <md-outlined-button type="button" data-intent-layer-action="delete" data-intent-layer-id="${escapeHtml(item.id)}">
+        Удалить
+      </md-outlined-button>
+    </div>
+  </div>`;
+}
+
+async function handleInterestIntentLayersClick(event, state) {
+  const button = event.target.closest("[data-intent-layer-action]");
+  if (!button) return;
+  const layerId = button.dataset.intentLayerId;
+  const action = button.dataset.intentLayerAction;
+  if (action === "run") {
+    await runInterestIntentLayer(layerId, state);
+  }
+  if (action === "delete") {
+    await deleteInterestIntentLayer(layerId, state);
+  }
+}
+
+async function runInterestIntentLayer(layerId, state) {
+  const status = document.querySelector("#interest-intent-status");
+  if (!state.selectedId || !layerId) return;
+  if (!state.selectedAnalysisRunId) {
+    if (status) status.textContent = "Сначала выберите широкий запуск анализа выше";
+    return;
+  }
+  try {
+    if (status) status.textContent = "Применяю слой намерений...";
+    const payload = await api(
+      `/api/interest-contexts/${encodeURIComponent(state.selectedId)}/intent-layers/${encodeURIComponent(layerId)}/runs`,
+      {
+        method: "POST",
+        body: JSON.stringify({ broad_analysis_run_id: state.selectedAnalysisRunId }),
+      }
+    );
+    const summary = payload.summary || {};
+    state.selectedIntentRunId = payload.run?.id || null;
+    state.intentRunsOffset = 0;
+    state.intentMatchesOffset = 0;
+    if (status) {
+      status.textContent = `Слой намерений готов: ${summary.match_count || 0} совпадений, ${summary.matched_message_count || 0} сообщений`;
+    }
+    await loadInterestIntentRuns(state);
+    if (state.selectedIntentRunId) await loadInterestIntentMatches(state, state.selectedIntentRunId);
+  } catch (error) {
+    if (status) status.textContent = error.message;
+  }
+}
+
+async function deleteInterestIntentLayer(layerId, state) {
+  const status = document.querySelector("#interest-intent-status");
+  if (!state.selectedId || !layerId) return;
+  try {
+    await api(
+      `/api/interest-contexts/${encodeURIComponent(state.selectedId)}/intent-layers/${encodeURIComponent(layerId)}`,
+      { method: "DELETE" }
+    );
+    if (status) status.textContent = "Слой намерений удален";
+    await loadInterestIntentLayers(state);
+  } catch (error) {
+    if (status) status.textContent = error.message;
+  }
+}
+
+async function loadInterestIntentRuns(state) {
+  const target = document.querySelector("#interest-intent-runs");
+  const status = document.querySelector("#interest-intent-status");
+  if (!target || !state.selectedId) return;
+  target.innerHTML = '<div class="empty-state">Загружаю запуски слоя намерений...</div>';
+  try {
+    const params = new URLSearchParams({
+      limit: String(state.intentRunsLimit),
+      offset: String(state.intentRunsOffset),
+    });
+    const payload = await api(
+      `/api/interest-contexts/${encodeURIComponent(state.selectedId)}/intent-runs?${params.toString()}`
+    );
+    renderInterestIntentRuns(payload, state);
+    const firstRun = payload.items?.[0]?.id || null;
+    const selectedStillVisible = (payload.items || []).some(
+      (item) => item.id === state.selectedIntentRunId
+    );
+    state.selectedIntentRunId = selectedStillVisible ? state.selectedIntentRunId : firstRun;
+    if (state.selectedIntentRunId) {
+      await loadInterestIntentMatches(state, state.selectedIntentRunId);
+    } else {
+      renderInterestIntentMatches(null, state);
+    }
+  } catch (error) {
+    target.innerHTML = `<div class="empty-state">${escapeHtml(error.message)}</div>`;
+    if (status) status.textContent = error.message;
+  }
+}
+
+function renderInterestIntentRuns(payload, state) {
+  const target = document.querySelector("#interest-intent-runs");
+  if (!target) return;
+  const items = payload.items || [];
+  const pagination = payload.pagination || { limit: state.intentRunsLimit, offset: 0, total: 0 };
+  if (!items.length) {
+    target.innerHTML = '<div class="empty-state">Примените слой намерений к широкому запуску анализа.</div>';
+    return;
+  }
+  target.innerHTML = `<section class="draft-review-section">
+    <div class="operations-summary raw-review-summary">
+      <div class="ops-metric-row">
+        ${renderOpsMetric("Запуски", pagination.total || 0, "слои намерений")}
+        ${renderOpsMetric("Последний запуск", payload.summary?.latest_match_count || 0, "совпадений")}
+        ${renderOpsMetric("Сообщения", payload.summary?.latest_matched_message_count || 0, "с намерением")}
+      </div>
+    </div>
+    <div class="table-list">${items.map((item) => renderInterestIntentRunRow(item, state)).join("")}</div>
+    ${renderPageControls(pagination, "intent-runs")}
+  </section>`;
+}
+
+function renderInterestIntentRunRow(item, state) {
+  const summary = item.summary_json || {};
+  const active = item.id === state.selectedIntentRunId ? "is-active" : "";
+  const title = item.source_title || item.id;
+  return `<button class="table-row linked-row analysis-run-row ${active}" type="button" data-intent-run-id="${escapeHtml(item.id)}">
+    <div>
+      <strong>${escapeHtml(title)}</strong>
+      <p class="muted">${escapeHtml([time(item.created_at), `run ${item.id}`].filter(Boolean).join(" / "))}</p>
+      <div class="badges">
+        ${badge(label(item.status || "unknown"), item.status === "failed" ? "is-danger" : "")}
+        ${badge(`${item.broad_match_count || 0} входных совпадений`)}
+        ${badge(`${item.match_count || 0} намерений`)}
+        ${badge(`${item.matched_message_count || 0} сообщений`)}
+      </div>
+      ${renderAnalysisCounters(summary.by_category, "Категории")}
+    </div>
+    <span>Открыть</span>
+  </button>`;
+}
+
+function handleInterestIntentRunsClick(event, state) {
+  const pageButton = event.target.closest("[data-intent-runs-page-action]");
+  if (pageButton) {
+    const action = pageButton.dataset.intentRunsPageAction;
+    if (action === "prev") {
+      state.intentRunsOffset = Math.max(0, state.intentRunsOffset - state.intentRunsLimit);
+    }
+    if (action === "next") {
+      state.intentRunsOffset += state.intentRunsLimit;
+    }
+    loadInterestIntentRuns(state);
+    return;
+  }
+  const runButton = event.target.closest("[data-intent-run-id]");
+  if (!runButton) return;
+  state.selectedIntentRunId = runButton.dataset.intentRunId;
+  state.intentMatchesOffset = 0;
+  renderInterestIntentRunSelection(state.selectedIntentRunId);
+  loadInterestIntentMatches(state, state.selectedIntentRunId);
+}
+
+function renderInterestIntentRunSelection(runId) {
+  document.querySelectorAll("[data-intent-run-id]").forEach((row) => {
+    row.classList.toggle("is-active", row.dataset.intentRunId === runId);
+  });
+}
+
+async function loadInterestIntentMatches(state, runId) {
+  const target = document.querySelector("#interest-intent-matches");
+  const status = document.querySelector("#interest-intent-status");
+  if (!target || !state.selectedId || !runId) return;
+  target.innerHTML = '<div class="empty-state">Загружаю сообщения слоя намерений...</div>';
+  try {
+    const params = new URLSearchParams({
+      limit: String(state.intentMatchesLimit),
+      offset: String(state.intentMatchesOffset),
+    });
+    const payload = await api(
+      `/api/interest-contexts/${encodeURIComponent(state.selectedId)}/intent-runs/${encodeURIComponent(runId)}/matches?${params.toString()}`
+    );
+    renderInterestIntentMatches(payload, state);
+  } catch (error) {
+    target.innerHTML = `<div class="empty-state">${escapeHtml(error.message)}</div>`;
+    if (status) status.textContent = error.message;
+  }
+}
+
+function renderInterestIntentMatches(payload, state) {
+  const target = document.querySelector("#interest-intent-matches");
+  if (!target) return;
+  if (!payload) {
+    target.innerHTML = '<div class="empty-state">Запуск слоя намерений еще не выбран.</div>';
+    return;
+  }
+  const items = payload.items || [];
+  const pagination =
+    payload.pagination || { limit: state.intentMatchesLimit, offset: 0, total: 0 };
+  const run = payload.run || {};
+  if (!items.length) {
+    target.innerHTML = `<div class="empty-state">В запуске ${escapeHtml(run.id || "")} намерений нет.</div>`;
+    return;
+  }
+  target.innerHTML = `<section class="draft-review-section">
+    <div class="section-head compact-section-head">
+      <h4>Сообщения из слоя ${escapeHtml(run.id || "")}</h4>
+      <span class="muted">${escapeHtml(`${pagination.offset + 1}-${Math.min(pagination.offset + items.length, pagination.total)} из ${pagination.total}`)}</span>
+    </div>
+    <div class="table-list">${items.map(renderInterestIntentMatchRow).join("")}</div>
+    ${renderPageControls(pagination, "intent-matches")}
+  </section>`;
+}
+
+function renderInterestIntentMatchRow(item) {
+  const evidence = item.evidence_json || {};
+  const scoreParts = evidence.score_parts || {};
+  return `<div class="table-row draft-item-row">
+    <div>
+      <strong>${escapeHtml(item.canonical_name || "элемент ядра")}</strong>
+      <p class="muted">${escapeHtml([`сообщение #${item.telegram_message_id || "н/д"}`, time(item.message_date), item.sender_id].filter(Boolean).join(" / "))}</p>
+      <p>${escapeHtml(shortText(item.message_text || "без текста", 520))}</p>
+      <div class="badges">
+        ${item.category ? badge(item.category) : ""}
+        ${badge("слой намерений")}
+        ${badge(`score ${formatScore(item.score)}`)}
+        ${badge(`широкий ${formatScore(item.broad_score)}`)}
+        ${item.matched_text ? badge(`намерение: ${item.matched_text}`) : ""}
+      </div>
+      <p class="draft-evidence"><strong>Почему найдено:</strong> ${escapeHtml([
+        evidence.include_hits?.length ? `паттерны: ${evidence.include_hits.slice(0, 4).join(", ")}` : "",
+        `широкий слой ${formatScore(scoreParts.broad || 0)}`,
+        `намерение ${formatScore(scoreParts.intent || 0)}`,
+      ].filter(Boolean).join("; "))}</p>
+    </div>
+  </div>`;
+}
+
+function handleInterestIntentMatchesClick(event, state) {
+  const pageButton = event.target.closest("[data-intent-matches-page-action]");
+  if (!pageButton || !state.selectedIntentRunId) return;
+  const action = pageButton.dataset.intentMatchesPageAction;
+  if (action === "prev") {
+    state.intentMatchesOffset = Math.max(0, state.intentMatchesOffset - state.intentMatchesLimit);
+  }
+  if (action === "next") {
+    state.intentMatchesOffset += state.intentMatchesLimit;
+  }
+  loadInterestIntentMatches(state, state.selectedIntentRunId);
 }
 
 async function saveManualInterestCoreBrief(event, state) {
@@ -5605,10 +5985,14 @@ function renderPageControls(pagination, kind) {
       : kind === "core"
         ? "data-core-page-action"
         : kind === "analysis-runs"
-          ? "data-analysis-runs-page-action"
-          : kind === "analysis-matches"
-            ? "data-analysis-matches-page-action"
-            : "data-draft-page-action";
+        ? "data-analysis-runs-page-action"
+        : kind === "analysis-matches"
+          ? "data-analysis-matches-page-action"
+          : kind === "intent-runs"
+            ? "data-intent-runs-page-action"
+            : kind === "intent-matches"
+              ? "data-intent-matches-page-action"
+              : "data-draft-page-action";
   return `<div class="queue-pagination">
     <span class="muted">${escapeHtml(`${from}-${to} из ${pagination.total}`)}</span>
     <div class="button-row">
