@@ -618,12 +618,36 @@ def build_telegram_handler_registry(
         scheduler.update_result_summary(job.id, result_summary=_json_ready(summary))
 
         if mode == "interest_core_analysis":
+            def update_analysis_progress(progress_payload: dict[str, Any]) -> None:
+                stage_percent = int(progress_payload.get("stage_percent") or 0)
+                scheduler.update_result_summary(
+                    job.id,
+                    result_summary=_json_ready(
+                        {
+                            **summary,
+                            "current_stage": "analysis",
+                            "current_stage_label": "Анализ по ядру",
+                            "overall_percent": min(99, 75 + int(stage_percent * 0.24)),
+                            "stage_percent": stage_percent,
+                            "message": (
+                                "Анализ по ядру: "
+                                f"{progress_payload.get('processed_message_count', 0)} / "
+                                f"{progress_payload.get('message_count', 0)} сообщений, "
+                                f"{progress_payload.get('match_count', 0)} совпадений"
+                            ),
+                            "analysis_progress": progress_payload,
+                            "analysis_run_id": progress_payload.get("run_id"),
+                        }
+                    ),
+                )
+
             analysis = InterestCoreChatAnalysisService(session).analyze_raw_export(
                 context_id=job.scope_id,
                 monitored_source_id=result.source.id,
                 raw_export_run_id=result.raw_export.run_id,
                 actor=actor,
                 source_title=result.source.title or source_title,
+                progress=update_analysis_progress,
             )
             summary = {
                 **summary,

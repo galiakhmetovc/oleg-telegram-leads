@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 from collections import Counter
+from collections.abc import Callable, Iterator
 from dataclasses import asdict, dataclass
 import re
 from typing import Any
 
-from sqlalchemy import desc, func, insert, select, update
+from sqlalchemy import and_, desc, func, insert, or_, select, update
 from sqlalchemy.orm import Session
 
 from pur_leads.core.ids import new_id
@@ -21,6 +22,9 @@ from pur_leads.models.telegram_sources import monitored_sources_table, source_me
 from pur_leads.services.audit import AuditService
 
 MAX_MATCHES_PER_MESSAGE = 5
+DEFAULT_ANALYSIS_BATCH_SIZE = 5000
+MATCH_INSERT_BATCH_SIZE = 5000
+ProgressCallback = Callable[[dict[str, Any]], None]
 
 
 @dataclass(frozen=True)
@@ -103,14 +107,17 @@ class InterestCoreChatAnalysisService:
         raw_export_run_id: str,
         actor: str,
         source_title: str | None = None,
+        batch_size: int = DEFAULT_ANALYSIS_BATCH_SIZE,
+        progress: ProgressCallback | None = None,
     ) -> dict[str, Any]:
         core_items = self._active_core_items(context_id)
         if not core_items:
             raise ValueError("Сначала сформируйте и примите рабочее ядро")
-        messages = self._source_messages(
+        message_count = self._source_message_count(
             monitored_source_id=monitored_source_id,
             raw_export_run_id=raw_export_run_id,
         )
+        safe_batch_size = max(1, int(batch_size or DEFAULT_ANALYSIS_BATCH_SIZE))
         now = utc_now()
         run_id = new_id()
         self.session.execute(
@@ -121,11 +128,19 @@ class InterestCoreChatAnalysisService:
                 raw_export_run_id=raw_export_run_id,
                 status="running",
                 source_title=source_title,
-                message_count=len(messages),
+                message_count=message_count,
                 core_item_count=len(core_items),
                 matched_message_count=0,
                 match_count=0,
-                summary_json=None,
+                summary_json={
+                    "matched_message_count": 0,
+                    "match_count": 0,
+                    "processed_message_count": 0,
+                    "message_count": message_count,
+                    "batch_size": safe_batch_size,
+                    "partial": True,
+                    "algorithm": "local_interest_core_match_v1",
+                },
                 created_by=actor,
                 started_at=now,
                 finished_at=None,
@@ -134,18 +149,91 @@ class InterestCoreChatAnalysisService:
             )
         )
         self.session.commit()
+        _emit_progress(
+            progress,
+            run_id=run_id,
+            status="running",
+            processed_message_count=0,
+            message_count=message_count,
+            matched_message_count=0,
+            match_count=0,
+            batch_size=safe_batch_size,
+        )
 
         try:
-            match_rows = self._build_matches(
-                run_id=run_id,
-                context_id=context_id,
-                core_items=core_items,
-                messages=messages,
-                created_at=now,
+            processed_message_count = 0
+            matched_message_ids: set[str] = set()
+            by_category: Counter[str] = Counter()
+            by_kind: Counter[str] = Counter()
+            by_core_item: Counter[str] = Counter()
+            match_count = 0
+            for message_batch in self._source_message_batches(
+                monitored_source_id=monitored_source_id,
+                raw_export_run_id=raw_export_run_id,
+                batch_size=safe_batch_size,
+            ):
+                batch_match_rows = self._build_matches(
+                    run_id=run_id,
+                    context_id=context_id,
+                    core_items=core_items,
+                    messages=message_batch,
+                    created_at=now,
+                )
+                _insert_match_rows(self.session, batch_match_rows)
+                processed_message_count += len(message_batch)
+                match_count += len(batch_match_rows)
+                _accumulate_summary(
+                    batch_match_rows,
+                    matched_message_ids=matched_message_ids,
+                    by_category=by_category,
+                    by_kind=by_kind,
+                    by_core_item=by_core_item,
+                )
+                partial_summary = _analysis_summary_from_counters(
+                    matched_message_ids=matched_message_ids,
+                    by_category=by_category,
+                    by_kind=by_kind,
+                    by_core_item=by_core_item,
+                    match_count=match_count,
+                    processed_message_count=processed_message_count,
+                    message_count=message_count,
+                    batch_size=safe_batch_size,
+                    partial=True,
+                )
+                updated_at = utc_now()
+                self.session.execute(
+                    update(interest_core_analysis_runs_table)
+                    .where(interest_core_analysis_runs_table.c.id == run_id)
+                    .values(
+                        matched_message_count=partial_summary["matched_message_count"],
+                        match_count=match_count,
+                        summary_json=partial_summary,
+                        updated_at=updated_at,
+                    )
+                )
+                self.session.commit()
+                _emit_progress(
+                    progress,
+                    run_id=run_id,
+                    status="running",
+                    processed_message_count=processed_message_count,
+                    message_count=message_count,
+                    matched_message_count=partial_summary["matched_message_count"],
+                    match_count=match_count,
+                    batch_size=safe_batch_size,
+                )
+
+            summary = _analysis_summary_from_counters(
+                matched_message_ids=matched_message_ids,
+                by_category=by_category,
+                by_kind=by_kind,
+                by_core_item=by_core_item,
+                match_count=match_count,
+                processed_message_count=processed_message_count,
+                message_count=message_count,
+                batch_size=safe_batch_size,
+                partial=False,
             )
-            if match_rows:
-                self.session.execute(insert(interest_core_analysis_matches_table), match_rows)
-            summary = _analysis_summary(match_rows)
             finished_at = utc_now()
             self.session.execute(
                 update(interest_core_analysis_runs_table)
@@ -153,7 +241,7 @@ class InterestCoreChatAnalysisService:
                 .values(
                     status="succeeded",
                     matched_message_count=summary["matched_message_count"],
-                    match_count=len(match_rows),
+                    match_count=match_count,
                     summary_json=summary,
                     finished_at=finished_at,
                     updated_at=finished_at,
@@ -186,10 +274,10 @@ class InterestCoreChatAnalysisService:
                 "run_id": run_id,
                 "monitored_source_id": monitored_source_id,
                 "raw_export_run_id": raw_export_run_id,
-                "message_count": len(messages),
+                "message_count": message_count,
                 "core_item_count": len(core_items),
                 "matched_message_count": summary["matched_message_count"],
-                "match_count": len(match_rows),
+                "match_count": match_count,
             },
         )
         return {
@@ -313,23 +401,64 @@ class InterestCoreChatAnalysisService:
         )
         return [_matcher_from_row(row) for row in rows]
 
-    def _source_messages(
+    def _source_message_count(
         self,
         *,
         monitored_source_id: str,
         raw_export_run_id: str,
-    ) -> list[dict[str, Any]]:
-        return [
-            dict(row)
-            for row in self.session.execute(
+    ) -> int:
+        return int(
+            self.session.execute(
+                select(func.count())
+                .select_from(source_messages_table)
+                .where(source_messages_table.c.monitored_source_id == monitored_source_id)
+                .where(source_messages_table.c.archive_pointer_id == raw_export_run_id)
+            ).scalar_one()
+            or 0
+        )
+
+    def _source_message_batches(
+        self,
+        *,
+        monitored_source_id: str,
+        raw_export_run_id: str,
+        batch_size: int,
+    ) -> Iterator[list[dict[str, Any]]]:
+        last_message_id: int | None = None
+        last_row_id: str | None = None
+        while True:
+            query = (
                 select(source_messages_table)
                 .where(source_messages_table.c.monitored_source_id == monitored_source_id)
                 .where(source_messages_table.c.archive_pointer_id == raw_export_run_id)
-                .order_by(source_messages_table.c.message_date, source_messages_table.c.telegram_message_id)
             )
-            .mappings()
-            .all()
-        ]
+            if last_message_id is not None and last_row_id is not None:
+                query = query.where(
+                    or_(
+                        source_messages_table.c.telegram_message_id > last_message_id,
+                        and_(
+                            source_messages_table.c.telegram_message_id == last_message_id,
+                            source_messages_table.c.id > last_row_id,
+                        ),
+                    )
+                )
+            rows = (
+                self.session.execute(
+                    query.order_by(
+                        source_messages_table.c.telegram_message_id,
+                        source_messages_table.c.id,
+                    ).limit(batch_size)
+                )
+                .mappings()
+                .all()
+            )
+            if not rows:
+                break
+            batch = [dict(row) for row in rows]
+            last = batch[-1]
+            last_message_id = int(last["telegram_message_id"])
+            last_row_id = str(last["id"])
+            yield batch
 
     def _build_matches(
         self,
@@ -509,6 +638,90 @@ def _analysis_summary(match_rows: list[dict[str, Any]]) -> dict[str, Any]:
         "top_core_items": dict(by_core_item.most_common(20)),
         "algorithm": "local_interest_core_match_v1",
     }
+
+
+def _insert_match_rows(session: Session, rows: list[dict[str, Any]]) -> None:
+    for index in range(0, len(rows), MATCH_INSERT_BATCH_SIZE):
+        chunk = rows[index : index + MATCH_INSERT_BATCH_SIZE]
+        if chunk:
+            session.execute(insert(interest_core_analysis_matches_table), chunk)
+
+
+def _accumulate_summary(
+    match_rows: list[dict[str, Any]],
+    *,
+    matched_message_ids: set[str],
+    by_category: Counter[str],
+    by_kind: Counter[str],
+    by_core_item: Counter[str],
+) -> None:
+    for row in match_rows:
+        matched_message_ids.add(str(row["source_message_id"]))
+        by_category.update([str(row["category"] or "без категории")])
+        by_kind.update([str(row["match_kind"])])
+        by_core_item.update([str(row["canonical_name"] or row["interest_core_item_id"])])
+
+
+def _analysis_summary_from_counters(
+    *,
+    matched_message_ids: set[str],
+    by_category: Counter[str],
+    by_kind: Counter[str],
+    by_core_item: Counter[str],
+    match_count: int,
+    processed_message_count: int,
+    message_count: int,
+    batch_size: int,
+    partial: bool,
+) -> dict[str, Any]:
+    return {
+        "matched_message_count": len(matched_message_ids),
+        "match_count": match_count,
+        "processed_message_count": processed_message_count,
+        "message_count": message_count,
+        "batch_size": batch_size,
+        "progress_percent": _progress_percent(processed_message_count, message_count),
+        "by_category": dict(by_category.most_common(20)),
+        "by_kind": dict(by_kind.most_common()),
+        "top_core_items": dict(by_core_item.most_common(20)),
+        "partial": partial,
+        "algorithm": "local_interest_core_match_v1",
+    }
+
+
+def _emit_progress(
+    progress: ProgressCallback | None,
+    *,
+    run_id: str,
+    status: str,
+    processed_message_count: int,
+    message_count: int,
+    matched_message_count: int,
+    match_count: int,
+    batch_size: int,
+) -> None:
+    if progress is None:
+        return
+    progress(
+        {
+            "run_id": run_id,
+            "status": status,
+            "current_stage": "analysis",
+            "current_stage_label": "Анализ по ядру",
+            "processed_message_count": processed_message_count,
+            "message_count": message_count,
+            "matched_message_count": matched_message_count,
+            "match_count": match_count,
+            "batch_size": batch_size,
+            "stage_percent": _progress_percent(processed_message_count, message_count),
+        }
+    )
+
+
+def _progress_percent(processed_message_count: int, message_count: int) -> int:
+    if message_count <= 0:
+        return 100
+    return max(0, min(100, int(processed_message_count * 100 / message_count)))
 
 
 def _runs_summary(rows: list[dict[str, Any]], total: int) -> dict[str, Any]:

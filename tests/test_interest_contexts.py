@@ -21,8 +21,10 @@ from pur_leads.models.interest_context_drafts import (
 )
 from pur_leads.models.telegram_sources import (
     monitored_sources_table,
+    source_messages_table,
     telegram_raw_export_runs_table,
 )
+from pur_leads.services.interest_core_chat_analysis import InterestCoreChatAnalysisService
 from pur_leads.workers.runtime import WorkerRuntime, build_telegram_handler_registry
 from pur_leads.services.web_auth import WebAuthService
 from pur_leads.web.app import create_app
@@ -216,6 +218,187 @@ async def test_interest_context_analysis_archive_import_uses_seed_source_purpose
     assert analysis_run["match_count"] >= 1
     assert job_row["result_summary_json"]["mode"] == "interest_core_analysis"
     assert job_row["result_summary_json"]["status"] == "succeeded"
+
+
+def test_interest_core_analysis_reports_batch_progress(tmp_path):
+    fixture = _setup_app(tmp_path)
+    context_id = "context-progress"
+    source_id = "source-progress"
+    raw_export_run_id = "raw-progress"
+    now = datetime(2026, 5, 6, tzinfo=UTC)
+    with fixture["session_factory"]() as session:
+        session.execute(
+            interest_contexts_table.insert().values(
+                id=context_id,
+                name="Контекст прогресса",
+                description=None,
+                status="active",
+                created_by="admin",
+                created_at=now,
+                updated_at=now,
+            )
+        )
+        session.execute(
+            monitored_sources_table.insert().values(
+                id=source_id,
+                source_kind="telegram_supergroup",
+                telegram_id="1292716582",
+                username=None,
+                title="Progress chat",
+                invite_link_hash=None,
+                input_ref="Progress chat",
+                source_purpose="interest_context_seed",
+                interest_context_id=context_id,
+                assigned_userbot_account_id=None,
+                priority="normal",
+                status="active",
+                lead_detection_enabled=False,
+                catalog_ingestion_enabled=False,
+                phase_enabled=False,
+                start_mode="from_beginning",
+                start_message_id=None,
+                start_recent_limit=None,
+                start_recent_days=None,
+                historical_backfill_policy="keep",
+                checkpoint_message_id=None,
+                checkpoint_date=None,
+                last_preview_at=None,
+                preview_message_count=None,
+                next_poll_at=None,
+                poll_interval_seconds=300,
+                last_success_at=None,
+                last_error_at=None,
+                last_error=None,
+                added_by="admin",
+                activated_by=None,
+                activated_at=None,
+                created_at=now,
+                updated_at=now,
+            )
+        )
+        session.execute(
+            telegram_raw_export_runs_table.insert().values(
+                id=raw_export_run_id,
+                monitored_source_id=source_id,
+                source_ref="Progress chat",
+                source_kind="telegram_supergroup",
+                telegram_id="1292716582",
+                username=None,
+                title="Progress chat",
+                export_format="telegram_desktop_json_v1",
+                output_dir="/tmp/progress",
+                result_json_path="/tmp/progress/result.json",
+                messages_jsonl_path="/tmp/progress/messages.jsonl",
+                attachments_jsonl_path="/tmp/progress/attachments.jsonl",
+                messages_parquet_path="/tmp/progress/messages.parquet",
+                attachments_parquet_path="/tmp/progress/attachments.parquet",
+                manifest_path="/tmp/progress/manifest.json",
+                message_count=2,
+                attachment_count=0,
+                status="succeeded",
+                error=None,
+                started_at=now,
+                finished_at=now,
+                metadata_json={},
+                created_at=now,
+            )
+        )
+        session.execute(
+            interest_core_items_table.insert().values(
+                id="core-camera",
+                context_id=context_id,
+                source_review_id=None,
+                source_candidate_id=None,
+                item_type="interest",
+                canonical_name="камера",
+                category="безопасность",
+                description="Камеры и видеонаблюдение",
+                confidence="high",
+                status="active",
+                synonyms_json=["камера", "dahua"],
+                lead_signals_json=["нужна камера"],
+                noise_patterns_json=[],
+                evidence_refs_json=[],
+                metadata_json={},
+                created_by="admin",
+                created_at=now,
+                updated_at=now,
+            )
+        )
+        session.execute(
+            source_messages_table.insert(),
+            [
+                {
+                    "id": "msg-1",
+                    "monitored_source_id": source_id,
+                    "raw_source_id": None,
+                    "telegram_message_id": 1,
+                    "sender_id": "user1",
+                    "message_date": now,
+                    "text": "Нужна камера Dahua",
+                    "caption": None,
+                    "normalized_text": None,
+                    "has_media": False,
+                    "media_metadata_json": None,
+                    "reply_to_message_id": None,
+                    "thread_id": None,
+                    "forward_metadata_json": None,
+                    "raw_metadata_json": {},
+                    "fetched_at": now,
+                    "classification_status": "pending",
+                    "archive_pointer_id": raw_export_run_id,
+                    "is_archived_stub": False,
+                    "text_archived": False,
+                    "caption_archived": False,
+                    "metadata_archived": False,
+                    "created_at": now,
+                    "updated_at": now,
+                },
+                {
+                    "id": "msg-2",
+                    "monitored_source_id": source_id,
+                    "raw_source_id": None,
+                    "telegram_message_id": 2,
+                    "sender_id": "user1",
+                    "message_date": now,
+                    "text": "Обсуждаем монтаж",
+                    "caption": None,
+                    "normalized_text": None,
+                    "has_media": False,
+                    "media_metadata_json": None,
+                    "reply_to_message_id": None,
+                    "thread_id": None,
+                    "forward_metadata_json": None,
+                    "raw_metadata_json": {},
+                    "fetched_at": now,
+                    "classification_status": "pending",
+                    "archive_pointer_id": raw_export_run_id,
+                    "is_archived_stub": False,
+                    "text_archived": False,
+                    "caption_archived": False,
+                    "metadata_archived": False,
+                    "created_at": now,
+                    "updated_at": now,
+                },
+            ],
+        )
+        session.commit()
+
+        progress_events: list[dict[str, object]] = []
+        result = InterestCoreChatAnalysisService(session).analyze_raw_export(
+            context_id=context_id,
+            monitored_source_id=source_id,
+            raw_export_run_id=raw_export_run_id,
+            actor="admin",
+            source_title="Progress chat",
+            batch_size=1,
+            progress=progress_events.append,
+        )
+
+    assert result["summary"]["matched_message_count"] == 1
+    assert any(event.get("processed_message_count") == 1 for event in progress_events)
+    assert progress_events[-1]["processed_message_count"] == 2
+    assert progress_events[-1]["match_count"] == 1
 
 
 def test_interest_context_page_is_protected_and_empty_home_redirects_there(tmp_path):
