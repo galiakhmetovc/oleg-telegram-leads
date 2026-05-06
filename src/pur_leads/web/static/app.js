@@ -5484,9 +5484,37 @@ function renderInterestIntentValidationRecommendations(payload, state) {
         ${renderOpsMetric("Ожидает", summary.pending_review || 0, "на ревью")}
       </div>
     </div>
+    ${renderIntentRecommendationNextStep(payload, state)}
     ${items.length ? `<div class="table-list">${items.map(renderInterestIntentValidationRecommendationRow).join("")}</div>` : '<div class="empty-state">Рекомендаций пока нет.</div>'}
     ${renderPageControls(pagination, "intent-validation-recommendations")}
   </section>`;
+}
+
+function renderIntentRecommendationNextStep(payload, state) {
+  const summary = payload.summary || {};
+  const run = payload.run || {};
+  if (run.created_layer_id) {
+    return `<div class="explain-box">
+      <strong>Следующий шаг</strong>
+      <p>AI-фильтр уже создан. Откройте страницу применения фильтра и запустите его на тех же сообщениях.</p>
+      <div class="button-row">
+        <a class="button-link" href="${escapeHtml(interestContextStepHref("/interest-contexts/intent-ai-filter", state.selectedId))}">Открыть применение AI-фильтра</a>
+      </div>
+    </div>`;
+  }
+  if ((summary.approved || 0) > 0) {
+    return `<div class="explain-box">
+      <strong>Следующий шаг</strong>
+      <p>Одобрено ${escapeHtml(String(summary.approved || 0))} рекомендаций. Теперь из них надо создать новый AI-фильтр.</p>
+      <div class="button-row">
+        <a class="button-link" href="${escapeHtml(interestContextStepHref("/interest-contexts/intent-ai-filter", state.selectedId))}">Создать AI-фильтр</a>
+      </div>
+    </div>`;
+  }
+  return `<div class="explain-box">
+    <strong>Следующий шаг</strong>
+    <p>Одобрите безопасные рекомендации. Пока ничего не меняется и новый слой не создается.</p>
+  </div>`;
 }
 
 function renderInterestIntentValidationRecommendationRow(item) {
@@ -5592,38 +5620,55 @@ async function loadInterestIntentAiFilter(state) {
     const payload = await api(
       `/api/interest-contexts/${encodeURIComponent(state.selectedId)}/intent-validation-runs/${encodeURIComponent(runId)}/recommendations?limit=100&offset=0`
     );
-    renderInterestIntentAiFilter(payload);
+    renderInterestIntentAiFilter(payload, state);
   } catch (error) {
     target.innerHTML = `<div class="empty-state">${escapeHtml(error.message)}</div>`;
     if (status) status.textContent = error.message;
   }
 }
 
-function renderInterestIntentAiFilter(payload) {
+function renderInterestIntentAiFilter(payload, state) {
   const target = document.querySelector("#interest-intent-ai-filter");
   if (!target) return;
   const summary = payload.summary || {};
   const run = payload.run || {};
+  const createdLayerId = run.created_layer_id || "";
+  const canCreate = (summary.approved || 0) > 0 && !createdLayerId;
   target.innerHTML = `<section class="draft-review-section">
     <div class="operations-summary raw-review-summary">
       <div class="ops-metric-row">
         ${renderOpsMetric("Одобрено", summary.approved || 0, "рекомендаций")}
         ${renderOpsMetric("Отклонено", summary.rejected || 0, "рекомендаций")}
-        ${renderOpsMetric("Слой", run.created_layer_id ? shortId(run.created_layer_id) : "еще нет", "результат")}
+        ${renderOpsMetric("Слой", createdLayerId ? shortId(createdLayerId) : "еще нет", "результат")}
       </div>
     </div>
+    <div class="explain-box">
+      <strong>${createdLayerId ? "Шаг 2 выполнен: AI-фильтр создан" : "Шаг 2: создать AI-фильтр"}</strong>
+      <p>${escapeHtml(createdLayerId ? `Создан слой ${createdLayerId}. Теперь его надо применить к тем же сообщениям, чтобы получить новый список намерений.` : "Создание слоя ничего не меняет в старых результатах. Это только сохраняет новый набор условий фильтрации.")}</p>
+    </div>
     <div class="button-row">
-      <md-filled-button type="button" data-create-ai-intent-layer="${escapeHtml(run.id || "")}" ${summary.approved ? "" : "disabled"}>
+      <md-filled-button type="button" data-create-ai-intent-layer="${escapeHtml(run.id || "")}" ${canCreate ? "" : "disabled"}>
         <md-icon slot="icon">filter_alt</md-icon>
         Создать новый AI-фильтр
       </md-filled-button>
+      <md-filled-tonal-button type="button" data-run-created-ai-intent-layer="${escapeHtml(run.id || "")}" ${createdLayerId ? "" : "disabled"}>
+        <md-icon slot="icon">play_arrow</md-icon>
+        Применить AI-фильтр к тем же сообщениям
+      </md-filled-tonal-button>
+      <a class="button-link" href="${escapeHtml(interestContextStepHref("/interest-contexts/intent-matches", state.selectedId))}">Смотреть сообщения намерений</a>
     </div>
+    <p id="interest-intent-ai-filter-run-status" class="status-line" role="status"></p>
   </section>`;
 }
 
 function handleInterestIntentAiFilterClick(event, state) {
   const button = event.target.closest("[data-create-ai-intent-layer]");
-  if (button) createInterestIntentAiFilter(button, state);
+  if (button) {
+    createInterestIntentAiFilter(button, state);
+    return;
+  }
+  const runButton = event.target.closest("[data-run-created-ai-intent-layer]");
+  if (runButton) runCreatedInterestIntentAiFilter(runButton, state);
 }
 
 async function createInterestIntentAiFilter(button, state) {
@@ -5638,6 +5683,29 @@ async function createInterestIntentAiFilter(button, state) {
     );
     if (status) status.textContent = "AI-фильтр создан как новый слой намерений.";
     await loadInterestIntentAiFilter(state);
+  } catch (error) {
+    button.disabled = false;
+    if (status) status.textContent = error.message;
+  }
+}
+
+async function runCreatedInterestIntentAiFilter(button, state) {
+  const validationRunId = button.dataset.runCreatedAiIntentLayer;
+  const status =
+    document.querySelector("#interest-intent-ai-filter-run-status") ||
+    document.querySelector("#interest-context-status");
+  if (!validationRunId || !state.selectedId) return;
+  button.disabled = true;
+  try {
+    if (status) status.textContent = "Применяю AI-фильтр к тому же broad-run...";
+    const payload = await api(
+      `/api/interest-contexts/${encodeURIComponent(state.selectedId)}/intent-validation-runs/${encodeURIComponent(validationRunId)}/run-created-layer`,
+      { method: "POST" }
+    );
+    state.selectedIntentRunId = payload.run?.id || null;
+    if (status) {
+      status.innerHTML = `Готово: создан новый запуск намерений ${escapeHtml(shortId(state.selectedIntentRunId || ""))}. Совпадений: ${escapeHtml(String(payload.summary?.match_count || 0))}. <a href="${escapeHtml(interestContextStepHref("/interest-contexts/intent-matches", state.selectedId))}">Открыть сообщения намерений</a>`;
+    }
   } catch (error) {
     button.disabled = false;
     if (status) status.textContent = error.message;

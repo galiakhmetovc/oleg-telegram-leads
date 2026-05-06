@@ -20,8 +20,10 @@ from pur_leads.core.config import load_settings
 from pur_leads.core.time import utc_now
 from pur_leads.core.tracing import current_trace_json
 from pur_leads.models.interest_context_drafts import (
+    interest_intent_analysis_runs_table,
     interest_intent_analysis_matches_table,
     interest_intent_layers_table,
+    interest_intent_validation_runs_table,
 )
 from pur_leads.models.leads import feedback_events_table
 from pur_leads.models.scheduler import scheduler_jobs_table
@@ -1372,6 +1374,58 @@ def create_interest_intent_validation_layer(
         )
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="Validation run not found") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return jsonable_encoder(result)
+
+
+@router.post("/{context_id}/intent-validation-runs/{validation_run_id}/run-created-layer")
+def run_created_interest_intent_validation_layer(
+    context_id: str,
+    validation_run_id: str,
+    validated: SessionValidationResult = Depends(current_admin),
+    session: Session = Depends(get_session),
+) -> dict[str, Any]:
+    context = InterestContextService(session).repository.get(context_id)
+    if context is None:
+        raise HTTPException(status_code=404, detail="Interest context not found")
+    validation_run = (
+        session.execute(
+            select(interest_intent_validation_runs_table)
+            .where(interest_intent_validation_runs_table.c.context_id == context.id)
+            .where(interest_intent_validation_runs_table.c.id == validation_run_id)
+        )
+        .mappings()
+        .first()
+    )
+    if validation_run is None:
+        raise HTTPException(status_code=404, detail="Validation run not found")
+    created_layer_id = validation_run["created_layer_id"]
+    if not created_layer_id:
+        raise HTTPException(status_code=400, detail="Сначала создайте AI-фильтр")
+    source_intent_run = (
+        session.execute(
+            select(interest_intent_analysis_runs_table)
+            .where(interest_intent_analysis_runs_table.c.context_id == context.id)
+            .where(
+                interest_intent_analysis_runs_table.c.id
+                == validation_run["source_intent_run_id"]
+            )
+        )
+        .mappings()
+        .first()
+    )
+    if source_intent_run is None:
+        raise HTTPException(status_code=404, detail="Source intent run not found")
+    try:
+        result = InterestIntentLayerService(session).run_layer(
+            context_id=context.id,
+            layer_id=str(created_layer_id),
+            broad_analysis_run_id=str(source_intent_run["broad_analysis_run_id"]),
+            actor=_actor(validated),
+        )
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Intent layer or broad run not found") from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return jsonable_encoder(result)
