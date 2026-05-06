@@ -483,7 +483,7 @@ class InterestIntentLayerService:
         )
         self.session.commit()
         try:
-            match_rows = self._build_intent_matches(
+            match_rows, compiled_layer = self._build_intent_matches(
                 run_id=run_id,
                 context_id=context_id,
                 layer=layer,
@@ -492,7 +492,12 @@ class InterestIntentLayerService:
             )
             if match_rows:
                 self.session.execute(insert(interest_intent_analysis_matches_table), match_rows)
-            summary = _intent_summary(match_rows, layer)
+            summary = _intent_summary(
+                match_rows,
+                layer,
+                compiled_layer,
+                broad_match_count=int(broad_run["match_count"] or 0),
+            )
             finished_at = utc_now()
             self.session.execute(
                 update(interest_intent_analysis_runs_table)
@@ -777,7 +782,7 @@ class InterestIntentLayerService:
         layer: InterestIntentLayerRecord,
         broad_run: dict[str, Any],
         created_at: Any,
-    ) -> list[dict[str, Any]]:
+    ) -> tuple[list[dict[str, Any]], "_CompiledIntentLayer"]:
         config = _CompiledIntentLayer(layer)
         best_by_message: dict[str, dict[str, Any]] = {}
         rows = (
@@ -825,6 +830,9 @@ class InterestIntentLayerService:
                     "context_hits": match["context_hits"],
                     "score_parts": match["score_parts"],
                     "prepared_text": match["prepared_text"],
+                    "semantic_negative_score": match["semantic_negative_score"],
+                    "semantic_positive_score": match["semantic_positive_score"],
+                    "positive_boost": match["positive_boost"],
                     "core_item": row["canonical_name"],
                     "category": row["category"],
                 },
@@ -833,9 +841,12 @@ class InterestIntentLayerService:
             current = best_by_message.get(str(row["source_message_id"]))
             if current is None or candidate["score"] > current["score"]:
                 best_by_message[str(row["source_message_id"])] = candidate
-        return sorted(best_by_message.values(), key=lambda item: item["score"], reverse=True)[
-            : layer.max_results
-        ]
+        return (
+            sorted(best_by_message.values(), key=lambda item: item["score"], reverse=True)[
+                : layer.max_results
+            ],
+            config,
+        )
 
     def _prepared_texts_for_broad_rows(
         self,
@@ -930,22 +941,36 @@ class InterestIntentLayerService:
 class _CompiledIntentLayer:
     def __init__(self, layer: InterestIntentLayerRecord) -> None:
         self.layer = layer
+        metadata = layer.metadata_json if isinstance(layer.metadata_json, dict) else {}
         self.include_patterns = _compile_patterns(_json_list(layer.include_patterns_json))
         self.context_patterns = _compile_patterns(_json_list(layer.context_patterns_json))
         self.exclude_patterns = _compile_patterns(_json_list(layer.exclude_patterns_json))
         self.exclude_lemma_rules = _compile_lemma_rules(_json_list(layer.exclude_lemmas_json))
         self.exclude_phrase_rules = _compile_phrase_rules(_json_list(layer.exclude_phrases_json))
-        self.semantic_negative_examples = [
-            str(item).strip()
-            for item in _json_list(layer.semantic_negative_examples_json)
-            if str(item or "").strip()
-        ]
+        self.semantic_negative_examples = _merge_casefold_strings(
+            _string_items(layer.semantic_negative_examples_json),
+            _string_items(metadata.get("operator_semantic_negative_examples")),
+        )
         self.semantic_negative_threshold = _score(
-            layer.semantic_negative_threshold, default=0.78
+            metadata.get("operator_semantic_negative_threshold"),
+            default=_score(layer.semantic_negative_threshold, default=0.78),
+        )
+        self.semantic_positive_examples = _string_items(
+            metadata.get("operator_semantic_positive_examples")
+        )
+        self.semantic_positive_threshold = _score(
+            metadata.get("operator_positive_boost_threshold"), default=0.55
+        )
+        self.semantic_positive_margin = _score(
+            metadata.get("operator_semantic_positive_margin"), default=0.03
+        )
+        self.positive_score_boost = min(
+            0.3,
+            _score(metadata.get("operator_positive_score_boost"), default=0.08),
         )
         self._semantic_embedder = (
             LocalHashingEmbedder(dimensions=DEFAULT_EMBEDDING_DIMENSIONS)
-            if self.semantic_negative_examples
+            if self.semantic_negative_examples or self.semantic_positive_examples
             else None
         )
         self._semantic_negative_vectors = (
@@ -953,17 +978,36 @@ class _CompiledIntentLayer:
             if self._semantic_embedder is not None
             else []
         )
+        self._semantic_positive_vectors = (
+            self._semantic_embedder.embed_texts(self.semantic_positive_examples)
+            if self._semantic_embedder is not None
+            else []
+        )
         self.include_categories = _casefold_set(layer.include_categories_json)
         self.exclude_categories = _casefold_set(layer.exclude_categories_json)
         self.include_core_names = _casefold_set(layer.include_core_names_json)
         self.exclude_core_names = _casefold_set(layer.exclude_core_names_json)
-        metadata = layer.metadata_json if isinstance(layer.metadata_json, dict) else {}
         self.excluded_source_message_ids = {
             str(item) for item in metadata.get("excluded_source_message_ids", []) if str(item)
         }
         self.excluded_telegram_message_ids = {
             str(item) for item in metadata.get("excluded_telegram_message_ids", []) if str(item)
         }
+        self.positive_source_message_ids = {
+            str(item) for item in metadata.get("positive_source_message_ids", []) if str(item)
+        }
+        self.positive_telegram_message_ids = {
+            str(item) for item in metadata.get("positive_telegram_message_ids", []) if str(item)
+        }
+        self.operator_review_counts = (
+            dict(metadata.get("operator_review_counts"))
+            if isinstance(metadata.get("operator_review_counts"), dict)
+            else {}
+        )
+        self.exclusion_counts: Counter[str] = Counter()
+        self.exclusion_samples: list[dict[str, Any]] = []
+        self.positive_boosted_count = 0
+        self.positive_boosted_samples: list[dict[str, Any]] = []
 
     def match(
         self,
@@ -974,40 +1018,96 @@ class _CompiledIntentLayer:
         raw_text = str(row["message_text"] or "")
         prepared = prepared_text or _prepared_from_raw(raw_text)
         text = prepared.search_text
-        if str(row["source_message_id"]) in self.excluded_source_message_ids:
+        source_message_id = str(row["source_message_id"])
+        telegram_message_id = str(row["telegram_message_id"])
+        positive_protected = (
+            source_message_id in self.positive_source_message_ids
+            or telegram_message_id in self.positive_telegram_message_ids
+        )
+        if source_message_id in self.excluded_source_message_ids and not positive_protected:
+            self._record_exclusion("exact_operator_incorrect", row)
             return None
-        if str(row["telegram_message_id"]) in self.excluded_telegram_message_ids:
+        if telegram_message_id in self.excluded_telegram_message_ids and not positive_protected:
+            self._record_exclusion("exact_operator_incorrect", row)
             return None
         normalized_category = _fold(row["category"])
         normalized_name = _fold(row["canonical_name"])
         if self.include_categories and normalized_category not in self.include_categories:
+            self._record_exclusion("include_category_miss", row)
             return None
         if self.include_core_names and normalized_name not in self.include_core_names:
+            self._record_exclusion("include_core_name_miss", row)
             return None
         if normalized_category in self.exclude_categories:
+            self._record_exclusion("exclude_category", row)
             return None
         if normalized_name in self.exclude_core_names:
+            self._record_exclusion("exclude_core_name", row)
             return None
         if _lemma_rule_hits(self.exclude_lemma_rules, prepared):
+            self._record_exclusion("exclude_lemma", row)
             return None
         if _phrase_rule_hits(self.exclude_phrase_rules, prepared):
+            self._record_exclusion("exclude_phrase", row)
             return None
-        if self._semantic_negative_hits(prepared):
+        semantic_scores = self._semantic_scores(prepared)
+        semantic_negative_score = semantic_scores["negative_score"]
+        semantic_positive_score = semantic_scores["positive_score"]
+        if (
+            semantic_negative_score >= self.semantic_negative_threshold
+            and semantic_negative_score >= semantic_positive_score + self.semantic_positive_margin
+            and not positive_protected
+        ):
+            self._record_exclusion(
+                "semantic_negative",
+                row,
+                {
+                    "semantic_negative_score": round(semantic_negative_score, 4),
+                    "semantic_positive_score": round(semantic_positive_score, 4),
+                    "semantic_negative_example": semantic_scores.get("negative_example"),
+                },
+            )
             return None
         if _pattern_hits(self.exclude_patterns, text):
+            self._record_exclusion("advanced_regex", row)
             return None
         include_hits = _pattern_hits(self.include_patterns, text)
         if self.layer.require_include_match and not include_hits:
+            self._record_exclusion("include_pattern_miss", row)
             return None
         context_hits = _pattern_hits(self.context_patterns, text)
         if self.layer.require_context_match and not context_hits:
+            self._record_exclusion("context_pattern_miss", row)
             return None
         broad_score = float(row["score"] or 0)
         intent_score = min(0.55, len(include_hits) * self.layer.intent_hit_weight)
         context_score = min(0.28, len(context_hits) * 0.14)
-        score = min(0.99, broad_score * self.layer.broad_score_weight + intent_score + context_score)
+        positive_boost = (
+            self.positive_score_boost
+            if positive_protected or semantic_positive_score >= self.semantic_positive_threshold
+            else 0.0
+        )
+        score = min(
+            0.99,
+            broad_score * self.layer.broad_score_weight
+            + intent_score
+            + context_score
+            + positive_boost,
+        )
         if score < self.layer.min_score:
+            self._record_exclusion("min_score", row)
             return None
+        if positive_boost > 0:
+            self.positive_boosted_count += 1
+            self._record_positive_boost(
+                row,
+                {
+                    "semantic_positive_score": round(semantic_positive_score, 4),
+                    "semantic_negative_score": round(semantic_negative_score, 4),
+                    "positive_boost": round(positive_boost, 4),
+                    "semantic_positive_example": semantic_scores.get("positive_example"),
+                },
+            )
         return {
             "include_hits": include_hits,
             "context_hits": context_hits,
@@ -1016,39 +1116,118 @@ class _CompiledIntentLayer:
                 "broad": round(broad_score * self.layer.broad_score_weight, 4),
                 "intent": round(intent_score, 4),
                 "context": round(context_score, 4),
+                "positive_boost": round(positive_boost, 4),
             },
             "prepared_text": {
                 "source": prepared.source,
                 "used_clean_text": bool(prepared.clean_text),
                 "used_lemmas": bool(prepared.lemmas_text),
             },
+            "semantic_negative_score": round(semantic_negative_score, 4),
+            "semantic_positive_score": round(semantic_positive_score, 4),
+            "positive_boost": round(positive_boost, 4),
         }
 
-    def _semantic_negative_hits(self, prepared: _PreparedMessageText) -> list[str]:
-        if self._semantic_embedder is None or not self._semantic_negative_vectors:
-            return []
+    def _semantic_scores(self, prepared: _PreparedMessageText) -> dict[str, Any]:
+        if self._semantic_embedder is None:
+            return {
+                "negative_score": 0.0,
+                "positive_score": 0.0,
+                "negative_example": None,
+                "positive_example": None,
+            }
         vector = self._semantic_embedder.embed_texts([prepared.search_text])[0]
-        hits: list[str] = []
-        for example, example_vector in zip(
-            self.semantic_negative_examples,
-            self._semantic_negative_vectors,
-            strict=False,
-        ):
+        negative_score = 0.0
+        negative_example = None
+        for example, example_vector in zip(self.semantic_negative_examples, self._semantic_negative_vectors, strict=False):
             score = _dot(vector, example_vector)
-            if score >= self.semantic_negative_threshold:
-                hits.append(f"{example}:{score:.3f}")
-        return hits[:5]
+            if score > negative_score:
+                negative_score = score
+                negative_example = example
+        positive_score = 0.0
+        positive_example = None
+        for example, example_vector in zip(self.semantic_positive_examples, self._semantic_positive_vectors, strict=False):
+            score = _dot(vector, example_vector)
+            if score > positive_score:
+                positive_score = score
+                positive_example = example
+        return {
+            "negative_score": negative_score,
+            "positive_score": positive_score,
+            "negative_example": negative_example,
+            "positive_example": positive_example,
+        }
+
+    def _record_exclusion(
+        self,
+        reason: str,
+        row: Any,
+        details: dict[str, Any] | None = None,
+    ) -> None:
+        self.exclusion_counts[reason] += 1
+        if len(self.exclusion_samples) >= 20:
+            return
+        self.exclusion_samples.append(
+            {
+                "reason": reason,
+                "source_message_id": str(row["source_message_id"]),
+                "telegram_message_id": row["telegram_message_id"],
+                "canonical_name": row["canonical_name"],
+                "message_text": _truncate(row["message_text"], 180),
+                **(details or {}),
+            }
+        )
+
+    def _record_positive_boost(self, row: Any, details: dict[str, Any]) -> None:
+        if len(self.positive_boosted_samples) >= 20:
+            return
+        self.positive_boosted_samples.append(
+            {
+                "source_message_id": str(row["source_message_id"]),
+                "telegram_message_id": row["telegram_message_id"],
+                "canonical_name": row["canonical_name"],
+                "message_text": _truncate(row["message_text"], 180),
+                **details,
+            }
+        )
 
 
 def _intent_summary(
-    match_rows: list[dict[str, Any]], layer: InterestIntentLayerRecord
+    match_rows: list[dict[str, Any]],
+    layer: InterestIntentLayerRecord,
+    compiled_layer: _CompiledIntentLayer,
+    *,
+    broad_match_count: int,
 ) -> dict[str, Any]:
     message_ids = {row["source_message_id"] for row in match_rows}
     by_category = Counter(str(row["category"] or "без категории") for row in match_rows)
     by_core_item = Counter(str(row["canonical_name"] or row["interest_core_item_id"]) for row in match_rows)
+    exclusion_counts = dict(compiled_layer.exclusion_counts)
+    exclusion_total = sum(exclusion_counts.values())
+    cleaned_total = max(0, int(broad_match_count) - len(match_rows))
     return {
         "matched_message_count": len(message_ids),
         "match_count": len(match_rows),
+        "input_broad_match_count": int(broad_match_count),
+        "cleaned_total": cleaned_total,
+        "exclusions": {
+            "total": exclusion_total,
+            **exclusion_counts,
+            "samples": compiled_layer.exclusion_samples,
+        },
+        "review_training": {
+            "operator_review_counts": compiled_layer.operator_review_counts,
+            "exact_negative_ids": len(compiled_layer.excluded_source_message_ids),
+            "exact_positive_ids": len(compiled_layer.positive_source_message_ids),
+            "semantic_negative_examples": len(compiled_layer.semantic_negative_examples),
+            "semantic_positive_examples": len(compiled_layer.semantic_positive_examples),
+            "semantic_negative_threshold": compiled_layer.semantic_negative_threshold,
+            "semantic_positive_margin": compiled_layer.semantic_positive_margin,
+            "positive_boost_threshold": compiled_layer.semantic_positive_threshold,
+            "positive_score_boost": compiled_layer.positive_score_boost,
+        },
+        "positive_boosted_count": compiled_layer.positive_boosted_count,
+        "positive_boosted_samples": compiled_layer.positive_boosted_samples,
         "by_category": dict(by_category.most_common(20)),
         "top_core_items": dict(by_core_item.most_common(20)),
         "algorithm": "local_intent_layer_v1",
@@ -1078,6 +1257,21 @@ def _clean_list(value: list[str] | None) -> list[str]:
     if not value:
         return []
     return [str(item).strip() for item in value if str(item or "").strip()]
+
+
+def _string_items(value: Any) -> list[str]:
+    return [str(item).strip() for item in _json_list(value) if str(item or "").strip()]
+
+
+def _merge_casefold_strings(left: list[str], right: list[str]) -> list[str]:
+    result = list(left)
+    seen = {item.casefold().strip() for item in result}
+    for item in right:
+        key = item.casefold().strip()
+        if key and key not in seen:
+            result.append(item)
+            seen.add(key)
+    return result
 
 
 def _json_list(value: Any) -> list[Any]:

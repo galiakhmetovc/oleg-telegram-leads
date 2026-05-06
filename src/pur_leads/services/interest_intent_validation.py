@@ -518,10 +518,15 @@ class InterestIntentValidationService:
         )
         changed = False
         for key, values in review_exclusions.items():
-            existing = [str(item) for item in metadata.get(key, []) if str(item)]
-            merged = _merge_lists(existing, [str(item) for item in values if str(item)])
-            if merged != existing:
-                metadata[key] = merged
+            if isinstance(values, list):
+                existing = [str(item) for item in metadata.get(key, []) if str(item)]
+                merged = _merge_lists(existing, [str(item) for item in values if str(item)])
+                if merged != existing:
+                    metadata[key] = merged
+                    changed = True
+                continue
+            if metadata.get(key) != values:
+                metadata[key] = values
                 changed = True
         if changed:
             self.session.execute(
@@ -690,22 +695,56 @@ class InterestIntentValidationService:
         *,
         context_id: str,
         source_intent_run_id: str,
-    ) -> dict[str, list[str]]:
+    ) -> dict[str, Any]:
         reviews = self._latest_reviews_by_match_id(source_intent_run_id)
         if not reviews:
-            return {"excluded_source_message_ids": [], "excluded_telegram_message_ids": []}
+            return {
+                "excluded_source_message_ids": [],
+                "excluded_telegram_message_ids": [],
+                "positive_source_message_ids": [],
+                "positive_telegram_message_ids": [],
+                "operator_semantic_negative_examples": [],
+                "operator_semantic_positive_examples": [],
+                "operator_review_counts": {"correct": 0, "incorrect": 0},
+            }
         rows = self._intent_match_rows(context_id, source_intent_run_id)
         source_ids = []
         telegram_ids = []
+        positive_source_ids = []
+        positive_telegram_ids = []
+        negative_examples = []
+        positive_examples = []
         for row in rows:
             review = reviews.get(str(row["id"]))
-            if not review or review.get("decision") != "incorrect":
+            if not review:
                 continue
-            source_ids.append(str(row["source_message_id"]))
-            telegram_ids.append(str(row["telegram_message_id"]))
+            decision = review.get("decision")
+            text = _truncate(row.get("message_text"), 800)
+            if decision == "incorrect":
+                source_ids.append(str(row["source_message_id"]))
+                telegram_ids.append(str(row["telegram_message_id"]))
+                if text:
+                    negative_examples.append(text)
+            elif decision == "correct":
+                positive_source_ids.append(str(row["source_message_id"]))
+                positive_telegram_ids.append(str(row["telegram_message_id"]))
+                if text:
+                    positive_examples.append(text)
         return {
             "excluded_source_message_ids": _merge_lists([], source_ids),
             "excluded_telegram_message_ids": _merge_lists([], telegram_ids),
+            "positive_source_message_ids": _merge_lists([], positive_source_ids),
+            "positive_telegram_message_ids": _merge_lists([], positive_telegram_ids),
+            "operator_semantic_negative_examples": _merge_lists([], negative_examples),
+            "operator_semantic_positive_examples": _merge_lists([], positive_examples),
+            "operator_semantic_negative_threshold": 0.55,
+            "operator_semantic_positive_margin": 0.03,
+            "operator_positive_boost_threshold": 0.55,
+            "operator_positive_score_boost": 0.08,
+            "operator_review_counts": {
+                "correct": len(_merge_lists([], positive_source_ids)),
+                "incorrect": len(_merge_lists([], source_ids)),
+            },
         }
 
     def _recommendation_rows_for_display(

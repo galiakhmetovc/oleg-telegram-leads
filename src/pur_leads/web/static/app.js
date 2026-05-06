@@ -4944,6 +4944,11 @@ function renderInterestIntentRuns(payload, state) {
 
 function renderInterestIntentRunRow(item, state) {
   const summary = item.summary_json || {};
+  const exclusions = summary.exclusions || {};
+  const cleanedTotal = summary.cleaned_total || Math.max(0, (summary.input_broad_match_count || item.broad_match_count || 0) - (item.match_count || 0));
+  const semanticCleaned = exclusions.semantic_negative || 0;
+  const exactCleaned = exclusions.exact_operator_incorrect || 0;
+  const boosted = summary.positive_boosted_count || 0;
   const active = item.id === state.selectedIntentRunId ? "is-active" : "";
   const title = item.source_title || item.id;
   return `<button class="table-row linked-row analysis-run-row ${active}" type="button" data-intent-run-id="${escapeHtml(item.id)}">
@@ -4957,8 +4962,13 @@ function renderInterestIntentRunRow(item, state) {
         ${badge(`${item.broad_match_count || 0} входных совпадений`)}
         ${badge(`${item.match_count || 0} намерений`)}
         ${badge(`${item.matched_message_count || 0} сообщений`)}
+        ${cleanedTotal ? badge(`очищено ${cleanedTotal}`) : ""}
+        ${semanticCleaned ? badge(`semantic -${semanticCleaned}`) : ""}
+        ${exactCleaned ? badge(`ручные -${exactCleaned}`) : ""}
+        ${boosted ? badge(`усилено ${boosted}`) : ""}
       </div>
       <p class="draft-evidence"><strong>Чем отличается:</strong> слой ${escapeHtml(item.intent_layer_id || "н/д")} применен к широкому запуску ${escapeHtml(item.broad_analysis_run_id || "н/д")}.</p>
+      ${cleanedTotal || boosted ? `<p class="draft-evidence"><strong>Обратная связь:</strong> очищено ${escapeHtml(String(cleanedTotal))}; точные ручные исключения ${escapeHtml(String(exactCleaned))}; семантически похожие исключения ${escapeHtml(String(semanticCleaned))}; усилено правильных совпадений ${escapeHtml(String(boosted))}.</p>` : ""}
       ${renderAnalysisCounters(summary.by_category, "Категории")}
     </div>
     <span>Открыть</span>
@@ -5719,7 +5729,12 @@ async function runCreatedInterestIntentAiFilter(button, state) {
     );
     state.selectedIntentRunId = payload.run?.id || null;
     if (status) {
-      status.innerHTML = `Готово: создан новый запуск намерений ${escapeHtml(shortId(state.selectedIntentRunId || ""))}. Совпадений: ${escapeHtml(String(payload.summary?.match_count || 0))}. <a href="${escapeHtml(interestContextStepHref("/interest-contexts/intent-matches", state.selectedId))}">Открыть сообщения намерений</a>`;
+      const exclusions = payload.summary?.exclusions || {};
+      const cleanedTotal = payload.summary?.cleaned_total || 0;
+      const semanticCleaned = exclusions.semantic_negative || 0;
+      const exactCleaned = exclusions.exact_operator_incorrect || 0;
+      const boosted = payload.summary?.positive_boosted_count || 0;
+      status.innerHTML = `Готово: запуск ${escapeHtml(shortId(state.selectedIntentRunId || ""))}. Было ${escapeHtml(String(payload.summary?.input_broad_match_count || 0))}, стало ${escapeHtml(String(payload.summary?.match_count || 0))}, очищено ${escapeHtml(String(cleanedTotal))}: ручные ${escapeHtml(String(exactCleaned))}, semantic ${escapeHtml(String(semanticCleaned))}. Усилено ${escapeHtml(String(boosted))}. <a href="${escapeHtml(interestContextStepHref("/interest-contexts/intent-matches", state.selectedId))}">Открыть сообщения намерений</a>`;
     }
     await loadInterestIntentAiFilter(state);
   } catch (error) {
