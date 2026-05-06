@@ -407,7 +407,7 @@ def test_project_opportunity_layer_keeps_pur_projects_and_filters_designer_noise
                     "category": category,
                     "matched_text": canonical_name,
                     "match_kind": "synonym",
-                    "score": 0.82,
+                    "score": 0.99,
                     "evidence_json": {},
                     "created_at": now,
                 }
@@ -478,6 +478,16 @@ def test_project_opportunity_layer_keeps_pur_projects_and_filters_designer_noise
         assert result["summary"]["exclusions"]["opportunity_pur_fit_miss"] >= 1
         assert result["summary"]["by_opportunity_type"]
         assert result["summary"]["positive_boosted_count"] == 1
+        yes_payload = service.list_matches(
+            context_id="context-1",
+            run_id=result["run"]["id"],
+            opportunity_decision="yes",
+        )
+        assert {row.source_message_id for row in yes_payload["items"]} == {"good-smart-home"}
+        assert all(
+            row.evidence_json["opportunity"]["decision"] == "yes"
+            for row in yes_payload["items"]
+        )
         for row in result["top_matches"]:
             opportunity = row["evidence_json"]["opportunity"]
             assert opportunity["profile"] == "pur_designer_project_opportunity_v1"

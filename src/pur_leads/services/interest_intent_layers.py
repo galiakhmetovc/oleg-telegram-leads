@@ -978,53 +978,64 @@ class InterestIntentLayerService:
         run_id: str,
         limit: int = 10,
         offset: int = 0,
+        opportunity_decision: str | None = None,
     ) -> dict[str, Any]:
         run = self._run(run_id)
         if run is None or run.context_id != context_id:
             raise KeyError(run_id)
         safe_limit = max(1, min(100, int(limit)))
         safe_offset = max(0, int(offset))
-        total = int(
-            self.session.execute(
-                select(func.count())
-                .select_from(interest_intent_analysis_matches_table)
-                .where(interest_intent_analysis_matches_table.c.context_id == context_id)
-                .where(interest_intent_analysis_matches_table.c.run_id == run_id)
-            ).scalar_one()
-            or 0
-        )
-        rows = (
-            self.session.execute(
-                select(
-                    interest_intent_analysis_matches_table,
-                    source_messages_table.c.raw_metadata_json.label("_source_raw_metadata_json"),
-                    monitored_sources_table.c.username.label("_source_username"),
-                    monitored_sources_table.c.input_ref.label("_source_input_ref"),
-                    monitored_sources_table.c.telegram_id.label("_source_telegram_id"),
-                )
-                .join(
-                    source_messages_table,
-                    source_messages_table.c.id
-                    == interest_intent_analysis_matches_table.c.source_message_id,
-                    isouter=True,
-                )
-                .join(
-                    monitored_sources_table,
-                    monitored_sources_table.c.id == source_messages_table.c.monitored_source_id,
-                    isouter=True,
-                )
-                .where(interest_intent_analysis_matches_table.c.context_id == context_id)
-                .where(interest_intent_analysis_matches_table.c.run_id == run_id)
-                .order_by(
-                    desc(interest_intent_analysis_matches_table.c.score),
-                    desc(interest_intent_analysis_matches_table.c.message_date),
-                )
-                .limit(safe_limit)
-                .offset(safe_offset)
+        decision_filter = str(opportunity_decision or "").strip().casefold()
+        if decision_filter and decision_filter not in {"yes", "maybe"}:
+            raise ValueError("Некорректный фильтр проектных возможностей")
+        query = (
+            select(
+                interest_intent_analysis_matches_table,
+                source_messages_table.c.raw_metadata_json.label("_source_raw_metadata_json"),
+                monitored_sources_table.c.username.label("_source_username"),
+                monitored_sources_table.c.input_ref.label("_source_input_ref"),
+                monitored_sources_table.c.telegram_id.label("_source_telegram_id"),
             )
-            .mappings()
-            .all()
+            .join(
+                source_messages_table,
+                source_messages_table.c.id
+                == interest_intent_analysis_matches_table.c.source_message_id,
+                isouter=True,
+            )
+            .join(
+                monitored_sources_table,
+                monitored_sources_table.c.id == source_messages_table.c.monitored_source_id,
+                isouter=True,
+            )
+            .where(interest_intent_analysis_matches_table.c.context_id == context_id)
+            .where(interest_intent_analysis_matches_table.c.run_id == run_id)
+            .order_by(
+                desc(interest_intent_analysis_matches_table.c.score),
+                desc(interest_intent_analysis_matches_table.c.message_date),
+            )
         )
+        if decision_filter:
+            all_rows = self.session.execute(query).mappings().all()
+            filtered_rows = [
+                row for row in all_rows if _opportunity_decision(row) == decision_filter
+            ]
+            total = len(filtered_rows)
+            rows = filtered_rows[safe_offset : safe_offset + safe_limit]
+        else:
+            total = int(
+                self.session.execute(
+                    select(func.count())
+                    .select_from(interest_intent_analysis_matches_table)
+                    .where(interest_intent_analysis_matches_table.c.context_id == context_id)
+                    .where(interest_intent_analysis_matches_table.c.run_id == run_id)
+                ).scalar_one()
+                or 0
+            )
+            rows = (
+                self.session.execute(query.limit(safe_limit).offset(safe_offset))
+                .mappings()
+                .all()
+            )
         feedback_by_match_id = self._intent_match_feedback_by_match_id(
             [str(row["id"]) for row in rows]
         )
@@ -2091,6 +2102,15 @@ def _opportunity_summary(
     project = ", ".join(project_hits[:2]) or "проектный контекст"
     action = ", ".join(commercial_hits[:2]) or "возможный следующий шаг"
     return f"{opportunity_type}: {subject}; контекст: {project}; действие: {action}"
+
+
+def _opportunity_decision(row: Any) -> str | None:
+    evidence = row["evidence_json"] if isinstance(row["evidence_json"], dict) else {}
+    opportunity = evidence.get("opportunity") if isinstance(evidence, dict) else None
+    if not isinstance(opportunity, dict):
+        return None
+    decision = str(opportunity.get("decision") or "").strip().casefold()
+    return decision or None
 
 
 def _prepared_from_raw(raw_text: str) -> _PreparedMessageText:

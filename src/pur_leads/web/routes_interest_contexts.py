@@ -1170,6 +1170,7 @@ def list_interest_intent_matches(
     run_id: str,
     limit: int = 10,
     offset: int = 0,
+    opportunity_decision: str | None = None,
     _validated: SessionValidationResult = Depends(current_admin),
     session: Session = Depends(get_session),
 ) -> dict[str, Any]:
@@ -1182,9 +1183,12 @@ def list_interest_intent_matches(
             run_id=run_id,
             limit=max(1, min(limit, 100)),
             offset=max(0, offset),
+            opportunity_decision=opportunity_decision,
         )
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="Intent run not found") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     return jsonable_encoder(payload)
 
 

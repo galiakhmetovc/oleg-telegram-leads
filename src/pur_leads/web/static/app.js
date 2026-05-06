@@ -3765,6 +3765,7 @@ function initInterestContexts() {
     projectOpportunityMatchesLimit: 10,
     projectOpportunityMatchesOffset: 0,
     selectedProjectOpportunityRunId: null,
+    projectOpportunityDecision: "all",
     intentReviewLimit: 10,
     intentReviewOffset: 0,
     intentValidationRunsLimit: 10,
@@ -4089,6 +4090,7 @@ async function loadInterestContextDetail(contextId, state) {
     state.projectOpportunityMatchesOffset = 0;
     state.selectedAnalysisRunId = null;
     state.selectedProjectOpportunityRunId = null;
+    state.projectOpportunityDecision = "all";
     await loadInterestAnalysisRuns(state);
     await loadInterestProjectOpportunities(state);
   }
@@ -5451,6 +5453,9 @@ async function loadInterestProjectOpportunityMatches(state, runId) {
       limit: String(state.projectOpportunityMatchesLimit),
       offset: String(state.projectOpportunityMatchesOffset),
     });
+    if (state.projectOpportunityDecision && state.projectOpportunityDecision !== "all") {
+      params.set("opportunity_decision", state.projectOpportunityDecision);
+    }
     const payload = await api(
       `/api/interest-contexts/${encodeURIComponent(state.selectedId)}/intent-runs/${encodeURIComponent(runId)}/matches?${params.toString()}`
     );
@@ -5472,7 +5477,8 @@ function renderInterestProjectOpportunityMatches(payload, state) {
   const pagination =
     payload.pagination || { limit: state.projectOpportunityMatchesLimit, offset: 0, total: 0 };
   if (!items.length) {
-    target.innerHTML = '<div class="empty-state">В выбранном запуске проектных возможностей нет.</div>';
+    target.innerHTML = `${renderProjectOpportunityFilters(state)}
+      <div class="empty-state">В выбранном фильтре сообщений нет.</div>`;
     return;
   }
   target.innerHTML = `<section class="draft-review-section">
@@ -5480,9 +5486,22 @@ function renderInterestProjectOpportunityMatches(payload, state) {
       <h4>Сообщения из запуска ${escapeHtml(shortId(payload.run?.id || ""))}</h4>
       <span class="muted">${escapeHtml(`${pagination.offset + 1}-${Math.min(pagination.offset + items.length, pagination.total)} из ${pagination.total}`)}</span>
     </div>
+    ${renderProjectOpportunityFilters(state)}
     <div class="table-list">${items.map((item) => renderInterestProjectOpportunityMatchRow(item, state)).join("")}</div>
     ${renderPageControls(pagination, "project-opportunity-matches")}
   </section>`;
+}
+
+function renderProjectOpportunityFilters(state) {
+  const active = state.projectOpportunityDecision || "all";
+  const buttons = [
+    ["all", "Все"],
+    ["yes", "Точные yes"],
+    ["maybe", "Maybe"],
+  ];
+  return `<div class="segmented-control project-opportunity-filters" role="group" aria-label="Фильтр проектных возможностей">
+    ${buttons.map(([value, labelText]) => `<button type="button" class="${active === value ? "is-active" : ""}" data-project-opportunity-filter="${escapeHtml(value)}">${escapeHtml(labelText)}</button>`).join("")}
+  </div>`;
 }
 
 function renderInterestProjectOpportunityMatchRow(item, state) {
@@ -5520,6 +5539,15 @@ function renderInterestProjectOpportunityMatchRow(item, state) {
 }
 
 function handleInterestProjectOpportunityMatchesClick(event, state) {
+  const filterButton = event.target.closest("[data-project-opportunity-filter]");
+  if (filterButton) {
+    state.projectOpportunityDecision = filterButton.dataset.projectOpportunityFilter || "all";
+    state.projectOpportunityMatchesOffset = 0;
+    if (state.selectedProjectOpportunityRunId) {
+      loadInterestProjectOpportunityMatches(state, state.selectedProjectOpportunityRunId);
+    }
+    return;
+  }
   const pageButton = event.target.closest("[data-project-opportunity-matches-page-action]");
   if (!pageButton || !state.selectedProjectOpportunityRunId) return;
   const action = pageButton.dataset.projectOpportunityMatchesPageAction;

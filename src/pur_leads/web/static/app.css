@@ -679,6 +679,33 @@ md-text-button {
   width: min(190px, 100%);
 }
 
+.segmented-control {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  align-items: center;
+  margin: 4px 0 12px;
+  padding: 3px;
+  border: 1px solid var(--line);
+  background: #f8faf9;
+}
+
+.segmented-control button {
+  min-height: 32px;
+  padding: 0 10px;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  cursor: pointer;
+}
+
+.segmented-control button.is-active {
+  background: #ffffff;
+  color: var(--text);
+  box-shadow: 0 0 0 1px rgba(22, 119, 75, 0.18);
+}
+
 .raw-review-panel:empty {
   display: none;
 }
