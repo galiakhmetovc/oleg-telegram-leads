@@ -395,9 +395,11 @@ def test_ai_filter_metadata_excludes_semantic_false_positives_and_boosts_correct
             name="AI-фильтр",
             actor="admin",
             include_patterns=["нужно", "нужный", "подскажите", "заказать"],
+            context_patterns=["нет такого контекста"],
+            exclude_lemmas=["видеонаблюдение"],
             require_include_match=True,
-            require_context_match=False,
-            min_score=0.5,
+            require_context_match=True,
+            min_score=0.95,
             metadata_json={
                 "excluded_source_message_ids": ["bad-exact"],
                 "operator_semantic_negative_examples": [
