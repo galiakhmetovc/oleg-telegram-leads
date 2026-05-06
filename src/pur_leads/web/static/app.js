@@ -5017,18 +5017,25 @@ function renderInterestIntentMatches(payload, state) {
       <span class="muted">${escapeHtml(`${pagination.offset + 1}-${Math.min(pagination.offset + items.length, pagination.total)} из ${pagination.total}`)}</span>
     </div>
     <p class="muted">Здесь показаны только сообщения, которые прошли второй слой: широкий интерес плюс признаки намерения, контекст и порог score.</p>
-    <div class="table-list">${items.map(renderInterestIntentMatchRow).join("")}</div>
+    <div class="table-list">${items.map((item) => renderInterestIntentMatchRow(item, state)).join("")}</div>
     ${renderPageControls(pagination, "intent-matches")}
   </section>`;
 }
 
-function renderInterestIntentMatchRow(item) {
+function renderInterestIntentMatchRow(item, state) {
   const evidence = item.evidence_json || {};
   const scoreParts = evidence.score_parts || {};
   const includeLabels = humanIntentPatterns(evidence.include_hits || item.matched_text);
   const contextLabels = humanIntentPatterns(evidence.context_hits || []);
   const feedback = item.operator_feedback_json || null;
   const feedbackApplied = feedback?.application_status === "applied";
+  const review = item.operator_review_json || null;
+  const reviewLabel =
+    review?.decision === "correct"
+      ? "размечено: правильное"
+      : review?.decision === "incorrect"
+        ? "размечено: неправильное"
+        : "";
   return `<div class="table-row draft-item-row">
     <div>
       <strong>${escapeHtml(item.canonical_name || "элемент ядра")}</strong>
@@ -5041,6 +5048,7 @@ function renderInterestIntentMatchRow(item) {
         ${badge(`широкий ${formatScore(item.broad_score)}`)}
         ${includeLabels.length ? badge(`намерение: ${includeLabels.slice(0, 3).join(", ")}`) : ""}
         ${feedback ? badge(feedbackApplied ? "исключение применено" : "в исключениях", feedbackApplied ? "" : "is-warn") : ""}
+        ${reviewLabel ? badge(reviewLabel, review?.decision === "incorrect" ? "is-warn" : "") : ""}
       </div>
       <p class="draft-evidence"><strong>Почему найдено:</strong> ${escapeHtml([
         includeLabels.length ? `намерение: ${includeLabels.slice(0, 4).join(", ")}` : "",
@@ -5051,32 +5059,15 @@ function renderInterestIntentMatchRow(item) {
       ].filter(Boolean).join("; "))}</p>
       <p class="draft-evidence"><strong>Подготовленный текст:</strong> ${escapeHtml(preparedTextExplanation(evidence.prepared_text))}</p>
       ${renderIntentFeedbackState(feedback)}
+      ${renderIntentReviewState(review)}
       ${renderTelegramMessageLink(item)}
       <div class="row-actions">
-        <md-outlined-button type="button" data-intent-feedback-action="preview" data-intent-match-id="${escapeHtml(item.id)}">
-          Проверить исключение
-        </md-outlined-button>
-        ${renderIntentFeedbackActionButton(item, feedback, feedbackApplied)}
+        <a class="interest-next-link" href="${escapeHtml(interestContextStepHref("/interest-contexts/intent-review", state.selectedId))}">
+          Открыть разметку
+        </a>
       </div>
-      <div id="intent-feedback-${escapeHtml(item.id)}" class="draft-evidence" aria-live="polite"></div>
     </div>
   </div>`;
-}
-
-function renderIntentFeedbackActionButton(item, feedback, feedbackApplied) {
-  if (!feedback) {
-    return `<md-outlined-button type="button" data-intent-feedback-action="not-interesting" data-intent-match-id="${escapeHtml(item.id)}">
-      Не интересно
-    </md-outlined-button>`;
-  }
-  if (feedbackApplied) {
-    return `<md-outlined-button type="button" disabled>
-      Исключение применено
-    </md-outlined-button>`;
-  }
-  return `<md-outlined-button type="button" data-intent-feedback-action="remove-exclusion" data-intent-match-id="${escapeHtml(item.id)}" data-intent-feedback-id="${escapeHtml(feedback.id)}">
-    Убрать из исключений
-  </md-outlined-button>`;
 }
 
 function renderIntentFeedbackState(feedback) {
@@ -5087,6 +5078,13 @@ function renderIntentFeedbackState(feedback) {
     ? "исключение уже применено к слою"
     : "feedback записан, исключение ждет явного применения";
   return `<p class="draft-evidence"><strong>Обратная связь:</strong> ${escapeHtml(actionText)}; статус ${escapeHtml(label(status))}; ${escapeHtml(time(feedback.created_at) || "")}</p>`;
+}
+
+function renderIntentReviewState(review) {
+  if (!review) return "";
+  const decision = review.decision === "correct" ? "правильное" : "неправильное";
+  const comment = review.comment ? `; комментарий: ${review.comment}` : "";
+  return `<p class="draft-evidence"><strong>Разметка:</strong> ${escapeHtml(decision)}${escapeHtml(comment)}; ${escapeHtml(time(review.created_at) || "")}</p>`;
 }
 
 function humanIntentPatterns(value) {
@@ -5160,11 +5158,6 @@ function preparedTextExplanation(prepared) {
 }
 
 function handleInterestIntentMatchesClick(event, state) {
-  const feedbackButton = event.target.closest("[data-intent-feedback-action]");
-  if (feedbackButton && state.selectedIntentRunId) {
-    handleIntentMatchFeedback(feedbackButton, state);
-    return;
-  }
   const pageButton = event.target.closest("[data-intent-matches-page-action]");
   if (!pageButton || !state.selectedIntentRunId) return;
   const action = pageButton.dataset.intentMatchesPageAction;
@@ -5175,78 +5168,6 @@ function handleInterestIntentMatchesClick(event, state) {
     state.intentMatchesOffset += state.intentMatchesLimit;
   }
   loadInterestIntentMatches(state, state.selectedIntentRunId);
-}
-
-async function handleIntentMatchFeedback(button, state) {
-  const matchId = button.dataset.intentMatchId;
-  const action = button.dataset.intentFeedbackAction;
-  const panel = document.querySelector(`#intent-feedback-${CSS.escape(matchId)}`);
-  if (!matchId || !panel) return;
-  try {
-    if (action === "remove-exclusion") {
-      await deleteInterestIntentExclusion(button, state);
-      return;
-    }
-    if (action === "not-interesting") {
-      await api(`/api/feedback/intent_match/${encodeURIComponent(matchId)}`, {
-        method: "POST",
-        body: JSON.stringify({
-          action: "not_lead",
-          reason_code: "not_relevant_intent",
-          feedback_scope: "classifier",
-          learning_effect: "negative_example",
-          application_status: "recorded",
-          comment: "Оператор отметил сообщение слоя намерений как неинтересное",
-          metadata_json: {
-            context_id: state.selectedId,
-            intent_run_id: state.selectedIntentRunId,
-          },
-        }),
-      });
-      markIntentMatchAsExcluded(button);
-      panel.innerHTML = "Feedback записан. Ниже можно посмотреть безопасный preview exclusion до изменения слоя.";
-      await previewIntentMatchExclusion(matchId, state, panel);
-      return;
-    }
-    await previewIntentMatchExclusion(matchId, state, panel);
-  } catch (error) {
-    panel.textContent = error.message;
-  }
-}
-
-function markIntentMatchAsExcluded(button) {
-  button.setAttribute("disabled", "");
-  button.textContent = "Уже в исключениях";
-  const row = button.closest(".table-row");
-  const badges = row?.querySelector(".badges");
-  if (badges && !badges.querySelector("[data-intent-feedback-badge]")) {
-    badges.insertAdjacentHTML(
-      "beforeend",
-      '<span class="badge is-warn" data-intent-feedback-badge>в исключениях</span>'
-    );
-  }
-}
-
-async function previewIntentMatchExclusion(matchId, state, panel) {
-  panel.textContent = "Считаю влияние exclusion...";
-  const payload = await api(
-    `/api/interest-contexts/${encodeURIComponent(state.selectedId)}/intent-runs/${encodeURIComponent(state.selectedIntentRunId)}/matches/${encodeURIComponent(matchId)}/exclude-preview`
-  );
-  const suggestions = payload.suggestions || [];
-  const samples = payload.removed_samples || [];
-  const risk =
-    payload.target_removed && payload.removed_count <= Math.max(3, Math.ceil((payload.total_matches || 0) * 0.05))
-      ? "точечное исключение"
-      : payload.target_removed
-        ? "широкое исключение, проверьте примеры"
-        : "кандидат не убирает выбранное сообщение";
-  panel.innerHTML = `<strong>Impact preview:</strong> ${escapeHtml(payload.term || "нет предложения")}
-    <br>Что изменить: добавить это выражение в исключающие условия слоя намерений.
-    <br>Эффект: уберет ${escapeHtml(String(payload.removed_count || 0))} из ${escapeHtml(String(payload.total_matches || 0))}; выбранное сообщение ${payload.target_removed ? "исчезнет" : "останется"}; оценка: ${escapeHtml(risk)}.
-    ${suggestions.length ? `<br>Другие кандидаты: ${escapeHtml(suggestions.join("; "))}` : ""}
-    ${samples.length ? `<br>Что еще зацепит: ${samples.map((item) => item.message_url ? `<a href="${escapeHtml(item.message_url)}" target="_blank" rel="noreferrer">#${escapeHtml(String(item.telegram_message_id))}</a>` : `#${escapeHtml(String(item.telegram_message_id))}`).join(", ")}` : ""}
-    <br><a href="${escapeHtml(interestContextStepHref("/interest-contexts/intent-exclusions", state.selectedId))}">Открыть страницу применения исключений</a>
-    <br><span class="muted">Изменение сейчас не применяется автоматически: сначала проверяем влияние, потом переносим условие в слой.</span>`;
 }
 
 async function ensureSelectedIntentRun(state) {

@@ -626,7 +626,6 @@ _INTEREST_CONTEXT_STEPS = (
     ("intent_ai_validation", "/interest-contexts/intent-ai-validation", "AI-валидация"),
     ("intent_ai_recommendations", "/interest-contexts/intent-ai-recommendations", "AI-рекомендации"),
     ("intent_ai_filter", "/interest-contexts/intent-ai-filter", "AI-фильтр"),
-    ("intent_exclusions", "/interest-contexts/intent-exclusions", "Исключения"),
 )
 
 
@@ -1687,9 +1686,9 @@ def _interest_context_intent_matches_body() -> str:
                   <section class="detail-section">
                     <div class="section-head">
                       <h3>Следующий шаг</h3>
-                      <a class="interest-next-link" href="/interest-contexts/intent-exclusions">Открыть исключения</a>
+                      <a class="interest-next-link" href="/interest-contexts/intent-review">Открыть разметку</a>
                     </div>
-                    <p class="muted">Если оператор отметил сообщение как “Не интересно”, применяйте исключение отдельным явным действием.</p>
+                    <p class="muted">На этой странице сообщения только просматриваются. Решение “правильное/неправильное” и комментарий записываются на отдельной странице разметки.</p>
                   </section>
     """
 
