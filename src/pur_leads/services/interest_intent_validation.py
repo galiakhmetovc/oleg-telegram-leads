@@ -656,9 +656,17 @@ class InterestIntentValidationService:
         )
         if not recommendations:
             if existing_layer is not None:
-                metadata = dict(existing_layer.get("metadata_json") or {})
+                review_exclusions = self._incorrect_review_exclusions(
+                    context_id=context_id,
+                    source_intent_run_id=source_intent_run_id,
+                )
+                metadata = self._merge_layer_review_metadata(
+                    str(existing_layer["id"]),
+                    review_exclusions,
+                )
+                refreshed_layer = self._layer(str(existing_layer["id"]))
                 return {
-                    "layer": dict(existing_layer),
+                    "layer": dict(refreshed_layer),
                     "applied_recommendation_ids": _string_list(
                         metadata.get("approved_recommendation_ids")
                     ),
@@ -733,6 +741,34 @@ class InterestIntentValidationService:
             context_id=context_id,
             source_intent_run_id=str(run["source_intent_run_id"]),
         )
+        changed = False
+        for key, values in review_exclusions.items():
+            if isinstance(values, list):
+                existing = [str(item) for item in metadata.get(key, []) if str(item)]
+                merged = _merge_lists(existing, [str(item) for item in values if str(item)])
+                if merged != existing:
+                    metadata[key] = merged
+                    changed = True
+                continue
+            if metadata.get(key) != values:
+                metadata[key] = values
+                changed = True
+        if changed:
+            self.session.execute(
+                update(interest_intent_layers_table)
+                .where(interest_intent_layers_table.c.id == layer_id)
+                .values(metadata_json=metadata, updated_at=utc_now())
+            )
+            self.session.commit()
+        return metadata
+
+    def _merge_layer_review_metadata(
+        self,
+        layer_id: str,
+        review_exclusions: dict[str, Any],
+    ) -> dict[str, Any]:
+        layer = self._layer(layer_id)
+        metadata = dict(layer.get("metadata_json") or {})
         changed = False
         for key, values in review_exclusions.items():
             if isinstance(values, list):
