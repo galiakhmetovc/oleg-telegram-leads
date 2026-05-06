@@ -251,7 +251,7 @@ def help_page(
                           <tr><td>Минимальный score</td><td>Слой намерений</td><td>Порог попадания сообщения в слой.</td><td>Выше порог - меньше, но точнее сообщений.</td></tr>
                           <tr><td>Максимум результатов</td><td>Слой намерений</td><td>Сколько совпадений сохранить.</td><td>Ограничивает длинные результаты, но не меняет raw-данные.</td></tr>
                           <tr><td>Вес широкого слоя</td><td>Слой намерений</td><td>Насколько учитывать score совпадения с ядром.</td><td>Если увеличить, сильнее ценятся сообщения, хорошо совпавшие с ядром.</td></tr>
-                          <tr><td>Вес одного намерения</td><td>Слой намерений</td><td>Сколько добавляет каждый include pattern.</td><td>Если увеличить, явные фразы “нужно/заказать/подскажите” сильнее поднимают score.</td></tr>
+                          <tr><td>Вес одного намерения</td><td>Слой намерений</td><td>Сколько добавляет каждое включающее условие.</td><td>Если увеличить, явные фразы “нужно/заказать/подскажите” сильнее поднимают score.</td></tr>
                         </tbody>
                       </table>
                     </div>
@@ -266,9 +266,9 @@ def help_page(
                       вместе с леммами. Поэтому `домофоны` может совпасть с правилом `домофон`.
                     </p>
                     <dl class="help-dl">
-                      <div><dt>Включающие паттерны</dt><dd>Фразы намерения: “нужно”, “подскажите”, “где заказать”, “сколько стоит”.</dd></div>
-                      <div><dt>Контекстные паттерны</dt><dd>Домен: камеры, домофоны, освещение, реле, щит, датчики.</dd></div>
-                      <div><dt>Исключающие паттерны</dt><dd>Шум: вакансии, продажа б/у, чужая реклама, нерелевантные темы.</dd></div>
+                      <div><dt>Включающие условия</dt><dd>Фразы намерения: “нужно”, “подскажите”, “где заказать”, “сколько стоит”.</dd></div>
+                      <div><dt>Контекстные условия</dt><dd>Домен: камеры, домофоны, освещение, реле, щит, датчики.</dd></div>
+                      <div><dt>Исключающие условия</dt><dd>Шум: вакансии, продажа б/у, чужая реклама, нерелевантные темы.</dd></div>
                       <div><dt>Исключить элементы ядра</dt><dd>Убирает слишком широкие элементы: “консультирование”, “клиенты”, “смета”.</dd></div>
                       <div><dt>Require include/context</dt><dd>Если включено, совпадение с этим типом правила обязательно.</dd></div>
                     </dl>
@@ -278,7 +278,7 @@ def help_page(
                     <h2>Объяснимость и трассировка</h2>
                     <p>
                       Для демо важно идти от результата назад к источнику. У сообщений широкого слоя и слоя
-                      намерений показывается evidence: какое ядро совпало, какой текст совпал, какие паттерны
+                      намерений показывается evidence: какое ядро совпало, какой текст совпал, какие условия
                       сработали, какие части score были добавлены и использовались ли леммы Stage 2.
                     </p>
                     <dl class="help-dl">
@@ -1030,6 +1030,7 @@ def _interest_context_prepare_texts_body() -> str:
                         <li>tokens, lemmas, POS и token-map - то, чем дальше пользуются поиск, признаки и сущности.</li>
                       </ul>
                     </div>
+                    <div id="interest-context-prep-run-selector" data-prep-run-metadata-key="text_normalization"></div>
                     <div id="interest-context-prep-texts" class="draft-review-panel" aria-live="polite"></div>
                   </section>
     """
@@ -1044,6 +1045,7 @@ def _interest_context_prepare_search_fts_body() -> str:
                         <p class="muted">Ищет по PostgreSQL `telegram_prepared_documents`: clean_text + lemmas_text.</p>
                       </div>
                     </div>
+                    <div id="interest-context-prep-run-selector" data-prep-run-metadata-key="fts_index"></div>
                     <form id="interest-context-prep-fts-form" class="material-form interest-source-form">
                       <md-outlined-text-field name="q" label="Запрос" required
                         placeholder="домофон камера dahua">
@@ -1068,6 +1070,7 @@ def _interest_context_prepare_search_chroma_body() -> str:
                         <p class="muted">Ищет семантически по Chroma-индексу выбранного raw-run.</p>
                       </div>
                     </div>
+                    <div id="interest-context-prep-run-selector" data-prep-run-metadata-key="chroma_index"></div>
                     <form id="interest-context-prep-chroma-form" class="material-form interest-source-form">
                       <md-outlined-text-field name="q" label="Запрос" required
                         placeholder="человек ищет домофон или камеру">
@@ -1096,6 +1099,15 @@ def _interest_context_prepare_features_body() -> str:
                         Обновить
                       </md-outlined-button>
                     </div>
+                    <div class="explain-box">
+                      <strong>Что добавляет Stage 3</strong>
+                      <ul>
+                        <li>question/solution/offer flags - быстрые признаки типа сообщения.</li>
+                        <li>urls, prices, phones, usernames - структурные сигналы, которые можно искать и проверять.</li>
+                        <li>technical_language_score - доля NOUN/PROPN, полезно для отбора терминов.</li>
+                      </ul>
+                    </div>
+                    <div id="interest-context-prep-run-selector" data-prep-run-metadata-key="feature_enrichment"></div>
                     <div id="interest-context-prep-features" class="draft-review-panel" aria-live="polite"></div>
                   </section>
     """
@@ -1114,6 +1126,15 @@ def _interest_context_prepare_aggregates_body() -> str:
                         Обновить
                       </md-outlined-button>
                     </div>
+                    <div class="explain-box">
+                      <strong>Что смотреть в агрегатах</strong>
+                      <ul>
+                        <li>N-граммы строятся из лемм Stage 2, частые служебные слова скрываются.</li>
+                        <li>Список ниже постраничный: можно смотреть все леммы, биграммы и триграммы, а не только top-10.</li>
+                        <li>URL и качество источника показывают, из чего реально собраны данные.</li>
+                      </ul>
+                    </div>
+                    <div id="interest-context-prep-run-selector" data-prep-run-metadata-key="aggregated_stats"></div>
                     <div id="interest-context-prep-aggregates" class="draft-review-panel" aria-live="polite"></div>
                   </section>
     """
@@ -1132,6 +1153,7 @@ def _interest_context_prepare_entities_body() -> str:
                         Обновить
                       </md-outlined-button>
                     </div>
+                    <div id="interest-context-prep-run-selector" data-prep-run-metadata-key="entity_ranking"></div>
                     <div id="interest-context-prep-entities" class="draft-review-panel" aria-live="polite"></div>
                   </section>
     """
@@ -1422,13 +1444,13 @@ def _interest_context_intent_layers_body() -> str:
                       </md-outlined-button>
                     </div>
                     <div class="explain-box">
-                      <strong>Что означают паттерны</strong>
+                      <strong>Что означают условия</strong>
                       <ul>
-                        <li>Включающие паттерны - признаки намерения: "ищу", "нужно", "подскажите", "купить", "сколько стоит". Без них сообщение обычно не считается запросом.</li>
-                        <li>Контекстные паттерны - предметная область: камеры, домофон, умный дом, электрика, реле, датчики. Они подтверждают, что намерение относится к нужной теме.</li>
-                        <li>Исключающие паттерны - шум: вакансии, резюме, объявления "продам/отдам" и похожие нерелевантные сообщения.</li>
+                        <li>Включающие условия - признаки намерения: "ищу", "нужно", "подскажите", "купить", "сколько стоит". Без них сообщение обычно не считается запросом.</li>
+                        <li>Контекстные условия - предметная область: камеры, домофон, умный дом, электрика, реле, датчики. Они проверяются по нормализованному тексту и леммам.</li>
+                        <li>Исключающие условия - шум: вакансии, резюме, объявления "продам/отдам" и похожие нерелевантные сообщения.</li>
                         <li>Исключить элементы ядра - слишком общие элементы, которые дают много ложных совпадений.</li>
-                        <li>Паттерны ниже - стартовая настройка системы, не LLM-магия. Их можно редактировать перед сохранением слоя.</li>
+                        <li>Условия ниже - стартовая настройка системы, не LLM-магия. Их можно редактировать перед сохранением слоя.</li>
                       </ul>
                     </div>
                     <form id="interest-intent-layer-form" class="material-form single-column-form">
@@ -1439,30 +1461,57 @@ def _interest_context_intent_layers_body() -> str:
                         value="Сообщение не просто касается ядра, а содержит явный запрос, вопрос, поиск исполнителя, цены, покупки или консультации.">
                       </md-outlined-text-field>
                       <label>
-                        Включающие паттерны, по одному на строку
-                        <textarea name="include_patterns" rows="7">\\bищу\\b|\\bищем\\b
-\\bнужен\\b|\\bнужна\\b|\\bнужно\\b|\\bнужны\\b
-\\bподскажите\\b|\\bпосоветуйте\\b|\\bпомогите\\b
-\\bгде\\s+(купить|заказать|найти)\\b
-\\bкупить\\b|\\bзаказать\\b|\\bпоставить\\b|\\bустановить\\b|\\bподключить\\b|\\bсмонтировать\\b|\\bсделать\\b
-\\bстоимость\\b|\\bцена\\b|\\bсколько\\s+стоит\\b|\\bбюджет\\b|\\bсмета\\b
-\\bкто\\s+(может|делает|занимается|ставил|устанавливал)\\b</textarea>
+                        Включающие условия, по одному на строку
+                        <textarea name="include_patterns" rows="7">ищу
+ищем
+нужно
+нужен
+подскажите
+посоветуйте
+помогите
+где купить
+где заказать
+купить
+заказать
+поставить
+установить
+подключить
+сколько стоит
+кто может</textarea>
                       </label>
                       <label>
-                        Контекстные паттерны, по одному на строку
-                        <textarea name="context_patterns" rows="7">\\bвидеонаблюдени[ея]\\b|\\bкамер[ауы]\\b|\\bвидеокамер[ауы]\\b
-\\bумн(ый|ого|ом)\\s+дом\\b|\\bhome\\s*assistant\\b|\\bалис[аы]\\b
-\\bрозетк[аиу]\\b|\\bвыключател[ья]\\b|\\bдиммер\\b|\\bреле\\b|\\bщит(ок|овая)?\\b|\\bавтомат[ыа]?\\b
-\\bэл\\.?\\s*вывод\\b|\\bэлектрик[аиу]\\b|\\bпроводк[аи]\\b
-\\bдатчик[аи]?\\b|\\bпротечк[аи]\\b|\\bтермостат\\b|\\bклимат\\b|\\bотоплени[ея]\\b
-\\bподсветк[аиу]\\b|\\bосвещени[ея]\\b|\\bсветильник[аи]?\\b|\\bтрек(овый|овые)?\\b
-\\bдомофон[а-я]*\\b|\\bконтроль\\s+доступа\\b|\\bзам(ок|ки)\\b|\\bсигнализаци[яи]\\b|\\bохран[аы]\\b</textarea>
+                        Контекстные условия, по одному на строку
+                        <textarea name="context_patterns" rows="7">видеонаблюдение
+камера
+видеокамера
+умный дом
+home assistant
+алиса
+розетка
+выключатель
+реле
+щит
+электрика
+проводка
+датчик
+протечка
+подсветка
+освещение
+домофон
+контроль доступа
+сигнализация</textarea>
                       </label>
                       <label>
-                        Исключающие паттерны, по одному на строку
-                        <textarea name="exclude_patterns" rows="5">#?ваканси[яи]\\b|\\bрезюме\\b|\\bв\\s+команду\\b
-\\bтребуется\\s+(дизайнер|архитектор|визуализатор|комплектатор|менеджер|чертежник|проектировщик)\\b
-\\bпродам\\b|\\bпродаю\\b|\\bотдам\\b|\\bаренда\\s+рабочего\\s+места\\b</textarea>
+                        Исключающие условия, по одному на строку
+                        <textarea name="exclude_patterns" rows="5">вакансия
+резюме
+в команду
+требуется дизайнер
+ищу дизайнера
+продам
+продаю
+отдам
+аренда рабочего места</textarea>
                       </label>
                       <label>
                         Исключить элементы ядра, по одному на строку
@@ -1486,11 +1535,11 @@ def _interest_context_intent_layers_body() -> str:
                       </div>
                       <label class="material-checkbox-line">
                         <input name="require_include_match" type="checkbox" checked>
-                        Требовать совпадение с включающим паттерном
+                        Требовать совпадение с включающим условием
                       </label>
                       <label class="material-checkbox-line">
                         <input name="require_context_match" type="checkbox">
-                        Требовать совпадение с контекстным паттерном
+                        Требовать совпадение с контекстным условием
                       </label>
                       <div class="button-row">
                         <md-filled-button type="submit">
@@ -1520,7 +1569,7 @@ def _interest_context_intent_runs_body() -> str:
                         <h3>Запуски слоя намерений</h3>
                         <p class="muted">
                           Один артефакт: история применений слоя намерений к широким запускам анализа.
-                          Разные запуски могут отличаться слоем, широким запуском и настройками паттернов.
+                          Разные запуски могут отличаться слоем, широким запуском и настройками условий.
                         </p>
                       </div>
                       <md-outlined-button id="interest-intent-refresh" type="button">
@@ -1532,7 +1581,7 @@ def _interest_context_intent_runs_body() -> str:
                       <strong>Почему запусков может быть несколько</strong>
                       <ul>
                         <li>Один слой применили к разным широким запускам анализа.</li>
-                        <li>Слой изменили: паттерны, веса, минимальный score или лимит результатов.</li>
+                        <li>Слой изменили: условия, веса, минимальный score или лимит результатов.</li>
                         <li>Запуск повторили после изменения рабочего ядра.</li>
                       </ul>
                     </div>

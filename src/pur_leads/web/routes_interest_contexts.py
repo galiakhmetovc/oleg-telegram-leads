@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections import Counter
 from dataclasses import asdict
 import json
 from pathlib import Path
@@ -58,7 +59,10 @@ from pur_leads.services.telegram_desktop_import import (
     DESKTOP_IMPORT_EXPORT_FORMAT,
     TelegramDesktopArchiveImportService,
 )
-from pur_leads.services.telegram_analysis_storage import stage_outputs
+from pur_leads.services.telegram_analysis_storage import (
+    feature_rows as telegram_feature_rows,
+    stage_outputs,
+)
 from pur_leads.services.telegram_search import TelegramSearchService
 from pur_leads.services.tracing import TraceService
 from pur_leads.services.web_auth import SessionValidationResult
@@ -311,6 +315,22 @@ def get_interest_context_prepare_data_status(
     }
 
 
+@router.get("/{context_id}/prepare-data/runs")
+def list_interest_context_prepared_runs(
+    context_id: str,
+    metadata_key: str = "text_normalization",
+    _validated: SessionValidationResult = Depends(current_admin),
+    session: Session = Depends(get_session),
+) -> dict[str, Any]:
+    context = InterestContextService(session).repository.get(context_id)
+    if context is None:
+        raise HTTPException(status_code=404, detail="Interest context not found")
+    return {
+        "metadata_key": metadata_key,
+        "raw_runs": _prepared_raw_runs_payload(session, context.id, metadata_key),
+    }
+
+
 @router.get("/{context_id}/prepare-data/texts")
 def list_interest_context_prepared_texts(
     context_id: str,
@@ -426,6 +446,37 @@ def get_interest_context_prepared_aggregates(
     )
 
 
+@router.get("/{context_id}/prepare-data/aggregates/ngrams")
+def list_interest_context_prepared_ngrams(
+    context_id: str,
+    raw_export_run_id: str | None = None,
+    kind: str = "lemmas",
+    limit: int = 10,
+    offset: int = 0,
+    _validated: SessionValidationResult = Depends(current_admin),
+    session: Session = Depends(get_session),
+) -> dict[str, Any]:
+    run = _prepared_raw_run(
+        session, context_id, metadata_key="aggregated_stats", raw_export_run_id=raw_export_run_id
+    )
+    safe_limit = max(1, min(limit, 100))
+    safe_offset = max(0, offset)
+    payload = _ngram_page_payload(
+        session,
+        str(run["id"]),
+        kind=kind,
+        limit=safe_limit,
+        offset=safe_offset,
+    )
+    return jsonable_encoder(
+        {
+            "raw_export_run": _raw_run_payload(run),
+            "raw_runs": _prepared_raw_runs_payload(session, context_id, "aggregated_stats"),
+            **payload,
+        }
+    )
+
+
 @router.get("/{context_id}/prepare-data/entities")
 def list_interest_context_prepared_entities(
     context_id: str,
@@ -460,6 +511,7 @@ def list_interest_context_prepared_entities(
             "raw_runs": _prepared_raw_runs_payload(session, context_id, "entity_ranking"),
             "ranked_artifact": {"kind": "postgres_table", "table": "telegram_entity_candidates"},
             "extracted_artifact": {"kind": "postgres_table", "table": "telegram_entity_candidates"},
+            "rules": _entity_extraction_rules_payload(),
             "ranked": ranked,
             "extracted": extracted,
         }
@@ -489,6 +541,11 @@ def search_interest_context_prepared_fts(
         {
             "raw_export_run": _raw_run_payload(run),
             "raw_runs": _prepared_raw_runs_payload(session, context_id, "fts_index"),
+            "search_explanation": {
+                "storage": "telegram_prepared_documents.search_vector",
+                "query_normalization": "pymorphy3 lemmas + PostgreSQL to_tsquery(simple, term:*)",
+                "ranking": "ts_rank_cd + rarity score",
+            },
             **payload,
         }
     )
@@ -517,6 +574,11 @@ def search_interest_context_prepared_chroma(
         {
             "raw_export_run": _raw_run_payload(run),
             "raw_runs": _prepared_raw_runs_payload(session, context_id, "chroma_index"),
+            "search_explanation": {
+                "storage": "Chroma persistent collection for выбранный raw-run",
+                "query_normalization": "raw query + pymorphy3 lemmas",
+                "embedding_profile": "из metadata raw-run, обычно rubert_tiny2_v1 или local_hashing_v1",
+            },
             **payload,
         }
     )
@@ -1484,6 +1546,149 @@ def _detail_payload(detail: InterestContextDetail) -> dict[str, Any]:
     )
 
 
+_NGRAM_STOPWORDS = {
+    "url",
+    "а",
+    "без",
+    "бы",
+    "быть",
+    "в",
+    "ваш",
+    "ваша",
+    "ваше",
+    "ваши",
+    "весь",
+    "все",
+    "всё",
+    "вы",
+    "где",
+    "да",
+    "для",
+    "до",
+    "его",
+    "ее",
+    "её",
+    "если",
+    "есть",
+    "еще",
+    "ещё",
+    "же",
+    "за",
+    "и",
+    "или",
+    "из",
+    "как",
+    "который",
+    "кто",
+    "мы",
+    "на",
+    "надо",
+    "наш",
+    "наша",
+    "наше",
+    "наши",
+    "не",
+    "нет",
+    "но",
+    "ну",
+    "о",
+    "он",
+    "она",
+    "они",
+    "по",
+    "под",
+    "при",
+    "просто",
+    "с",
+    "со",
+    "так",
+    "такой",
+    "там",
+    "то",
+    "тут",
+    "у",
+    "уже",
+    "что",
+    "чтобы",
+    "это",
+    "этот",
+    "эта",
+    "эти",
+}
+
+
+def _ngram_page_payload(
+    session: Session,
+    raw_export_run_id: str,
+    *,
+    kind: str,
+    limit: int,
+    offset: int,
+) -> dict[str, Any]:
+    normalized_kind = str(kind or "lemmas").strip().lower()
+    ngram_size = {"lemmas": 1, "bigrams": 2, "trigrams": 3}.get(normalized_kind)
+    if ngram_size is None:
+        raise HTTPException(status_code=400, detail="kind must be lemmas, bigrams or trigrams")
+    counter: Counter[str] = Counter()
+    rows = telegram_feature_rows(session, raw_export_run_id)
+    for row in rows:
+        lemmas = _clean_ngram_lemmas(row.get("lemmas_json") or row.get("lemmas"))
+        if ngram_size == 1:
+            counter.update(lemmas)
+            continue
+        counter.update(
+            " ".join(items)
+            for items in zip(*(lemmas[index:] for index in range(ngram_size)), strict=False)
+            if len(set(items)) > 1
+        )
+    items = [{"term": term, "count": count} for term, count in counter.most_common()]
+    total = len(items)
+    return {
+        "kind": normalized_kind,
+        "items": items[offset : offset + limit],
+        "summary": {
+            "feature_rows": len(rows),
+            "unique_terms": total,
+            "stopwords_removed": sorted(_NGRAM_STOPWORDS),
+            "source": "telegram_prepared_documents.feature_json",
+        },
+        "pagination": _pagination(limit=limit, offset=offset, total=total),
+    }
+
+
+def _clean_ngram_lemmas(value: Any) -> list[str]:
+    result: list[str] = []
+    for item in _json_list_any(value):
+        lemma = str(item or "").casefold().replace("ё", "е").strip()
+        if len(lemma) < 3:
+            continue
+        if lemma in _NGRAM_STOPWORDS:
+            continue
+        if not re.search(r"[a-zа-я0-9]", lemma):
+            continue
+        result.append(lemma)
+    return result
+
+
+def _entity_extraction_rules_payload() -> dict[str, Any]:
+    return {
+        "stage": "telegram_entity_extraction",
+        "storage": "telegram_entity_candidates",
+        "candidate_pos": ["NOUN", "PROPN", "ADJ"],
+        "candidate_patterns": ["[NOUN]", "[PROPN]", "[NOUN NOUN]", "[ADJ NOUN]", "[PROPN+]"],
+        "normalization": "lowercase + punctuation trim + lemmas from Stage 2",
+        "auto_merge_policy": "exact_only",
+        "auto_merge_confidence": "high",
+        "human_review_required_for": ["medium", "low"],
+        "noise_filtering": "short/no-letter/stop-lemma candidates are dropped before ranking",
+        "editable": False,
+        "edit_note": (
+            "Сейчас правила показаны явно, но редактирование правил еще не применяет пересчет. "
+            "Следующий шаг - вынести их в настройки Stage 5 и запускать пересборку."
+        ),
+    }
+
+
 def _prepared_raw_run(
     session: Session,
     context_id: str,
@@ -1666,6 +1871,23 @@ def _json_any(value: Any) -> Any:
         return json.loads(str(value))
     except json.JSONDecodeError:
         return value
+
+
+def _json_list_any(value: Any) -> list[Any]:
+    if isinstance(value, list):
+        return value
+    if isinstance(value, bytes):
+        value = value.decode("utf-8")
+    if isinstance(value, str) and value.strip():
+        stripped = value.strip()
+        if stripped.startswith("["):
+            try:
+                loaded = json.loads(stripped)
+            except json.JSONDecodeError:
+                return [stripped]
+            return loaded if isinstance(loaded, list) else [loaded]
+        return [stripped]
+    return []
 
 
 def _pagination(*, limit: int, offset: int, total: int) -> dict[str, Any]:

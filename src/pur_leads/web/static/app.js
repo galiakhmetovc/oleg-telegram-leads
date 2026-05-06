@@ -3766,6 +3766,9 @@ function initInterestContexts() {
     prepFeaturesOffset: 0,
     prepEntitiesLimit: 10,
     prepEntitiesOffset: 0,
+    prepNgramsLimit: 10,
+    prepNgramsOffset: 0,
+    prepNgramsKind: "lemmas",
     selectedPrepRawRunId: new URLSearchParams(window.location.search).get("raw_export_run_id"),
   };
   document
@@ -3849,6 +3852,12 @@ function initInterestContexts() {
   document
     .querySelector("#interest-context-prep-aggregates-refresh")
     ?.addEventListener("click", () => loadInterestContextPrepareAggregates(state));
+  document
+    .querySelector("#interest-context-prep-aggregates")
+    ?.addEventListener("click", (event) => changeInterestContextPrepNgramsPage(event, state));
+  document
+    .querySelector("#interest-context-prep-aggregates")
+    ?.addEventListener("change", (event) => changeInterestContextPrepNgramsKind(event, state));
   document
     .querySelector("#interest-context-prep-entities-refresh")
     ?.addEventListener("click", () => loadInterestContextPrepareEntitiesPage(state));
@@ -4017,17 +4026,28 @@ async function loadInterestContextDetail(contextId, state) {
   }
   if (state.step === "prepare_texts") {
     state.prepTextsOffset = 0;
+    await loadInterestPrepareRunSelector(state, "text_normalization");
     await loadInterestContextPrepareTextsPage(state);
+  }
+  if (state.step === "prepare_search_fts") {
+    await loadInterestPrepareRunSelector(state, "fts_index");
+  }
+  if (state.step === "prepare_search_chroma") {
+    await loadInterestPrepareRunSelector(state, "chroma_index");
   }
   if (state.step === "prepare_features") {
     state.prepFeaturesOffset = 0;
+    await loadInterestPrepareRunSelector(state, "feature_enrichment");
     await loadInterestContextPrepareFeaturesPage(state);
   }
   if (state.step === "prepare_aggregates") {
+    state.prepNgramsOffset = 0;
+    await loadInterestPrepareRunSelector(state, "aggregated_stats");
     await loadInterestContextPrepareAggregates(state);
   }
   if (state.step === "prepare_entities") {
     state.prepEntitiesOffset = 0;
+    await loadInterestPrepareRunSelector(state, "entity_ranking");
     await loadInterestContextPrepareEntitiesPage(state);
   }
 }
@@ -4941,6 +4961,8 @@ function renderInterestIntentMatches(payload, state) {
 function renderInterestIntentMatchRow(item) {
   const evidence = item.evidence_json || {};
   const scoreParts = evidence.score_parts || {};
+  const includeLabels = humanIntentPatterns(evidence.include_hits || item.matched_text);
+  const contextLabels = humanIntentPatterns(evidence.context_hits || []);
   return `<div class="table-row draft-item-row">
     <div>
       <strong>${escapeHtml(item.canonical_name || "элемент ядра")}</strong>
@@ -4951,11 +4973,11 @@ function renderInterestIntentMatchRow(item) {
         ${badge("слой намерений")}
         ${badge(`score ${formatScore(item.score)}`)}
         ${badge(`широкий ${formatScore(item.broad_score)}`)}
-        ${item.matched_text ? badge(`намерение: ${item.matched_text}`) : ""}
+        ${includeLabels.length ? badge(`намерение: ${includeLabels.slice(0, 3).join(", ")}`) : ""}
       </div>
       <p class="draft-evidence"><strong>Почему найдено:</strong> ${escapeHtml([
-        evidence.include_hits?.length ? `паттерны: ${evidence.include_hits.slice(0, 4).join(", ")}` : "",
-        evidence.context_hits?.length ? `контекст: ${evidence.context_hits.slice(0, 3).join(", ")}` : "",
+        includeLabels.length ? `намерение: ${includeLabels.slice(0, 4).join(", ")}` : "",
+        contextLabels.length ? `контекст: ${contextLabels.slice(0, 4).join(", ")}` : "",
         `широкий слой ${formatScore(scoreParts.broad || 0)}`,
         `намерение ${formatScore(scoreParts.intent || 0)}`,
         scoreParts.context ? `контекст ${formatScore(scoreParts.context)}` : "",
@@ -4973,6 +4995,68 @@ function renderInterestIntentMatchRow(item) {
       <div id="intent-feedback-${escapeHtml(item.id)}" class="draft-evidence" aria-live="polite"></div>
     </div>
   </div>`;
+}
+
+function humanIntentPatterns(value) {
+  const items = Array.isArray(value)
+    ? value
+    : String(value || "")
+        .split(",")
+        .map((item) => item.trim())
+        .filter(Boolean);
+  return [...new Set(items.map(humanIntentPattern).filter(Boolean))];
+}
+
+function humanIntentPattern(value) {
+  const text = String(value || "").trim();
+  if (!text) return "";
+  const normalized = text
+    .replaceAll("\\b", "")
+    .replaceAll("\\s+", " ")
+    .replaceAll("[а-я]*", "")
+    .replace(/[()]/g, "")
+    .replace(/[?]/g, "")
+    .replace(/\|/g, ", ")
+    .replace(/\[.*?\]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  const lower = normalized.toLowerCase();
+  const known = [
+    ["ищу", "поиск"],
+    ["ищем", "поиск"],
+    ["нужен", "нужно"],
+    ["нужна", "нужно"],
+    ["нужно", "нужно"],
+    ["подскажите", "просит подсказать"],
+    ["посоветуйте", "просит совет"],
+    ["помогите", "просит помощь"],
+    ["купить", "покупка"],
+    ["заказать", "заказ"],
+    ["поставить", "монтаж/установка"],
+    ["установить", "монтаж/установка"],
+    ["подключить", "подключение"],
+    ["смонтировать", "монтаж"],
+    ["стоимость", "цена/стоимость"],
+    ["цена", "цена/стоимость"],
+    ["сколько стоит", "цена/стоимость"],
+    ["кто может", "поиск исполнителя"],
+    ["видеонаблюдение", "видеонаблюдение"],
+    ["камера", "камеры"],
+    ["умный дом", "умный дом"],
+    ["home assistant", "Home Assistant"],
+    ["розетка", "электрика/автоматизация"],
+    ["реле", "электрика/автоматизация"],
+    ["щит", "щит/автоматы"],
+    ["датчик", "датчики"],
+    ["подсветк", "подсветка/освещение"],
+    ["освещени", "освещение"],
+    ["светильник", "освещение"],
+    ["домофон", "домофон/доступ"],
+    ["контроль доступа", "контроль доступа"],
+    ["сигнализаци", "сигнализация"],
+  ];
+  const found = known.find(([needle]) => lower.includes(needle));
+  return found ? found[1] : normalized;
 }
 
 function preparedTextExplanation(prepared) {
@@ -5040,10 +5124,18 @@ async function previewIntentMatchExclusion(matchId, state, panel) {
   );
   const suggestions = payload.suggestions || [];
   const samples = payload.removed_samples || [];
-  panel.innerHTML = `<strong>Preview exclusion:</strong> ${escapeHtml(payload.term || "нет предложения")}
-    <br>Уберет ${escapeHtml(String(payload.removed_count || 0))} из ${escapeHtml(String(payload.total_matches || 0))}; target ${payload.target_removed ? "будет убран" : "не будет убран"}.
-    ${suggestions.length ? `<br>Кандидаты: ${escapeHtml(suggestions.join("; "))}` : ""}
-    ${samples.length ? `<br>Примеры: ${samples.map((item) => item.message_url ? `<a href="${escapeHtml(item.message_url)}" target="_blank" rel="noreferrer">#${escapeHtml(String(item.telegram_message_id))}</a>` : `#${escapeHtml(String(item.telegram_message_id))}`).join(", ")}` : ""}`;
+  const risk =
+    payload.target_removed && payload.removed_count <= Math.max(3, Math.ceil((payload.total_matches || 0) * 0.05))
+      ? "точечное исключение"
+      : payload.target_removed
+        ? "широкое исключение, проверьте примеры"
+        : "кандидат не убирает выбранное сообщение";
+  panel.innerHTML = `<strong>Impact preview:</strong> ${escapeHtml(payload.term || "нет предложения")}
+    <br>Что изменить: добавить это выражение в исключающие условия слоя намерений.
+    <br>Эффект: уберет ${escapeHtml(String(payload.removed_count || 0))} из ${escapeHtml(String(payload.total_matches || 0))}; выбранное сообщение ${payload.target_removed ? "исчезнет" : "останется"}; оценка: ${escapeHtml(risk)}.
+    ${suggestions.length ? `<br>Другие кандидаты: ${escapeHtml(suggestions.join("; "))}` : ""}
+    ${samples.length ? `<br>Что еще зацепит: ${samples.map((item) => item.message_url ? `<a href="${escapeHtml(item.message_url)}" target="_blank" rel="noreferrer">#${escapeHtml(String(item.telegram_message_id))}</a>` : `#${escapeHtml(String(item.telegram_message_id))}`).join(", ")}` : ""}
+    <br><span class="muted">Изменение сейчас не применяется автоматически: сначала проверяем влияние, потом переносим условие в слой.</span>`;
 }
 
 async function saveManualInterestCoreBrief(event, state) {
@@ -6212,7 +6304,9 @@ function renderPageControls(pagination, kind) {
                   ? "data-prep-features-page-action"
                   : kind === "prep-entities"
                     ? "data-prep-entities-page-action"
-                    : "data-draft-page-action";
+                    : kind === "prep-ngrams"
+                      ? "data-prep-ngrams-page-action"
+                      : "data-draft-page-action";
   return `<div class="queue-pagination">
     <span class="muted">${escapeHtml(`${from}-${to} из ${pagination.total}`)}</span>
     <div class="button-row">
@@ -6621,6 +6715,33 @@ function appendPrepRunParam(params, state) {
   }
 }
 
+async function loadInterestPrepareRunSelector(state, metadataKey) {
+  const target = document.querySelector("#interest-context-prep-run-selector");
+  if (!target || !state.selectedId) return;
+  const key = metadataKey || target.dataset.prepRunMetadataKey || "text_normalization";
+  target.innerHTML = '<div class="empty-state">Загружаю источники данных...</div>';
+  try {
+    const payload = await api(
+      `/api/interest-contexts/${encodeURIComponent(state.selectedId)}/prepare-data/runs?metadata_key=${encodeURIComponent(key)}`
+    );
+    const runs = payload.raw_runs || [];
+    const activeId =
+      state.selectedPrepRawRunId && runs.some((run) => run.id === state.selectedPrepRawRunId)
+        ? state.selectedPrepRawRunId
+        : runs[0]?.id || null;
+    state.selectedPrepRawRunId = activeId;
+    target.innerHTML = renderPrepareRunSelector(
+      {
+        raw_runs: runs,
+        raw_export_run: runs.find((run) => run.id === activeId) || runs[0] || null,
+      },
+      state
+    );
+  } catch (error) {
+    target.innerHTML = `<div class="empty-state">${escapeHtml(error.message)}</div>`;
+  }
+}
+
 function renderPrepareRunSelector(payload, state) {
   const runs = payload.raw_runs || [];
   const activeId = payload.raw_export_run?.id || state?.selectedPrepRawRunId || "";
@@ -6659,10 +6780,19 @@ function handleInterestPrepRunChange(event, state) {
   state.prepTextsOffset = 0;
   state.prepFeaturesOffset = 0;
   state.prepEntitiesOffset = 0;
+  state.prepNgramsOffset = 0;
   if (state.step === "prepare_texts") loadInterestContextPrepareTextsPage(state);
   if (state.step === "prepare_features") loadInterestContextPrepareFeaturesPage(state);
   if (state.step === "prepare_aggregates") loadInterestContextPrepareAggregates(state);
   if (state.step === "prepare_entities") loadInterestContextPrepareEntitiesPage(state);
+  if (state.step === "prepare_search_fts") {
+    const target = document.querySelector("#interest-context-prep-fts-results");
+    if (target) target.innerHTML = '<div class="empty-state">Источник выбран. Введите запрос и нажмите поиск.</div>';
+  }
+  if (state.step === "prepare_search_chroma") {
+    const target = document.querySelector("#interest-context-prep-chroma-results");
+    if (target) target.innerHTML = '<div class="empty-state">Источник выбран. Введите запрос и нажмите поиск.</div>';
+  }
 }
 
 function prepareDocumentTitle(item) {
@@ -6731,8 +6861,17 @@ function renderInterestContextPreparedSearch(payload, selector, kind) {
   if (!target) return;
   const items = payload.results || [];
   const metrics = payload.metrics || {};
+  const explanation = payload.search_explanation || {};
   target.innerHTML = `<section class="draft-review-section">
     ${renderPrepareRunSelector(payload, null)}
+    <div class="explain-box compact-explain-box">
+      <strong>${kind === "fts" ? "Как работает FTS" : "Как работает Chroma"}</strong>
+      <p class="muted">${escapeHtml([
+        explanation.storage,
+        explanation.query_normalization,
+        explanation.ranking || explanation.embedding_profile,
+      ].filter(Boolean).join(" / "))}</p>
+    </div>
     <div class="operations-summary raw-review-summary">
       <div class="ops-metric-row">
         ${renderOpsMetric("Найдено", items.length, kind === "fts" ? "PostgreSQL FTS" : "Chroma")}
@@ -6841,6 +6980,15 @@ async function loadInterestContextPrepareAggregates(state) {
     const payload = await api(
       `/api/interest-contexts/${encodeURIComponent(state.selectedId)}/prepare-data/aggregates${suffix}`
     );
+    const ngramParams = new URLSearchParams({
+      kind: state.prepNgramsKind || "lemmas",
+      limit: String(state.prepNgramsLimit),
+      offset: String(state.prepNgramsOffset),
+    });
+    appendPrepRunParam(ngramParams, state);
+    payload.ngram_page = await api(
+      `/api/interest-contexts/${encodeURIComponent(state.selectedId)}/prepare-data/aggregates/ngrams?${ngramParams.toString()}`
+    );
     renderInterestContextPrepareAggregates(payload, state);
   } catch (error) {
     target.innerHTML = `<div class="empty-state">${escapeHtml(error.message)}</div>`;
@@ -6852,9 +7000,9 @@ function renderInterestContextPrepareAggregates(payload, state) {
   const target = document.querySelector("#interest-context-prep-aggregates");
   if (!target) return;
   const summary = payload.summary?.metrics || payload.summary || {};
-  const ngrams = payload.ngrams || {};
   const urls = payload.urls || {};
   const quality = payload.source_quality || {};
+  const ngramPage = payload.ngram_page || {};
   target.innerHTML = `<section class="draft-review-section">
     ${renderPrepareRunSelector(payload, state)}
     <div class="operations-summary raw-review-summary">
@@ -6864,12 +7012,55 @@ function renderInterestContextPrepareAggregates(payload, state) {
         ${renderOpsMetric("URL", summary.rows_with_url || 0, "строк")}
       </div>
     </div>
+    ${renderNgramPage(ngramPage, state)}
     <div class="raw-review-grid">
-      ${renderAggregateList("Леммы", ngrams.top_lemmas)}
-      ${renderAggregateList("Биграммы", ngrams.top_bigrams)}
       ${renderAggregateList("Домены", urls.domains)}
       ${renderAggregateObject("Качество", quality)}
     </div>
+  </section>`;
+}
+
+function changeInterestContextPrepNgramsPage(event, state) {
+  const button = event.target.closest("[data-prep-ngrams-page-action]");
+  if (!button) return;
+  if (button.dataset.prepNgramsPageAction === "prev") {
+    state.prepNgramsOffset = Math.max(0, state.prepNgramsOffset - state.prepNgramsLimit);
+  }
+  if (button.dataset.prepNgramsPageAction === "next") {
+    state.prepNgramsOffset += state.prepNgramsLimit;
+  }
+  loadInterestContextPrepareAggregates(state);
+}
+
+function changeInterestContextPrepNgramsKind(event, state) {
+  const select = event.target.closest("[data-prep-ngrams-kind]");
+  if (!select) return;
+  state.prepNgramsKind = select.value || "lemmas";
+  state.prepNgramsOffset = 0;
+  loadInterestContextPrepareAggregates(state);
+}
+
+function renderNgramPage(payload, state) {
+  const items = payload.items || [];
+  const pagination =
+    payload.pagination || { limit: state.prepNgramsLimit, offset: state.prepNgramsOffset, total: 0 };
+  const summary = payload.summary || {};
+  const kind = payload.kind || state.prepNgramsKind || "lemmas";
+  return `<section class="draft-items">
+    <div class="section-head compact-section-head">
+      <div>
+        <h4>N-граммы по леммам</h4>
+        <p class="muted">${escapeHtml(`Источник: ${summary.source || "feature_json"}; строк features: ${summary.feature_rows || 0}; уникальных: ${summary.unique_terms || 0}`)}</p>
+      </div>
+      <label class="material-select-line">Тип
+        <select data-prep-ngrams-kind>
+          ${["lemmas", "bigrams", "trigrams"].map((value) => `<option value="${value}" ${value === kind ? "selected" : ""}>${value}</option>`).join("")}
+        </select>
+      </label>
+    </div>
+    <p class="draft-evidence"><strong>Очистка:</strong> короткие токены и частые служебные слова вроде "или", "ваш", "наш" скрыты до подсчета.</p>
+    <div class="table-list">${items.length ? items.map((item) => `<div class="table-row"><div><strong>${escapeHtml(item.term || "item")}</strong></div><span>${escapeHtml(String(item.count || 0))}</span></div>`).join("") : '<div class="empty-state">Нет данных</div>'}</div>
+    ${renderPageControls(pagination, "prep-ngrams")}
   </section>`;
 }
 
@@ -6927,10 +7118,12 @@ function renderInterestContextPrepareEntities(payload, state) {
   if (!target) return;
   const ranked = payload.ranked || {};
   const extracted = payload.extracted || {};
+  const rules = payload.rules || {};
   const pagination =
     ranked.pagination || { limit: state.prepEntitiesLimit, offset: 0, total: 0 };
   target.innerHTML = `<section class="draft-review-section">
     ${renderPrepareRunSelector(payload, state)}
+    ${renderEntityRules(rules)}
     <div class="section-head compact-section-head">
       <h4>Ранжированные сущности</h4>
       <span class="muted">${escapeHtml(`${pagination.total || 0} всего`)}</span>
@@ -6941,8 +7134,21 @@ function renderInterestContextPrepareEntities(payload, state) {
       <h4>Извлеченные POS-сущности</h4>
       <span class="muted">${escapeHtml(`${extracted.pagination?.total || 0} всего`)}</span>
     </div>
-    ${extracted.items?.length ? `<div class="table-list">${extracted.items.slice(0, 5).map(renderExtractedEntityRow).join("")}</div>` : ""}
+    ${extracted.items?.length ? `<div class="table-list">${extracted.items.map(renderExtractedEntityRow).join("")}</div>` : ""}
   </section>`;
+}
+
+function renderEntityRules(rules) {
+  if (!rules || typeof rules !== "object") return "";
+  return `<div class="explain-box compact-explain-box">
+    <strong>Правила выделения сущностей</strong>
+    <ul>
+      <li>Берутся POS: ${escapeHtml((rules.candidate_pos || []).join(", ") || "NOUN, PROPN, ADJ")}.</li>
+      <li>Паттерны: ${escapeHtml((rules.candidate_patterns || []).join("; "))}.</li>
+      <li>Слияние: ${escapeHtml(rules.auto_merge_policy || "exact_only")}; auto только confidence ${escapeHtml(rules.auto_merge_confidence || "high")}.</li>
+      <li>Редактирование правил: ${rules.editable ? "включено" : "пока только просмотр; пересчет правил будет отдельным действием"}.</li>
+    </ul>
+  </div>`;
 }
 
 function renderRankedEntityRow(item) {

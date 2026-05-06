@@ -44,44 +44,7 @@ RUSSIAN_STOP_WORDS = {
     "что",
     "это",
 }
-RUSSIAN_ENDINGS = (
-    "иями",
-    "ями",
-    "ами",
-    "ого",
-    "его",
-    "ому",
-    "ему",
-    "ыми",
-    "ими",
-    "ых",
-    "их",
-    "ая",
-    "яя",
-    "ое",
-    "ее",
-    "ые",
-    "ие",
-    "ый",
-    "ий",
-    "ой",
-    "ую",
-    "юю",
-    "ам",
-    "ям",
-    "ах",
-    "ях",
-    "ом",
-    "ем",
-    "а",
-    "я",
-    "ы",
-    "и",
-    "у",
-    "ю",
-    "е",
-    "о",
-)
+_MORPH_ANALYZER: Any | None = None
 
 
 @dataclass(frozen=True)
@@ -519,19 +482,23 @@ def _query_terms(query_text: str) -> list[str]:
         if token in RUSSIAN_STOP_WORDS:
             continue
         if CYRILLIC_RE.search(token):
-            terms.append(_russian_stem(token))
+            terms.append(_russian_lemma(token))
         else:
             terms.append(token)
     return sorted(set(term for term in terms if len(term) >= 2))
 
 
-def _russian_stem(token: str) -> str:
-    if len(token) <= 5:
+def _russian_lemma(token: str) -> str:
+    global _MORPH_ANALYZER
+    try:
+        if _MORPH_ANALYZER is None:
+            import pymorphy3
+
+            _MORPH_ANALYZER = pymorphy3.MorphAnalyzer()
+        parsed = _MORPH_ANALYZER.parse(token)
+        return str(parsed[0].normal_form) if parsed else token
+    except Exception:
         return token
-    for ending in RUSSIAN_ENDINGS:
-        if token.endswith(ending) and len(token) - len(ending) >= 4:
-            return token[: -len(ending)]
-    return token
 
 
 def _texts_path_from_metadata(run: dict[str, Any]) -> Path:
