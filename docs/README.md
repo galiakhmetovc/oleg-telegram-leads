@@ -146,7 +146,12 @@ Chat analytics pipeline:
   local matching against approved Interest Core items. The second layer is a
   configurable **Intent Layer** over that broad run: operators can tune include
   patterns, optional context/domain patterns, exclude patterns, excluded core
-  items/categories, score weights, threshold, and result limit. This keeps “sales lead” as one possible intent
+  items/categories, score weights, threshold, and result limit. Intent Layers
+  must match against Stage 2 prepared text when it exists: raw text, clean text,
+  and lemma text are combined for include/context/exclude checks. This means a
+  context pattern such as `домофон` can match a message containing `домофоны`
+  after normalization. If Stage 2 metadata is absent, the layer falls back to
+  raw message text and records that fallback in match evidence. This keeps “sales lead” as one possible intent
   configuration instead of hardcoding it into the core matcher.
 
 Catalog and examples:

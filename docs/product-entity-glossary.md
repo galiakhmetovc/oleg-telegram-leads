@@ -357,6 +357,11 @@ Lead detection is not the first matching layer. The product uses:
 - lead creation/notification later: whether this intent should become an
   operational lead, task, notification, or CRM follow-up.
 
+Intent Layers operate on prepared text when Stage 2 normalization exists. Their
+rules see raw text, clean text, and lemma text together, so inflected Russian
+forms such as "домофоны" can satisfy a configured context pattern for
+`домофон`. Match evidence records whether normalized text and lemmas were used.
+
 This keeps intent definitions auditable and editable without changing the
 Interest Core itself.
 
