@@ -4560,7 +4560,7 @@ function renderInterestAnalysisRuns(payload, state) {
     return;
   }
   target.innerHTML = `<section class="draft-review-section">
-    <p class="muted">Каждая строка - отдельный широкий запуск: конкретный raw-run чата, версия рабочего ядра на момент запуска и результат локального matching.</p>
+    <p class="muted">Каждая строка - отдельный широкий тематический запуск: конкретный raw-run чата, версия рабочего ядра на момент запуска и результат локального matching.</p>
     <div class="operations-summary raw-review-summary">
       <div class="ops-metric-row">
         ${renderOpsMetric("Запуски", pagination.total || 0, "в этом контексте")}
@@ -4776,7 +4776,7 @@ function renderInterestIntentLayers(payload, state) {
     return;
   }
   target.innerHTML = `<section class="draft-review-section">
-    <p class="muted">Сохраненные слои - это настраиваемые правила второго уровня. Их можно применить к выбранному широкому запуску анализа.</p>
+    <p class="muted">Сохраненные слои - это настраиваемые правила второго уровня. Их можно применить к выбранному широкому тематическому запуску анализа.</p>
     <div class="table-list">${items.map((item) => renderInterestIntentLayerRow(item, state)).join("")}</div>
   </section>`;
 }
@@ -4816,7 +4816,7 @@ function renderInterestIntentLayerRow(item, state) {
         ${badge(`min ${formatScore(item.min_score)}`)}
         ${badge(`limit ${item.max_results || 0}`)}
       </div>
-      <p class="draft-evidence"><strong>Источник:</strong> ${escapeHtml(selectedBroad ? `выбран широкий запуск ${selectedBroad}` : "выберите широкий запуск выше")}</p>
+      <p class="draft-evidence"><strong>Источник:</strong> ${escapeHtml(selectedBroad ? `выбран тематический запуск ${selectedBroad}` : "выберите тематический запуск выше")}</p>
       <p class="draft-evidence"><strong>Логика:</strong> include ищет действие/намерение, context подтверждает тематику, lemma/phrase/semantic exclusions отсекают шум по нормализованному тексту; advanced regex остается ручным fallback.</p>
     </div>
     <div class="button-column">
@@ -4848,7 +4848,7 @@ async function runInterestIntentLayer(layerId, state) {
   const status = document.querySelector("#interest-intent-status");
   if (!state.selectedId || !layerId) return;
   if (!state.selectedAnalysisRunId) {
-    if (status) status.textContent = "Сначала выберите широкий запуск анализа выше";
+    if (status) status.textContent = "Сначала выберите широкий тематический запуск анализа выше";
     return;
   }
   try {
@@ -4925,11 +4925,11 @@ function renderInterestIntentRuns(payload, state) {
   const items = payload.items || [];
   const pagination = payload.pagination || { limit: state.intentRunsLimit, offset: 0, total: 0 };
   if (!items.length) {
-    target.innerHTML = '<div class="empty-state">Примените слой намерений к широкому запуску анализа.</div>';
+    target.innerHTML = '<div class="empty-state">Примените слой намерений к широкому тематическому запуску анализа.</div>';
     return;
   }
   target.innerHTML = `<section class="draft-review-section">
-    <p class="muted">Каждый запуск намерений - это конкретный слой, примененный к конкретному широкому запуску. Сравнивайте layer/run id и счетчики входных совпадений.</p>
+    <p class="muted">Каждый запуск намерений - это конкретный слой, примененный к конкретному широкому тематическому запуску. Сравнивайте layer/run id и счетчики входных совпадений.</p>
     <div class="operations-summary raw-review-summary">
       <div class="ops-metric-row">
         ${renderOpsMetric("Запуски", pagination.total || 0, "слои намерений")}
@@ -4958,8 +4958,8 @@ function renderInterestIntentRunRow(item, state) {
       <div class="badges">
         ${badge(label(item.status || "unknown"), item.status === "failed" ? "is-danger" : "")}
         ${item.intent_layer_id ? badge(`layer ${shortId(item.intent_layer_id)}`) : ""}
-        ${item.broad_analysis_run_id ? badge(`broad ${shortId(item.broad_analysis_run_id)}`) : ""}
-        ${badge(`${item.broad_match_count || 0} входных совпадений`)}
+        ${item.broad_analysis_run_id ? badge(`темы ${shortId(item.broad_analysis_run_id)}`) : ""}
+        ${badge(`${item.broad_match_count || 0} тематических совпадений`)}
         ${badge(`${item.match_count || 0} намерений`)}
         ${badge(`${item.matched_message_count || 0} сообщений`)}
         ${cleanedTotal ? badge(`очищено ${cleanedTotal}`) : ""}
@@ -4967,7 +4967,7 @@ function renderInterestIntentRunRow(item, state) {
         ${exactCleaned ? badge(`ручные -${exactCleaned}`) : ""}
         ${boosted ? badge(`усилено ${boosted}`) : ""}
       </div>
-      <p class="draft-evidence"><strong>Чем отличается:</strong> слой ${escapeHtml(item.intent_layer_id || "н/д")} применен к широкому запуску ${escapeHtml(item.broad_analysis_run_id || "н/д")}.</p>
+      <p class="draft-evidence"><strong>Чем отличается:</strong> слой ${escapeHtml(item.intent_layer_id || "н/д")} применен к широкому тематическому запуску ${escapeHtml(item.broad_analysis_run_id || "н/д")}.</p>
       ${cleanedTotal || boosted ? `<p class="draft-evidence"><strong>Обратная связь:</strong> очищено ${escapeHtml(String(cleanedTotal))}; точные ручные исключения ${escapeHtml(String(exactCleaned))}; семантически похожие исключения ${escapeHtml(String(semanticCleaned))}; усилено правильных совпадений ${escapeHtml(String(boosted))}.</p>` : ""}
       ${renderAnalysisCounters(summary.by_category, "Категории")}
     </div>
@@ -5042,7 +5042,7 @@ function renderInterestIntentMatches(payload, state) {
       <h4>Сообщения из слоя ${escapeHtml(run.id || "")}</h4>
       <span class="muted">${escapeHtml(`${pagination.offset + 1}-${Math.min(pagination.offset + items.length, pagination.total)} из ${pagination.total}`)}</span>
     </div>
-    <p class="muted">Здесь показаны только сообщения, которые прошли второй слой: широкий интерес плюс признаки намерения, контекст и порог score.</p>
+    <p class="muted">Здесь показаны только сообщения, которые прошли второй слой: тематическое совпадение с ядром плюс признаки намерения, контекст и порог score.</p>
     <div class="table-list">${items.map((item) => renderInterestIntentMatchRow(item, state)).join("")}</div>
     ${renderPageControls(pagination, "intent-matches")}
   </section>`;
@@ -5071,7 +5071,7 @@ function renderInterestIntentMatchRow(item, state) {
         ${item.category ? badge(item.category) : ""}
         ${badge("слой намерений")}
         ${badge(`score ${formatScore(item.score)}`)}
-        ${badge(`широкий ${formatScore(item.broad_score)}`)}
+        ${badge(`темы ${formatScore(item.broad_score)}`)}
         ${includeLabels.length ? badge(`намерение: ${includeLabels.slice(0, 3).join(", ")}`) : ""}
         ${feedback ? badge(feedbackApplied ? "исключение применено" : "в исключениях", feedbackApplied ? "" : "is-warn") : ""}
         ${reviewLabel ? badge(reviewLabel, review?.decision === "incorrect" ? "is-warn" : "") : ""}
@@ -5079,7 +5079,7 @@ function renderInterestIntentMatchRow(item, state) {
       <p class="draft-evidence"><strong>Почему найдено:</strong> ${escapeHtml([
         includeLabels.length ? `намерение: ${includeLabels.slice(0, 4).join(", ")}` : "",
         contextLabels.length ? `контекст: ${contextLabels.slice(0, 4).join(", ")}` : "",
-        `широкий слой ${formatScore(scoreParts.broad || 0)}`,
+        `тематический слой ${formatScore(scoreParts.broad || 0)}`,
         `намерение ${formatScore(scoreParts.intent || 0)}`,
         scoreParts.context ? `контекст ${formatScore(scoreParts.context)}` : "",
       ].filter(Boolean).join("; "))}</p>
@@ -5262,7 +5262,7 @@ function renderInterestIntentReviewRow(item) {
       <div class="badges">
         ${badge(decision === "correct" ? "правильное" : decision === "incorrect" ? "неправильное" : "не проверено", decision === "incorrect" ? "is-warn" : "")}
         ${badge(`score ${formatScore(item.score)}`)}
-        ${badge(`широкий ${formatScore(item.broad_score)}`)}
+        ${badge(`темы ${formatScore(item.broad_score)}`)}
         ${item.category ? badge(item.category) : ""}
       </div>
       ${renderTelegramMessageLink(item)}
@@ -5722,7 +5722,7 @@ async function runCreatedInterestIntentAiFilter(button, state) {
   if (!validationRunId || !state.selectedId) return;
   button.disabled = true;
   try {
-    if (status) status.textContent = "Применяю AI-фильтр к тому же broad-run...";
+    if (status) status.textContent = "Применяю AI-фильтр к тому же широкому тематическому запуску...";
     const payload = await api(
       `/api/interest-contexts/${encodeURIComponent(state.selectedId)}/intent-validation-runs/${encodeURIComponent(validationRunId)}/run-created-layer`,
       { method: "POST" }
@@ -5820,7 +5820,7 @@ function renderInterestIntentExclusionRow(item) {
     preview.target_removed && preview.removed_count <= Math.max(3, Math.ceil((preview.total_matches || 0) * 0.05))
       ? "точечно"
       : preview.target_removed
-        ? "широко"
+        ? "тематически"
         : "не убирает цель";
   return `<div class="table-row draft-item-row">
     <div>
