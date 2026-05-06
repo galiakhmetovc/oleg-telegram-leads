@@ -22,7 +22,11 @@ from pur_leads.models.interest_context_drafts import (
     interest_intent_analysis_runs_table,
     interest_intent_layers_table,
 )
-from pur_leads.models.telegram_sources import source_messages_table, telegram_raw_export_runs_table
+from pur_leads.models.telegram_sources import (
+    monitored_sources_table,
+    source_messages_table,
+    telegram_raw_export_runs_table,
+)
 from pur_leads.services.audit import AuditService
 
 
@@ -529,11 +533,19 @@ class InterestIntentLayerService:
                 select(
                     interest_intent_analysis_matches_table,
                     source_messages_table.c.raw_metadata_json.label("_source_raw_metadata_json"),
+                    monitored_sources_table.c.username.label("_source_username"),
+                    monitored_sources_table.c.input_ref.label("_source_input_ref"),
+                    monitored_sources_table.c.telegram_id.label("_source_telegram_id"),
                 )
                 .join(
                     source_messages_table,
                     source_messages_table.c.id
                     == interest_intent_analysis_matches_table.c.source_message_id,
+                    isouter=True,
+                )
+                .join(
+                    monitored_sources_table,
+                    monitored_sources_table.c.id == source_messages_table.c.monitored_source_id,
                     isouter=True,
                 )
                 .where(interest_intent_analysis_matches_table.c.context_id == context_id)
@@ -868,15 +880,55 @@ def _run_record(row: Any) -> InterestIntentRunRecord:
 def _match_record(row: Any) -> InterestIntentMatchRecord:
     payload = dict(row)
     raw_metadata = payload.pop("_source_raw_metadata_json", None)
-    payload["message_url"] = _message_url_from_metadata(raw_metadata)
+    username = payload.pop("_source_username", None)
+    input_ref = payload.pop("_source_input_ref", None)
+    telegram_id = payload.pop("_source_telegram_id", None)
+    payload["message_url"] = _message_url(
+        raw_metadata,
+        username=username,
+        input_ref=input_ref,
+        telegram_id=telegram_id,
+        telegram_message_id=payload.get("telegram_message_id"),
+    )
     return InterestIntentMatchRecord(**payload)
 
 
-def _message_url_from_metadata(value: Any) -> str | None:
+def _message_url(
+    value: Any,
+    *,
+    username: Any,
+    input_ref: Any,
+    telegram_id: Any,
+    telegram_message_id: Any,
+) -> str | None:
     if not isinstance(value, dict):
-        return None
+        value = {}
     message_url = value.get("message_url")
-    return str(message_url) if isinstance(message_url, str) and message_url.strip() else None
+    if isinstance(message_url, str) and message_url.strip() and message_url != "null":
+        return message_url
+    if telegram_message_id is None:
+        return None
+    message_id = str(telegram_message_id)
+    source_username = str(username or "").strip().lstrip("@") or _username_from_ref(input_ref)
+    if source_username:
+        return f"https://t.me/{source_username}/{message_id}"
+    source_id = str(telegram_id or "").strip()
+    if source_id:
+        internal_id = source_id.removeprefix("-100").lstrip("-")
+        if internal_id.isdigit():
+            return f"https://t.me/c/{internal_id}/{message_id}"
+    return None
+
+
+def _username_from_ref(value: Any) -> str:
+    text = str(value or "").strip()
+    if "t.me/" not in text:
+        return ""
+    tail = text.split("t.me/", 1)[1].strip("/")
+    username = tail.split("/", 1)[0].strip().lstrip("@")
+    if not username or username in {"c", "joinchat", "+"} or username.startswith("+"):
+        return ""
+    return username
 
 
 def _pagination(*, limit: int, offset: int, total: int) -> dict[str, Any]:

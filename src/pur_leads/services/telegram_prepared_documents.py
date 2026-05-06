@@ -39,6 +39,37 @@ def replace_prepared_documents(
     return len(prepared)
 
 
+def replace_prepared_documents_from_batches(
+    session: Session,
+    row_batches: Any,
+    *,
+    raw_export_run_id: str,
+    entity_type: str,
+) -> int:
+    """Replace one prepared-document slice from an iterator without loading it all."""
+
+    session.execute(
+        delete(telegram_prepared_documents_table)
+        .where(telegram_prepared_documents_table.c.raw_export_run_id == raw_export_run_id)
+        .where(telegram_prepared_documents_table.c.entity_type == entity_type)
+    )
+    total = 0
+    for rows in row_batches:
+        prepared = [
+            _prepared_row(row, raw_export_run_id=raw_export_run_id, entity_type=entity_type)
+            for row in rows
+            if row.get("has_text")
+        ]
+        if not prepared:
+            continue
+        for index in range(0, len(prepared), 1000):
+            session.execute(
+                telegram_prepared_documents_table.insert(), prepared[index : index + 1000]
+            )
+        total += len(prepared)
+    return total
+
+
 def prepared_document_count(session: Session, raw_export_run_id: str) -> int:
     return int(
         session.execute(

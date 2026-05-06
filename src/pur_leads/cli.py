@@ -42,6 +42,9 @@ from pur_leads.services.entity_enrichment import (
 )
 from pur_leads.services.secrets import SecretRefService
 from pur_leads.services.settings import SettingsService
+from pur_leads.services.telegram_analysis_artifact_materialization import (
+    TelegramAnalysisArtifactMaterializationService,
+)
 from pur_leads.services.telegram_aggregated_stats import TelegramAggregatedStatsService
 from pur_leads.services.telegram_artifact_texts import TelegramArtifactTextExtractionService
 from pur_leads.services.telegram_chroma_index import TelegramChromaIndexService
@@ -178,6 +181,10 @@ def build_parser() -> argparse.ArgumentParser:
     analyze_telegram_fts.add_argument("--texts-parquet-path", type=Path, default=None)
     analyze_telegram_fts.add_argument("--search-root", type=Path, default=None)
     analyze_telegram_fts.set_defaults(handler=_analyze_telegram_fts)
+    analyze_telegram_materialize = analyze_commands.add_parser("telegram-materialize-artifacts")
+    analyze_telegram_materialize.add_argument("--raw-export-run-id", default=None)
+    analyze_telegram_materialize.add_argument("--force", action="store_true")
+    analyze_telegram_materialize.set_defaults(handler=_analyze_telegram_materialize_artifacts)
     analyze_telegram_lead_candidates = analyze_commands.add_parser("telegram-lead-candidates")
     analyze_telegram_lead_candidates.add_argument("--raw-export-run-id", required=True)
     analyze_telegram_lead_candidates.add_argument("--output-root", type=Path, default=None)
@@ -472,6 +479,18 @@ def _analyze_telegram_entity_ranking(args: argparse.Namespace) -> None:
             sort_keys=True,
         )
     )
+
+
+def _analyze_telegram_materialize_artifacts(args: argparse.Namespace) -> None:
+    _ensure_database_upgraded(args)
+    with _session_from_args(args) as session:
+        service = TelegramAnalysisArtifactMaterializationService(session)
+        if args.raw_export_run_id:
+            result = service.materialize_run(args.raw_export_run_id, force=args.force)
+            session.commit()
+        else:
+            result = service.materialize_all(force=args.force)
+    print(json.dumps(result, ensure_ascii=False, sort_keys=True))
 
 
 def _analyze_telegram_entity_enrichment(args: argparse.Namespace) -> None:
