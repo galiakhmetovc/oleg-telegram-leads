@@ -4975,6 +4975,8 @@ function renderInterestIntentMatchRow(item) {
   const scoreParts = evidence.score_parts || {};
   const includeLabels = humanIntentPatterns(evidence.include_hits || item.matched_text);
   const contextLabels = humanIntentPatterns(evidence.context_hits || []);
+  const feedback = item.operator_feedback_json || null;
+  const feedbackApplied = feedback?.application_status === "applied";
   return `<div class="table-row draft-item-row">
     <div>
       <strong>${escapeHtml(item.canonical_name || "элемент ядра")}</strong>
@@ -4986,6 +4988,7 @@ function renderInterestIntentMatchRow(item) {
         ${badge(`score ${formatScore(item.score)}`)}
         ${badge(`широкий ${formatScore(item.broad_score)}`)}
         ${includeLabels.length ? badge(`намерение: ${includeLabels.slice(0, 3).join(", ")}`) : ""}
+        ${feedback ? badge(feedbackApplied ? "исключение применено" : "в исключениях", feedbackApplied ? "" : "is-warn") : ""}
       </div>
       <p class="draft-evidence"><strong>Почему найдено:</strong> ${escapeHtml([
         includeLabels.length ? `намерение: ${includeLabels.slice(0, 4).join(", ")}` : "",
@@ -4995,18 +4998,29 @@ function renderInterestIntentMatchRow(item) {
         scoreParts.context ? `контекст ${formatScore(scoreParts.context)}` : "",
       ].filter(Boolean).join("; "))}</p>
       <p class="draft-evidence"><strong>Подготовленный текст:</strong> ${escapeHtml(preparedTextExplanation(evidence.prepared_text))}</p>
+      ${renderIntentFeedbackState(feedback)}
       ${renderTelegramMessageLink(item)}
       <div class="row-actions">
         <md-outlined-button type="button" data-intent-feedback-action="preview" data-intent-match-id="${escapeHtml(item.id)}">
           Проверить исключение
         </md-outlined-button>
-        <md-outlined-button type="button" data-intent-feedback-action="not-interesting" data-intent-match-id="${escapeHtml(item.id)}">
-          Не интересно
+        <md-outlined-button type="button" data-intent-feedback-action="not-interesting" data-intent-match-id="${escapeHtml(item.id)}" ${feedback ? "disabled" : ""}>
+          ${feedback ? "Уже в исключениях" : "Не интересно"}
         </md-outlined-button>
       </div>
       <div id="intent-feedback-${escapeHtml(item.id)}" class="draft-evidence" aria-live="polite"></div>
     </div>
   </div>`;
+}
+
+function renderIntentFeedbackState(feedback) {
+  if (!feedback) return "";
+  const status = feedback.application_status || "recorded";
+  const applied = status === "applied";
+  const actionText = applied
+    ? "исключение уже применено к слою"
+    : "feedback записан, исключение ждет явного применения";
+  return `<p class="draft-evidence"><strong>Обратная связь:</strong> ${escapeHtml(actionText)}; статус ${escapeHtml(label(status))}; ${escapeHtml(time(feedback.created_at) || "")}</p>`;
 }
 
 function humanIntentPatterns(value) {
@@ -5119,6 +5133,7 @@ async function handleIntentMatchFeedback(button, state) {
           },
         }),
       });
+      markIntentMatchAsExcluded(button);
       panel.innerHTML = "Feedback записан. Ниже можно посмотреть безопасный preview exclusion до изменения слоя.";
       await previewIntentMatchExclusion(matchId, state, panel);
       return;
@@ -5126,6 +5141,19 @@ async function handleIntentMatchFeedback(button, state) {
     await previewIntentMatchExclusion(matchId, state, panel);
   } catch (error) {
     panel.textContent = error.message;
+  }
+}
+
+function markIntentMatchAsExcluded(button) {
+  button.setAttribute("disabled", "");
+  button.textContent = "Уже в исключениях";
+  const row = button.closest(".table-row");
+  const badges = row?.querySelector(".badges");
+  if (badges && !badges.querySelector("[data-intent-feedback-badge]")) {
+    badges.insertAdjacentHTML(
+      "beforeend",
+      '<span class="badge is-warn" data-intent-feedback-badge>в исключениях</span>'
+    );
   }
 }
 
