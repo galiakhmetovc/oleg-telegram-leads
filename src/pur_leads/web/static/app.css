@@ -278,6 +278,7 @@ md-text-button {
 }
 
 .topbar nav a[href="/interest-contexts"],
+.topbar nav a[href="/help"],
 .topbar nav a.interest-step-link {
   display: inline-flex;
 }
@@ -1688,6 +1689,143 @@ md-text-button {
   color: var(--text);
 }
 
+.help-layout {
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(220px, 280px) minmax(0, 1fr);
+}
+
+.help-nav {
+  position: sticky;
+  top: 0;
+  align-self: start;
+  display: grid;
+  gap: 6px;
+  max-height: calc(100svh - 76px);
+  padding: 18px;
+  border-right: 1px solid var(--line);
+  background: var(--surface);
+  overflow: auto;
+}
+
+.help-nav a {
+  min-height: 36px;
+  display: flex;
+  align-items: center;
+  padding: 0 10px;
+  border-radius: 8px;
+  color: var(--muted);
+}
+
+.help-nav a:hover {
+  background: var(--surface-tonal);
+  color: var(--accent-strong);
+}
+
+.help-content {
+  display: grid;
+  gap: 18px;
+  max-width: 1160px;
+  padding: 20px 24px 36px;
+}
+
+.help-section {
+  display: grid;
+  gap: 12px;
+  padding-bottom: 20px;
+  border-bottom: 1px solid var(--line);
+}
+
+.help-section h2 {
+  font-size: 20px;
+}
+
+.help-section p,
+.help-list,
+.help-steps,
+.help-dl {
+  color: var(--text);
+  line-height: 1.55;
+}
+
+.help-dl {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+}
+
+.help-dl div {
+  display: grid;
+  grid-template-columns: minmax(180px, 0.3fr) minmax(0, 1fr);
+  gap: 12px;
+  padding: 10px 0;
+  border-top: 1px solid var(--line);
+}
+
+.help-dl dt {
+  color: var(--accent-strong);
+  font-weight: 700;
+}
+
+.help-dl dd {
+  margin: 0;
+  color: var(--muted);
+}
+
+.help-steps {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding-left: 22px;
+}
+
+.help-steps li {
+  padding: 8px 0;
+}
+
+.help-steps span {
+  display: block;
+  color: var(--muted);
+}
+
+.help-list {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding-left: 20px;
+}
+
+.help-table-wrap {
+  max-width: 100%;
+  overflow: auto;
+  border: 1px solid var(--line);
+  background: #ffffff;
+}
+
+.help-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.help-table th,
+.help-table td {
+  min-width: 160px;
+  padding: 10px;
+  border-bottom: 1px solid var(--line);
+  text-align: left;
+  vertical-align: top;
+}
+
+.help-table th {
+  position: sticky;
+  top: 0;
+  background: #f8faf9;
+  color: var(--muted);
+  font-weight: 700;
+  z-index: 1;
+}
+
 @media (max-width: 980px) {
   .inbox-layout,
   .catalog-layout,
@@ -1695,6 +1833,7 @@ md-text-button {
   .sources-layout,
   .operations-layout,
   .artifacts-layout,
+  .help-layout,
   .interest-context-layout,
   .today-layout,
   .admin-layout,
@@ -1714,9 +1853,19 @@ md-text-button {
   .queue-pane,
   .detail-pane,
   .side-pane,
+  .help-nav,
   .onboarding-rail {
     border-right: 0;
     border-bottom: 1px solid var(--line);
+  }
+
+  .help-nav {
+    position: static;
+    max-height: none;
+  }
+
+  .help-dl div {
+    grid-template-columns: 1fr;
   }
 
   .inline-form,

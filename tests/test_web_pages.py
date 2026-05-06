@@ -66,6 +66,7 @@ def test_login_page_and_static_assets_are_served(tmp_path):
     assert "pagination.has_more" in js_response.text
     assert "must_change_password" in js_response.text
     assert "/api/auth/change-password" in js_response.text
+    assert "bindHelpNav" in js_response.text
 
 
 def test_workspace_admin_sections_are_protected_and_render_shells(tmp_path):
@@ -86,6 +87,7 @@ def test_workspace_admin_sections_are_protected_and_render_shells(tmp_path):
     artifacts_denied = client.get("/artifacts", follow_redirects=False)
     operations_denied = client.get("/operations", follow_redirects=False)
     quality_denied = client.get("/quality", follow_redirects=False)
+    help_denied = client.get("/help", follow_redirects=False)
     _login(client)
     empty_home_redirect = client.get("/", follow_redirects=False)
     create_context_response = client.post(
@@ -108,6 +110,7 @@ def test_workspace_admin_sections_are_protected_and_render_shells(tmp_path):
     artifacts_response = client.get("/artifacts")
     operations_response = client.get("/operations")
     quality_response = client.get("/quality")
+    help_response = client.get("/help")
     js_response = client.get("/static/app.js")
 
     assert workspace_denied.status_code == 303
@@ -140,6 +143,8 @@ def test_workspace_admin_sections_are_protected_and_render_shells(tmp_path):
     assert operations_denied.headers["location"] == "/login"
     assert quality_denied.status_code == 303
     assert quality_denied.headers["location"] == "/login"
+    assert help_denied.status_code == 303
+    assert help_denied.headers["location"] == "/login"
     assert empty_home_redirect.status_code == 303
     assert empty_home_redirect.headers["location"] == "/interest-contexts"
     assert create_context_response.status_code == 200
@@ -198,6 +203,12 @@ def test_workspace_admin_sections_are_protected_and_render_shells(tmp_path):
     assert 'id="interest-context-create-form"' in interest_contexts_response.text
     assert 'id="interest-context-telegram-archive-form"' in interest_contexts_response.text
     assert 'id="interest-context-telegram-source-form"' in interest_source_link_response.text
+    assert help_response.status_code == 200
+    assert 'data-page="help"' in help_response.text
+    assert "Что делает продукт" in help_response.text
+    assert "Слои намерений" in help_response.text
+    assert "Настройки шагов" in help_response.text
+    assert "prepared text" in help_response.text
     assert users_response.status_code == 200
     assert 'data-page="users"' in users_response.text
     assert 'id="telegram-admin-form"' in users_response.text

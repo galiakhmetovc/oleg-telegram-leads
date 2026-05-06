@@ -222,6 +222,7 @@ const formChecked = (form, name) => {
 };
 
 document.addEventListener("DOMContentLoaded", () => {
+  bindHelpNav();
   bindLogout();
   if (page === "login") bindLogin();
   if (page === "leads-inbox") initInbox();
@@ -243,6 +244,21 @@ document.addEventListener("DOMContentLoaded", () => {
   if (page === "task-executors") initTaskExecutors();
   if (page === "task-types") initTaskTypes();
 });
+
+function bindHelpNav() {
+  document.querySelectorAll(".topbar nav").forEach((nav) => {
+    if (nav.querySelector('a[href="/help"]')) return;
+    const link = document.createElement("a");
+    link.href = "/help";
+    link.textContent = "Помощь";
+    const logout = nav.querySelector("#logout-button");
+    if (logout) {
+      nav.insertBefore(link, logout);
+    } else {
+      nav.appendChild(link);
+    }
+  });
+}
 
 function bindLogin() {
   const form = document.querySelector("#local-login-form");
