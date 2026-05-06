@@ -5460,9 +5460,9 @@ async function loadInterestIntentValidationRecommendations(state) {
   if (!target || !state.selectedId) return;
   target.innerHTML = '<div class="empty-state">Загружаю AI-рекомендации...</div>';
   try {
-    const runId = await ensureSelectedIntentValidationRun(state);
+    const runId = await ensureSelectedIntentRun(state);
     if (!runId) {
-      target.innerHTML = '<div class="empty-state">Сначала запустите AI-валидацию.</div>';
+      target.innerHTML = '<div class="empty-state">Сначала нужен запуск слоя намерений и AI-валидация.</div>';
       return;
     }
     const params = new URLSearchParams({
@@ -5470,7 +5470,7 @@ async function loadInterestIntentValidationRecommendations(state) {
       offset: String(state.intentValidationRecommendationsOffset),
     });
     const payload = await api(
-      `/api/interest-contexts/${encodeURIComponent(state.selectedId)}/intent-validation-runs/${encodeURIComponent(runId)}/recommendations?${params.toString()}`
+      `/api/interest-contexts/${encodeURIComponent(state.selectedId)}/intent-runs/${encodeURIComponent(runId)}/validation-recommendations?${params.toString()}`
     );
     renderInterestIntentValidationRecommendations(payload, state);
   } catch (error) {
@@ -5492,6 +5492,7 @@ function renderInterestIntentValidationRecommendations(payload, state) {
         ${renderOpsMetric("Всего", summary.total || 0, "рекомендаций")}
         ${renderOpsMetric("Одобрено", summary.approved || 0, "готово к слою")}
         ${renderOpsMetric("Ожидает", summary.pending_review || 0, "на ревью")}
+        ${summary.batch_run_count ? renderOpsMetric("Пачки", summary.batch_run_count, "AI-run") : ""}
       </div>
     </div>
     ${renderIntentRecommendationNextStep(payload, state)}
@@ -5503,6 +5504,12 @@ function renderInterestIntentValidationRecommendations(payload, state) {
 function renderIntentRecommendationNextStep(payload, state) {
   const summary = payload.summary || {};
   const run = payload.run || {};
+  if (run.batch_mode) {
+    return `<div class="explain-box">
+      <strong>Рекомендации из пачек</strong>
+      <p>Показаны рекомендации всех успешных AI-пачек для одного списка намерений. Одобрите безопасные рекомендации; общий AI-фильтр будет собираться следующим шагом из всех одобренных пачек.</p>
+    </div>`;
+  }
   if (run.created_layer_id) {
     return `<div class="explain-box">
       <strong>Следующий шаг</strong>

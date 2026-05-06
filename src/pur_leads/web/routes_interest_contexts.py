@@ -1332,6 +1332,30 @@ def list_interest_intent_validation_recommendations(
     )
 
 
+@router.get("/{context_id}/intent-runs/{run_id}/validation-recommendations")
+def list_interest_intent_validation_recommendations_for_intent_run(
+    context_id: str,
+    run_id: str,
+    limit: int = 10,
+    offset: int = 0,
+    _validated: SessionValidationResult = Depends(current_admin),
+    session: Session = Depends(get_session),
+) -> dict[str, Any]:
+    context = InterestContextService(session).repository.get(context_id)
+    if context is None:
+        raise HTTPException(status_code=404, detail="Interest context not found")
+    try:
+        payload = InterestIntentValidationService(session).recommendations_payload_for_source_run(
+            context.id,
+            source_intent_run_id=run_id,
+            limit=max(1, min(limit, 100)),
+            offset=max(0, offset),
+        )
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Intent run not found") from exc
+    return jsonable_encoder(payload)
+
+
 @router.patch("/{context_id}/intent-validation-recommendations/{recommendation_id}")
 def update_interest_intent_validation_recommendation(
     context_id: str,

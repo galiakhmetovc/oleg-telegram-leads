@@ -194,6 +194,103 @@ class InterestIntentValidationService:
             "pagination": _pagination(limit=safe_limit, offset=safe_offset, total=total),
         }
 
+    def recommendations_payload_for_source_run(
+        self,
+        context_id: str,
+        *,
+        source_intent_run_id: str,
+        limit: int = 10,
+        offset: int = 0,
+    ) -> dict[str, Any]:
+        intent_run = self._intent_run(context_id, source_intent_run_id)
+        if intent_run is None:
+            raise KeyError(source_intent_run_id)
+        safe_limit = max(1, min(100, int(limit)))
+        safe_offset = max(0, int(offset))
+        run_ids_query = (
+            select(interest_intent_validation_runs_table.c.id)
+            .where(interest_intent_validation_runs_table.c.context_id == context_id)
+            .where(
+                interest_intent_validation_runs_table.c.source_intent_run_id
+                == source_intent_run_id
+            )
+            .where(interest_intent_validation_runs_table.c.status == "succeeded")
+        )
+        total = int(
+            self.session.execute(
+                select(func.count())
+                .select_from(interest_intent_validation_recommendations_table)
+                .where(
+                    interest_intent_validation_recommendations_table.c.validation_run_id.in_(
+                        run_ids_query
+                    )
+                )
+            ).scalar_one()
+            or 0
+        )
+        rows = (
+            self.session.execute(
+                select(interest_intent_validation_recommendations_table)
+                .where(
+                    interest_intent_validation_recommendations_table.c.validation_run_id.in_(
+                        run_ids_query
+                    )
+                )
+                .order_by(
+                    desc(interest_intent_validation_recommendations_table.c.created_at)
+                )
+                .limit(safe_limit)
+                .offset(safe_offset)
+            )
+            .mappings()
+            .all()
+        )
+        status_counts = Counter(
+            str(row["status"])
+            for row in self.session.execute(
+                select(interest_intent_validation_recommendations_table.c.status).where(
+                    interest_intent_validation_recommendations_table.c.validation_run_id.in_(
+                        run_ids_query
+                    )
+                )
+            )
+            .mappings()
+            .all()
+        )
+        run_count = int(
+            self.session.execute(
+                select(func.count()).select_from(run_ids_query.subquery())
+            ).scalar_one()
+            or 0
+        )
+        run_payload = {
+            "id": source_intent_run_id,
+            "source_intent_run_id": source_intent_run_id,
+            "source_intent_layer_id": intent_run["intent_layer_id"],
+            "status": "batch",
+            "batch_mode": True,
+            "batch_run_count": run_count,
+            "created_layer_id": None,
+            "created_intent_run": None,
+        }
+        return {
+            "run": run_payload,
+            "items": self._recommendation_rows_for_display(
+                context_id,
+                source_intent_run_id,
+                [dict(row) for row in rows],
+            ),
+            "summary": {
+                "total": total,
+                "approved": status_counts.get("approved", 0),
+                "pending_review": status_counts.get("pending_review", 0),
+                "rejected": status_counts.get("rejected", 0),
+                "applied": status_counts.get("applied", 0),
+                "batch_run_count": run_count,
+            },
+            "pagination": _pagination(limit=safe_limit, offset=safe_offset, total=total),
+        }
+
     async def generate_recommendations(
         self,
         *,
