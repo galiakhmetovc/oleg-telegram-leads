@@ -4517,12 +4517,14 @@ async function createInterestIntentLayer(event, state) {
         name: formValue(form, "name"),
         description: formValue(form, "description") || null,
         include_patterns: formLines(form, "include_patterns"),
+        context_patterns: formLines(form, "context_patterns"),
         exclude_patterns: formLines(form, "exclude_patterns"),
         exclude_core_names: formLines(form, "exclude_core_names"),
         include_categories: [],
         exclude_categories: [],
         include_core_names: [],
         require_include_match: formChecked(form, "require_include_match"),
+        require_context_match: formChecked(form, "require_context_match"),
         min_score: formNumber(form, "min_score", 0.55),
         max_results: Math.max(1, Math.round(formNumber(form, "max_results", 3000))),
         broad_score_weight: formNumber(form, "broad_score_weight", 0.45),
@@ -4573,6 +4575,9 @@ function renderInterestIntentLayerRow(item, state) {
   const excludeCount = Array.isArray(item.exclude_patterns_json)
     ? item.exclude_patterns_json.length
     : 0;
+  const contextCount = Array.isArray(item.context_patterns_json)
+    ? item.context_patterns_json.length
+    : 0;
   return `<div class="table-row draft-item-row">
     <div>
       <strong>${escapeHtml(item.name || "Слой намерений")}</strong>
@@ -4580,6 +4585,7 @@ function renderInterestIntentLayerRow(item, state) {
       <div class="badges">
         ${badge(label(item.status || "active"))}
         ${badge(`include ${includeCount}`)}
+        ${badge(`context ${contextCount}`)}
         ${badge(`exclude ${excludeCount}`)}
         ${badge(`min ${formatScore(item.min_score)}`)}
         ${badge(`limit ${item.max_results || 0}`)}
@@ -4817,8 +4823,10 @@ function renderInterestIntentMatchRow(item) {
       </div>
       <p class="draft-evidence"><strong>Почему найдено:</strong> ${escapeHtml([
         evidence.include_hits?.length ? `паттерны: ${evidence.include_hits.slice(0, 4).join(", ")}` : "",
+        evidence.context_hits?.length ? `контекст: ${evidence.context_hits.slice(0, 3).join(", ")}` : "",
         `широкий слой ${formatScore(scoreParts.broad || 0)}`,
         `намерение ${formatScore(scoreParts.intent || 0)}`,
+        scoreParts.context ? `контекст ${formatScore(scoreParts.context)}` : "",
       ].filter(Boolean).join("; "))}</p>
     </div>
   </div>`;

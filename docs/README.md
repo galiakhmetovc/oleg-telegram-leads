@@ -145,8 +145,8 @@ Chat analytics pipeline:
 - Interest chat analysis is split into two layers. The first layer is broad,
   local matching against approved Interest Core items. The second layer is a
   configurable **Intent Layer** over that broad run: operators can tune include
-  patterns, exclude patterns, excluded core items/categories, score weights,
-  threshold, and result limit. This keeps “sales lead” as one possible intent
+  patterns, optional context/domain patterns, exclude patterns, excluded core
+  items/categories, score weights, threshold, and result limit. This keeps “sales lead” as one possible intent
   configuration instead of hardcoding it into the core matcher.
 
 Catalog and examples:

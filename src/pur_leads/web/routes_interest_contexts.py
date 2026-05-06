@@ -123,12 +123,14 @@ class InterestIntentLayerRequest(BaseModel):
     name: str = Field(min_length=1, max_length=200)
     description: str | None = None
     include_patterns: list[str] = []
+    context_patterns: list[str] = []
     exclude_patterns: list[str] = []
     include_categories: list[str] = []
     exclude_categories: list[str] = []
     include_core_names: list[str] = []
     exclude_core_names: list[str] = []
     require_include_match: bool = True
+    require_context_match: bool = False
     min_score: float = Field(default=0.55, ge=0.0, le=1.0)
     max_results: int = Field(default=3000, ge=1, le=20000)
     broad_score_weight: float = Field(default=0.45, ge=0.0, le=1.0)
@@ -139,12 +141,14 @@ class InterestIntentLayerUpdateRequest(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=200)
     description: str | None = None
     include_patterns: list[str] | None = None
+    context_patterns: list[str] | None = None
     exclude_patterns: list[str] | None = None
     include_categories: list[str] | None = None
     exclude_categories: list[str] | None = None
     include_core_names: list[str] | None = None
     exclude_core_names: list[str] | None = None
     require_include_match: bool | None = None
+    require_context_match: bool | None = None
     min_score: float | None = Field(default=None, ge=0.0, le=1.0)
     max_results: int | None = Field(default=None, ge=1, le=20000)
     broad_score_weight: float | None = Field(default=None, ge=0.0, le=1.0)
@@ -679,12 +683,14 @@ def create_interest_intent_layer(
             description=payload.description,
             actor=_actor(validated),
             include_patterns=payload.include_patterns,
+            context_patterns=payload.context_patterns,
             exclude_patterns=payload.exclude_patterns,
             include_categories=payload.include_categories,
             exclude_categories=payload.exclude_categories,
             include_core_names=payload.include_core_names,
             exclude_core_names=payload.exclude_core_names,
             require_include_match=payload.require_include_match,
+            require_context_match=payload.require_context_match,
             min_score=payload.min_score,
             max_results=payload.max_results,
             broad_score_weight=payload.broad_score_weight,

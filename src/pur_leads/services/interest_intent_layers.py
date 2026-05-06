@@ -41,6 +41,17 @@ DEFAULT_INTENT_EXCLUDE_PATTERNS = [
     r"\bпродам\b|\bпродаю\b|\bотдам\b|\bаренда\s+рабочего\s+места\b",
 ]
 
+DEFAULT_CONTEXT_PATTERNS = [
+    r"\bвидеонаблюдени[ея]\b|\bкамер[ауы]\b|\bвидеокамер[ауы]\b",
+    r"\bумн(ый|ого|ом)\s+дом\b|\bhome\s*assistant\b|\bалис[аы]\b",
+    r"\bрозетк[аиу]\b|\bвыключател[ья]\b|\bдиммер\b|\bреле\b|\bщит(ок|овая)?\b|\bавтомат[ыа]?\b",
+    r"\bэл\\.?\\s*вывод\b|\bэлектрик[аиу]\b|\bпроводк[аи]\b",
+    r"\bдатчик[аи]?\b|\bпротечк[аи]\b|\bтермостат\b|\bклимат\b|\bотоплени[ея]\b",
+    r"\bподсветк[аиу]\b|\bосвещени[ея]\b|\bсветильник[аи]?\b|\bтрек(овый|овые)?\b",
+    r"\bдомофон\b|\bконтроль\s+доступа\b|\bзам(ок|ки)\b|\bсигнализаци[яи]\b|\bохран[аы]\b",
+    r"\bштор[аы]\b|\bкарниз\b|\bжалюзи\b|\bворот[а]\b|\bроллет[аы]\b",
+]
+
 DEFAULT_INTENT_EXCLUDED_CORE_NAMES = [
     "консультирование",
     "клиенты",
@@ -63,12 +74,14 @@ class InterestIntentLayerRecord:
     description: str | None
     status: str
     include_patterns_json: Any
+    context_patterns_json: Any
     exclude_patterns_json: Any
     include_categories_json: Any
     exclude_categories_json: Any
     include_core_names_json: Any
     exclude_core_names_json: Any
     require_include_match: bool
+    require_context_match: bool
     min_score: float
     max_results: int
     broad_score_weight: float
@@ -161,8 +174,10 @@ class InterestIntentLayerService:
             ),
             actor=actor,
             include_patterns=DEFAULT_INTENT_INCLUDE_PATTERNS,
+            context_patterns=DEFAULT_CONTEXT_PATTERNS,
             exclude_patterns=DEFAULT_INTENT_EXCLUDE_PATTERNS,
             exclude_core_names=DEFAULT_INTENT_EXCLUDED_CORE_NAMES,
+            require_context_match=False,
             min_score=0.55,
             max_results=3000,
         )
@@ -190,12 +205,14 @@ class InterestIntentLayerService:
         actor: str,
         description: str | None = None,
         include_patterns: list[str] | None = None,
+        context_patterns: list[str] | None = None,
         exclude_patterns: list[str] | None = None,
         include_categories: list[str] | None = None,
         exclude_categories: list[str] | None = None,
         include_core_names: list[str] | None = None,
         exclude_core_names: list[str] | None = None,
         require_include_match: bool = True,
+        require_context_match: bool = False,
         min_score: float = 0.55,
         max_results: int = 3000,
         broad_score_weight: float = 0.45,
@@ -215,12 +232,14 @@ class InterestIntentLayerService:
                 description=description.strip() if description and description.strip() else None,
                 status="active",
                 include_patterns_json=_clean_list(include_patterns),
+                context_patterns_json=_clean_list(context_patterns),
                 exclude_patterns_json=_clean_list(exclude_patterns),
                 include_categories_json=_clean_list(include_categories),
                 exclude_categories_json=_clean_list(exclude_categories),
                 include_core_names_json=_clean_list(include_core_names),
                 exclude_core_names_json=_clean_list(exclude_core_names),
                 require_include_match=bool(require_include_match),
+                require_context_match=bool(require_context_match),
                 min_score=max(0.0, min(1.0, float(min_score))),
                 max_results=max(1, min(20000, int(max_results))),
                 broad_score_weight=max(0.0, min(1.0, float(broad_score_weight))),
@@ -264,6 +283,7 @@ class InterestIntentLayerService:
             patch["description"] = description or None
         for field in (
             "include_patterns",
+            "context_patterns",
             "exclude_patterns",
             "include_categories",
             "exclude_categories",
@@ -274,6 +294,8 @@ class InterestIntentLayerService:
                 patch[f"{field}_json"] = _clean_list(values[field])
         if "require_include_match" in values:
             patch["require_include_match"] = bool(values["require_include_match"])
+        if "require_context_match" in values:
+            patch["require_context_match"] = bool(values["require_context_match"])
         for field in ("min_score", "broad_score_weight", "intent_hit_weight"):
             if field in values:
                 patch[field] = max(0.0, min(1.0, float(values[field])))
@@ -553,6 +575,7 @@ class InterestIntentLayerService:
                     "interest_core_match_id": row["id"],
                     "broad_score": float(row["score"] or 0),
                     "include_hits": match["include_hits"],
+                    "context_hits": match["context_hits"],
                     "score_parts": match["score_parts"],
                     "core_item": row["canonical_name"],
                     "category": row["category"],
@@ -609,6 +632,7 @@ class _CompiledIntentLayer:
     def __init__(self, layer: InterestIntentLayerRecord) -> None:
         self.layer = layer
         self.include_patterns = _compile_patterns(_json_list(layer.include_patterns_json))
+        self.context_patterns = _compile_patterns(_json_list(layer.context_patterns_json))
         self.exclude_patterns = _compile_patterns(_json_list(layer.exclude_patterns_json))
         self.include_categories = _casefold_set(layer.include_categories_json)
         self.exclude_categories = _casefold_set(layer.exclude_categories_json)
@@ -632,17 +656,23 @@ class _CompiledIntentLayer:
         include_hits = _pattern_hits(self.include_patterns, text)
         if self.layer.require_include_match and not include_hits:
             return None
+        context_hits = _pattern_hits(self.context_patterns, text)
+        if self.layer.require_context_match and not context_hits:
+            return None
         broad_score = float(row["score"] or 0)
         intent_score = min(0.55, len(include_hits) * self.layer.intent_hit_weight)
-        score = min(0.99, broad_score * self.layer.broad_score_weight + intent_score)
+        context_score = min(0.28, len(context_hits) * 0.14)
+        score = min(0.99, broad_score * self.layer.broad_score_weight + intent_score + context_score)
         if score < self.layer.min_score:
             return None
         return {
             "include_hits": include_hits,
+            "context_hits": context_hits,
             "score": round(score, 4),
             "score_parts": {
                 "broad": round(broad_score * self.layer.broad_score_weight, 4),
                 "intent": round(intent_score, 4),
+                "context": round(context_score, 4),
             },
         }
 

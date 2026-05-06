@@ -744,6 +744,16 @@ def _interest_context_analysis_body() -> str:
 \\bкто\\s+(может|делает|занимается|ставил|устанавливал)\\b</textarea>
                       </label>
                       <label>
+                        Контекстные паттерны, по одному на строку
+                        <textarea name="context_patterns" rows="7">\\bвидеонаблюдени[ея]\\b|\\bкамер[ауы]\\b|\\bвидеокамер[ауы]\\b
+\\bумн(ый|ого|ом)\\s+дом\\b|\\bhome\\s*assistant\\b|\\bалис[аы]\\b
+\\bрозетк[аиу]\\b|\\bвыключател[ья]\\b|\\bдиммер\\b|\\bреле\\b|\\bщит(ок|овая)?\\b|\\bавтомат[ыа]?\\b
+\\bэл\\.?\\s*вывод\\b|\\bэлектрик[аиу]\\b|\\bпроводк[аи]\\b
+\\bдатчик[аи]?\\b|\\bпротечк[аи]\\b|\\bтермостат\\b|\\bклимат\\b|\\bотоплени[ея]\\b
+\\bподсветк[аиу]\\b|\\bосвещени[ея]\\b|\\bсветильник[аи]?\\b|\\bтрек(овый|овые)?\\b
+\\bдомофон\\b|\\bконтроль\\s+доступа\\b|\\bзам(ок|ки)\\b|\\bсигнализаци[яи]\\b|\\bохран[аы]\\b</textarea>
+                      </label>
+                      <label>
                         Исключающие паттерны, по одному на строку
                         <textarea name="exclude_patterns" rows="5">#?ваканси[яи]\\b|\\bрезюме\\b|\\bв\\s+команду\\b
 \\bтребуется\\s+(дизайнер|архитектор|визуализатор|комплектатор|менеджер|чертежник|проектировщик)\\b
@@ -772,6 +782,10 @@ def _interest_context_analysis_body() -> str:
                       <label class="material-checkbox-line">
                         <input name="require_include_match" type="checkbox" checked>
                         Требовать совпадение с включающим паттерном
+                      </label>
+                      <label class="material-checkbox-line">
+                        <input name="require_context_match" type="checkbox">
+                        Требовать совпадение с контекстным паттерном
                       </label>
                       <div class="button-row">
                         <md-filled-button type="submit">
