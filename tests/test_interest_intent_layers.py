@@ -13,11 +13,14 @@ from pur_leads.db.session import create_session_factory
 from pur_leads.models.interest_context_drafts import (
     interest_core_analysis_matches_table,
     interest_core_analysis_runs_table,
+    interest_intent_analysis_matches_table,
 )
+from pur_leads.models.leads import feedback_events_table
 from pur_leads.models.telegram_sources import (
     monitored_sources_table,
     telegram_raw_export_runs_table,
 )
+from pur_leads.services.interest_intent_validation import InterestIntentValidationService
 from pur_leads.services.interest_intent_layers import InterestIntentLayerService
 
 
@@ -439,3 +442,107 @@ def test_ai_filter_metadata_excludes_semantic_false_positives_and_boosts_correct
         assert result["summary"]["exclusions"]["semantic_negative"] == 1
         assert result["summary"]["positive_boosted_count"] == 2
         assert all(row["evidence_json"]["positive_boost"] > 0 for row in result["top_matches"])
+
+
+def test_intent_review_exclusions_are_context_wide_across_runs(tmp_path):
+    engine = create_sqlite_engine(tmp_path / "test.db")
+    upgrade_database(engine)
+    session_factory = create_session_factory(engine)
+    now = datetime(2026, 5, 6, 8, 0, tzinfo=UTC)
+    with session_factory() as session:
+        session.execute(
+            insert(interest_intent_analysis_matches_table),
+            [
+                {
+                    "id": "old-match-bad",
+                    "run_id": "old-run",
+                    "context_id": "context-1",
+                    "intent_layer_id": "old-layer",
+                    "source_message_id": "message-bad",
+                    "interest_core_match_id": "broad-match-bad",
+                    "interest_core_item_id": "core-1",
+                    "telegram_message_id": 719012,
+                    "message_date": now,
+                    "sender_id": "user-1",
+                    "message_text": "Нужно определить размер ниши для подсветки скалы.",
+                    "canonical_name": "управление подсветкой",
+                    "category": "автоматизация",
+                    "matched_text": "нужно, подсветки",
+                    "match_kind": "intent_rule",
+                    "score": 0.99,
+                    "broad_score": 0.99,
+                    "evidence_json": {},
+                    "created_at": now,
+                },
+                {
+                    "id": "old-match-good",
+                    "run_id": "old-run",
+                    "context_id": "context-1",
+                    "intent_layer_id": "old-layer",
+                    "source_message_id": "message-good",
+                    "interest_core_match_id": "broad-match-good",
+                    "interest_core_item_id": "core-1",
+                    "telegram_message_id": 718839,
+                    "message_date": now,
+                    "sender_id": "user-2",
+                    "message_text": "Где можно заказать систему видеонаблюдения для квартиры?",
+                    "canonical_name": "камеры",
+                    "category": "безопасность",
+                    "matched_text": "заказать",
+                    "match_kind": "intent_rule",
+                    "score": 0.91,
+                    "broad_score": 0.91,
+                    "evidence_json": {},
+                    "created_at": now,
+                },
+            ],
+        )
+        session.execute(
+            insert(feedback_events_table),
+            [
+                {
+                    "id": "feedback-bad",
+                    "target_type": "interest_intent_match",
+                    "target_id": "old-match-bad",
+                    "action": "not_lead",
+                    "reason_code": "manual",
+                    "feedback_scope": "message",
+                    "learning_effect": "exclude",
+                    "application_status": "recorded",
+                    "applied_entity_type": None,
+                    "applied_entity_id": None,
+                    "applied_at": None,
+                    "comment": "габариты ниш, не автоматизация",
+                    "created_by": "admin",
+                    "created_at": now,
+                    "metadata_json": {},
+                },
+                {
+                    "id": "feedback-good",
+                    "target_type": "interest_intent_match",
+                    "target_id": "old-match-good",
+                    "action": "intent_match_correct",
+                    "reason_code": "manual",
+                    "feedback_scope": "message",
+                    "learning_effect": "include",
+                    "application_status": "recorded",
+                    "applied_entity_type": None,
+                    "applied_entity_id": None,
+                    "applied_at": None,
+                    "comment": "похоже на лид",
+                    "created_by": "admin",
+                    "created_at": now,
+                    "metadata_json": {},
+                },
+            ],
+        )
+        session.commit()
+
+        exclusions = InterestIntentValidationService(session)._incorrect_review_exclusions(
+            context_id="context-1",
+            source_intent_run_id="new-run",
+        )
+
+        assert exclusions["excluded_telegram_message_ids"] == ["719012"]
+        assert exclusions["positive_telegram_message_ids"] == ["718839"]
+        assert exclusions["operator_review_counts"] == {"correct": 1, "incorrect": 1}

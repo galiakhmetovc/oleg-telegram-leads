@@ -49,6 +49,7 @@ REVIEW_ACTIONS = {
     "incorrect": "intent_match_incorrect",
 }
 REVIEW_ACTION_TO_DECISION = {value: key for key, value in REVIEW_ACTIONS.items()}
+REVIEW_ACTION_TO_DECISION["not_lead"] = "incorrect"
 VALID_RECOMMENDATION_STATUSES = {"pending_review", "approved", "rejected", "applied"}
 
 
@@ -912,7 +913,7 @@ class InterestIntentValidationService:
         context_id: str,
         source_intent_run_id: str,
     ) -> dict[str, Any]:
-        reviews = self._latest_reviews_by_match_id(source_intent_run_id)
+        reviews = self._latest_context_reviews_by_source_message(context_id)
         if not reviews:
             return {
                 "excluded_source_message_ids": [],
@@ -923,27 +924,23 @@ class InterestIntentValidationService:
                 "operator_semantic_positive_examples": [],
                 "operator_review_counts": {"correct": 0, "incorrect": 0},
             }
-        rows = self._intent_match_rows(context_id, source_intent_run_id)
         source_ids = []
         telegram_ids = []
         positive_source_ids = []
         positive_telegram_ids = []
         negative_examples = []
         positive_examples = []
-        for row in rows:
-            review = reviews.get(str(row["id"]))
-            if not review:
-                continue
+        for review in reviews.values():
             decision = review.get("decision")
-            text = _truncate(row.get("message_text"), 800)
+            text = _truncate(review.get("message_text"), 800)
             if decision == "incorrect":
-                source_ids.append(str(row["source_message_id"]))
-                telegram_ids.append(str(row["telegram_message_id"]))
+                source_ids.append(str(review["source_message_id"]))
+                telegram_ids.append(str(review["telegram_message_id"]))
                 if text:
                     negative_examples.append(text)
             elif decision == "correct":
-                positive_source_ids.append(str(row["source_message_id"]))
-                positive_telegram_ids.append(str(row["telegram_message_id"]))
+                positive_source_ids.append(str(review["source_message_id"]))
+                positive_telegram_ids.append(str(review["telegram_message_id"]))
                 if text:
                     positive_examples.append(text)
         return {
@@ -962,6 +959,54 @@ class InterestIntentValidationService:
                 "incorrect": len(_merge_lists([], source_ids)),
             },
         }
+
+    def _latest_context_reviews_by_source_message(
+        self,
+        context_id: str,
+    ) -> dict[str, dict[str, Any]]:
+        rows = (
+            self.session.execute(
+                select(
+                    feedback_events_table,
+                    interest_intent_analysis_matches_table.c.source_message_id.label(
+                        "_source_message_id"
+                    ),
+                    interest_intent_analysis_matches_table.c.telegram_message_id.label(
+                        "_telegram_message_id"
+                    ),
+                    interest_intent_analysis_matches_table.c.message_text.label("_message_text"),
+                )
+                .join(
+                    interest_intent_analysis_matches_table,
+                    interest_intent_analysis_matches_table.c.id == feedback_events_table.c.target_id,
+                )
+                .where(feedback_events_table.c.target_type == "interest_intent_match")
+                .where(feedback_events_table.c.action.in_(list(REVIEW_ACTION_TO_DECISION)))
+                .where(feedback_events_table.c.application_status != "ignored")
+                .where(interest_intent_analysis_matches_table.c.context_id == context_id)
+                .order_by(desc(feedback_events_table.c.created_at))
+            )
+            .mappings()
+            .all()
+        )
+        result: dict[str, dict[str, Any]] = {}
+        for row in rows:
+            source_message_id = str(row["_source_message_id"])
+            if source_message_id in result:
+                continue
+            result[source_message_id] = {
+                "id": row["id"],
+                "target_id": row["target_id"],
+                "source_message_id": source_message_id,
+                "telegram_message_id": row["_telegram_message_id"],
+                "message_text": row["_message_text"],
+                "decision": REVIEW_ACTION_TO_DECISION.get(str(row["action"]), "unknown"),
+                "action": row["action"],
+                "comment": row["comment"],
+                "created_by": row["created_by"],
+                "created_at": row["created_at"],
+            }
+        return result
 
     def _recommendation_rows_for_display(
         self,
