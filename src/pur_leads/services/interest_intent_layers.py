@@ -1035,7 +1035,7 @@ class _CompiledIntentLayer:
         semantic_positive_score = semantic_scores["positive_score"]
         semantic_positive_protected = (
             semantic_positive_score >= self.semantic_positive_threshold
-            and semantic_positive_score >= semantic_negative_score + self.semantic_positive_margin
+            and semantic_positive_score + self.semantic_positive_margin >= semantic_negative_score
         )
         positive_signal = positive_protected or semantic_positive_protected
         normalized_category = _fold(row["category"])
