@@ -1403,6 +1403,15 @@ def run_created_interest_intent_validation_layer(
     created_layer_id = validation_run["created_layer_id"]
     if not created_layer_id:
         raise HTTPException(status_code=400, detail="Сначала создайте AI-фильтр")
+    try:
+        InterestIntentValidationService(session).ensure_created_layer_review_exclusions(
+            validation_run_id,
+            context_id=context.id,
+        )
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Validation run not found") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     source_intent_run = (
         session.execute(
             select(interest_intent_analysis_runs_table)

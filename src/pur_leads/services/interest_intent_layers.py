@@ -957,6 +957,13 @@ class _CompiledIntentLayer:
         self.exclude_categories = _casefold_set(layer.exclude_categories_json)
         self.include_core_names = _casefold_set(layer.include_core_names_json)
         self.exclude_core_names = _casefold_set(layer.exclude_core_names_json)
+        metadata = layer.metadata_json if isinstance(layer.metadata_json, dict) else {}
+        self.excluded_source_message_ids = {
+            str(item) for item in metadata.get("excluded_source_message_ids", []) if str(item)
+        }
+        self.excluded_telegram_message_ids = {
+            str(item) for item in metadata.get("excluded_telegram_message_ids", []) if str(item)
+        }
 
     def match(
         self,
@@ -967,6 +974,10 @@ class _CompiledIntentLayer:
         raw_text = str(row["message_text"] or "")
         prepared = prepared_text or _prepared_from_raw(raw_text)
         text = prepared.search_text
+        if str(row["source_message_id"]) in self.excluded_source_message_ids:
+            return None
+        if str(row["telegram_message_id"]) in self.excluded_telegram_message_ids:
+            return None
         normalized_category = _fold(row["category"])
         normalized_name = _fold(row["canonical_name"])
         if self.include_categories and normalized_category not in self.include_categories:

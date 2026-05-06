@@ -462,6 +462,10 @@ class InterestIntentValidationService:
             raise ValueError("Нет одобренных рекомендаций для создания слоя")
         base_layer = self._layer(str(run["source_intent_layer_id"]))
         values = self._layer_values_with_recommendations(base_layer, recommendations)
+        review_exclusions = self._incorrect_review_exclusions(
+            context_id=context_id,
+            source_intent_run_id=str(run["source_intent_run_id"]),
+        )
         layer = InterestIntentLayerService(self.session).create_layer(
             context_id=context_id,
             actor=actor,
@@ -475,6 +479,7 @@ class InterestIntentValidationService:
                 "validation_run_id": validation_run_id,
                 "base_intent_layer_id": base_layer["id"],
                 "approved_recommendation_ids": [row["id"] for row in recommendations],
+                **review_exclusions,
             },
             **values,
         )
@@ -492,6 +497,40 @@ class InterestIntentValidationService:
         )
         self.session.commit()
         return {"layer": layer.as_jsonable(), "applied_recommendation_ids": recommendation_ids}
+
+    def ensure_created_layer_review_exclusions(
+        self,
+        validation_run_id: str,
+        *,
+        context_id: str,
+    ) -> dict[str, Any]:
+        run = self._validation_run(validation_run_id, context_id=context_id)
+        if run is None:
+            raise KeyError(validation_run_id)
+        layer_id = run["created_layer_id"]
+        if not layer_id:
+            raise ValueError("Сначала создайте AI-фильтр")
+        layer = self._layer(str(layer_id))
+        metadata = dict(layer.get("metadata_json") or {})
+        review_exclusions = self._incorrect_review_exclusions(
+            context_id=context_id,
+            source_intent_run_id=str(run["source_intent_run_id"]),
+        )
+        changed = False
+        for key, values in review_exclusions.items():
+            existing = [str(item) for item in metadata.get(key, []) if str(item)]
+            merged = _merge_lists(existing, [str(item) for item in values if str(item)])
+            if merged != existing:
+                metadata[key] = merged
+                changed = True
+        if changed:
+            self.session.execute(
+                update(interest_intent_layers_table)
+                .where(interest_intent_layers_table.c.id == layer_id)
+                .values(metadata_json=metadata, updated_at=utc_now())
+            )
+            self.session.commit()
+        return metadata
 
     def preview_changes(
         self,
@@ -645,6 +684,29 @@ class InterestIntentValidationService:
                     values["semantic_negative_threshold"], semantic_threshold
                 )
         return values
+
+    def _incorrect_review_exclusions(
+        self,
+        *,
+        context_id: str,
+        source_intent_run_id: str,
+    ) -> dict[str, list[str]]:
+        reviews = self._latest_reviews_by_match_id(source_intent_run_id)
+        if not reviews:
+            return {"excluded_source_message_ids": [], "excluded_telegram_message_ids": []}
+        rows = self._intent_match_rows(context_id, source_intent_run_id)
+        source_ids = []
+        telegram_ids = []
+        for row in rows:
+            review = reviews.get(str(row["id"]))
+            if not review or review.get("decision") != "incorrect":
+                continue
+            source_ids.append(str(row["source_message_id"]))
+            telegram_ids.append(str(row["telegram_message_id"]))
+        return {
+            "excluded_source_message_ids": _merge_lists([], source_ids),
+            "excluded_telegram_message_ids": _merge_lists([], telegram_ids),
+        }
 
     def _recommendation_rows_for_display(
         self,
