@@ -16,6 +16,11 @@ from sqlalchemy.orm import Session
 
 from pur_leads.core.time import utc_now
 from pur_leads.models.telegram_sources import telegram_raw_export_runs_table
+from pur_leads.services.telegram_analysis_storage import (
+    entity_candidate_rows,
+    replace_ranked_entity_candidates,
+    replace_stage_outputs,
+)
 from pur_leads.services.telegram_run_metadata import merge_raw_export_run_metadata
 
 STAGE_NAME = "telegram_entity_ranking"
@@ -113,8 +118,9 @@ class TelegramEntityRankingService:
 
     def write_rankings(self, raw_export_run_id: str) -> TelegramEntityRankingResult:
         run = self._require_run(raw_export_run_id)
-        entities_path = _entities_path_from_metadata(run)
-        entity_rows = pq.read_table(entities_path).to_pylist()
+        entity_rows = entity_candidate_rows(self.session, raw_export_run_id)
+        if not entity_rows:
+            raise ValueError("entity ranking requires Stage 5 PostgreSQL entities")
 
         output_dir = (
             self.enriched_root
@@ -146,7 +152,7 @@ class TelegramEntityRankingService:
                 "raw_export_run_id": raw_export_run_id,
                 "monitored_source_id": run["monitored_source_id"],
                 "source_ref": run["source_ref"],
-                "entities_parquet_path": str(entities_path),
+                "entities_storage": "telegram_entity_candidates",
             },
             "outputs": {
                 "ranked_entities_parquet_path": str(ranked_entities_parquet_path),
@@ -163,6 +169,35 @@ class TelegramEntityRankingService:
             "metrics": metrics,
         }
         _write_json(summary_path, summary)
+        postgres_ranked_rows = replace_ranked_entity_candidates(
+            self.session,
+            raw_export_run_id=raw_export_run_id,
+            monitored_source_id=str(run["monitored_source_id"]),
+            rows=ranked_rows,
+        )
+        replace_stage_outputs(
+            self.session,
+            raw_export_run_id=raw_export_run_id,
+            monitored_source_id=str(run["monitored_source_id"]),
+            stage_key="entity_ranking",
+            outputs={
+                "summary": {
+                    "output_kind": "summary_json",
+                    "payload_json": summary,
+                    "artifact_path": str(summary_path),
+                },
+                "ranked_entities": {
+                    "output_kind": "ranked_entities_json",
+                    "payload_json": ranked_payload,
+                    "artifact_path": str(ranked_entities_json_path),
+                },
+                "noise_report": {
+                    "output_kind": "noise_report_json",
+                    "payload_json": noise_payload,
+                    "artifact_path": str(noise_report_path),
+                },
+            },
+        )
 
         merge_raw_export_run_metadata(
             self.session,
@@ -177,6 +212,7 @@ class TelegramEntityRankingService:
                 "noise_report_path": str(noise_report_path),
                 "summary_path": str(summary_path),
                 "ranked_entity_rows": metrics["ranked_entity_rows"],
+                "postgres_ranked_entity_rows": postgres_ranked_rows,
                 "promote_candidate_rows": metrics["promote_candidate_rows"],
                 "review_candidate_rows": metrics["review_candidate_rows"],
                 "noise_rows": metrics["noise_rows"],
@@ -443,17 +479,6 @@ def _compact_rows(
     return result
 
 
-def _entities_path_from_metadata(run: dict[str, Any]) -> Path:
-    metadata = dict(run["metadata_json"] or {})
-    entity_extraction = metadata.get("entity_extraction")
-    if not isinstance(entity_extraction, dict):
-        raise ValueError("entity ranking requires Stage 5 entity_extraction metadata")
-    path_value = entity_extraction.get("entities_parquet_path")
-    if not path_value:
-        raise ValueError("entity ranking requires entity_extraction.entities_parquet_path")
-    return _resolve_path(path_value)
-
-
 def _write_ranked_parquet(path: Path, rows: list[dict[str, Any]]) -> None:
     schema = pa.schema(
         [
@@ -512,8 +537,3 @@ def _json_any(value: Any, *, default: Any) -> Any:
 
 def _json_string(value: Any) -> str:
     return json.dumps(value, ensure_ascii=False, sort_keys=True)
-
-
-def _resolve_path(value: Path | str | Any) -> Path:
-    path = Path(str(value))
-    return path if path.is_absolute() else Path(".") / path

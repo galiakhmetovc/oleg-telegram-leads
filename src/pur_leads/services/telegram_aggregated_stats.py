@@ -9,12 +9,12 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
-import pyarrow.parquet as pq
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from pur_leads.core.time import utc_now
 from pur_leads.models.telegram_sources import telegram_raw_export_runs_table
+from pur_leads.services.telegram_analysis_storage import feature_rows, replace_stage_outputs
 from pur_leads.services.telegram_run_metadata import merge_raw_export_run_metadata
 
 STAGE_NAME = "telegram_aggregated_stats"
@@ -47,8 +47,9 @@ class TelegramAggregatedStatsService:
 
     def write_stats(self, raw_export_run_id: str) -> TelegramAggregatedStatsResult:
         run = self._require_run(raw_export_run_id)
-        features_path = _features_path_from_metadata(run)
-        rows = pq.read_table(features_path).to_pylist()
+        rows = feature_rows(self.session, raw_export_run_id)
+        if not rows:
+            raise ValueError("aggregated stats requires Stage 3 PostgreSQL features")
 
         output_dir = (
             self.enriched_root
@@ -77,7 +78,7 @@ class TelegramAggregatedStatsService:
                 "raw_export_run_id": raw_export_run_id,
                 "monitored_source_id": run["monitored_source_id"],
                 "source_ref": run["source_ref"],
-                "features_parquet_path": str(features_path),
+                "features_storage": "telegram_prepared_documents.feature_json",
             },
             "outputs": {
                 "summary_path": str(summary_path),
@@ -94,6 +95,39 @@ class TelegramAggregatedStatsService:
         _write_json(entity_candidates_path, entities)
         _write_json(url_summary_path, urls)
         _write_json(source_quality_path, source_quality)
+        replace_stage_outputs(
+            self.session,
+            raw_export_run_id=raw_export_run_id,
+            monitored_source_id=str(run["monitored_source_id"]),
+            stage_key="aggregated_stats",
+            outputs={
+                "summary": {
+                    "output_kind": "summary_json",
+                    "payload_json": summary,
+                    "artifact_path": str(summary_path),
+                },
+                "ngrams": {
+                    "output_kind": "aggregate_json",
+                    "payload_json": ngrams,
+                    "artifact_path": str(ngrams_path),
+                },
+                "entity_candidates": {
+                    "output_kind": "aggregate_json",
+                    "payload_json": entities,
+                    "artifact_path": str(entity_candidates_path),
+                },
+                "urls": {
+                    "output_kind": "aggregate_json",
+                    "payload_json": urls,
+                    "artifact_path": str(url_summary_path),
+                },
+                "source_quality": {
+                    "output_kind": "aggregate_json",
+                    "payload_json": source_quality,
+                    "artifact_path": str(source_quality_path),
+                },
+            },
+        )
 
         merge_raw_export_run_metadata(
             self.session,
@@ -109,6 +143,8 @@ class TelegramAggregatedStatsService:
                 "url_summary_path": str(url_summary_path),
                 "source_quality_path": str(source_quality_path),
                 "total_rows": metrics["total_rows"],
+                "storage": "postgresql",
+                "postgres_outputs": 5,
             },
         )
         self.session.commit()
@@ -218,17 +254,6 @@ def _source_quality_payload(rows: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
-def _features_path_from_metadata(run: dict[str, Any]) -> Path:
-    metadata = dict(run["metadata_json"] or {})
-    feature_enrichment = metadata.get("feature_enrichment")
-    if not isinstance(feature_enrichment, dict):
-        raise ValueError("aggregated stats requires Stage 3 feature_enrichment metadata")
-    path_value = feature_enrichment.get("features_parquet_path")
-    if not path_value:
-        raise ValueError("aggregated stats requires feature_enrichment.features_parquet_path")
-    return _resolve_path(path_value)
-
-
 def _counter_items(counter: Counter[str], limit: int) -> list[dict[str, Any]]:
     return [
         {"term": term, "count": count}
@@ -252,6 +277,8 @@ def _json_list(value: Any) -> list[str]:
 def _json_any(value: Any, *, default: Any) -> Any:
     if not value:
         return default
+    if isinstance(value, (dict, list)):
+        return value
     try:
         return json.loads(str(value))
     except json.JSONDecodeError:
@@ -263,8 +290,3 @@ def _write_json(path: Path, payload: dict[str, Any]) -> None:
         json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True),
         encoding="utf-8",
     )
-
-
-def _resolve_path(value: Path | str | Any) -> Path:
-    path = Path(str(value))
-    return path if path.is_absolute() else Path(".") / path

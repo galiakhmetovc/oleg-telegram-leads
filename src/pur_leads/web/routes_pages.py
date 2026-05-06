@@ -929,7 +929,7 @@ def _interest_context_prepare_body() -> str:
                       <div>
                         <h3>Подготовка данных</h3>
                         <p class="muted">
-                          Запускает Stage 2-5: нормализацию текста, локальный индекс, сущности, очистку и ранжирование.
+                          Последовательно запускает Stage 2-5: PostgreSQL prepared documents, FTS, Chroma, признаки, агрегаты, сущности и ранжирование.
                         </p>
                       </div>
                       <md-filled-button id="interest-context-prepare-data" type="button">
@@ -941,10 +941,10 @@ def _interest_context_prepare_body() -> str:
                       <strong>Что именно делает подготовка</strong>
                       <ul>
                         <li>Stage 2: сохраняет raw_text, строит clean_text, tokens, lemmas, POS-теги и token-map.</li>
-                        <li>Индекс: кладет подготовленный текст в локальный поиск и Chroma-совместимый слой local_hashing_v1.</li>
-                        <li>Stage 3: добавляет признаки сообщения: язык, вопрос, решение, ссылки, PII, технический score.</li>
-                        <li>Stage 4: считает агрегаты по текстам, n-граммам, источникам и качеству данных.</li>
-                        <li>Stage 5: извлекает сущности по POS-паттернам и ранжирует кандидатов для ядра.</li>
+                        <li>Индекс: кладет подготовленный текст в PostgreSQL FTS и Chroma-совместимый слой local_hashing_v1.</li>
+                        <li>Stage 3: добавляет признаки в PostgreSQL: вопрос, решение, ссылки, цены, контакты, технический score.</li>
+                        <li>Stage 4: сохраняет агрегаты в PostgreSQL: n-граммы, URL, источники и качество данных.</li>
+                        <li>Stage 5: сохраняет сущности и ранжирование в PostgreSQL для дальнейшей сборки ядра.</li>
                       </ul>
                     </div>
                     <div id="interest-context-prepare-progress" class="prepare-progress-panel" aria-live="polite"></div>
@@ -979,21 +979,21 @@ def _interest_context_prepare_body() -> str:
                       <a class="table-row linked-row" href="/interest-contexts/prepare/features">
                         <div>
                           <strong>Stage 3: признаки</strong>
-                          <p class="muted">Вопросы, ссылки, контакты, цены, технический score.</p>
+                          <p class="muted">Вопросы, ссылки, контакты, цены, технический score из PostgreSQL.</p>
                         </div>
                         <span>Открыть</span>
                       </a>
                       <a class="table-row linked-row" href="/interest-contexts/prepare/aggregates">
                         <div>
                           <strong>Stage 4: агрегаты</strong>
-                          <p class="muted">N-граммы, URL, качество источника и счетчики.</p>
+                          <p class="muted">N-граммы, URL, качество источника и счетчики из PostgreSQL.</p>
                         </div>
                         <span>Открыть</span>
                       </a>
                       <a class="table-row linked-row" href="/interest-contexts/prepare/entities">
                         <div>
                           <strong>Stage 5: сущности</strong>
-                          <p class="muted">POS-кандидаты, очистка, ранжирование и причины score.</p>
+                          <p class="muted">POS-кандидаты, очистка, ранжирование и причины score из PostgreSQL.</p>
                         </div>
                         <span>Открыть</span>
                       </a>
@@ -1089,7 +1089,7 @@ def _interest_context_prepare_features_body() -> str:
                     <div class="section-head">
                       <div>
                         <h3>Stage 3: признаки</h3>
-                        <p class="muted">Постранично показывает признаки, которые добавлены к сообщениям и документам.</p>
+                        <p class="muted">Постранично показывает признаки из `telegram_prepared_documents.feature_json`.</p>
                       </div>
                       <md-outlined-button id="interest-context-prep-features-refresh" type="button">
                         <md-icon slot="icon">refresh</md-icon>
@@ -1107,7 +1107,7 @@ def _interest_context_prepare_aggregates_body() -> str:
                     <div class="section-head">
                       <div>
                         <h3>Stage 4: агрегаты</h3>
-                        <p class="muted">Один экран для summary, n-грамм, URL и качества источника.</p>
+                        <p class="muted">Один экран для summary, n-грамм, URL и качества источника из PostgreSQL stage outputs.</p>
                       </div>
                       <md-outlined-button id="interest-context-prep-aggregates-refresh" type="button">
                         <md-icon slot="icon">refresh</md-icon>
@@ -1125,7 +1125,7 @@ def _interest_context_prepare_entities_body() -> str:
                     <div class="section-head">
                       <div>
                         <h3>Stage 5: сущности и ранжирование</h3>
-                        <p class="muted">Показывает извлеченные POS-сущности и результат rule-based ranking.</p>
+                        <p class="muted">Показывает POS-сущности и rule-based ranking из `telegram_entity_candidates`.</p>
                       </div>
                       <md-outlined-button id="interest-context-prep-entities-refresh" type="button">
                         <md-icon slot="icon">refresh</md-icon>

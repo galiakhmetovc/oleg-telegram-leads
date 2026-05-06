@@ -10,7 +10,6 @@ import zipfile
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
 from fastapi.encoders import jsonable_encoder
-import pyarrow.parquet as pq
 from pydantic import BaseModel, Field
 from sqlalchemy import desc, func, select
 from sqlalchemy.orm import Session
@@ -38,6 +37,7 @@ from pur_leads.services.interest_core_briefs import (
 from pur_leads.models.telegram_sources import (
     monitored_sources_table,
     source_messages_table,
+    telegram_entity_candidates_table,
     telegram_prepared_documents_table,
     telegram_raw_export_runs_table,
 )
@@ -56,6 +56,7 @@ from pur_leads.services.telegram_desktop_import import (
     DESKTOP_IMPORT_EXPORT_FORMAT,
     TelegramDesktopArchiveImportService,
 )
+from pur_leads.services.telegram_analysis_storage import stage_outputs
 from pur_leads.services.telegram_search import TelegramSearchService
 from pur_leads.services.tracing import TraceService
 from pur_leads.services.web_auth import SessionValidationResult
@@ -355,13 +356,38 @@ def list_interest_context_prepared_features(
     session: Session = Depends(get_session),
 ) -> dict[str, Any]:
     run = _prepared_raw_run(session, context_id, metadata_key="feature_enrichment")
-    path = _metadata_path(run, "feature_enrichment", "features_parquet_path")
-    payload = _parquet_page(path, limit=max(1, min(limit, 100)), offset=max(0, offset))
+    safe_limit = max(1, min(limit, 100))
+    safe_offset = max(0, offset)
+    base = (
+        select(telegram_prepared_documents_table)
+        .where(telegram_prepared_documents_table.c.raw_export_run_id == run["id"])
+        .where(telegram_prepared_documents_table.c.feature_json.is_not(None))
+    )
+    total = int(session.execute(select(func.count()).select_from(base.subquery())).scalar_one() or 0)
+    rows = (
+        session.execute(
+            base.order_by(
+                telegram_prepared_documents_table.c.entity_type,
+                telegram_prepared_documents_table.c.telegram_message_id,
+                telegram_prepared_documents_table.c.chunk_index,
+            )
+            .limit(safe_limit)
+            .offset(safe_offset)
+        )
+        .mappings()
+        .all()
+    )
     return jsonable_encoder(
         {
             "raw_export_run": _raw_run_payload(run),
-            "artifact": {"kind": "features_parquet", "path": str(path)},
-            **payload,
+            "artifact": {
+                "kind": "postgres_table",
+                "table": "telegram_prepared_documents",
+                "column": "feature_json",
+            },
+            "items": [_feature_payload(dict(row)) for row in rows],
+            "pagination": _pagination(limit=safe_limit, offset=safe_offset, total=total),
+            "columns": ["feature_json"],
         }
     )
 
@@ -373,15 +399,15 @@ def get_interest_context_prepared_aggregates(
     session: Session = Depends(get_session),
 ) -> dict[str, Any]:
     run = _prepared_raw_run(session, context_id, metadata_key="aggregated_stats")
-    metadata = dict(run.get("metadata_json") or {}).get("aggregated_stats") or {}
+    outputs = stage_outputs(session, str(run["id"]), "aggregated_stats")
     return jsonable_encoder(
         {
             "raw_export_run": _raw_run_payload(run),
-            "summary": _json_file_from_metadata(metadata, "summary_path"),
-            "ngrams": _json_file_from_metadata(metadata, "ngrams_path"),
-            "entity_candidates": _json_file_from_metadata(metadata, "entity_candidates_path"),
-            "urls": _json_file_from_metadata(metadata, "url_summary_path"),
-            "source_quality": _json_file_from_metadata(metadata, "source_quality_path"),
+            "summary": _stage_payload(outputs, "summary"),
+            "ngrams": _stage_payload(outputs, "ngrams"),
+            "entity_candidates": _stage_payload(outputs, "entity_candidates"),
+            "urls": _stage_payload(outputs, "urls"),
+            "source_quality": _stage_payload(outputs, "source_quality"),
         }
     )
 
@@ -397,15 +423,25 @@ def list_interest_context_prepared_entities(
     run = _prepared_raw_run(session, context_id, metadata_key="entity_ranking")
     safe_limit = max(1, min(limit, 100))
     safe_offset = max(0, offset)
-    ranked_path = _metadata_path(run, "entity_ranking", "ranked_entities_parquet_path")
-    ranked = _parquet_page(ranked_path, limit=safe_limit, offset=safe_offset)
-    entity_path = _metadata_path(run, "entity_extraction", "entities_parquet_path")
-    extracted = _parquet_page(entity_path, limit=safe_limit, offset=safe_offset)
+    extracted = _entity_rows_page(
+        session,
+        str(run["id"]),
+        limit=safe_limit,
+        offset=safe_offset,
+        ranked=False,
+    )
+    ranked = _entity_rows_page(
+        session,
+        str(run["id"]),
+        limit=safe_limit,
+        offset=safe_offset,
+        ranked=True,
+    )
     return jsonable_encoder(
         {
             "raw_export_run": _raw_run_payload(run),
-            "ranked_artifact": {"kind": "ranked_entities_parquet", "path": str(ranked_path)},
-            "extracted_artifact": {"kind": "entities_parquet", "path": str(entity_path)},
+            "ranked_artifact": {"kind": "postgres_table", "table": "telegram_entity_candidates"},
+            "extracted_artifact": {"kind": "postgres_table", "table": "telegram_entity_candidates"},
             "ranked": ranked,
             "extracted": extracted,
         }
@@ -1442,49 +1478,75 @@ def _prepared_text_payload(row: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _metadata_path(run: dict[str, Any], stage_key: str, path_key: str) -> Path:
-    metadata = run.get("metadata_json") if isinstance(run.get("metadata_json"), dict) else {}
-    block = metadata.get(stage_key)
-    if not isinstance(block, dict) or not block.get(path_key):
-        raise HTTPException(
-            status_code=400,
-            detail=f"В metadata нет {stage_key}.{path_key}",
-        )
-    path = Path(str(block[path_key]))
-    return path if path.is_absolute() else Path(".") / path
-
-
-def _json_file_from_metadata(metadata: dict[str, Any], key: str) -> dict[str, Any]:
-    path_raw = metadata.get(key)
-    if not path_raw:
-        return {}
-    path = Path(str(path_raw))
-    if not path.is_absolute():
-        path = Path(".") / path
-    if not path.exists():
-        return {"missing": True, "path": str(path)}
-    parsed = json.loads(path.read_text(encoding="utf-8"))
-    return parsed if isinstance(parsed, dict) else {"items": parsed}
-
-
-def _parquet_page(path: Path, *, limit: int, offset: int) -> dict[str, Any]:
-    if not path.exists():
-        raise HTTPException(status_code=400, detail=f"Файл не найден: {path}")
-    table = pq.read_table(path)
-    total = table.num_rows
-    rows = table.slice(offset, limit).to_pylist()
+def _feature_payload(row: dict[str, Any]) -> dict[str, Any]:
+    feature = row.get("feature_json") if isinstance(row.get("feature_json"), dict) else {}
+    expanded = dict(feature)
+    for key, value in list(expanded.items()):
+        if key.endswith("_json"):
+            expanded[key[:-5]] = value
     return {
-        "items": [_json_columns(row) for row in rows],
-        "pagination": _pagination(limit=limit, offset=offset, total=total),
-        "columns": table.column_names,
+        **expanded,
+        "prepared_document_id": row.get("id"),
+        "entity_type": row.get("entity_type"),
+        "telegram_message_id": row.get("telegram_message_id"),
+        "artifact_kind": row.get("artifact_kind"),
+        "file_name": row.get("file_name"),
+        "message_url": row.get("message_url"),
+        "clean_text": row.get("clean_text"),
     }
 
 
-def _json_columns(row: dict[str, Any]) -> dict[str, Any]:
-    result = dict(row)
-    for key in list(result):
-        if key.endswith("_json"):
-            result[key[:-5]] = _json_any(result[key])
+def _stage_payload(outputs: dict[str, Any], key: str) -> Any:
+    output = outputs.get(key)
+    if not isinstance(output, dict):
+        return {}
+    return output.get("payload_json") or {}
+
+
+def _entity_rows_page(
+    session: Session,
+    raw_export_run_id: str,
+    *,
+    limit: int,
+    offset: int,
+    ranked: bool,
+) -> dict[str, Any]:
+    base = select(telegram_entity_candidates_table).where(
+        telegram_entity_candidates_table.c.raw_export_run_id == raw_export_run_id
+    )
+    total = int(session.execute(select(func.count()).select_from(base.subquery())).scalar_one() or 0)
+    order_by = (
+        [
+            telegram_entity_candidates_table.c.score.desc().nullslast(),
+            telegram_entity_candidates_table.c.normalized_text,
+        ]
+        if ranked
+        else [
+            telegram_entity_candidates_table.c.normalized_text,
+            telegram_entity_candidates_table.c.entity_id,
+        ]
+    )
+    rows = (
+        session.execute(base.order_by(*order_by).limit(limit).offset(offset))
+        .mappings()
+        .all()
+    )
+    return {
+        "items": [_entity_payload(dict(row)) for row in rows],
+        "pagination": _pagination(limit=limit, offset=offset, total=total),
+        "columns": [column.name for column in telegram_entity_candidates_table.columns],
+    }
+
+
+def _entity_payload(row: dict[str, Any]) -> dict[str, Any]:
+    payload = row.get("payload_json") if isinstance(row.get("payload_json"), dict) else {}
+    result = {**payload, **row}
+    result["pos_pattern"] = row.get("pos_pattern_json") or []
+    result["source_refs"] = row.get("source_refs_json") or []
+    result["example_contexts"] = row.get("example_contexts_json") or []
+    result["entity_type_counts"] = row.get("entity_type_counts_json") or {}
+    result["reasons"] = row.get("reasons_json") or []
+    result["penalties"] = row.get("penalties_json") or []
     return result
 
 

@@ -131,13 +131,24 @@ Chat analytics pipeline:
 - Unified search: `pur-leads search telegram`.
   Merges FTS and Chroma hits and returns source-backed RAG context with Telegram message links and artifact metadata.
 - Stage 3 features: `pur-leads analyze telegram-features`.
-  Combines message and artifact normalized text, detects question/offer/solution-like signals, prices, phones, emails, Telegram usernames, URLs, technical-language scores, quality signals, and traceable source identity. Domain profiles are reserved but disabled.
+  Reads prepared PostgreSQL documents, detects question/offer/solution-like
+  signals, prices, phones, emails, Telegram usernames, URLs, technical-language
+  scores, quality signals, and traceable source identity, then writes features
+  to `telegram_prepared_documents.feature_json`. Parquet remains an export
+  artifact.
 - Stage 4 aggregated stats: `pur-leads analyze telegram-stats`.
-  Produces aggregate stats, n-grams, entity candidates, URL summary, source quality, and message/artifact row counts.
+  Reads Stage 3 features from PostgreSQL and writes aggregate stats, n-grams,
+  entity candidates, URL summary, source quality, and message/artifact row
+  counts to `telegram_analysis_stage_outputs`. JSON files remain export
+  artifacts.
 - Stage 5 entity extraction: `pur-leads analyze telegram-entities`.
-  Extracts candidates from POS patterns and creates exact entity groups plus fuzzy/translit review candidates.
+  Reads Stage 3 features from PostgreSQL, extracts candidates from POS patterns,
+  creates exact entity groups plus fuzzy/translit review candidates, and writes
+  rows to `telegram_entity_candidates`.
 - Stage 5.1 entity ranking: `pur-leads analyze telegram-entity-ranking`.
-  Adds transparent rule-based score, status, reasons, penalties, ranked JSON, and noise report. No AI and no domain profiles are applied.
+  Reads `telegram_entity_candidates`, adds transparent rule-based score, status,
+  reasons, penalties, ranked JSON, and noise report, then writes the ranked rows
+  back to PostgreSQL. No AI and no domain profiles are applied.
 - Stage 5.2 entity enrichment: `pur-leads analyze telegram-entity-enrichment`.
   Uses either rule-based fallback or LLM to map ranked entities into a canonical registry. It stores prompt text, request JSON, response JSON, parsed response, context snapshot, provider/model/profile, and source refs. Writes `auto_pending` canonical entities and merge-review candidates, not approved catalog truth.
 - Interest Core Brief generation is the first LLM step for the product scenario.
@@ -232,6 +243,10 @@ Observability and operations:
 ## New Since The Initial Spec
 
 - Raw Telegram acquisition was made reusable: one Telethon read can be replayed through Parquet, text normalization, artifacts, FTS, Chroma, entity extraction, lead-candidate research, and later AI stages.
+- The product pipeline is now explicitly sequential for Interest Contexts:
+  preparation runs Stage 2 through Stage 5.1, and rule-based core assembly only
+  reads already-ranked PostgreSQL entity rows. It no longer starts Stage 3-5 as
+  a side effect.
 - Telegram Desktop zip import was added as an alternate ingestion source for user-exported chat history.
 - Interest Context intake was added: a user can create a context, attach a
   Telegram link or Telegram Desktop export, and stop after raw/parquet

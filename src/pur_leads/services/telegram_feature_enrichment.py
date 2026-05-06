@@ -16,6 +16,11 @@ from sqlalchemy.orm import Session
 
 from pur_leads.core.time import utc_now
 from pur_leads.models.telegram_sources import telegram_raw_export_runs_table
+from pur_leads.services.telegram_analysis_storage import (
+    prepared_document_rows,
+    replace_document_features,
+    replace_stage_outputs,
+)
 from pur_leads.services.telegram_run_metadata import merge_raw_export_run_metadata
 
 STAGE_NAME = "telegram_feature_enrichment"
@@ -73,13 +78,15 @@ class TelegramFeatureEnrichmentService:
 
     def write_features(self, raw_export_run_id: str) -> TelegramFeatureEnrichmentResult:
         run = self._require_run(raw_export_run_id)
-        message_rows = pq.read_table(_texts_path_from_metadata(run)).to_pylist()
-        artifact_path = _artifact_texts_path_from_metadata(run)
-        artifact_rows = (
-            pq.read_table(artifact_path).to_pylist()
-            if artifact_path is not None and artifact_path.exists()
-            else []
-        )
+        prepared_rows = prepared_document_rows(self.session, raw_export_run_id)
+        if not prepared_rows:
+            raise ValueError("feature enrichment requires prepared PostgreSQL documents")
+        message_rows = [
+            row for row in prepared_rows if row.get("entity_type") == "telegram_message"
+        ]
+        artifact_rows = [
+            row for row in prepared_rows if row.get("entity_type") == "telegram_artifact"
+        ]
 
         output_dir = (
             self.processed_root
@@ -92,16 +99,14 @@ class TelegramFeatureEnrichmentService:
         summary_path = output_dir / "feature_enrichment_summary.json"
 
         feature_rows = [
-            _feature_row(row, entity_type="telegram_message")
-            for row in message_rows
-            if row.get("has_text")
+            _feature_row(row, entity_type=str(row["entity_type"])) for row in prepared_rows
         ]
-        feature_rows.extend(
-            _feature_row(row, entity_type="telegram_artifact")
-            for row in artifact_rows
-            if row.get("has_text")
-        )
         _write_features_parquet(features_parquet_path, feature_rows)
+        postgres_feature_rows = replace_document_features(
+            self.session,
+            raw_export_run_id,
+            feature_rows,
+        )
         metrics = _metrics(feature_rows)
         summary = {
             "stage": STAGE_NAME,
@@ -141,6 +146,19 @@ class TelegramFeatureEnrichmentService:
             json.dumps(summary, ensure_ascii=False, indent=2, sort_keys=True),
             encoding="utf-8",
         )
+        replace_stage_outputs(
+            self.session,
+            raw_export_run_id=raw_export_run_id,
+            monitored_source_id=str(run["monitored_source_id"]),
+            stage_key="feature_enrichment",
+            outputs={
+                "summary": {
+                    "output_kind": "summary_json",
+                    "payload_json": summary,
+                    "artifact_path": str(summary_path),
+                }
+            },
+        )
         merge_raw_export_run_metadata(
             self.session,
             raw_export_run_id,
@@ -152,6 +170,7 @@ class TelegramFeatureEnrichmentService:
                 "features_parquet_path": str(features_parquet_path),
                 "summary_path": str(summary_path),
                 "total_rows": metrics["total_rows"],
+                "postgres_feature_rows": postgres_feature_rows,
                 "rows_with_price": metrics["rows_with_price"],
                 "feature_profile_status": FEATURE_PROFILE_STATUS,
                 "feature_profile_id": None,
@@ -209,6 +228,7 @@ def _feature_row(row: dict[str, Any], *, entity_type: str) -> dict[str, Any]:
     )
     return {
         "feature_id": feature_id,
+        "prepared_document_id": str(row.get("prepared_document_id") or ""),
         "entity_type": entity_type,
         "export_run_id": str(row.get("export_run_id") or ""),
         "monitored_source_id": str(row.get("monitored_source_id") or ""),
@@ -314,6 +334,7 @@ def _write_features_parquet(path: Path, rows: list[dict[str, Any]]) -> None:
     schema = pa.schema(
         [
             ("feature_id", pa.string()),
+            ("prepared_document_id", pa.string()),
             ("entity_type", pa.string()),
             ("export_run_id", pa.string()),
             ("monitored_source_id", pa.string()),
@@ -365,29 +386,11 @@ def _write_features_parquet(path: Path, rows: list[dict[str, Any]]) -> None:
     pq.write_table(table, path, compression="zstd")
 
 
-def _texts_path_from_metadata(run: dict[str, Any]) -> Path:
-    metadata = dict(run["metadata_json"] or {})
-    text_normalization = metadata.get("text_normalization")
-    if not isinstance(text_normalization, dict):
-        raise ValueError("feature enrichment requires Stage 2 text_normalization metadata")
-    path_value = text_normalization.get("texts_parquet_path")
-    if not path_value:
-        raise ValueError("feature enrichment requires text_normalization.texts_parquet_path")
-    return _resolve_path(path_value)
-
-
-def _artifact_texts_path_from_metadata(run: dict[str, Any]) -> Path | None:
-    metadata = dict(run["metadata_json"] or {})
-    artifact_texts = metadata.get("artifact_texts")
-    if not isinstance(artifact_texts, dict):
-        return None
-    path_value = artifact_texts.get("texts_parquet_path")
-    return _resolve_path(path_value) if path_value else None
-
-
 def _json_list(value: Any) -> list[str]:
     if not value:
         return []
+    if isinstance(value, list):
+        return [str(item) for item in value]
     try:
         parsed = json.loads(str(value))
     except json.JSONDecodeError:
@@ -401,8 +404,3 @@ def _json_string(value: Any) -> str:
 
 def _truncate(value: str, limit: int) -> str:
     return value if len(value) <= limit else value[: limit - 3] + "..."
-
-
-def _resolve_path(value: Path | str | Any) -> Path:
-    path = Path(str(value))
-    return path if path.is_absolute() else Path(".") / path

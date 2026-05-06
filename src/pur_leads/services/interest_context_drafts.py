@@ -8,7 +8,6 @@ import json
 from pathlib import Path
 from typing import Any
 
-import pyarrow.parquet as pq
 from sqlalchemy import desc, func, insert, select, update
 from sqlalchemy.orm import Session
 
@@ -23,10 +22,7 @@ from pur_leads.models.telegram_sources import (
     monitored_sources_table,
     telegram_raw_export_runs_table,
 )
-from pur_leads.services.telegram_aggregated_stats import TelegramAggregatedStatsService
-from pur_leads.services.telegram_entity_extraction import TelegramEntityExtractionService
-from pur_leads.services.telegram_entity_ranking import TelegramEntityRankingService
-from pur_leads.services.telegram_feature_enrichment import TelegramFeatureEnrichmentService
+from pur_leads.services.telegram_analysis_storage import ranked_entity_rows
 
 BUILD_INTEREST_CONTEXT_DRAFT_JOB = "build_interest_context_draft"
 DRAFT_ALGORITHM_VERSION = "interest-draft-rule-based-v1"
@@ -34,10 +30,6 @@ DRAFT_ALGORITHM_VERSION = "interest-draft-rule-based-v1"
 ProgressCallback = Callable[[dict[str, Any]], None]
 
 STAGES: tuple[dict[str, str], ...] = (
-    {"key": "feature_enrichment", "label": "Признаки сообщений"},
-    {"key": "aggregated_stats", "label": "Агрегаты"},
-    {"key": "entity_extraction", "label": "Кандидаты сущностей"},
-    {"key": "entity_ranking", "label": "Очистка и ранжирование"},
     {"key": "draft_assembly", "label": "Черновик ядра"},
 )
 
@@ -90,7 +82,13 @@ class InterestContextDraftService:
         raw_runs = self._raw_export_runs(context_id)
         if not raw_runs:
             raise ValueError("Нет успешных raw-выгрузок для сборки черновика")
-        total_steps = (len(STAGES) - 1) * len(raw_runs) + 1
+        missing_preparation = _runs_missing_entity_ranking(raw_runs)
+        if missing_preparation:
+            raise ValueError(
+                "Сначала выполните подготовку данных до этапа "
+                f"«Очистка и ранжирование»: не готово {len(missing_preparation)} raw-запусков"
+            )
+        total_steps = 1
         completed_steps = 0
         stage_results: list[dict[str, Any]] = []
         started_at = utc_now()
@@ -122,50 +120,7 @@ class InterestContextDraftService:
         )
 
         try:
-            for stage_index, stage in enumerate(STAGES[:-1], start=1):
-                stage_completed_runs = 0
-                for run_index, run in enumerate(raw_runs, start=1):
-                    self._report_stage_start(
-                        progress,
-                        draft_run_id=draft_run_id,
-                        started_at=started_at,
-                        stage=stage,
-                        stage_index=stage_index,
-                        completed_steps=completed_steps,
-                        total_steps=total_steps,
-                        raw_runs=raw_runs,
-                        run=run,
-                        run_index=run_index,
-                        stage_completed_runs=stage_completed_runs,
-                        stage_results=stage_results,
-                    )
-                    result = self._run_stage(stage["key"], str(run["id"]))
-                    stage_results.append(
-                        {
-                            "stage": stage["key"],
-                            "stage_label": stage["label"],
-                            "raw_export_run_id": run["id"],
-                            "metrics": result,
-                        }
-                    )
-                    completed_steps += 1
-                    stage_completed_runs += 1
-                    self._report_stage_done(
-                        progress,
-                        draft_run_id=draft_run_id,
-                        started_at=started_at,
-                        stage=stage,
-                        stage_index=stage_index,
-                        completed_steps=completed_steps,
-                        total_steps=total_steps,
-                        raw_runs=raw_runs,
-                        run=run,
-                        run_index=run_index,
-                        stage_completed_runs=stage_completed_runs,
-                        stage_results=stage_results,
-                    )
-
-            assembly_stage = STAGES[-1]
+            assembly_stage = STAGES[0]
             self._report(
                 progress,
                 status="running",
@@ -174,8 +129,8 @@ class InterestContextDraftService:
                 updated_at=utc_now().isoformat(),
                 current_stage=assembly_stage["key"],
                 current_stage_label=assembly_stage["label"],
-                stage_index=len(STAGES),
-                stage_count=len(STAGES),
+                stage_index=1,
+                stage_count=1,
                 stage_percent=0,
                 overall_percent=_percent(completed_steps, total_steps),
                 completed_steps=completed_steps,
@@ -185,11 +140,10 @@ class InterestContextDraftService:
                 stage_results=stage_results,
                 message="Собираю проверяемые карточки ядра интересов",
             )
-            refreshed_raw_runs = self._raw_export_runs(context_id)
             items = self._assemble_items(
                 context_id,
                 draft_run_id,
-                refreshed_raw_runs,
+                raw_runs,
                 max_items=max_items,
             )
             completed_steps += 1
@@ -241,8 +195,8 @@ class InterestContextDraftService:
                 finished_at=finished_at.isoformat(),
                 current_stage="done",
                 current_stage_label="Готово",
-                stage_index=len(STAGES),
-                stage_count=len(STAGES),
+                stage_index=1,
+                stage_count=1,
                 stage_percent=100,
                 overall_percent=100,
                 completed_steps=completed_steps,
@@ -315,53 +269,6 @@ class InterestContextDraftService:
         )
         return [dict(row) for row in rows]
 
-    def _run_stage(self, stage: str, raw_export_run_id: str) -> dict[str, Any]:
-        if stage == "feature_enrichment":
-            result = TelegramFeatureEnrichmentService(
-                self.session,
-                processed_root=self.processed_root,
-            ).write_features(raw_export_run_id)
-            return {
-                "features_parquet_path": str(result.features_parquet_path),
-                "summary_path": str(result.summary_path),
-                **result.metrics,
-            }
-        if stage == "aggregated_stats":
-            result = TelegramAggregatedStatsService(
-                self.session,
-                enriched_root=self.enriched_root,
-            ).write_stats(raw_export_run_id)
-            return {
-                "summary_path": str(result.summary_path),
-                "ngrams_path": str(result.ngrams_path),
-                "entity_candidates_path": str(result.entity_candidates_path),
-                "url_summary_path": str(result.url_summary_path),
-                **result.metrics,
-            }
-        if stage == "entity_extraction":
-            result = TelegramEntityExtractionService(
-                self.session,
-                enriched_root=self.enriched_root,
-            ).write_entities(raw_export_run_id)
-            return {
-                "entities_parquet_path": str(result.entities_parquet_path),
-                "entity_groups_path": str(result.entity_groups_path),
-                "summary_path": str(result.summary_path),
-                **result.metrics,
-            }
-        if stage == "entity_ranking":
-            result = TelegramEntityRankingService(
-                self.session,
-                enriched_root=self.enriched_root,
-            ).write_rankings(raw_export_run_id)
-            return {
-                "ranked_entities_parquet_path": str(result.ranked_entities_parquet_path),
-                "ranked_entities_json_path": str(result.ranked_entities_json_path),
-                "summary_path": str(result.summary_path),
-                **result.metrics,
-            }
-        raise ValueError(f"unsupported draft stage: {stage}")
-
     def _assemble_items(
         self,
         context_id: str,
@@ -372,10 +279,11 @@ class InterestContextDraftService:
     ) -> list[dict[str, Any]]:
         buckets: dict[str, dict[str, Any]] = {}
         for run in raw_runs:
-            ranking_path = _ranking_path_from_run(run)
-            if ranking_path is None or not ranking_path.exists():
-                continue
-            rows = pq.read_table(ranking_path).to_pylist()
+            rows = ranked_entity_rows(
+                self.session,
+                str(run["id"]),
+                statuses={"promote_candidate", "review_candidate"},
+            )
             for row in rows:
                 status = str(row.get("ranking_status") or "")
                 if status not in {"promote_candidate", "review_candidate"}:
@@ -675,16 +583,13 @@ def _item_row(context_id: str, draft_run_id: str, bucket: dict[str, Any]) -> dic
     }
 
 
-def _ranking_path_from_run(run: dict[str, Any]) -> Path | None:
-    metadata = dict(run.get("metadata_json") or {})
-    ranking = metadata.get("entity_ranking")
-    if not isinstance(ranking, dict):
-        return None
-    path_value = ranking.get("ranked_entities_parquet_path")
-    if not path_value:
-        return None
-    path = Path(str(path_value))
-    return path if path.is_absolute() else Path(".") / path
+def _runs_missing_entity_ranking(raw_runs: list[dict[str, Any]]) -> list[str]:
+    missing: list[str] = []
+    for run in raw_runs:
+        metadata = dict(run.get("metadata_json") or {})
+        if not isinstance(metadata.get("entity_ranking"), dict):
+            missing.append(str(run["id"]))
+    return missing
 
 
 def _json_list(value: Any) -> list[str]:

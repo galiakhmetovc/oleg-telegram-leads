@@ -16,7 +16,11 @@ from pur_leads.models.telegram_sources import (
     telegram_raw_export_runs_table,
 )
 from pur_leads.services.telegram_artifact_texts import TelegramArtifactTextExtractionService
+from pur_leads.services.telegram_aggregated_stats import TelegramAggregatedStatsService
 from pur_leads.services.telegram_chroma_index import TelegramChromaIndexService
+from pur_leads.services.telegram_entity_extraction import TelegramEntityExtractionService
+from pur_leads.services.telegram_entity_ranking import TelegramEntityRankingService
+from pur_leads.services.telegram_feature_enrichment import TelegramFeatureEnrichmentService
 from pur_leads.services.telegram_fts_index import TelegramFtsIndexService
 from pur_leads.services.telegram_text_normalization import TelegramTextNormalizationService
 
@@ -30,6 +34,10 @@ STAGES: tuple[dict[str, str], ...] = (
     {"key": "artifact_text_extraction", "label": "Тексты вложений"},
     {"key": "fts_index", "label": "Полнотекстовый индекс"},
     {"key": "chroma_index", "label": "Семантический индекс"},
+    {"key": "feature_enrichment", "label": "Признаки сообщений"},
+    {"key": "aggregated_stats", "label": "Агрегаты"},
+    {"key": "entity_extraction", "label": "Кандидаты сущностей"},
+    {"key": "entity_ranking", "label": "Очистка и ранжирование"},
 )
 
 
@@ -57,11 +65,13 @@ class InterestContextPreparationService:
         session: Session,
         *,
         processed_root: Path | str = "./data/processed",
+        enriched_root: Path | str = "./data/enriched",
         search_root: Path | str = "./data/search",
         chroma_root: Path | str = "./data/chroma",
     ) -> None:
         self.session = session
         self.processed_root = Path(processed_root)
+        self.enriched_root = Path(enriched_root)
         self.search_root = Path(search_root)
         self.chroma_root = Path(chroma_root)
 
@@ -258,6 +268,51 @@ class InterestContextPreparationService:
             return {
                 "chroma_path": str(result.chroma_path),
                 "collection_name": result.collection_name,
+                "summary_path": str(result.summary_path),
+                **result.metrics,
+            }
+        if stage == "feature_enrichment":
+            result = TelegramFeatureEnrichmentService(
+                self.session,
+                processed_root=self.processed_root,
+            ).write_features(raw_export_run_id)
+            return {
+                "features_parquet_path": str(result.features_parquet_path),
+                "summary_path": str(result.summary_path),
+                **result.metrics,
+            }
+        if stage == "aggregated_stats":
+            result = TelegramAggregatedStatsService(
+                self.session,
+                enriched_root=self.enriched_root,
+            ).write_stats(raw_export_run_id)
+            return {
+                "summary_path": str(result.summary_path),
+                "ngrams_path": str(result.ngrams_path),
+                "entity_candidates_path": str(result.entity_candidates_path),
+                "url_summary_path": str(result.url_summary_path),
+                "source_quality_path": str(result.source_quality_path),
+                **result.metrics,
+            }
+        if stage == "entity_extraction":
+            result = TelegramEntityExtractionService(
+                self.session,
+                enriched_root=self.enriched_root,
+            ).write_entities(raw_export_run_id)
+            return {
+                "entities_parquet_path": str(result.entities_parquet_path),
+                "entity_groups_path": str(result.entity_groups_path),
+                "summary_path": str(result.summary_path),
+                **result.metrics,
+            }
+        if stage == "entity_ranking":
+            result = TelegramEntityRankingService(
+                self.session,
+                enriched_root=self.enriched_root,
+            ).write_rankings(raw_export_run_id)
+            return {
+                "ranked_entities_parquet_path": str(result.ranked_entities_parquet_path),
+                "ranked_entities_json_path": str(result.ranked_entities_json_path),
                 "summary_path": str(result.summary_path),
                 **result.metrics,
             }

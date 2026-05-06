@@ -14,7 +14,12 @@ from pur_leads.db.migrations import upgrade_database
 from pur_leads.db.session import create_session_factory
 from pur_leads.integrations.documents.pdf_parser import PdfArtifactParser
 from pur_leads.integrations.telegram.types import ResolvedTelegramSource, TelegramMessage
-from pur_leads.models.telegram_sources import telegram_raw_export_runs_table
+from pur_leads.models.telegram_sources import (
+    telegram_analysis_stage_outputs_table,
+    telegram_entity_candidates_table,
+    telegram_prepared_documents_table,
+    telegram_raw_export_runs_table,
+)
 from pur_leads.services.telegram_aggregated_stats import TelegramAggregatedStatsService
 from pur_leads.services.telegram_artifact_texts import TelegramArtifactTextExtractionService
 from pur_leads.services.telegram_entity_extraction import TelegramEntityExtractionService
@@ -85,7 +90,10 @@ def test_telegram_feature_enrichment_writes_features_for_messages_and_artifacts(
         metadata = run["metadata_json"]["feature_enrichment"]
         assert metadata["features_parquet_path"] == str(result.features_parquet_path)
         assert metadata["total_rows"] == len(rows)
+        assert metadata["postgres_feature_rows"] == len(rows)
         assert metadata["feature_profile_status"] == "not_configured"
+        prepared_rows = session.execute(select(telegram_prepared_documents_table)).mappings().all()
+        assert sum(1 for row in prepared_rows if row["feature_json"]) == len(rows)
 
 
 def test_telegram_aggregated_stats_writes_reports_from_features(tmp_path):
@@ -132,6 +140,18 @@ def test_telegram_aggregated_stats_writes_reports_from_features(tmp_path):
 
         quality = json.loads(result.source_quality_path.read_text(encoding="utf-8"))
         assert quality["entity_type_counts"]["telegram_artifact"] >= 1
+        output_rows = (
+            session.execute(select(telegram_analysis_stage_outputs_table))
+            .mappings()
+            .all()
+        )
+        assert {row["output_key"] for row in output_rows} >= {
+            "summary",
+            "ngrams",
+            "entity_candidates",
+            "urls",
+            "source_quality",
+        }
 
 
 def test_telegram_entity_extraction_writes_pos_entities_and_review_candidates(tmp_path):
@@ -222,6 +242,11 @@ def test_telegram_entity_extraction_writes_pos_entities_and_review_candidates(tm
         assert metadata["entities_parquet_path"] == str(result.entities_parquet_path)
         assert metadata["entity_groups_path"] == str(result.entity_groups_path)
         assert metadata["auto_merge_policy"] == "exact_only"
+        assert metadata["postgres_entity_rows"] == len(rows)
+        assert (
+            session.execute(select(telegram_entity_candidates_table)).mappings().first()
+            is not None
+        )
 
 
 def test_telegram_entity_ranking_marks_useful_terms_and_noise(tmp_path):
@@ -302,6 +327,13 @@ def test_telegram_entity_ranking_marks_useful_terms_and_noise(tmp_path):
         metadata = run["metadata_json"]["entity_ranking"]
         assert metadata["ranked_entities_parquet_path"] == str(result.ranked_entities_parquet_path)
         assert metadata["ranking_policy"] == "rule_based_v1"
+        assert metadata["postgres_ranked_entity_rows"] == len(rows)
+        ranked_db_rows = (
+            session.execute(select(telegram_entity_candidates_table))
+            .mappings()
+            .all()
+        )
+        assert any(row["ranking_status"] == "promote_candidate" for row in ranked_db_rows)
 
 
 def _prepared_export(session, tmp_path):

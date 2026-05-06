@@ -232,6 +232,50 @@ telegram_prepared_documents_table = Table(
     Column("updated_at", DateTime(timezone=True), nullable=False),
 )
 
+telegram_analysis_stage_outputs_table = Table(
+    "telegram_analysis_stage_outputs",
+    metadata,
+    Column("id", String(160), primary_key=True),
+    Column("raw_export_run_id", String(36), nullable=False),
+    Column("monitored_source_id", String(36), nullable=False),
+    Column("stage_key", String(80), nullable=False),
+    Column("output_key", String(80), nullable=False),
+    Column("output_kind", String(64), nullable=False),
+    Column("payload_json", JSON, nullable=True),
+    Column("artifact_path", String(1024), nullable=True),
+    Column("row_count", Integer, nullable=False),
+    Column("created_at", DateTime(timezone=True), nullable=False),
+    Column("updated_at", DateTime(timezone=True), nullable=False),
+)
+
+telegram_entity_candidates_table = Table(
+    "telegram_entity_candidates",
+    metadata,
+    Column("id", String(160), primary_key=True),
+    Column("raw_export_run_id", String(36), nullable=False),
+    Column("monitored_source_id", String(36), nullable=False),
+    Column("entity_id", String(80), nullable=False),
+    Column("group_id", String(80), nullable=False),
+    Column("canonical_text", Text, nullable=False),
+    Column("normalized_text", Text, nullable=False),
+    Column("lemma_text", Text, nullable=False),
+    Column("pos_pattern_json", JSON, nullable=True),
+    Column("mention_count", Integer, nullable=False),
+    Column("source_count", Integer, nullable=False),
+    Column("source_refs_json", JSON, nullable=True),
+    Column("example_contexts_json", JSON, nullable=True),
+    Column("entity_type_counts_json", JSON, nullable=True),
+    Column("group_confidence", String(32), nullable=False),
+    Column("group_method", String(32), nullable=False),
+    Column("score", Float, nullable=True),
+    Column("ranking_status", String(64), nullable=True),
+    Column("reasons_json", JSON, nullable=True),
+    Column("penalties_json", JSON, nullable=True),
+    Column("payload_json", JSON, nullable=True),
+    Column("created_at", DateTime(timezone=True), nullable=False),
+    Column("updated_at", DateTime(timezone=True), nullable=False),
+)
+
 sender_profiles_table = Table(
     "sender_profiles",
     metadata,

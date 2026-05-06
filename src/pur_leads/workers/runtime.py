@@ -531,6 +531,7 @@ def build_telegram_handler_registry(
         preparation = InterestContextPreparationService(
             session,
             processed_root=processed_storage_path or "./data/processed",
+            enriched_root=enriched_storage_path or "./data/enriched",
             search_root=search_storage_path or "./data/search",
             chroma_root=chroma_storage_path or "./data/chroma",
         )

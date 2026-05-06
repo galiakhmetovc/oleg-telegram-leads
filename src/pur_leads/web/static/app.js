@@ -6312,19 +6312,19 @@ function prepareStageExplanation(stage) {
     return "raw_text сохранен, clean_text очищен, построены tokens/lemmas/POS и token-map";
   }
   if (key.includes("index") || key.includes("chroma") || key.includes("embedding")) {
-    return "подготовленный текст добавлен в локальный поиск и семантический индекс local_hashing_v1";
+    return "подготовленный текст добавлен в PostgreSQL FTS и семантический индекс local_hashing_v1";
   }
   if (key.includes("feature") || key.includes("stage_3")) {
-    return "добавлены признаки сообщения: язык, вопрос/решение, ссылки, PII и технический score";
+    return "в PostgreSQL добавлены признаки сообщения: вопрос/решение, ссылки, цены, контакты и технический score";
   }
   if (key.includes("stat") || key.includes("stage_4") || key.includes("aggregate")) {
-    return "посчитаны агрегаты по источникам, n-граммам, частотам, ссылкам и качеству данных";
-  }
-  if (key.includes("entity") || key.includes("stage_5")) {
-    return "извлечены сущности по POS-паттернам и подготовлены кандидаты для ранжирования";
+    return "в PostgreSQL сохранены агрегаты по источникам, n-граммам, частотам, ссылкам и качеству данных";
   }
   if (key.includes("rank")) {
     return "сущности очищены от шума, получили score и порядок для сборки ядра";
+  }
+  if (key.includes("entity") || key.includes("stage_5")) {
+    return "извлечены сущности по POS-паттернам и подготовлены кандидаты для ранжирования";
   }
   return "промежуточный артефакт подготовки данных";
 }
@@ -6333,6 +6333,9 @@ function renderPrepareStageArtifactLine(metrics) {
   const paths = [
     metrics.texts_parquet_path ? `texts.parquet: ${shortPath(metrics.texts_parquet_path)}` : "",
     metrics.search_table_name ? `FTS: ${metrics.search_table_name}` : "",
+    metrics.postgres_feature_rows ? `features: ${metrics.postgres_feature_rows}` : "",
+    metrics.postgres_entity_rows ? `entities: ${metrics.postgres_entity_rows}` : "",
+    metrics.postgres_ranked_entity_rows ? `ranked: ${metrics.postgres_ranked_entity_rows}` : "",
     metrics.report_path ? `отчет: ${shortPath(metrics.report_path)}` : "",
     metrics.entities_parquet_path ? `entities.parquet: ${shortPath(metrics.entities_parquet_path)}` : "",
     metrics.ranked_entities_parquet_path
@@ -6682,7 +6685,7 @@ function renderInterestContextPrepareFeatures(payload, state) {
   const items = payload.items || [];
   const pagination = payload.pagination || { limit: state.prepFeaturesLimit, offset: 0, total: 0 };
   target.innerHTML = `<section class="draft-review-section">
-    ${items.length ? `<div class="table-list">${items.map(renderPrepareFeatureRow).join("")}</div>` : '<div class="empty-state">Stage 3 еще не готов. Соберите ядро, чтобы получить признаки.</div>'}
+    ${items.length ? `<div class="table-list">${items.map(renderPrepareFeatureRow).join("")}</div>` : '<div class="empty-state">Stage 3 еще не готов. Запустите подготовку данных.</div>'}
     ${renderPageControls(pagination, "prep-features")}
   </section>`;
 }
@@ -6809,7 +6812,7 @@ function renderInterestContextPrepareEntities(payload, state) {
       <h4>Ранжированные сущности</h4>
       <span class="muted">${escapeHtml(`${pagination.total || 0} всего`)}</span>
     </div>
-    ${ranked.items?.length ? `<div class="table-list">${ranked.items.map(renderRankedEntityRow).join("")}</div>` : '<div class="empty-state">Stage 5 еще не готов. Соберите ядро, чтобы получить сущности.</div>'}
+    ${ranked.items?.length ? `<div class="table-list">${ranked.items.map(renderRankedEntityRow).join("")}</div>` : '<div class="empty-state">Stage 5 еще не готов. Запустите подготовку данных.</div>'}
     ${renderPageControls(pagination, "prep-entities")}
     <div class="section-head compact-section-head">
       <h4>Извлеченные POS-сущности</h4>

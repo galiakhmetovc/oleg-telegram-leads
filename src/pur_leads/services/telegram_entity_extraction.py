@@ -18,6 +18,11 @@ from sqlalchemy.orm import Session
 
 from pur_leads.core.time import utc_now
 from pur_leads.models.telegram_sources import telegram_raw_export_runs_table
+from pur_leads.services.telegram_analysis_storage import (
+    feature_rows,
+    replace_entity_candidates,
+    replace_stage_outputs,
+)
 from pur_leads.services.telegram_run_metadata import merge_raw_export_run_metadata
 
 STAGE_NAME = "telegram_entity_extraction"
@@ -116,8 +121,9 @@ class TelegramEntityExtractionService:
 
     def write_entities(self, raw_export_run_id: str) -> TelegramEntityExtractionResult:
         run = self._require_run(raw_export_run_id)
-        features_path = _features_path_from_metadata(run)
-        rows = pq.read_table(features_path).to_pylist()
+        rows = feature_rows(self.session, raw_export_run_id)
+        if not rows:
+            raise ValueError("entity extraction requires Stage 3 PostgreSQL features")
 
         output_dir = (
             self.enriched_root
@@ -153,7 +159,7 @@ class TelegramEntityExtractionService:
                 "raw_export_run_id": raw_export_run_id,
                 "monitored_source_id": run["monitored_source_id"],
                 "source_ref": run["source_ref"],
-                "features_parquet_path": str(features_path),
+                "features_storage": "telegram_prepared_documents.feature_json",
             },
             "outputs": {
                 "entities_parquet_path": str(entities_parquet_path),
@@ -178,6 +184,35 @@ class TelegramEntityExtractionService:
             ],
         }
         _write_json(summary_path, summary)
+        postgres_entity_rows = replace_entity_candidates(
+            self.session,
+            raw_export_run_id=raw_export_run_id,
+            monitored_source_id=str(run["monitored_source_id"]),
+            rows=entity_rows,
+        )
+        replace_stage_outputs(
+            self.session,
+            raw_export_run_id=raw_export_run_id,
+            monitored_source_id=str(run["monitored_source_id"]),
+            stage_key="entity_extraction",
+            outputs={
+                "summary": {
+                    "output_kind": "summary_json",
+                    "payload_json": summary,
+                    "artifact_path": str(summary_path),
+                },
+                "groups": {
+                    "output_kind": "entity_groups_json",
+                    "payload_json": groups_payload,
+                    "artifact_path": str(entity_groups_path),
+                },
+                "resolution_candidates": {
+                    "output_kind": "resolution_candidates",
+                    "payload_json": {"items": review_candidates},
+                    "artifact_path": str(resolution_candidates_path),
+                },
+            },
+        )
 
         merge_raw_export_run_metadata(
             self.session,
@@ -192,6 +227,7 @@ class TelegramEntityExtractionService:
                 "resolution_candidates_path": str(resolution_candidates_path),
                 "summary_path": str(summary_path),
                 "entity_rows": metrics["entity_rows"],
+                "postgres_entity_rows": postgres_entity_rows,
                 "group_count": metrics["group_count"],
                 "review_candidate_rows": metrics["review_candidate_rows"],
                 "auto_merge_policy": AUTO_MERGE_POLICY,
@@ -517,17 +553,6 @@ def _metrics(
     }
 
 
-def _features_path_from_metadata(run: dict[str, Any]) -> Path:
-    metadata = dict(run["metadata_json"] or {})
-    feature_enrichment = metadata.get("feature_enrichment")
-    if not isinstance(feature_enrichment, dict):
-        raise ValueError("entity extraction requires Stage 3 feature_enrichment metadata")
-    path_value = feature_enrichment.get("features_parquet_path")
-    if not path_value:
-        raise ValueError("entity extraction requires feature_enrichment.features_parquet_path")
-    return _resolve_path(path_value)
-
-
 def _write_entities_parquet(path: Path, rows: list[dict[str, Any]]) -> None:
     schema = pa.schema(
         [
@@ -603,6 +628,8 @@ def _json_list(value: Any) -> list[str]:
 def _json_any(value: Any, *, default: Any) -> Any:
     if not value:
         return default
+    if isinstance(value, (dict, list)):
+        return value
     try:
         return json.loads(str(value))
     except json.JSONDecodeError:
@@ -668,8 +695,3 @@ def _damerau_levenshtein(left: str, right: str) -> int:
 
 def _truncate(value: str, limit: int) -> str:
     return value if len(value) <= limit else value[: limit - 3] + "..."
-
-
-def _resolve_path(value: Path | str | Any) -> Path:
-    path = Path(str(value))
-    return path if path.is_absolute() else Path(".") / path

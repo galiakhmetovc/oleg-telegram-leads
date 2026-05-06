@@ -172,6 +172,12 @@ Implemented:
   Postgres table `telegram_prepared_documents`. On Postgres this table owns a
   generated `search_vector` column and GIN index; parquet remains an auditable
   export/rebuild artifact, not the operational search database.
+- Telegram Stage 3-5.1 outputs also live in Postgres:
+  `telegram_prepared_documents.feature_json` stores per-document features,
+  `telegram_analysis_stage_outputs` stores aggregate JSON outputs, and
+  `telegram_entity_candidates` stores extracted/ranked entity candidates.
+  Parquet/JSON files remain optional audit/export artifacts and must not be the
+  UI or workflow source of truth.
 
 Still pending:
 
