@@ -758,7 +758,7 @@ def test_cli_analyze_telegram_fts_indexes_normalized_texts(tmp_path, capsys):
     output = json.loads(capsys.readouterr().out)
     assert output["raw_export_run_id"] == export.run_id
     assert output["metrics"]["indexed_documents"] == 1
-    assert Path(output["search_db_path"]).exists()
+    assert output["search_table_name"] == "telegram_prepared_documents"
     assert Path(output["summary_path"]).exists()
 
 

@@ -562,7 +562,7 @@ def _analyze_telegram_fts(args: argparse.Namespace) -> None:
         json.dumps(
             {
                 "raw_export_run_id": result.raw_export_run_id,
-                "search_db_path": str(result.search_db_path),
+                "search_table_name": result.search_table_name,
                 "summary_path": str(result.summary_path),
                 "metrics": result.metrics,
             },

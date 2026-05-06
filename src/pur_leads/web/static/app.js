@@ -3760,6 +3760,12 @@ function initInterestContexts() {
     intentMatchesLimit: 10,
     intentMatchesOffset: 0,
     selectedIntentRunId: null,
+    prepTextsLimit: 10,
+    prepTextsOffset: 0,
+    prepFeaturesLimit: 10,
+    prepFeaturesOffset: 0,
+    prepEntitiesLimit: 10,
+    prepEntitiesOffset: 0,
   };
   document
     .querySelector("#interest-context-refresh")
@@ -3821,6 +3827,33 @@ function initInterestContexts() {
   document
     .querySelector("#interest-context-prepare-data")
     ?.addEventListener("click", () => startInterestContextDataPreparation(state));
+  document
+    .querySelector("#interest-context-prep-texts-refresh")
+    ?.addEventListener("click", () => loadInterestContextPrepareTextsPage(state));
+  document
+    .querySelector("#interest-context-prep-texts")
+    ?.addEventListener("click", (event) => changeInterestContextPrepTextsPage(event, state));
+  document
+    .querySelector("#interest-context-prep-fts-form")
+    ?.addEventListener("submit", (event) => searchInterestContextPrepareFts(event, state));
+  document
+    .querySelector("#interest-context-prep-chroma-form")
+    ?.addEventListener("submit", (event) => searchInterestContextPrepareChroma(event, state));
+  document
+    .querySelector("#interest-context-prep-features-refresh")
+    ?.addEventListener("click", () => loadInterestContextPrepareFeaturesPage(state));
+  document
+    .querySelector("#interest-context-prep-features")
+    ?.addEventListener("click", (event) => changeInterestContextPrepFeaturesPage(event, state));
+  document
+    .querySelector("#interest-context-prep-aggregates-refresh")
+    ?.addEventListener("click", () => loadInterestContextPrepareAggregates(state));
+  document
+    .querySelector("#interest-context-prep-entities-refresh")
+    ?.addEventListener("click", () => loadInterestContextPrepareEntitiesPage(state));
+  document
+    .querySelector("#interest-context-prep-entities")
+    ?.addEventListener("click", (event) => changeInterestContextPrepEntitiesPage(event, state));
   document
     .querySelector("#interest-core-brief-form")
     ?.addEventListener("submit", (event) => saveManualInterestCoreBrief(event, state));
@@ -3980,6 +4013,21 @@ async function loadInterestContextDetail(contextId, state) {
   if (state.step === "check") {
     await loadInterestContextRawReview(state);
   }
+  if (state.step === "prepare_texts") {
+    state.prepTextsOffset = 0;
+    await loadInterestContextPrepareTextsPage(state);
+  }
+  if (state.step === "prepare_features") {
+    state.prepFeaturesOffset = 0;
+    await loadInterestContextPrepareFeaturesPage(state);
+  }
+  if (state.step === "prepare_aggregates") {
+    await loadInterestContextPrepareAggregates(state);
+  }
+  if (state.step === "prepare_entities") {
+    state.prepEntitiesOffset = 0;
+    await loadInterestContextPrepareEntitiesPage(state);
+  }
 }
 
 function renderInterestContextEmptyDetail() {
@@ -4002,6 +4050,12 @@ function renderInterestContextEmptyDetail() {
   const intentLayers = document.querySelector("#interest-intent-layers");
   const intentRuns = document.querySelector("#interest-intent-runs");
   const intentMatches = document.querySelector("#interest-intent-matches");
+  const prepTexts = document.querySelector("#interest-context-prep-texts");
+  const prepFts = document.querySelector("#interest-context-prep-fts-results");
+  const prepChroma = document.querySelector("#interest-context-prep-chroma-results");
+  const prepFeatures = document.querySelector("#interest-context-prep-features");
+  const prepAggregates = document.querySelector("#interest-context-prep-aggregates");
+  const prepEntities = document.querySelector("#interest-context-prep-entities");
   if (title) title.textContent = "Выберите контекст";
   if (description) {
     description.textContent = "Сначала создайте контекст, затем загрузите архив источника для этого контекста.";
@@ -4020,6 +4074,12 @@ function renderInterestContextEmptyDetail() {
   if (intentLayers) intentLayers.innerHTML = "";
   if (intentRuns) intentRuns.innerHTML = "";
   if (intentMatches) intentMatches.innerHTML = "";
+  if (prepTexts) prepTexts.innerHTML = "";
+  if (prepFts) prepFts.innerHTML = "";
+  if (prepChroma) prepChroma.innerHTML = "";
+  if (prepFeatures) prepFeatures.innerHTML = "";
+  if (prepAggregates) prepAggregates.innerHTML = "";
+  if (prepEntities) prepEntities.innerHTML = "";
 }
 
 function renderInterestContextDetail(detail) {
@@ -6085,7 +6145,13 @@ function renderPageControls(pagination, kind) {
             ? "data-intent-runs-page-action"
             : kind === "intent-matches"
               ? "data-intent-matches-page-action"
-              : "data-draft-page-action";
+              : kind === "prep-texts"
+                ? "data-prep-texts-page-action"
+                : kind === "prep-features"
+                  ? "data-prep-features-page-action"
+                  : kind === "prep-entities"
+                    ? "data-prep-entities-page-action"
+                    : "data-draft-page-action";
   return `<div class="queue-pagination">
     <span class="muted">${escapeHtml(`${from}-${to} из ${pagination.total}`)}</span>
     <div class="button-row">
@@ -6266,6 +6332,7 @@ function prepareStageExplanation(stage) {
 function renderPrepareStageArtifactLine(metrics) {
   const paths = [
     metrics.texts_parquet_path ? `texts.parquet: ${shortPath(metrics.texts_parquet_path)}` : "",
+    metrics.search_table_name ? `FTS: ${metrics.search_table_name}` : "",
     metrics.report_path ? `отчет: ${shortPath(metrics.report_path)}` : "",
     metrics.entities_parquet_path ? `entities.parquet: ${shortPath(metrics.entities_parquet_path)}` : "",
     metrics.ranked_entities_parquet_path
@@ -6409,12 +6476,390 @@ function renderRawReviewMessages(messages, previewSource) {
       .join("")}</div>`;
 }
 
+async function loadInterestContextPrepareTextsPage(state) {
+  const target = document.querySelector("#interest-context-prep-texts");
+  const status = document.querySelector("#interest-context-status");
+  if (!target || !state.selectedId) return;
+  target.innerHTML = '<div class="empty-state">Загружаю Stage 2...</div>';
+  try {
+    const params = new URLSearchParams({
+      limit: String(state.prepTextsLimit),
+      offset: String(state.prepTextsOffset),
+    });
+    const payload = await api(
+      `/api/interest-contexts/${encodeURIComponent(state.selectedId)}/prepare-data/texts?${params.toString()}`
+    );
+    renderInterestContextPrepareTexts(payload, state);
+  } catch (error) {
+    target.innerHTML = `<div class="empty-state">${escapeHtml(error.message)}</div>`;
+    if (status) status.textContent = error.message;
+  }
+}
+
+function changeInterestContextPrepTextsPage(event, state) {
+  const button = event.target.closest("[data-prep-texts-page-action]");
+  if (!button) return;
+  if (button.dataset.prepTextsPageAction === "prev") {
+    state.prepTextsOffset = Math.max(0, state.prepTextsOffset - state.prepTextsLimit);
+  }
+  if (button.dataset.prepTextsPageAction === "next") {
+    state.prepTextsOffset += state.prepTextsLimit;
+  }
+  loadInterestContextPrepareTextsPage(state);
+}
+
+function renderInterestContextPrepareTexts(payload, state) {
+  const target = document.querySelector("#interest-context-prep-texts");
+  if (!target) return;
+  const items = payload.items || [];
+  const pagination = payload.pagination || { limit: state.prepTextsLimit, offset: 0, total: 0 };
+  const summary = payload.summary || {};
+  target.innerHTML = `<section class="draft-review-section">
+    <div class="operations-summary raw-review-summary">
+      <div class="ops-metric-row">
+        ${renderOpsMetric("Строки", summary.total_rows || pagination.total || 0, "prepared documents")}
+        ${renderOpsMetric("Токены", summary.total_tokens || 0, "в PostgreSQL")}
+        ${renderOpsMetric("Хранилище", summary.storage || "postgresql", "операционная БД")}
+      </div>
+    </div>
+    ${items.length ? `<div class="table-list">${items.map(renderPrepareTextRow).join("")}</div>` : '<div class="empty-state">Stage 2 еще не готов. Нажмите «Подготовить данные».</div>'}
+    ${renderPageControls(pagination, "prep-texts")}
+  </section>`;
+}
+
+function renderPrepareTextRow(item) {
+  return `<div class="table-row draft-item-row">
+    <div>
+      <strong>${escapeHtml(prepareDocumentTitle(item))}</strong>
+      <p class="muted">${escapeHtml([item.entity_type, `#${item.telegram_message_id || "н/д"}`, time(item.date)].filter(Boolean).join(" / "))}</p>
+      <p class="draft-evidence"><strong>raw_text:</strong> ${escapeHtml(shortText(item.raw_text || "", 240))}</p>
+      <p class="draft-evidence"><strong>clean_text:</strong> ${escapeHtml(shortText(item.clean_text || "", 240))}</p>
+      <div class="badges">
+        ${badge(`${item.token_count || 0} tokens`)}
+        ${badge(item.normalization_lang || "unknown")}
+        ${badge(label(item.normalization_status || "normalized"))}
+        ${item.artifact_kind ? badge(item.artifact_kind) : ""}
+      </div>
+      ${renderSmallArray("tokens", item.tokens)}
+      ${renderSmallArray("lemmas", item.lemmas)}
+      ${renderSmallArray("POS", item.pos_tags)}
+      ${renderTokenMapPreview(item.token_map)}
+      ${renderTelegramMessageLink(item)}
+    </div>
+  </div>`;
+}
+
+function prepareDocumentTitle(item) {
+  if (item.entity_type === "telegram_artifact") {
+    return item.file_name || item.title || item.source_url || "текст вложения";
+  }
+  return "сообщение Telegram";
+}
+
+function renderSmallArray(title, values) {
+  if (!Array.isArray(values) || !values.length) return "";
+  return `<p class="draft-evidence"><strong>${escapeHtml(title)}:</strong> ${escapeHtml(values.slice(0, 18).join(", "))}</p>`;
+}
+
+function renderTokenMapPreview(values) {
+  if (!Array.isArray(values) || !values.length) return "";
+  const preview = values
+    .slice(0, 8)
+    .map((item) => `${item.token || ""}->${item.lemma || ""}/${item.pos || ""}`)
+    .join("; ");
+  return `<p class="draft-evidence"><strong>token-map:</strong> ${escapeHtml(preview)}</p>`;
+}
+
+async function searchInterestContextPrepareFts(event, state) {
+  event.preventDefault();
+  await searchInterestContextPrepared(
+    state,
+    event.currentTarget,
+    "#interest-context-prep-fts-results",
+    "fts"
+  );
+}
+
+async function searchInterestContextPrepareChroma(event, state) {
+  event.preventDefault();
+  await searchInterestContextPrepared(
+    state,
+    event.currentTarget,
+    "#interest-context-prep-chroma-results",
+    "chroma"
+  );
+}
+
+async function searchInterestContextPrepared(state, form, selector, kind) {
+  const target = document.querySelector(selector);
+  const status = document.querySelector("#interest-context-status");
+  if (!target || !state.selectedId) return;
+  const query = formValue(form, "q");
+  if (!query) return;
+  target.innerHTML = `<div class="empty-state">Ищу: ${escapeHtml(query)}...</div>`;
+  try {
+    const params = new URLSearchParams({ q: query, limit: "10" });
+    const payload = await api(
+      `/api/interest-contexts/${encodeURIComponent(state.selectedId)}/prepare-data/search/${kind}?${params.toString()}`
+    );
+    renderInterestContextPreparedSearch(payload, selector, kind);
+  } catch (error) {
+    target.innerHTML = `<div class="empty-state">${escapeHtml(error.message)}</div>`;
+    if (status) status.textContent = error.message;
+  }
+}
+
+function renderInterestContextPreparedSearch(payload, selector, kind) {
+  const target = document.querySelector(selector);
+  if (!target) return;
+  const items = payload.results || [];
+  const metrics = payload.metrics || {};
+  target.innerHTML = `<section class="draft-review-section">
+    <div class="operations-summary raw-review-summary">
+      <div class="ops-metric-row">
+        ${renderOpsMetric("Найдено", items.length, kind === "fts" ? "PostgreSQL FTS" : "Chroma")}
+        ${renderOpsMetric("FTS hits", metrics.fts_hits || 0, "точные")}
+        ${renderOpsMetric("Chroma hits", metrics.chroma_hits || 0, "семантика")}
+      </div>
+    </div>
+    ${items.length ? `<div class="table-list">${items.map(renderPreparedSearchRow).join("")}</div>` : '<div class="empty-state">Ничего не найдено.</div>'}
+  </section>`;
+}
+
+function renderPreparedSearchRow(item) {
+  return `<div class="table-row draft-item-row">
+    <div>
+      <strong>${escapeHtml(prepareDocumentTitle(item))}</strong>
+      <p class="muted">${escapeHtml([item.entity_type, `#${item.telegram_message_id || "н/д"}`, time(item.date)].filter(Boolean).join(" / "))}</p>
+      <p>${escapeHtml(shortText(item.clean_text || "", 420))}</p>
+      <div class="badges">
+        ${badge((item.sources || []).join("+") || "search")}
+        ${badge(`score ${formatScore(item.score)}`)}
+        ${badge(`fts ${formatScore(item.fts_score)}`)}
+        ${badge(`chroma ${formatScore(item.chroma_score)}`)}
+        ${item.artifact_kind ? badge(item.artifact_kind) : ""}
+      </div>
+      ${renderTelegramMessageLink(item)}
+    </div>
+  </div>`;
+}
+
+async function loadInterestContextPrepareFeaturesPage(state) {
+  const target = document.querySelector("#interest-context-prep-features");
+  const status = document.querySelector("#interest-context-status");
+  if (!target || !state.selectedId) return;
+  target.innerHTML = '<div class="empty-state">Загружаю Stage 3...</div>';
+  try {
+    const params = new URLSearchParams({
+      limit: String(state.prepFeaturesLimit),
+      offset: String(state.prepFeaturesOffset),
+    });
+    const payload = await api(
+      `/api/interest-contexts/${encodeURIComponent(state.selectedId)}/prepare-data/features?${params.toString()}`
+    );
+    renderInterestContextPrepareFeatures(payload, state);
+  } catch (error) {
+    target.innerHTML = `<div class="empty-state">${escapeHtml(error.message)}</div>`;
+    if (status) status.textContent = error.message;
+  }
+}
+
+function changeInterestContextPrepFeaturesPage(event, state) {
+  const button = event.target.closest("[data-prep-features-page-action]");
+  if (!button) return;
+  if (button.dataset.prepFeaturesPageAction === "prev") {
+    state.prepFeaturesOffset = Math.max(0, state.prepFeaturesOffset - state.prepFeaturesLimit);
+  }
+  if (button.dataset.prepFeaturesPageAction === "next") {
+    state.prepFeaturesOffset += state.prepFeaturesLimit;
+  }
+  loadInterestContextPrepareFeaturesPage(state);
+}
+
+function renderInterestContextPrepareFeatures(payload, state) {
+  const target = document.querySelector("#interest-context-prep-features");
+  if (!target) return;
+  const items = payload.items || [];
+  const pagination = payload.pagination || { limit: state.prepFeaturesLimit, offset: 0, total: 0 };
+  target.innerHTML = `<section class="draft-review-section">
+    ${items.length ? `<div class="table-list">${items.map(renderPrepareFeatureRow).join("")}</div>` : '<div class="empty-state">Stage 3 еще не готов. Соберите ядро, чтобы получить признаки.</div>'}
+    ${renderPageControls(pagination, "prep-features")}
+  </section>`;
+}
+
+function renderPrepareFeatureRow(item) {
+  return `<div class="table-row draft-item-row">
+    <div>
+      <strong>${escapeHtml(prepareDocumentTitle(item))}</strong>
+      <p class="muted">${escapeHtml([item.entity_type, `#${item.telegram_message_id || "н/д"}`, time(item.date)].filter(Boolean).join(" / "))}</p>
+      <p>${escapeHtml(shortText(item.clean_text || "", 360))}</p>
+      <div class="badges">
+        ${item.is_question_like ? badge("question") : ""}
+        ${item.is_solution_like ? badge("solution") : ""}
+        ${item.is_offer_like ? badge("offer") : ""}
+        ${item.has_price ? badge("price") : ""}
+        ${item.has_phone ? badge("phone") : ""}
+        ${item.has_url ? badge("url") : ""}
+        ${badge(`tech ${formatScore(item.technical_language_score)}`)}
+        ${badge(label(item.text_quality || "normal"))}
+      </div>
+      ${renderSmallArray("urls", item.urls)}
+      ${renderTelegramMessageLink(item)}
+    </div>
+  </div>`;
+}
+
+async function loadInterestContextPrepareAggregates(state) {
+  const target = document.querySelector("#interest-context-prep-aggregates");
+  const status = document.querySelector("#interest-context-status");
+  if (!target || !state.selectedId) return;
+  target.innerHTML = '<div class="empty-state">Загружаю Stage 4...</div>';
+  try {
+    const payload = await api(
+      `/api/interest-contexts/${encodeURIComponent(state.selectedId)}/prepare-data/aggregates`
+    );
+    renderInterestContextPrepareAggregates(payload);
+  } catch (error) {
+    target.innerHTML = `<div class="empty-state">${escapeHtml(error.message)}</div>`;
+    if (status) status.textContent = error.message;
+  }
+}
+
+function renderInterestContextPrepareAggregates(payload) {
+  const target = document.querySelector("#interest-context-prep-aggregates");
+  if (!target) return;
+  const summary = payload.summary?.metrics || payload.summary || {};
+  const ngrams = payload.ngrams || {};
+  const urls = payload.urls || {};
+  const quality = payload.source_quality || {};
+  target.innerHTML = `<section class="draft-review-section">
+    <div class="operations-summary raw-review-summary">
+      <div class="ops-metric-row">
+        ${renderOpsMetric("Строки", summary.total_rows || 0, "features")}
+        ${renderOpsMetric("Вопросы", summary.question_like_rows || 0, "question_like")}
+        ${renderOpsMetric("URL", summary.rows_with_url || 0, "строк")}
+      </div>
+    </div>
+    <div class="raw-review-grid">
+      ${renderAggregateList("Леммы", ngrams.top_lemmas)}
+      ${renderAggregateList("Биграммы", ngrams.top_bigrams)}
+      ${renderAggregateList("Домены", urls.domains)}
+      ${renderAggregateObject("Качество", quality)}
+    </div>
+  </section>`;
+}
+
+function renderAggregateList(title, items) {
+  const rows = Array.isArray(items) ? items.slice(0, 10) : [];
+  return `<section>
+    <h4>${escapeHtml(title)}</h4>
+    <div class="table-list">${rows.length ? rows.map((item) => `<div class="table-row"><div><strong>${escapeHtml(item.term || item.url || "item")}</strong></div><span>${escapeHtml(String(item.count || 0))}</span></div>`).join("") : '<div class="empty-state">Нет данных</div>'}</div>
+  </section>`;
+}
+
+function renderAggregateObject(title, value) {
+  const rows = value && typeof value === "object" ? Object.entries(value).slice(0, 8) : [];
+  return `<section>
+    <h4>${escapeHtml(title)}</h4>
+    <div class="table-list">${rows.length ? rows.map(([key, item]) => `<div class="table-row"><div><strong>${escapeHtml(key)}</strong></div><span>${escapeHtml(typeof item === "object" ? JSON.stringify(item) : String(item))}</span></div>`).join("") : '<div class="empty-state">Нет данных</div>'}</div>
+  </section>`;
+}
+
+async function loadInterestContextPrepareEntitiesPage(state) {
+  const target = document.querySelector("#interest-context-prep-entities");
+  const status = document.querySelector("#interest-context-status");
+  if (!target || !state.selectedId) return;
+  target.innerHTML = '<div class="empty-state">Загружаю Stage 5...</div>';
+  try {
+    const params = new URLSearchParams({
+      limit: String(state.prepEntitiesLimit),
+      offset: String(state.prepEntitiesOffset),
+    });
+    const payload = await api(
+      `/api/interest-contexts/${encodeURIComponent(state.selectedId)}/prepare-data/entities?${params.toString()}`
+    );
+    renderInterestContextPrepareEntities(payload, state);
+  } catch (error) {
+    target.innerHTML = `<div class="empty-state">${escapeHtml(error.message)}</div>`;
+    if (status) status.textContent = error.message;
+  }
+}
+
+function changeInterestContextPrepEntitiesPage(event, state) {
+  const button = event.target.closest("[data-prep-entities-page-action]");
+  if (!button) return;
+  if (button.dataset.prepEntitiesPageAction === "prev") {
+    state.prepEntitiesOffset = Math.max(0, state.prepEntitiesOffset - state.prepEntitiesLimit);
+  }
+  if (button.dataset.prepEntitiesPageAction === "next") {
+    state.prepEntitiesOffset += state.prepEntitiesLimit;
+  }
+  loadInterestContextPrepareEntitiesPage(state);
+}
+
+function renderInterestContextPrepareEntities(payload, state) {
+  const target = document.querySelector("#interest-context-prep-entities");
+  if (!target) return;
+  const ranked = payload.ranked || {};
+  const extracted = payload.extracted || {};
+  const pagination =
+    ranked.pagination || { limit: state.prepEntitiesLimit, offset: 0, total: 0 };
+  target.innerHTML = `<section class="draft-review-section">
+    <div class="section-head compact-section-head">
+      <h4>Ранжированные сущности</h4>
+      <span class="muted">${escapeHtml(`${pagination.total || 0} всего`)}</span>
+    </div>
+    ${ranked.items?.length ? `<div class="table-list">${ranked.items.map(renderRankedEntityRow).join("")}</div>` : '<div class="empty-state">Stage 5 еще не готов. Соберите ядро, чтобы получить сущности.</div>'}
+    ${renderPageControls(pagination, "prep-entities")}
+    <div class="section-head compact-section-head">
+      <h4>Извлеченные POS-сущности</h4>
+      <span class="muted">${escapeHtml(`${extracted.pagination?.total || 0} всего`)}</span>
+    </div>
+    ${extracted.items?.length ? `<div class="table-list">${extracted.items.slice(0, 5).map(renderExtractedEntityRow).join("")}</div>` : ""}
+  </section>`;
+}
+
+function renderRankedEntityRow(item) {
+  return `<div class="table-row draft-item-row">
+    <div>
+      <strong>${escapeHtml(item.normalized_text || item.canonical_text || "сущность")}</strong>
+      <p class="muted">${escapeHtml(item.canonical_text || "")}</p>
+      <div class="badges">
+        ${badge(`score ${formatScore(item.score)}`)}
+        ${badge(label(item.ranking_status || "unknown"))}
+        ${badge(`${item.mention_count || 0} mentions`)}
+        ${badge(`${item.source_count || 0} sources`)}
+      </div>
+      ${renderSmallArray("POS", item.pos_pattern)}
+      ${renderSmallArray("Причины", item.reasons)}
+      ${renderSmallArray("Штрафы", item.penalties)}
+      ${renderSmallArray("Примеры", item.example_contexts)}
+    </div>
+  </div>`;
+}
+
+function renderExtractedEntityRow(item) {
+  return `<div class="table-row draft-item-row">
+    <div>
+      <strong>${escapeHtml(item.normalized_text || "сущность")}</strong>
+      <div class="badges">
+        ${badge(label(item.group_confidence || "high"))}
+        ${badge(label(item.group_method || "exact"))}
+        ${badge(`${item.mention_count || 0} mentions`)}
+      </div>
+      ${renderSmallArray("POS", item.pos_pattern)}
+    </div>
+  </div>`;
+}
+
 function setInterestContextFormsEnabled(enabled) {
   [
     "#interest-context-telegram-source-form",
     "#interest-context-telegram-archive-form",
     "#interest-analysis-archive-form",
     "#interest-core-brief-form",
+    "#interest-context-prep-fts-form",
+    "#interest-context-prep-chroma-form",
   ].forEach((selector) => {
     document
       .querySelectorAll(

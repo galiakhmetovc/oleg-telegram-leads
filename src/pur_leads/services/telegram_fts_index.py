@@ -1,22 +1,27 @@
-"""SQLite FTS5 index for normalized Telegram text."""
+"""PostgreSQL-backed full-text search for prepared Telegram text."""
 
 from __future__ import annotations
 
-from collections import Counter
 from dataclasses import dataclass
 import json
 import math
 from pathlib import Path
 import re
-import sqlite3
 from typing import Any
 
 import pyarrow.parquet as pq
-from sqlalchemy import select
+from sqlalchemy import func, or_, select, text
 from sqlalchemy.orm import Session
 
 from pur_leads.core.time import utc_now
-from pur_leads.models.telegram_sources import telegram_raw_export_runs_table
+from pur_leads.models.telegram_sources import (
+    telegram_prepared_documents_table,
+    telegram_raw_export_runs_table,
+)
+from pur_leads.services.telegram_prepared_documents import (
+    prepared_document_count,
+    replace_prepared_documents,
+)
 from pur_leads.services.telegram_run_metadata import merge_raw_export_run_metadata
 
 STAGE_NAME = "telegram_fts_index"
@@ -82,13 +87,13 @@ RUSSIAN_ENDINGS = (
 @dataclass(frozen=True)
 class TelegramFtsIndexResult:
     raw_export_run_id: str
-    search_db_path: Path
+    search_table_name: str
     summary_path: Path
     metrics: dict[str, Any]
 
 
 class TelegramFtsIndexService:
-    """Build and query a local SQLite FTS5 index from Stage 2 text parquet."""
+    """Build and query the operational database text index from Stage 2 rows."""
 
     def __init__(self, session: Session, *, search_root: Path | str = "./data/search") -> None:
         self.session = session
@@ -108,18 +113,9 @@ class TelegramFtsIndexService:
             else _texts_path_from_metadata(run)
         )
         artifact_texts_path = _artifact_texts_path_from_metadata(run)
-        output_dir = (
-            self.search_root
-            / "telegram_texts"
-            / f"source_id={run['monitored_source_id']}"
-            / f"run_id={raw_export_run_id}"
-        )
+        output_dir = self.search_root / "telegram_texts" / f"run_id={raw_export_run_id}"
         output_dir.mkdir(parents=True, exist_ok=True)
-        search_db_path = output_dir / "search.sqlite3"
         summary_path = output_dir / "fts_index_summary.json"
-        if rebuild and search_db_path.exists():
-            search_db_path.unlink()
-
         sample_documents: list[dict[str, Any]] = []
         total_text_rows = 0
         total_artifact_text_rows = 0
@@ -127,38 +123,47 @@ class TelegramFtsIndexService:
         indexed_artifact_documents = 0
         skipped_empty_text_rows = 0
         skipped_empty_artifact_text_rows = 0
-        next_row_id = 1
-        with _sqlite_fts_connection(search_db_path) as connection:
-            for batch in pq.ParquetFile(texts_path).iter_batches(batch_size=5000):
-                rows = batch.to_pylist()
-                total_text_rows += len(rows)
-                documents = _documents_from_rows(
-                    rows,
+        for batch in pq.ParquetFile(texts_path).iter_batches(batch_size=5000):
+            rows = batch.to_pylist()
+            total_text_rows += len(rows)
+            documents = _documents_from_rows(
+                rows,
+                raw_export_run_id=raw_export_run_id,
+                monitored_source_id=str(run["monitored_source_id"]),
+            )
+            skipped_empty_text_rows += len(rows) - len(documents)
+            indexed_message_documents += len(documents)
+            _extend_sample_documents(sample_documents, documents)
+        if total_text_rows:
+            replace_prepared_documents(
+                self.session,
+                pq.read_table(texts_path).to_pylist(),
+                raw_export_run_id=raw_export_run_id,
+                entity_type="telegram_message",
+            )
+        if artifact_texts_path is not None and artifact_texts_path.exists():
+            for batch in pq.ParquetFile(artifact_texts_path).iter_batches(batch_size=5000):
+                artifact_rows = batch.to_pylist()
+                total_artifact_text_rows += len(artifact_rows)
+                documents = _artifact_documents_from_rows(
+                    artifact_rows,
                     raw_export_run_id=raw_export_run_id,
                     monitored_source_id=str(run["monitored_source_id"]),
-                    start_row_id=next_row_id,
                 )
-                skipped_empty_text_rows += len(rows) - len(documents)
-                indexed_message_documents += len(documents)
-                next_row_id += len(documents)
+                skipped_empty_artifact_text_rows += len(artifact_rows) - len(documents)
+                indexed_artifact_documents += len(documents)
                 _extend_sample_documents(sample_documents, documents)
-                _insert_sqlite_documents(connection, documents)
-            if artifact_texts_path is not None and artifact_texts_path.exists():
-                for batch in pq.ParquetFile(artifact_texts_path).iter_batches(batch_size=5000):
-                    artifact_rows = batch.to_pylist()
-                    total_artifact_text_rows += len(artifact_rows)
-                    documents = _artifact_documents_from_rows(
-                        artifact_rows,
-                        raw_export_run_id=raw_export_run_id,
-                        monitored_source_id=str(run["monitored_source_id"]),
-                        start_row_id=next_row_id,
-                    )
-                    skipped_empty_artifact_text_rows += len(artifact_rows) - len(documents)
-                    indexed_artifact_documents += len(documents)
-                    next_row_id += len(documents)
-                    _extend_sample_documents(sample_documents, documents)
-                    _insert_sqlite_documents(connection, documents)
-            connection.commit()
+            replace_prepared_documents(
+                self.session,
+                pq.read_table(artifact_texts_path).to_pylist(),
+                raw_export_run_id=raw_export_run_id,
+                entity_type="telegram_artifact",
+            )
+        storage_backend = (
+            "postgresql_full_text"
+            if self.session.get_bind().dialect.name == "postgresql"
+            else "database_text_search"
+        )
         metrics = {
             "total_text_rows": total_text_rows,
             "total_artifact_text_rows": total_artifact_text_rows,
@@ -167,8 +172,9 @@ class TelegramFtsIndexService:
             "indexed_artifact_documents": indexed_artifact_documents,
             "skipped_empty_text_rows": skipped_empty_text_rows,
             "skipped_empty_artifact_text_rows": skipped_empty_artifact_text_rows,
-            "index_type": "sqlite_fts5",
-            "ranking": "bm25_plus_rarity",
+            "postgres_rows": prepared_document_count(self.session, raw_export_run_id),
+            "index_type": storage_backend,
+            "ranking": "postgres_ts_rank_plus_rarity",
         }
         summary = {
             "stage": STAGE_NAME,
@@ -186,7 +192,7 @@ class TelegramFtsIndexService:
                 ),
             },
             "outputs": {
-                "search_db_path": str(search_db_path),
+                "search_table_name": "telegram_prepared_documents",
                 "summary_path": str(summary_path),
             },
             "metrics": metrics,
@@ -218,17 +224,19 @@ class TelegramFtsIndexService:
                 "artifact_texts_parquet_path": (
                     str(artifact_texts_path) if artifact_texts_path is not None else None
                 ),
-                "search_db_path": str(search_db_path),
+                "search_table_name": "telegram_prepared_documents",
+                "storage": storage_backend,
                 "indexed_documents": indexed_message_documents + indexed_artifact_documents,
                 "indexed_message_documents": indexed_message_documents,
                 "indexed_artifact_documents": indexed_artifact_documents,
+                "postgres_rows": metrics["postgres_rows"],
                 "summary_path": str(summary_path),
             },
         )
         self.session.commit()
         return TelegramFtsIndexResult(
             raw_export_run_id=raw_export_run_id,
-            search_db_path=search_db_path,
+            search_table_name="telegram_prepared_documents",
             summary_path=summary_path,
             metrics=metrics,
         )
@@ -236,54 +244,24 @@ class TelegramFtsIndexService:
     def query(
         self,
         *,
-        search_db_path: Path | str,
+        raw_export_run_id: str,
         query_text: str,
         limit: int = 10,
     ) -> list[dict[str, Any]]:
         query_terms = _query_terms(query_text)
         if not query_terms:
             return []
-        fts_query = " OR ".join(f"{term}*" for term in query_terms)
-        with sqlite3.connect(search_db_path) as connection:
-            connection.row_factory = sqlite3.Row
-            matches = connection.execute(
-                """
-                SELECT
-                    m.row_id,
-                    m.raw_export_run_id,
-                    m.monitored_source_id,
-                    m.entity_type,
-                    m.telegram_message_id,
-                    m.row_index,
-                    m.artifact_id,
-                    m.artifact_kind,
-                    m.chunk_index,
-                    m.source_url,
-                    m.final_url,
-                    m.title,
-                    m.file_name,
-                    m.reply_to_message_id,
-                    m.thread_id,
-                    m.thread_key,
-                    m.date,
-                    m.message_url,
-                    m.clean_text,
-                    m.lemmas_text,
-                    m.token_count,
-                    bm25(messages_fts) AS bm25_score
-                FROM messages_fts
-                JOIN messages m ON m.row_id = messages_fts.rowid
-                WHERE messages_fts MATCH ?
-                LIMIT ?
-                """,
-                (fts_query, max(1, limit * 5)),
-            ).fetchall()
-            idf = _idf_by_term(connection, query_terms)
-        ranked = []
-        for row in matches:
-            haystack = f"{row['clean_text']} {row['lemmas_text']}".lower()
+        rows = (
+            self._postgres_hits(raw_export_run_id, query_terms=query_terms, limit=limit * 5)
+            if self.session.get_bind().dialect.name == "postgresql"
+            else self._fallback_hits(raw_export_run_id, query_terms=query_terms, limit=limit * 5)
+        )
+        idf = self._idf_by_term(raw_export_run_id, query_terms)
+        ranked: list[dict[str, Any]] = []
+        for row in rows:
+            haystack = f"{row['clean_text'] or ''} {row['lemmas_text'] or ''}".lower()
             rarity_score = sum(weight for term, weight in idf.items() if term in haystack)
-            fts_score = -float(row["bm25_score"] or 0.0)
+            fts_score = float(row.get("fts_score") or 0.0)
             ranked.append(
                 {
                     "raw_export_run_id": row["raw_export_run_id"],
@@ -312,6 +290,112 @@ class TelegramFtsIndexService:
             )
         ranked.sort(key=lambda item: item["score"], reverse=True)
         return ranked[: max(1, limit)]
+
+    def _postgres_hits(
+        self,
+        raw_export_run_id: str,
+        *,
+        query_terms: list[str],
+        limit: int,
+    ) -> list[dict[str, Any]]:
+        ts_query = " | ".join(f"{term}:*" for term in query_terms)
+        result = self.session.execute(
+            text(
+                """
+                SELECT
+                    raw_export_run_id,
+                    monitored_source_id,
+                    entity_type,
+                    telegram_message_id,
+                    row_index,
+                    artifact_id,
+                    artifact_kind,
+                    chunk_index,
+                    source_url,
+                    final_url,
+                    title,
+                    file_name,
+                    reply_to_message_id,
+                    thread_id,
+                    thread_key,
+                    date,
+                    message_url,
+                    clean_text,
+                    lemmas_text,
+                    token_count,
+                    ts_rank_cd(search_vector, to_tsquery('simple', :ts_query)) AS fts_score
+                FROM telegram_prepared_documents
+                WHERE raw_export_run_id = :raw_export_run_id
+                  AND search_vector @@ to_tsquery('simple', :ts_query)
+                ORDER BY fts_score DESC, token_count DESC
+                LIMIT :limit
+                """
+            ),
+            {
+                "raw_export_run_id": raw_export_run_id,
+                "ts_query": ts_query,
+                "limit": max(1, limit),
+            },
+        )
+        return [dict(row) for row in result.mappings().all()]
+
+    def _fallback_hits(
+        self,
+        raw_export_run_id: str,
+        *,
+        query_terms: list[str],
+        limit: int,
+    ) -> list[dict[str, Any]]:
+        haystack = func.lower(
+            func.coalesce(telegram_prepared_documents_table.c.clean_text, "")
+            + " "
+            + func.coalesce(telegram_prepared_documents_table.c.lemmas_text, "")
+        )
+        filters = [
+            haystack.like(f"%{term.lower()}%")
+            for term in query_terms
+        ]
+        rows = (
+            self.session.execute(
+                select(telegram_prepared_documents_table)
+                .where(telegram_prepared_documents_table.c.raw_export_run_id == raw_export_run_id)
+                .where(or_(*filters))
+                .limit(max(1, limit))
+            )
+            .mappings()
+            .all()
+        )
+        return [{**dict(row), "fts_score": 1.0} for row in rows]
+
+    def _idf_by_term(self, raw_export_run_id: str, terms: list[str]) -> dict[str, float]:
+        total = max(
+            1,
+            int(
+                self.session.execute(
+                    select(func.count(telegram_prepared_documents_table.c.id)).where(
+                        telegram_prepared_documents_table.c.raw_export_run_id == raw_export_run_id
+                    )
+                ).scalar_one()
+                or 0
+            ),
+        )
+        weights: dict[str, float] = {}
+        haystack = func.lower(
+            func.coalesce(telegram_prepared_documents_table.c.clean_text, "")
+            + " "
+            + func.coalesce(telegram_prepared_documents_table.c.lemmas_text, "")
+        )
+        for term in terms:
+            count = int(
+                self.session.execute(
+                    select(func.count(telegram_prepared_documents_table.c.id))
+                    .where(telegram_prepared_documents_table.c.raw_export_run_id == raw_export_run_id)
+                    .where(haystack.like(f"%{term.lower()}%"))
+                ).scalar_one()
+                or 0
+            )
+            weights[term] = math.log((total + 1) / (count + 1)) + 1.0
+        return weights
 
     def _require_run(self, raw_export_run_id: str) -> dict[str, Any]:
         row = (
@@ -378,7 +462,7 @@ def _artifact_documents_from_rows(
     *,
     raw_export_run_id: str,
     monitored_source_id: str,
-    start_row_id: int,
+    start_row_id: int = 1,
 ) -> list[dict[str, Any]]:
     documents: list[dict[str, Any]] = []
     for row in rows:
@@ -418,121 +502,6 @@ def _artifact_documents_from_rows(
     return documents
 
 
-def _write_sqlite_fts(path: Path, documents: list[dict[str, Any]]) -> None:
-    with _sqlite_fts_connection(path) as connection:
-        _insert_sqlite_documents(connection, documents)
-        connection.commit()
-
-
-def _sqlite_fts_connection(path: Path) -> sqlite3.Connection:
-    connection = sqlite3.connect(path)
-    connection.execute("PRAGMA journal_mode=WAL")
-    connection.execute("PRAGMA synchronous=NORMAL")
-    connection.execute(
-        """
-        CREATE TABLE messages (
-            row_id INTEGER PRIMARY KEY,
-            raw_export_run_id TEXT NOT NULL,
-            monitored_source_id TEXT NOT NULL,
-            entity_type TEXT NOT NULL,
-            telegram_message_id INTEGER NOT NULL,
-            row_index INTEGER NOT NULL,
-            artifact_id TEXT NOT NULL,
-            artifact_kind TEXT NOT NULL,
-            chunk_index INTEGER NOT NULL,
-            source_url TEXT NOT NULL,
-            final_url TEXT NOT NULL,
-            title TEXT NOT NULL,
-            file_name TEXT NOT NULL,
-            reply_to_message_id INTEGER,
-            thread_id TEXT NOT NULL,
-            thread_key TEXT NOT NULL,
-            date TEXT NOT NULL,
-            message_url TEXT NOT NULL,
-            clean_text TEXT NOT NULL,
-            lemmas_text TEXT NOT NULL,
-            token_count INTEGER NOT NULL
-        )
-        """
-    )
-    connection.execute(
-        """
-        CREATE VIRTUAL TABLE messages_fts USING fts5(
-            clean_text,
-            lemmas_text,
-            tokenize = 'unicode61'
-        )
-        """
-    )
-    return connection
-
-
-def _insert_sqlite_documents(
-    connection: sqlite3.Connection,
-    documents: list[dict[str, Any]],
-) -> None:
-    if not documents:
-        return
-    connection.executemany(
-        """
-        INSERT INTO messages (
-            row_id,
-            raw_export_run_id,
-            monitored_source_id,
-            entity_type,
-            telegram_message_id,
-            row_index,
-            artifact_id,
-            artifact_kind,
-            chunk_index,
-            source_url,
-            final_url,
-            title,
-            file_name,
-            reply_to_message_id,
-            thread_id,
-            thread_key,
-            date,
-            message_url,
-            clean_text,
-            lemmas_text,
-            token_count
-        )
-        VALUES (
-            :row_id,
-            :raw_export_run_id,
-            :monitored_source_id,
-            :entity_type,
-            :telegram_message_id,
-            :row_index,
-            :artifact_id,
-            :artifact_kind,
-            :chunk_index,
-            :source_url,
-            :final_url,
-            :title,
-            :file_name,
-            :reply_to_message_id,
-            :thread_id,
-            :thread_key,
-            :date,
-            :message_url,
-            :clean_text,
-            :lemmas_text,
-            :token_count
-        )
-        """,
-        documents,
-    )
-    connection.executemany(
-        """
-        INSERT INTO messages_fts(rowid, clean_text, lemmas_text)
-        VALUES (:row_id, :clean_text, :lemmas_text)
-        """,
-        documents,
-    )
-
-
 def _extend_sample_documents(
     sample_documents: list[dict[str, Any]],
     documents: list[dict[str, Any]],
@@ -563,23 +532,6 @@ def _russian_stem(token: str) -> str:
         if token.endswith(ending) and len(token) - len(ending) >= 4:
             return token[: -len(ending)]
     return token
-
-
-def _idf_by_term(connection: sqlite3.Connection, terms: list[str]) -> dict[str, float]:
-    total = max(1, int(connection.execute("SELECT COUNT(*) FROM messages").fetchone()[0]))
-    counts: Counter[str] = Counter()
-    for term in terms:
-        counts[term] = int(
-            connection.execute(
-                """
-                SELECT COUNT(*)
-                FROM messages
-                WHERE lower(clean_text || ' ' || lemmas_text) LIKE ?
-                """,
-                (f"%{term.lower()}%",),
-            ).fetchone()[0]
-        )
-    return {term: math.log((total + 1) / (counts.get(term, 0) + 1)) + 1.0 for term in terms}
 
 
 def _texts_path_from_metadata(run: dict[str, Any]) -> Path:

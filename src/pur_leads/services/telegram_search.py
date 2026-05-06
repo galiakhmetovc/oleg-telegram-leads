@@ -40,6 +40,7 @@ class TelegramSearchService:
         limit: int = 10,
         fts_limit: int | None = None,
         chroma_limit: int | None = None,
+        include_fts: bool = True,
         include_chroma: bool = True,
         embedding_profile: str | None = None,
         embedding_dimensions: int = DEFAULT_EMBEDDING_DIMENSIONS,
@@ -47,10 +48,15 @@ class TelegramSearchService:
         run = self._require_run(raw_export_run_id)
         metadata = dict(run["metadata_json"] or {})
 
-        fts_hits = self._fts_hits(
-            metadata,
-            query_text=query_text,
-            limit=fts_limit or limit * 3,
+        fts_hits = (
+            self._fts_hits(
+                raw_export_run_id,
+                metadata,
+                query_text=query_text,
+                limit=fts_limit or limit * 3,
+            )
+            if include_fts
+            else []
         )
         chroma_hits = (
             self._chroma_hits(
@@ -87,16 +93,17 @@ class TelegramSearchService:
 
     def _fts_hits(
         self,
+        raw_export_run_id: str,
         metadata: dict[str, Any],
         *,
         query_text: str,
         limit: int,
     ) -> list[dict[str, Any]]:
         fts_index = metadata.get("fts_index")
-        if not isinstance(fts_index, dict) or not fts_index.get("search_db_path"):
+        if not isinstance(fts_index, dict):
             return []
         return TelegramFtsIndexService(self.session, search_root=self.search_root).query(
-            search_db_path=_resolve_path(fts_index["search_db_path"]),
+            raw_export_run_id=raw_export_run_id,
             query_text=query_text,
             limit=limit,
         )

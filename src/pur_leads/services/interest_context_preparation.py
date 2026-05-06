@@ -243,7 +243,7 @@ class InterestContextPreparationService:
                 search_root=self.search_root,
             ).write_index(raw_export_run_id)
             return {
-                "search_db_path": str(result.search_db_path),
+                "search_table_name": result.search_table_name,
                 "summary_path": str(result.summary_path),
                 **result.metrics,
             }

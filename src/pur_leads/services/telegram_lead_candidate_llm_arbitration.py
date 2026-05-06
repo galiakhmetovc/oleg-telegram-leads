@@ -7,7 +7,6 @@ from collections import Counter
 from dataclasses import dataclass
 import json
 from pathlib import Path
-import sqlite3
 from time import perf_counter
 from typing import Any
 
@@ -16,7 +15,10 @@ from sqlalchemy.orm import Session
 
 from pur_leads.core.time import utc_now
 from pur_leads.integrations.ai.chat import AiChatClient, AiChatMessage
-from pur_leads.models.telegram_sources import telegram_raw_export_runs_table
+from pur_leads.models.telegram_sources import (
+    telegram_prepared_documents_table,
+    telegram_raw_export_runs_table,
+)
 from pur_leads.services.telegram_run_metadata import merge_raw_export_run_metadata
 
 STAGE_NAME = "telegram_lead_candidate_llm_arbitration"
@@ -88,7 +90,7 @@ class TelegramLeadCandidateLlmArbitrationService:
             if candidates_json_path is not None
             else _lead_candidates_path_from_metadata(run)
         )
-        search_db_path = _fts_path_from_metadata(run)
+        _require_fts_metadata(run)
         candidate_payload = _json_file(candidate_payload_path)
         candidates = _candidate_items(candidate_payload)[: max(1, limit)]
 
@@ -107,76 +109,74 @@ class TelegramLeadCandidateLlmArbitrationService:
         results: list[dict[str, Any]] = []
         counters: Counter[str] = Counter()
         traces: list[str] = []
-        with sqlite3.connect(search_db_path) as connection:
-            connection.row_factory = sqlite3.Row
-            for sequence_index, candidate in enumerate(candidates):
-                context = _context_for_candidate(
-                    connection,
-                    candidate,
-                    raw_export_run_id=raw_export_run_id,
-                    context_window=max(0, context_window),
-                    thread_context_limit=max(1, thread_context_limit),
-                )
-                prompt_text = _prompt_text(candidate, context)
-                started = perf_counter()
-                response_json: dict[str, Any] | None = None
-                raw_response = ""
-                try:
-                    completion = asyncio.run(
-                        client.complete(
-                            messages=[
-                                AiChatMessage(role="system", content=SYSTEM_PROMPT),
-                                AiChatMessage(role="user", content=prompt_text),
-                            ],
-                            model=model,
-                            temperature=temperature,
-                            max_tokens=max_tokens,
-                        )
+        for sequence_index, candidate in enumerate(candidates):
+            context = _context_for_candidate(
+                self.session,
+                candidate,
+                raw_export_run_id=raw_export_run_id,
+                context_window=max(0, context_window),
+                thread_context_limit=max(1, thread_context_limit),
+            )
+            prompt_text = _prompt_text(candidate, context)
+            started = perf_counter()
+            response_json: dict[str, Any] | None = None
+            raw_response = ""
+            try:
+                completion = asyncio.run(
+                    client.complete(
+                        messages=[
+                            AiChatMessage(role="system", content=SYSTEM_PROMPT),
+                            AiChatMessage(role="user", content=prompt_text),
+                        ],
+                        model=model,
+                        temperature=temperature,
+                        max_tokens=max_tokens,
                     )
-                    raw_response = completion.content
-                    response_json = {
-                        "content": completion.content,
-                        "model": completion.model,
-                        "request_id": completion.request_id,
-                        "usage": completion.usage,
-                        "raw_response": completion.raw_response,
-                    }
-                    decision = _decision_from_llm_json(completion.content)
-                except Exception as exc:  # noqa: BLE001
-                    counters["error_count"] += 1
-                    decision = _error_decision(exc)
-                    if response_json is None:
-                        response_json = {
-                            "content": raw_response,
-                            "model": model,
-                            "request_id": None,
-                            "usage": {},
-                            "raw_response": {},
-                        }
-                    response_json["error"] = str(exc)
-                elapsed_ms = round((perf_counter() - started) * 1000, 3)
-                decision_value = str(decision["decision"])
-                counters[f"{decision_value}_count"] += 1
-                counters["processed_candidates"] += 1
-
-                result_item = {
-                    "sequence_index": sequence_index,
-                    "candidate": candidate,
-                    "context": context,
-                    "prompt_version": PROMPT_VERSION,
-                    "prompt_text": prompt_text,
-                    "provider": provider,
-                    "model": model,
-                    "model_profile": model_profile,
-                    "temperature": temperature,
-                    "max_tokens": max_tokens,
-                    "elapsed_ms": elapsed_ms,
-                    "raw_response": raw_response,
-                    "response_json": response_json,
-                    "decision": decision,
+                )
+                raw_response = completion.content
+                response_json = {
+                    "content": completion.content,
+                    "model": completion.model,
+                    "request_id": completion.request_id,
+                    "usage": completion.usage,
+                    "raw_response": completion.raw_response,
                 }
-                results.append(result_item)
-                traces.append(json.dumps(result_item, ensure_ascii=False, sort_keys=True))
+                decision = _decision_from_llm_json(completion.content)
+            except Exception as exc:  # noqa: BLE001
+                counters["error_count"] += 1
+                decision = _error_decision(exc)
+                if response_json is None:
+                    response_json = {
+                        "content": raw_response,
+                        "model": model,
+                        "request_id": None,
+                        "usage": {},
+                        "raw_response": {},
+                    }
+                response_json["error"] = str(exc)
+            elapsed_ms = round((perf_counter() - started) * 1000, 3)
+            decision_value = str(decision["decision"])
+            counters[f"{decision_value}_count"] += 1
+            counters["processed_candidates"] += 1
+
+            result_item = {
+                "sequence_index": sequence_index,
+                "candidate": candidate,
+                "context": context,
+                "prompt_version": PROMPT_VERSION,
+                "prompt_text": prompt_text,
+                "provider": provider,
+                "model": model,
+                "model_profile": model_profile,
+                "temperature": temperature,
+                "max_tokens": max_tokens,
+                "elapsed_ms": elapsed_ms,
+                "raw_response": raw_response,
+                "response_json": response_json,
+                "decision": decision,
+            }
+            results.append(result_item)
+            traces.append(json.dumps(result_item, ensure_ascii=False, sort_keys=True))
 
         metrics = {
             "selected_candidates": len(candidates),
@@ -205,7 +205,7 @@ class TelegramLeadCandidateLlmArbitrationService:
             },
             "input": {
                 "candidates_json_path": str(candidate_payload_path),
-                "search_db_path": str(search_db_path),
+                "search_table_name": "telegram_prepared_documents",
                 "limit": max(1, limit),
                 "context_window": max(0, context_window),
                 "thread_context_limit": max(1, thread_context_limit),
@@ -273,65 +273,61 @@ class TelegramLeadCandidateLlmArbitrationService:
 
 
 def _context_for_candidate(
-    connection: sqlite3.Connection,
+    session: Session,
     candidate: dict[str, Any],
     *,
     raw_export_run_id: str,
     context_window: int,
     thread_context_limit: int,
 ) -> list[dict[str, Any]]:
-    rows_by_key: dict[str, sqlite3.Row] = {}
+    rows_by_key: dict[str, Any] = {}
     message_id = int(candidate["telegram_message_id"])
     row_index = int(candidate.get("row_index") or 0)
     thread_key = str(candidate.get("thread_key") or message_id)
-    for row in connection.execute(
-        """
-        SELECT telegram_message_id, row_index, reply_to_message_id, thread_key, date,
-               message_url, clean_text, token_count
-        FROM messages
-        WHERE raw_export_run_id = ?
-          AND entity_type = 'telegram_message'
-          AND row_index BETWEEN ? AND ?
-        ORDER BY row_index
-        """,
-        (raw_export_run_id, row_index - context_window, row_index + context_window),
-    ).fetchall():
+    for row in session.execute(
+        select(telegram_prepared_documents_table)
+        .where(telegram_prepared_documents_table.c.raw_export_run_id == raw_export_run_id)
+        .where(telegram_prepared_documents_table.c.entity_type == "telegram_message")
+        .where(
+            telegram_prepared_documents_table.c.row_index.between(
+                row_index - context_window,
+                row_index + context_window,
+            )
+        )
+        .order_by(telegram_prepared_documents_table.c.row_index)
+    ).mappings():
         rows_by_key[str(row["telegram_message_id"])] = row
-    for row in connection.execute(
-        """
-        SELECT telegram_message_id, row_index, reply_to_message_id, thread_key, date,
-               message_url, clean_text, token_count
-        FROM messages
-        WHERE raw_export_run_id = ?
-          AND entity_type = 'telegram_message'
-          AND thread_key = ?
-        ORDER BY row_index
-        LIMIT ?
-        """,
-        (raw_export_run_id, thread_key, thread_context_limit),
-    ).fetchall():
+    for row in session.execute(
+        select(telegram_prepared_documents_table)
+        .where(telegram_prepared_documents_table.c.raw_export_run_id == raw_export_run_id)
+        .where(telegram_prepared_documents_table.c.entity_type == "telegram_message")
+        .where(telegram_prepared_documents_table.c.thread_key == thread_key)
+        .order_by(telegram_prepared_documents_table.c.row_index)
+        .limit(thread_context_limit)
+    ).mappings():
         rows_by_key[str(row["telegram_message_id"])] = row
     reply_to = candidate.get("reply_to_message_id")
     if reply_to is not None:
-        row = connection.execute(
-            """
-            SELECT telegram_message_id, row_index, reply_to_message_id, thread_key, date,
-                   message_url, clean_text, token_count
-            FROM messages
-            WHERE raw_export_run_id = ?
-              AND entity_type = 'telegram_message'
-              AND telegram_message_id = ?
-            LIMIT 1
-            """,
-            (raw_export_run_id, int(reply_to)),
-        ).fetchone()
+        row = (
+            session.execute(
+                select(telegram_prepared_documents_table)
+                .where(telegram_prepared_documents_table.c.raw_export_run_id == raw_export_run_id)
+                .where(telegram_prepared_documents_table.c.entity_type == "telegram_message")
+                .where(
+                    telegram_prepared_documents_table.c.telegram_message_id == int(reply_to)
+                )
+                .limit(1)
+            )
+            .mappings()
+            .first()
+        )
         if row is not None:
             rows_by_key[str(row["telegram_message_id"])] = row
     rows = sorted(rows_by_key.values(), key=lambda item: int(item["row_index"]))
     return [_context_item(row, candidate_message_id=message_id) for row in rows]
 
 
-def _context_item(row: sqlite3.Row, *, candidate_message_id: int) -> dict[str, Any]:
+def _context_item(row: Any, *, candidate_message_id: int) -> dict[str, Any]:
     message_id = int(row["telegram_message_id"])
     role = "candidate" if message_id == candidate_message_id else "neighbor"
     return {
@@ -496,15 +492,13 @@ def _lead_candidates_path_from_metadata(run: dict[str, Any]) -> Path:
     return _resolve_path(path_value)
 
 
-def _fts_path_from_metadata(run: dict[str, Any]) -> Path:
+def _require_fts_metadata(run: dict[str, Any]) -> None:
     metadata = dict(run["metadata_json"] or {})
     block = metadata.get("fts_index")
     if not isinstance(block, dict):
         raise ValueError("LLM arbitration requires fts_index metadata")
-    path_value = block.get("search_db_path")
-    if not path_value:
-        raise ValueError("LLM arbitration requires fts_index.search_db_path")
-    return _resolve_path(path_value)
+    if block.get("search_table_name") != "telegram_prepared_documents":
+        raise ValueError("LLM arbitration requires PostgreSQL prepared documents")
 
 
 def _resolve_path(value: Path | str | Any) -> Path:

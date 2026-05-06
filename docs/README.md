@@ -1,6 +1,6 @@
 # PUR Leads Documentation Index
 
-Last audited: 2026-05-05.
+Last audited: 2026-05-06.
 
 This is the main entry point for project documentation. Treat this file as the
 current map of what is implemented, what is partial, and which secondary
@@ -52,9 +52,9 @@ the operator workspace.
 
 Core application:
 
-- Alembic foundation through migration `0034_interest_core_briefs`.
+- Alembic foundation through migration `0041_telegram_prepared_documents`.
 - Postgres is now the target operational database. SQLite remains a temporary
-  local/test fallback and artifact format while production cutover is in progress. The
+  local/test fallback and historical artifact preview format. The
   storage decision is documented in `docs/superpowers/specs/2026-05-01-postgres-and-otel-storage-design.md`.
 - Docker Compose includes Postgres and wires `web`/`worker` through
   `PUR_DATABASE_URL`.
@@ -122,7 +122,10 @@ Chat analytics pipeline:
 - Artifact text extraction: `pur-leads analyze telegram-artifacts`.
   Parses external pages and downloaded text/PDF-like documents into normalized artifact text rows with parent Telegram identity. External fetch and document parsing have concurrency and timeout settings, defaulting to 10-minute timeouts.
 - FTS index: `pur-leads analyze telegram-fts`.
-  Indexes message text and artifact chunks in SQLite FTS5.
+  Writes prepared message/document rows into PostgreSQL
+  `telegram_prepared_documents`. On Postgres the table has a generated
+  `search_vector` and GIN index; local tests can still use a database text
+  fallback.
 - Chroma index: `pur-leads analyze telegram-chroma`.
   Builds a local persistent Chroma index over messages and artifact chunks. `rubert_tiny2_v1` is the intended Russian embedding profile when optional embedding dependencies are installed; `local_hashing_v1` is available as deterministic local fallback.
 - Unified search: `pur-leads search telegram`.
@@ -163,7 +166,9 @@ Catalog and examples:
 
 Lead candidate research:
 
-- `pur-leads analyze telegram-lead-candidates` scans prepared FTS indexes and writes review-only lead candidates. It does not create operational leads or notifications.
+- `pur-leads analyze telegram-lead-candidates` scans prepared PostgreSQL search
+  rows and writes review-only lead candidates. It does not create operational
+  leads or notifications.
 - `pur-leads analyze telegram-lead-candidate-llm` runs review-only LLM arbitration over candidates and writes full prompt/response traces to artifacts. It does not mutate CRM leads.
 
 AI/resource layer:
@@ -238,7 +243,9 @@ Observability and operations:
 - Stage 5.1 rule-based entity ranking was added to clean and prioritize noisy POS entities before LLM.
 - Stage 5.2 canonical entity enrichment was added with persistent registry context between LLM calls, preventing independent requests from inventing duplicate canonical names silently.
 - Review-only lead candidate discovery and LLM arbitration were added to inspect lead quality without creating live leads.
-- Artifact visibility UI was added so raw exports, Parquet, SQLite FTS, Chroma internals, JSON traces, and summaries can be inspected from the web UI.
+- Artifact visibility UI was added so raw exports, Parquet, PostgreSQL search
+  summaries, Chroma internals, JSON traces, and summaries can be inspected from
+  the web UI.
 - Resource/capacity planning was broadened to provider accounts, model profiles, Telegram userbots, ordinary bots, parser/fetch pools, worker concurrency, and idle validation.
 
 ## Documentation Map

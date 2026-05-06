@@ -13,7 +13,8 @@ Purpose:
 
 - show every generated pipeline file that can explain what happened during ingest, parsing, indexing, candidate discovery, and LLM arbitration;
 - make raw files and derived artifacts inspectable from the product UI instead of requiring SSH;
-- preserve auditability for prompts, model responses, Parquet outputs, SQLite search indexes, Chroma files, and raw Telegram exports.
+- preserve auditability for prompts, model responses, Parquet outputs,
+  PostgreSQL search summaries, Chroma files, and raw Telegram exports.
 
 Access:
 
@@ -106,8 +107,8 @@ Current production server:
 - Docker Compose service: `web`;
 - container name: `oleg-telegram-leads-web-1`;
 - target production database: Postgres through `PUR_DATABASE_URL`;
-- legacy SQLite database path, while migration is still in progress:
-  `data/pur-leads.sqlite3`.
+- Telegram prepared text/FTS search table:
+  `telegram_prepared_documents`.
 
 The local/dev server `64.188.58.5` is not production.
 

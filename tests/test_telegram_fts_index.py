@@ -1,4 +1,4 @@
-"""SQLite FTS5 index for normalized Telegram text."""
+"""Database-backed FTS index for normalized Telegram text."""
 
 from datetime import UTC, datetime
 
@@ -8,7 +8,10 @@ from pur_leads.db.engine import create_sqlite_engine
 from pur_leads.db.migrations import upgrade_database
 from pur_leads.db.session import create_session_factory
 from pur_leads.integrations.telegram.types import ResolvedTelegramSource, TelegramMessage
-from pur_leads.models.telegram_sources import telegram_raw_export_runs_table
+from pur_leads.models.telegram_sources import (
+    telegram_prepared_documents_table,
+    telegram_raw_export_runs_table,
+)
 from pur_leads.services.telegram_fts_index import TelegramFtsIndexService
 from pur_leads.services.telegram_raw_export import TelegramRawExportService
 from pur_leads.services.telegram_sources import TelegramSourceService
@@ -49,13 +52,14 @@ def test_telegram_fts_index_matches_russian_stemmed_query_and_updates_metadata(t
         service = TelegramFtsIndexService(session, search_root=tmp_path / "search")
         result = service.write_index(export.run_id)
 
-        assert result.search_db_path.exists()
+        assert result.search_table_name == "telegram_prepared_documents"
         assert result.summary_path.exists()
         assert result.metrics["indexed_documents"] == 2
         assert result.metrics["skipped_empty_text_rows"] == 1
+        assert result.metrics["postgres_rows"] == 2
 
         matches = service.query(
-            search_db_path=result.search_db_path,
+            raw_export_run_id=export.run_id,
             query_text="кто отдавал пылесоса",
             limit=5,
         )
@@ -74,8 +78,14 @@ def test_telegram_fts_index_matches_russian_stemmed_query_and_updates_metadata(t
             .one()
         )
         metadata = run["metadata_json"]["fts_index"]
-        assert metadata["search_db_path"] == str(result.search_db_path)
+        assert metadata["search_table_name"] == "telegram_prepared_documents"
         assert metadata["indexed_documents"] == 2
+        assert (
+            session.execute(select(telegram_prepared_documents_table))
+            .mappings()
+            .first()["raw_export_run_id"]
+            == export.run_id
+        )
 
 
 def _message(message_id: int, text: str | None) -> TelegramMessage:

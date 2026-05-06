@@ -16,6 +16,7 @@ from sqlalchemy.orm import Session
 
 from pur_leads.core.time import utc_now
 from pur_leads.models.telegram_sources import telegram_raw_export_runs_table
+from pur_leads.services.telegram_prepared_documents import replace_prepared_documents
 
 STAGE_NAME = "telegram_text_normalization"
 STAGE_VERSION = "1"
@@ -157,7 +158,16 @@ class TelegramTextNormalizationService:
             "total_messages": metrics["total_messages"],
             "rows_with_text": metrics["rows_with_text"],
             "tokenizer_error_rows": metrics["tokenizer_error_rows"],
+            "postgres_table": "telegram_prepared_documents",
         }
+        prepared_rows = pq.read_table(texts_parquet_path).to_pylist()
+        prepared_document_rows = replace_prepared_documents(
+            self.session,
+            prepared_rows,
+            raw_export_run_id=raw_export_run_id,
+            entity_type="telegram_message",
+        )
+        metadata["text_normalization"]["postgres_rows"] = prepared_document_rows
         self.session.execute(
             update(telegram_raw_export_runs_table)
             .where(telegram_raw_export_runs_table.c.id == raw_export_run_id)

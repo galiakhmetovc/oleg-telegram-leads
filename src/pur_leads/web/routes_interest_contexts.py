@@ -10,6 +10,7 @@ import zipfile
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
 from fastapi.encoders import jsonable_encoder
+import pyarrow.parquet as pq
 from pydantic import BaseModel, Field
 from sqlalchemy import desc, func, select
 from sqlalchemy.orm import Session
@@ -37,6 +38,7 @@ from pur_leads.services.interest_core_briefs import (
 from pur_leads.models.telegram_sources import (
     monitored_sources_table,
     source_messages_table,
+    telegram_prepared_documents_table,
     telegram_raw_export_runs_table,
 )
 from pur_leads.services.audit import AuditService
@@ -54,6 +56,7 @@ from pur_leads.services.telegram_desktop_import import (
     DESKTOP_IMPORT_EXPORT_FORMAT,
     TelegramDesktopArchiveImportService,
 )
+from pur_leads.services.telegram_search import TelegramSearchService
 from pur_leads.services.tracing import TraceService
 from pur_leads.services.web_auth import SessionValidationResult
 from pur_leads.web.dependencies import current_admin, get_session
@@ -303,6 +306,148 @@ def get_interest_context_prepare_data_status(
         "job": _row(job) if job else None,
         "progress": _job_progress_from_row(job) if job else _empty_prepare_progress(),
     }
+
+
+@router.get("/{context_id}/prepare-data/texts")
+def list_interest_context_prepared_texts(
+    context_id: str,
+    limit: int = 10,
+    offset: int = 0,
+    _validated: SessionValidationResult = Depends(current_admin),
+    session: Session = Depends(get_session),
+) -> dict[str, Any]:
+    run = _prepared_raw_run(session, context_id, metadata_key="text_normalization")
+    safe_limit = max(1, min(limit, 100))
+    safe_offset = max(0, offset)
+    base = select(telegram_prepared_documents_table).where(
+        telegram_prepared_documents_table.c.raw_export_run_id == run["id"]
+    )
+    total = int(session.execute(select(func.count()).select_from(base.subquery())).scalar_one() or 0)
+    rows = (
+        session.execute(
+            base.order_by(
+                telegram_prepared_documents_table.c.entity_type,
+                telegram_prepared_documents_table.c.telegram_message_id,
+                telegram_prepared_documents_table.c.chunk_index,
+            )
+            .limit(safe_limit)
+            .offset(safe_offset)
+        )
+        .mappings()
+        .all()
+    )
+    return jsonable_encoder(
+        {
+            "raw_export_run": _raw_run_payload(run),
+            "items": [_prepared_text_payload(dict(row)) for row in rows],
+            "summary": _prepared_documents_summary(session, str(run["id"])),
+            "pagination": _pagination(limit=safe_limit, offset=safe_offset, total=total),
+        }
+    )
+
+
+@router.get("/{context_id}/prepare-data/features")
+def list_interest_context_prepared_features(
+    context_id: str,
+    limit: int = 10,
+    offset: int = 0,
+    _validated: SessionValidationResult = Depends(current_admin),
+    session: Session = Depends(get_session),
+) -> dict[str, Any]:
+    run = _prepared_raw_run(session, context_id, metadata_key="feature_enrichment")
+    path = _metadata_path(run, "feature_enrichment", "features_parquet_path")
+    payload = _parquet_page(path, limit=max(1, min(limit, 100)), offset=max(0, offset))
+    return jsonable_encoder(
+        {
+            "raw_export_run": _raw_run_payload(run),
+            "artifact": {"kind": "features_parquet", "path": str(path)},
+            **payload,
+        }
+    )
+
+
+@router.get("/{context_id}/prepare-data/aggregates")
+def get_interest_context_prepared_aggregates(
+    context_id: str,
+    _validated: SessionValidationResult = Depends(current_admin),
+    session: Session = Depends(get_session),
+) -> dict[str, Any]:
+    run = _prepared_raw_run(session, context_id, metadata_key="aggregated_stats")
+    metadata = dict(run.get("metadata_json") or {}).get("aggregated_stats") or {}
+    return jsonable_encoder(
+        {
+            "raw_export_run": _raw_run_payload(run),
+            "summary": _json_file_from_metadata(metadata, "summary_path"),
+            "ngrams": _json_file_from_metadata(metadata, "ngrams_path"),
+            "entity_candidates": _json_file_from_metadata(metadata, "entity_candidates_path"),
+            "urls": _json_file_from_metadata(metadata, "url_summary_path"),
+            "source_quality": _json_file_from_metadata(metadata, "source_quality_path"),
+        }
+    )
+
+
+@router.get("/{context_id}/prepare-data/entities")
+def list_interest_context_prepared_entities(
+    context_id: str,
+    limit: int = 10,
+    offset: int = 0,
+    _validated: SessionValidationResult = Depends(current_admin),
+    session: Session = Depends(get_session),
+) -> dict[str, Any]:
+    run = _prepared_raw_run(session, context_id, metadata_key="entity_ranking")
+    safe_limit = max(1, min(limit, 100))
+    safe_offset = max(0, offset)
+    ranked_path = _metadata_path(run, "entity_ranking", "ranked_entities_parquet_path")
+    ranked = _parquet_page(ranked_path, limit=safe_limit, offset=safe_offset)
+    entity_path = _metadata_path(run, "entity_extraction", "entities_parquet_path")
+    extracted = _parquet_page(entity_path, limit=safe_limit, offset=safe_offset)
+    return jsonable_encoder(
+        {
+            "raw_export_run": _raw_run_payload(run),
+            "ranked_artifact": {"kind": "ranked_entities_parquet", "path": str(ranked_path)},
+            "extracted_artifact": {"kind": "entities_parquet", "path": str(entity_path)},
+            "ranked": ranked,
+            "extracted": extracted,
+        }
+    )
+
+
+@router.get("/{context_id}/prepare-data/search/fts")
+def search_interest_context_prepared_fts(
+    context_id: str,
+    q: str,
+    limit: int = 10,
+    _validated: SessionValidationResult = Depends(current_admin),
+    session: Session = Depends(get_session),
+) -> dict[str, Any]:
+    run = _prepared_raw_run(session, context_id, metadata_key="fts_index")
+    payload = TelegramSearchService(session).query(
+        str(run["id"]),
+        query_text=q,
+        limit=max(1, min(limit, 50)),
+        include_fts=True,
+        include_chroma=False,
+    )
+    return jsonable_encoder({"raw_export_run": _raw_run_payload(run), **payload})
+
+
+@router.get("/{context_id}/prepare-data/search/chroma")
+def search_interest_context_prepared_chroma(
+    context_id: str,
+    q: str,
+    limit: int = 10,
+    _validated: SessionValidationResult = Depends(current_admin),
+    session: Session = Depends(get_session),
+) -> dict[str, Any]:
+    run = _prepared_raw_run(session, context_id, metadata_key="chroma_index")
+    payload = TelegramSearchService(session).query(
+        str(run["id"]),
+        query_text=q,
+        limit=max(1, min(limit, 50)),
+        include_fts=False,
+        include_chroma=True,
+    )
+    return jsonable_encoder({"raw_export_run": _raw_run_payload(run), **payload})
 
 
 @router.post("/{context_id}/telegram-source")
@@ -1226,6 +1371,141 @@ def _detail_payload(detail: InterestContextDetail) -> dict[str, Any]:
             ],
         }
     )
+
+
+def _prepared_raw_run(
+    session: Session,
+    context_id: str,
+    *,
+    metadata_key: str,
+) -> dict[str, Any]:
+    context = InterestContextService(session).repository.get(context_id)
+    if context is None:
+        raise HTTPException(status_code=404, detail="Interest context not found")
+    source_ids = [
+        str(row["id"])
+        for row in session.execute(
+            select(monitored_sources_table.c.id).where(
+                monitored_sources_table.c.interest_context_id == context.id
+            )
+        )
+        .mappings()
+        .all()
+    ]
+    for row in _raw_runs_for_sources(session, source_ids):
+        if row.get("status") != "succeeded":
+            continue
+        metadata = row.get("metadata_json") if isinstance(row.get("metadata_json"), dict) else {}
+        if isinstance(metadata.get(metadata_key), dict):
+            return row
+    raise HTTPException(
+        status_code=400,
+        detail=f"Артефакт {metadata_key} еще не готов для выбранного контекста",
+    )
+
+
+def _prepared_documents_summary(session: Session, raw_export_run_id: str) -> dict[str, Any]:
+    rows = (
+        session.execute(
+            select(
+                telegram_prepared_documents_table.c.entity_type,
+                func.count(telegram_prepared_documents_table.c.id).label("count"),
+                func.sum(telegram_prepared_documents_table.c.token_count).label("tokens"),
+            )
+            .where(telegram_prepared_documents_table.c.raw_export_run_id == raw_export_run_id)
+            .group_by(telegram_prepared_documents_table.c.entity_type)
+        )
+        .mappings()
+        .all()
+    )
+    return {
+        "total_rows": sum(int(row["count"] or 0) for row in rows),
+        "total_tokens": sum(int(row["tokens"] or 0) for row in rows),
+        "by_entity_type": {
+            str(row["entity_type"]): {
+                "rows": int(row["count"] or 0),
+                "tokens": int(row["tokens"] or 0),
+            }
+            for row in rows
+        },
+        "storage": "postgresql" if session.get_bind().dialect.name == "postgresql" else "database",
+    }
+
+
+def _prepared_text_payload(row: dict[str, Any]) -> dict[str, Any]:
+    return {
+        **row,
+        "tokens": row.get("tokens_json") or [],
+        "lemmas": row.get("lemmas_json") or [],
+        "pos_tags": row.get("pos_tags_json") or [],
+        "token_map": row.get("token_map_json") or [],
+    }
+
+
+def _metadata_path(run: dict[str, Any], stage_key: str, path_key: str) -> Path:
+    metadata = run.get("metadata_json") if isinstance(run.get("metadata_json"), dict) else {}
+    block = metadata.get(stage_key)
+    if not isinstance(block, dict) or not block.get(path_key):
+        raise HTTPException(
+            status_code=400,
+            detail=f"В metadata нет {stage_key}.{path_key}",
+        )
+    path = Path(str(block[path_key]))
+    return path if path.is_absolute() else Path(".") / path
+
+
+def _json_file_from_metadata(metadata: dict[str, Any], key: str) -> dict[str, Any]:
+    path_raw = metadata.get(key)
+    if not path_raw:
+        return {}
+    path = Path(str(path_raw))
+    if not path.is_absolute():
+        path = Path(".") / path
+    if not path.exists():
+        return {"missing": True, "path": str(path)}
+    parsed = json.loads(path.read_text(encoding="utf-8"))
+    return parsed if isinstance(parsed, dict) else {"items": parsed}
+
+
+def _parquet_page(path: Path, *, limit: int, offset: int) -> dict[str, Any]:
+    if not path.exists():
+        raise HTTPException(status_code=400, detail=f"Файл не найден: {path}")
+    table = pq.read_table(path)
+    total = table.num_rows
+    rows = table.slice(offset, limit).to_pylist()
+    return {
+        "items": [_json_columns(row) for row in rows],
+        "pagination": _pagination(limit=limit, offset=offset, total=total),
+        "columns": table.column_names,
+    }
+
+
+def _json_columns(row: dict[str, Any]) -> dict[str, Any]:
+    result = dict(row)
+    for key in list(result):
+        if key.endswith("_json"):
+            result[key[:-5]] = _json_any(result[key])
+    return result
+
+
+def _json_any(value: Any) -> Any:
+    if value is None or value == "":
+        return value
+    if isinstance(value, (dict, list)):
+        return value
+    try:
+        return json.loads(str(value))
+    except json.JSONDecodeError:
+        return value
+
+
+def _pagination(*, limit: int, offset: int, total: int) -> dict[str, Any]:
+    return {
+        "limit": limit,
+        "offset": offset,
+        "total": total,
+        "has_more": offset + limit < total,
+    }
 
 
 def _raw_runs_for_sources(session: Session, source_ids: list[str]) -> list[dict[str, Any]]:

@@ -23,7 +23,6 @@ Postgres becomes the product source of truth for:
 SQLite remains allowed only for:
 
 - local developer/test fallback while migration is in progress;
-- generated artifact databases such as per-run FTS5 search indexes;
 - Chroma internal files when Chroma runs embedded;
 - reading historical backups until migration cleanup is complete.
 
@@ -140,8 +139,8 @@ Immediate work:
 Legacy cleanup:
 
 - rename SQLite-specific settings and UI labels to database-neutral names;
-- keep artifact SQLite preview support because FTS/Chroma artifacts still use
-  SQLite files;
+- keep artifact SQLite preview support only for historical artifacts and Chroma
+  embedded internals; Telegram FTS/search documents belong in Postgres;
 - replace `backup_sqlite_enabled` with a Postgres-aware backup policy;
 - remove production reliance on `data/pur-leads.sqlite3`;
 - audit migrations for dialect-specific SQL before enabling Postgres in prod.
@@ -169,6 +168,10 @@ Implemented:
     backup manifests.
   - The old `/api/operations/backups/sqlite` route remains only as a compatibility
     alias while UI/test callers migrate.
+- Telegram Stage 2 prepared message/document rows and FTS search moved to
+  Postgres table `telegram_prepared_documents`. On Postgres this table owns a
+  generated `search_vector` column and GIN index; parquet remains an auditable
+  export/rebuild artifact, not the operational search database.
 
 Still pending:
 
@@ -188,5 +191,5 @@ Still pending:
   Postgres.
 - Production docs no longer instruct operators to treat SQLite as the product
   database.
-- SQLite remains supported only for tests/local fallback and generated
-  analytics artifacts.
+- SQLite remains supported only for tests/local fallback, historical backups,
+  and embedded third-party files such as Chroma internals.

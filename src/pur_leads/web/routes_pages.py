@@ -208,7 +208,7 @@ def help_page(
                       <li><strong>Контекст</strong><span>Создайте или выберите отдельное ядро интересов. Все следующие данные привязываются к нему.</span></li>
                       <li><strong>Архив источника</strong><span>Загрузите ZIP Telegram Desktop с каналом или чатом, который описывает интересы пользователя.</span></li>
                       <li><strong>Проверка raw</strong><span>Проверьте, сколько сообщений, вложений и parquet/raw-файлов создалось.</span></li>
-                      <li><strong>Подготовка</strong><span>Запустите нормализацию, локальный индекс, извлечение сущностей, очистку и ранжирование.</span></li>
+                      <li><strong>Подготовка</strong><span>Запустите нормализацию, PostgreSQL FTS, Chroma, извлечение сущностей, очистку и ранжирование.</span></li>
                       <li><strong>LLM</strong><span>Подключите провайдера, URL, token и модель для LLM-этапов.</span></li>
                       <li><strong>Бриф</strong><span>Сформируйте или вручную задайте контекст: чем занимается пользователь и что считать интересом.</span></li>
                       <li><strong>Сборка ядра</strong><span>Создайте rule-based черновик кандидатов без LLM.</span></li>
@@ -228,7 +228,7 @@ def help_page(
                     <dl class="help-dl">
                       <div><dt>Raw export run</dt><dd>Одна выгрузка Telegram: JSON/JSONL/parquet, вложения, metadata и счетчики.</dd></div>
                       <div><dt>texts.parquet</dt><dd>Stage 2: raw text, clean text, tokens, lemmas, POS tags. Используется для поиска по нормализованным словам.</dd></div>
-                      <div><dt>FTS/Chroma index</dt><dd>Локальные индексы для полнотекстового и семантического поиска. Сейчас основной путь в продукте использует локальные подготовленные данные.</dd></div>
+                      <div><dt>FTS/Chroma index</dt><dd>FTS хранится в PostgreSQL `telegram_prepared_documents`, Chroma остается отдельным семантическим индексом для похожих по смыслу сообщений.</dd></div>
                       <div><dt>Draft candidates</dt><dd>Rule-based кандидаты ядра интересов до LLM и ручного подтверждения.</dd></div>
                       <div><dt>LLM recommendations</dt><dd>Рекомендации модели: улучшить, добавить, отклонить, объединить.</dd></div>
                       <div><dt>Core items</dt><dd>Утвержденные элементы рабочего ядра.</dd></div>
@@ -369,6 +369,66 @@ def interest_context_prepare_page(
     return HTMLResponse(_interest_context_step_page("prepare"))
 
 
+@router.get("/interest-contexts/prepare/texts", response_class=HTMLResponse)
+def interest_context_prepare_texts_page(
+    request: Request,
+    auth_service: WebAuthService = Depends(get_auth_service),
+) -> Response:
+    if not _has_page_session(request, auth_service):
+        return RedirectResponse("/login", status_code=303)
+    return HTMLResponse(_interest_context_step_page("prepare_texts"))
+
+
+@router.get("/interest-contexts/prepare/search-fts", response_class=HTMLResponse)
+def interest_context_prepare_search_fts_page(
+    request: Request,
+    auth_service: WebAuthService = Depends(get_auth_service),
+) -> Response:
+    if not _has_page_session(request, auth_service):
+        return RedirectResponse("/login", status_code=303)
+    return HTMLResponse(_interest_context_step_page("prepare_search_fts"))
+
+
+@router.get("/interest-contexts/prepare/search-chroma", response_class=HTMLResponse)
+def interest_context_prepare_search_chroma_page(
+    request: Request,
+    auth_service: WebAuthService = Depends(get_auth_service),
+) -> Response:
+    if not _has_page_session(request, auth_service):
+        return RedirectResponse("/login", status_code=303)
+    return HTMLResponse(_interest_context_step_page("prepare_search_chroma"))
+
+
+@router.get("/interest-contexts/prepare/features", response_class=HTMLResponse)
+def interest_context_prepare_features_page(
+    request: Request,
+    auth_service: WebAuthService = Depends(get_auth_service),
+) -> Response:
+    if not _has_page_session(request, auth_service):
+        return RedirectResponse("/login", status_code=303)
+    return HTMLResponse(_interest_context_step_page("prepare_features"))
+
+
+@router.get("/interest-contexts/prepare/aggregates", response_class=HTMLResponse)
+def interest_context_prepare_aggregates_page(
+    request: Request,
+    auth_service: WebAuthService = Depends(get_auth_service),
+) -> Response:
+    if not _has_page_session(request, auth_service):
+        return RedirectResponse("/login", status_code=303)
+    return HTMLResponse(_interest_context_step_page("prepare_aggregates"))
+
+
+@router.get("/interest-contexts/prepare/entities", response_class=HTMLResponse)
+def interest_context_prepare_entities_page(
+    request: Request,
+    auth_service: WebAuthService = Depends(get_auth_service),
+) -> Response:
+    if not _has_page_session(request, auth_service):
+        return RedirectResponse("/login", status_code=303)
+    return HTMLResponse(_interest_context_step_page("prepare_entities"))
+
+
 @router.get("/interest-contexts/core", response_class=HTMLResponse)
 def interest_context_core_page(
     request: Request,
@@ -494,6 +554,12 @@ _INTEREST_CONTEXT_STEPS = (
     ("load_archive", "/interest-contexts/source-archive", "Архив источника"),
     ("check", "/interest-contexts/check", "Проверка raw"),
     ("prepare", "/interest-contexts/prepare", "Подготовка"),
+    ("prepare_texts", "/interest-contexts/prepare/texts", "Stage 2"),
+    ("prepare_search_fts", "/interest-contexts/prepare/search-fts", "FTS"),
+    ("prepare_search_chroma", "/interest-contexts/prepare/search-chroma", "Chroma"),
+    ("prepare_features", "/interest-contexts/prepare/features", "Stage 3"),
+    ("prepare_aggregates", "/interest-contexts/prepare/aggregates", "Stage 4"),
+    ("prepare_entities", "/interest-contexts/prepare/entities", "Stage 5"),
     ("llm", "/interest-contexts/llm", "LLM"),
     ("brief", "/interest-contexts/brief", "Бриф"),
     ("core", "/interest-contexts/core", "Сборка ядра"),
@@ -516,6 +582,12 @@ def _interest_context_step_page(step: str) -> str:
         "load_link": "Telegram-ссылка источника",
         "check": "Проверка raw-данных",
         "prepare": "Подготовка данных",
+        "prepare_texts": "Stage 2: нормализованные тексты",
+        "prepare_search_fts": "Поиск FTS",
+        "prepare_search_chroma": "Поиск Chroma",
+        "prepare_features": "Stage 3: признаки",
+        "prepare_aggregates": "Stage 4: агрегаты",
+        "prepare_entities": "Stage 5: сущности",
         "llm": "LLM-провайдер",
         "brief": "Бриф ядра интересов",
         "core": "Сборка ядра",
@@ -535,6 +607,12 @@ def _interest_context_step_page(step: str) -> str:
         "load_link": "Добавьте Telegram-канал или чат по ссылке. Система поставит raw-выгрузку в очередь.",
         "check": "Проверьте, что raw/parquet, вложения и рабочая таблица собраны корректно.",
         "prepare": "Запустите нормализацию, локальный индекс, извлечение и ранжирование кандидатов.",
+        "prepare_texts": "Проверьте, что именно получилось после нормализации: raw_text, clean_text, tokens, lemmas, POS и token-map.",
+        "prepare_search_fts": "Проверьте точный полнотекстовый поиск по нормализованному тексту и леммам.",
+        "prepare_search_chroma": "Проверьте семантический поиск по Chroma-индексу выбранного raw-run.",
+        "prepare_features": "Проверьте детерминированные признаки сообщений и текстов вложений: вопрос, ссылки, контакты, score языка.",
+        "prepare_aggregates": "Проверьте агрегаты: n-граммы, частотные термины, URL, качество источника и счетчики.",
+        "prepare_entities": "Проверьте извлеченные POS-сущности и результат очистки/ранжирования.",
         "llm": "Подключите провайдера и модель. Это отдельный ресурс для LLM-этапов.",
         "brief": "Сформируйте или отредактируйте объяснимый контекст для модели.",
         "core": "Сформируйте rule-based черновик ядра. Этот экран не показывает длинные списки.",
@@ -626,6 +704,12 @@ def _interest_context_step_body(step: str) -> str:
         "load_link": _interest_context_link_body,
         "check": _interest_context_check_body,
         "prepare": _interest_context_prepare_body,
+        "prepare_texts": _interest_context_prepare_texts_body,
+        "prepare_search_fts": _interest_context_prepare_search_fts_body,
+        "prepare_search_chroma": _interest_context_prepare_search_chroma_body,
+        "prepare_features": _interest_context_prepare_features_body,
+        "prepare_aggregates": _interest_context_prepare_aggregates_body,
+        "prepare_entities": _interest_context_prepare_entities_body,
         "core": _interest_context_core_body,
         "candidates": _interest_context_candidates_body,
         "reviews": _interest_context_reviews_body,
@@ -867,10 +951,188 @@ def _interest_context_prepare_body() -> str:
                   </section>
                   <section class="detail-section">
                     <div class="section-head">
+                      <h3>Результаты подготовки</h3>
+                      <a class="interest-next-link" href="/interest-contexts/prepare/texts">Открыть Stage 2</a>
+                    </div>
+                    <div class="table-list">
+                      <a class="table-row linked-row" href="/interest-contexts/prepare/texts">
+                        <div>
+                          <strong>Stage 2: нормализованные тексты</strong>
+                          <p class="muted">raw_text, clean_text, tokens, lemmas, POS и token-map из PostgreSQL.</p>
+                        </div>
+                        <span>Открыть</span>
+                      </a>
+                      <a class="table-row linked-row" href="/interest-contexts/prepare/search-fts">
+                        <div>
+                          <strong>FTS поиск</strong>
+                          <p class="muted">Полнотекстовый поиск по PostgreSQL prepared documents.</p>
+                        </div>
+                        <span>Открыть</span>
+                      </a>
+                      <a class="table-row linked-row" href="/interest-contexts/prepare/search-chroma">
+                        <div>
+                          <strong>Chroma поиск</strong>
+                          <p class="muted">Семантический поиск по Chroma-индексу raw-run.</p>
+                        </div>
+                        <span>Открыть</span>
+                      </a>
+                      <a class="table-row linked-row" href="/interest-contexts/prepare/features">
+                        <div>
+                          <strong>Stage 3: признаки</strong>
+                          <p class="muted">Вопросы, ссылки, контакты, цены, технический score.</p>
+                        </div>
+                        <span>Открыть</span>
+                      </a>
+                      <a class="table-row linked-row" href="/interest-contexts/prepare/aggregates">
+                        <div>
+                          <strong>Stage 4: агрегаты</strong>
+                          <p class="muted">N-граммы, URL, качество источника и счетчики.</p>
+                        </div>
+                        <span>Открыть</span>
+                      </a>
+                      <a class="table-row linked-row" href="/interest-contexts/prepare/entities">
+                        <div>
+                          <strong>Stage 5: сущности</strong>
+                          <p class="muted">POS-кандидаты, очистка, ранжирование и причины score.</p>
+                        </div>
+                        <span>Открыть</span>
+                      </a>
+                    </div>
+                  </section>
+                  <section class="detail-section">
+                    <div class="section-head">
                       <h3>Источники для подготовки</h3>
                       <a class="interest-next-link" href="/interest-contexts/core">Дальше: формирование ядра</a>
                     </div>
                     <div id="interest-context-source-list" class="resource-list" aria-live="polite"></div>
+                  </section>
+    """
+
+
+def _interest_context_prepare_texts_body() -> str:
+    return """
+                  <section class="detail-section">
+                    <div class="section-head">
+                      <div>
+                        <h3>Stage 2: нормализованные тексты</h3>
+                        <p class="muted">Один артефакт: подготовленные документы в PostgreSQL. Показываем 10 строк на страницу.</p>
+                      </div>
+                      <md-outlined-button id="interest-context-prep-texts-refresh" type="button">
+                        <md-icon slot="icon">refresh</md-icon>
+                        Обновить
+                      </md-outlined-button>
+                    </div>
+                    <div class="explain-box">
+                      <strong>Что здесь проверять</strong>
+                      <ul>
+                        <li>raw_text - исходный текст сообщения или текстового чанка документа.</li>
+                        <li>clean_text - очищенный текст для поиска, без изменения смысла.</li>
+                        <li>tokens, lemmas, POS и token-map - то, чем дальше пользуются поиск, признаки и сущности.</li>
+                      </ul>
+                    </div>
+                    <div id="interest-context-prep-texts" class="draft-review-panel" aria-live="polite"></div>
+                  </section>
+    """
+
+
+def _interest_context_prepare_search_fts_body() -> str:
+    return """
+                  <section class="detail-section">
+                    <div class="section-head">
+                      <div>
+                        <h3>FTS поиск</h3>
+                        <p class="muted">Ищет по PostgreSQL `telegram_prepared_documents`: clean_text + lemmas_text.</p>
+                      </div>
+                    </div>
+                    <form id="interest-context-prep-fts-form" class="material-form interest-source-form">
+                      <md-outlined-text-field name="q" label="Запрос" required
+                        placeholder="домофон камера dahua">
+                      </md-outlined-text-field>
+                      <md-filled-button type="submit">
+                        <md-icon slot="icon">search</md-icon>
+                        Искать в FTS
+                      </md-filled-button>
+                    </form>
+                    <p class="muted form-help">FTS нужен для объяснимого поиска по словам и леммам. Он не заменяет Chroma, а дополняет ее.</p>
+                    <div id="interest-context-prep-fts-results" class="draft-review-panel" aria-live="polite"></div>
+                  </section>
+    """
+
+
+def _interest_context_prepare_search_chroma_body() -> str:
+    return """
+                  <section class="detail-section">
+                    <div class="section-head">
+                      <div>
+                        <h3>Chroma поиск</h3>
+                        <p class="muted">Ищет семантически по Chroma-индексу выбранного raw-run.</p>
+                      </div>
+                    </div>
+                    <form id="interest-context-prep-chroma-form" class="material-form interest-source-form">
+                      <md-outlined-text-field name="q" label="Запрос" required
+                        placeholder="человек ищет домофон или камеру">
+                      </md-outlined-text-field>
+                      <md-filled-button type="submit">
+                        <md-icon slot="icon">hub</md-icon>
+                        Искать в Chroma
+                      </md-filled-button>
+                    </form>
+                    <p class="muted form-help">Chroma нужен для похожих по смыслу сообщений, когда точных слов может не быть.</p>
+                    <div id="interest-context-prep-chroma-results" class="draft-review-panel" aria-live="polite"></div>
+                  </section>
+    """
+
+
+def _interest_context_prepare_features_body() -> str:
+    return """
+                  <section class="detail-section">
+                    <div class="section-head">
+                      <div>
+                        <h3>Stage 3: признаки</h3>
+                        <p class="muted">Постранично показывает признаки, которые добавлены к сообщениям и документам.</p>
+                      </div>
+                      <md-outlined-button id="interest-context-prep-features-refresh" type="button">
+                        <md-icon slot="icon">refresh</md-icon>
+                        Обновить
+                      </md-outlined-button>
+                    </div>
+                    <div id="interest-context-prep-features" class="draft-review-panel" aria-live="polite"></div>
+                  </section>
+    """
+
+
+def _interest_context_prepare_aggregates_body() -> str:
+    return """
+                  <section class="detail-section">
+                    <div class="section-head">
+                      <div>
+                        <h3>Stage 4: агрегаты</h3>
+                        <p class="muted">Один экран для summary, n-грамм, URL и качества источника.</p>
+                      </div>
+                      <md-outlined-button id="interest-context-prep-aggregates-refresh" type="button">
+                        <md-icon slot="icon">refresh</md-icon>
+                        Обновить
+                      </md-outlined-button>
+                    </div>
+                    <div id="interest-context-prep-aggregates" class="draft-review-panel" aria-live="polite"></div>
+                  </section>
+    """
+
+
+def _interest_context_prepare_entities_body() -> str:
+    return """
+                  <section class="detail-section">
+                    <div class="section-head">
+                      <div>
+                        <h3>Stage 5: сущности и ранжирование</h3>
+                        <p class="muted">Показывает извлеченные POS-сущности и результат rule-based ranking.</p>
+                      </div>
+                      <md-outlined-button id="interest-context-prep-entities-refresh" type="button">
+                        <md-icon slot="icon">refresh</md-icon>
+                        Обновить
+                      </md-outlined-button>
+                    </div>
+                    <div id="interest-context-prep-entities" class="draft-review-panel" aria-live="polite"></div>
                   </section>
     """
 
@@ -1439,6 +1701,12 @@ def _interest_context_stage_hint(step: str) -> str:
         "load_link": "канал или чат по ссылке",
         "check": "raw/parquet, вложения, примеры",
         "prepare": "нормализация, индекс, сущности",
+        "prepare_texts": "raw/clean/tokens/POS",
+        "prepare_search_fts": "PostgreSQL full-text",
+        "prepare_search_chroma": "семантический индекс",
+        "prepare_features": "детерминированные признаки",
+        "prepare_aggregates": "n-граммы и счетчики",
+        "prepare_entities": "POS-сущности и ranking",
         "llm": "провайдер и модель",
         "brief": "контекст для модели",
         "core": "запуск и статус ядра",
@@ -2912,7 +3180,7 @@ def _page(*, page: str, title: str, main: str) -> str:
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans:wght@400;500;600;700&amp;display=swap">
-  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined&amp;icon_names=add,archive,article,auto_fix_high,check_circle,close,database,description,folder,forum,hub,model_training,open_in_new,person,person_add,radio_button_unchecked,refresh,send,settings,smart_toy,storage,table_chart,upload_file,vpn_key&amp;display=block">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined&amp;icon_names=add,archive,article,auto_fix_high,check_circle,close,database,description,folder,forum,hub,model_training,open_in_new,person,person_add,radio_button_unchecked,refresh,search,send,settings,smart_toy,storage,table_chart,upload_file,vpn_key&amp;display=block">
   <link rel="stylesheet" href="/static/app.css">
 </head>
 <body data-page="{page}">

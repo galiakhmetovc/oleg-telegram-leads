@@ -6,7 +6,6 @@ from dataclasses import dataclass
 import json
 from pathlib import Path
 import re
-import sqlite3
 from typing import Any
 
 from sqlalchemy import select
@@ -18,7 +17,10 @@ from pur_leads.integrations.leads.fuzzy_classifier import (
     GENERIC_EQUIPMENT_TERMS,
     NEGATIVE_INTENT_TERMS,
 )
-from pur_leads.models.telegram_sources import telegram_raw_export_runs_table
+from pur_leads.models.telegram_sources import (
+    telegram_prepared_documents_table,
+    telegram_raw_export_runs_table,
+)
 from pur_leads.services.telegram_run_metadata import merge_raw_export_run_metadata
 
 STAGE_NAME = "telegram_lead_candidate_discovery"
@@ -82,7 +84,7 @@ class TelegramLeadCandidateDiscoveryService:
         negative_terms: list[str] | None = None,
     ) -> TelegramLeadCandidateDiscoveryResult:
         run = self._require_run(raw_export_run_id)
-        search_db_path = _fts_path_from_metadata(run)
+        _require_fts_metadata(run)
         output_dir = (
             self.output_root
             / "telegram_lead_candidates"
@@ -95,7 +97,7 @@ class TelegramLeadCandidateDiscoveryService:
         discovered_at = utc_now()
 
         scan = _scan_candidates(
-            search_db_path,
+            self.session,
             raw_export_run_id=raw_export_run_id,
             intent_terms=_normalize_terms(intent_terms or list(BUYING_INTENT_TERMS)),
             topic_terms=_normalize_terms(topic_terms or list(DEFAULT_TOPIC_TERMS)),
@@ -187,7 +189,7 @@ class TelegramLeadCandidateDiscoveryService:
 
 
 def _scan_candidates(
-    search_db_path: Path,
+    session: Session,
     *,
     raw_export_run_id: str,
     intent_terms: list[str],
@@ -201,61 +203,51 @@ def _scan_candidates(
     negative_filtered = 0
     intent_only = 0
     topic_only = 0
-    last_row_id = 0
-    with sqlite3.connect(search_db_path) as connection:
-        connection.row_factory = sqlite3.Row
-        while True:
-            rows = connection.execute(
-                """
-                SELECT
-                    row_id,
-                    raw_export_run_id,
-                    monitored_source_id,
-                    telegram_message_id,
-                    row_index,
-                    reply_to_message_id,
-                    thread_id,
-                    thread_key,
-                    date,
-                    message_url,
-                    clean_text,
-                    lemmas_text,
-                    token_count
-                FROM messages
-                WHERE entity_type = 'telegram_message' AND row_id > ?
-                ORDER BY row_id
-                LIMIT ?
-                """,
-                (last_row_id, batch_size),
-            ).fetchall()
-            if not rows:
-                break
-            for row in rows:
-                scanned += 1
-                last_row_id = int(row["row_id"])
-                candidate = _candidate_from_row(
-                    row,
-                    raw_export_run_id=raw_export_run_id,
-                    intent_terms=intent_terms,
-                    topic_terms=topic_terms,
-                    negative_terms=negative_terms,
-                    min_score=min_score,
+    offset = 0
+    while True:
+        rows = (
+            session.execute(
+                select(telegram_prepared_documents_table)
+                .where(telegram_prepared_documents_table.c.raw_export_run_id == raw_export_run_id)
+                .where(telegram_prepared_documents_table.c.entity_type == "telegram_message")
+                .order_by(
+                    telegram_prepared_documents_table.c.telegram_message_id,
+                    telegram_prepared_documents_table.c.row_index,
                 )
-                if candidate is None:
-                    clean_text = str(row["clean_text"] or "")
-                    lemmas_text = str(row["lemmas_text"] or "")
-                    terms = _row_terms(clean_text, lemmas_text)
-                    intents = _matched_terms(clean_text, terms, intent_terms)
-                    topics = _matched_terms(clean_text, terms, topic_terms)
-                    negatives = _matched_terms(clean_text, terms, negative_terms)
-                    if intents and negatives:
-                        negative_filtered += 1
-                    elif intents and not topics:
-                        intent_only += 1
-                    elif topics and not intents:
-                        topic_only += 1
-                    continue
-                candidates.append(candidate)
+                .limit(batch_size)
+                .offset(offset)
+            )
+            .mappings()
+            .all()
+        )
+        if not rows:
+            break
+        offset += len(rows)
+        for row in rows:
+            scanned += 1
+            candidate = _candidate_from_row(
+                row,
+                raw_export_run_id=raw_export_run_id,
+                intent_terms=intent_terms,
+                topic_terms=topic_terms,
+                negative_terms=negative_terms,
+                min_score=min_score,
+            )
+            if candidate is None:
+                clean_text = str(row["clean_text"] or "")
+                lemmas_text = str(row["lemmas_text"] or "")
+                terms = _row_terms(clean_text, lemmas_text)
+                intents = _matched_terms(clean_text, terms, intent_terms)
+                topics = _matched_terms(clean_text, terms, topic_terms)
+                negatives = _matched_terms(clean_text, terms, negative_terms)
+                if intents and negatives:
+                    negative_filtered += 1
+                elif intents and not topics:
+                    intent_only += 1
+                elif topics and not intents:
+                    topic_only += 1
+                continue
+            candidates.append(candidate)
     return {
         "candidates": candidates,
         "scanned_documents": scanned,
@@ -266,7 +258,7 @@ def _scan_candidates(
 
 
 def _candidate_from_row(
-    row: sqlite3.Row,
+    row: Any,
     *,
     raw_export_run_id: str,
     intent_terms: list[str],
@@ -356,13 +348,10 @@ def _normalize_terms(terms: list[str]) -> list[str]:
     return result
 
 
-def _fts_path_from_metadata(run: dict[str, Any]) -> Path:
+def _require_fts_metadata(run: dict[str, Any]) -> None:
     metadata = dict(run["metadata_json"] or {})
     fts_index = metadata.get("fts_index")
     if not isinstance(fts_index, dict):
         raise ValueError("lead candidate discovery requires Stage FTS metadata")
-    path_value = fts_index.get("search_db_path")
-    if not path_value:
-        raise ValueError("lead candidate discovery requires fts_index.search_db_path")
-    path = Path(str(path_value))
-    return path if path.is_absolute() else Path(".") / path
+    if fts_index.get("search_table_name") != "telegram_prepared_documents":
+        raise ValueError("lead candidate discovery requires PostgreSQL prepared documents")

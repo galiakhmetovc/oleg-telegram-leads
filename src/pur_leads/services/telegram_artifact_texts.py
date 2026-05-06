@@ -28,6 +28,7 @@ from pur_leads.services.telegram_desktop_import import (
     _desktop_media_path,
     _safe_media_relative_path,
 )
+from pur_leads.services.telegram_prepared_documents import replace_prepared_documents
 from pur_leads.services.telegram_run_metadata import merge_raw_export_run_metadata
 from pur_leads.services.telegram_text_normalization import TelegramTextNormalizationService
 
@@ -173,6 +174,13 @@ class TelegramArtifactTextExtractionService:
                 "total_rows": metrics["total_rows"],
                 "extracted_rows": metrics["extracted_rows"],
                 "rows_with_text": metrics["rows_with_text"],
+                "postgres_table": "telegram_prepared_documents",
+                "postgres_rows": replace_prepared_documents(
+                    self.session,
+                    artifact_rows,
+                    raw_export_run_id=raw_export_run_id,
+                    entity_type="telegram_artifact",
+                ),
             },
         )
         self.session.commit()
