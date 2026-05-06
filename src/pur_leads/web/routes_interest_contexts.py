@@ -13,12 +13,16 @@ import zipfile
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
 from fastapi.encoders import jsonable_encoder
 from pydantic import BaseModel, Field
-from sqlalchemy import desc, func, select
+from sqlalchemy import desc, func, select, update
 from sqlalchemy.orm import Session
 
 from pur_leads.core.time import utc_now
 from pur_leads.core.tracing import current_trace_json
-from pur_leads.models.interest_context_drafts import interest_intent_analysis_matches_table
+from pur_leads.models.interest_context_drafts import (
+    interest_intent_analysis_matches_table,
+    interest_intent_layers_table,
+)
+from pur_leads.models.leads import feedback_events_table
 from pur_leads.models.scheduler import scheduler_jobs_table
 from pur_leads.services.interest_context_drafts import (
     BUILD_INTEREST_CONTEXT_DRAFT_JOB,
@@ -168,6 +172,10 @@ class InterestIntentLayerUpdateRequest(BaseModel):
 
 class InterestIntentLayerRunRequest(BaseModel):
     broad_analysis_run_id: str = Field(min_length=1)
+
+
+class InterestIntentExclusionApplyRequest(BaseModel):
+    term: str = Field(min_length=1, max_length=200)
 
 
 @router.get("")
@@ -1135,6 +1143,105 @@ def preview_interest_intent_exclusion(
     )
 
 
+@router.get("/{context_id}/intent-exclusions")
+def list_interest_intent_exclusions(
+    context_id: str,
+    limit: int = 10,
+    offset: int = 0,
+    _validated: SessionValidationResult = Depends(current_admin),
+    session: Session = Depends(get_session),
+) -> dict[str, Any]:
+    context = InterestContextService(session).repository.get(context_id)
+    if context is None:
+        raise HTTPException(status_code=404, detail="Interest context not found")
+    return jsonable_encoder(
+        _intent_exclusion_queue_payload(
+            session,
+            context_id=context.id,
+            limit=max(1, min(limit, 100)),
+            offset=max(0, offset),
+        )
+    )
+
+
+@router.post("/{context_id}/intent-exclusions/{feedback_id}/apply")
+def apply_interest_intent_exclusion(
+    context_id: str,
+    feedback_id: str,
+    payload: InterestIntentExclusionApplyRequest,
+    validated: SessionValidationResult = Depends(current_admin),
+    session: Session = Depends(get_session),
+) -> dict[str, Any]:
+    context = InterestContextService(session).repository.get(context_id)
+    if context is None:
+        raise HTTPException(status_code=404, detail="Interest context not found")
+    row = _intent_exclusion_feedback_row(session, context_id=context.id, feedback_id=feedback_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="Feedback item not found")
+    term = payload.term.strip()
+    layer_row = (
+        session.execute(
+            select(interest_intent_layers_table).where(
+                interest_intent_layers_table.c.id == row["intent_layer_id"]
+            )
+        )
+        .mappings()
+        .first()
+    )
+    if layer_row is None:
+        raise HTTPException(status_code=404, detail="Intent layer not found")
+    exclude_terms = _json_list_any(layer_row["exclude_patterns_json"])
+    if not any(str(item).casefold().strip() == term.casefold() for item in exclude_terms):
+        exclude_terms.append(term)
+    now = utc_now()
+    feedback_metadata = row.get("metadata_json") if isinstance(row.get("metadata_json"), dict) else {}
+    feedback_metadata = {
+        **feedback_metadata,
+        "applied_exclusion": {
+            "term": term,
+            "intent_layer_id": row["intent_layer_id"],
+            "intent_run_id": row["run_id"],
+            "intent_match_id": row["target_id"],
+            "applied_at": now.isoformat(),
+        },
+    }
+    session.execute(
+        update(interest_intent_layers_table)
+        .where(interest_intent_layers_table.c.id == row["intent_layer_id"])
+        .values(exclude_patterns_json=exclude_terms, updated_at=now)
+    )
+    session.execute(
+        update(feedback_events_table)
+        .where(feedback_events_table.c.id == feedback_id)
+        .values(
+            application_status="applied",
+            applied_entity_type="interest_intent_layer",
+            applied_entity_id=row["intent_layer_id"],
+            applied_at=now,
+            metadata_json=feedback_metadata,
+        )
+    )
+    AuditService(session).record_change(
+        actor=_actor(validated),
+        action="interest_intent_exclusion.apply",
+        entity_type="interest_intent_layer",
+        entity_id=str(row["intent_layer_id"]),
+        old_value_json={"exclude_patterns_json": layer_row["exclude_patterns_json"]},
+        new_value_json={"added_exclusion": term, "feedback_id": feedback_id},
+    )
+    session.commit()
+    return jsonable_encoder(
+        {
+            "status": "applied",
+            "feedback_id": feedback_id,
+            "intent_layer_id": row["intent_layer_id"],
+            "term": term,
+            "exclude_patterns": exclude_terms,
+            "next_step": "Перезапустите слой намерений, чтобы получить новый список сообщений.",
+        }
+    )
+
+
 @router.post("/{context_id}/draft")
 def build_interest_context_draft(
     context_id: str,
@@ -1923,6 +2030,198 @@ def _intent_match_row(
 ) -> dict[str, Any] | None:
     rows = _intent_match_rows_for_run(session, context_id=context_id, run_id=run_id, match_id=match_id)
     return rows[0] if rows else None
+
+
+def _intent_exclusion_queue_payload(
+    session: Session,
+    *,
+    context_id: str,
+    limit: int,
+    offset: int,
+) -> dict[str, Any]:
+    total = int(
+        session.execute(
+            select(func.count())
+            .select_from(feedback_events_table)
+            .join(
+                interest_intent_analysis_matches_table,
+                interest_intent_analysis_matches_table.c.id == feedback_events_table.c.target_id,
+            )
+            .where(feedback_events_table.c.target_type == "interest_intent_match")
+            .where(feedback_events_table.c.action == "not_lead")
+            .where(interest_intent_analysis_matches_table.c.context_id == context_id)
+        ).scalar_one()
+        or 0
+    )
+    rows = (
+        session.execute(
+            _intent_exclusion_feedback_select()
+            .where(feedback_events_table.c.target_type == "interest_intent_match")
+            .where(feedback_events_table.c.action == "not_lead")
+            .where(interest_intent_analysis_matches_table.c.context_id == context_id)
+            .order_by(desc(feedback_events_table.c.created_at))
+            .limit(limit)
+            .offset(offset)
+        )
+        .mappings()
+        .all()
+    )
+    items = [
+        _intent_exclusion_feedback_payload(session, dict(row), context_id=context_id) for row in rows
+    ]
+    return {
+        "items": items,
+        "summary": {
+            "total": total,
+            "pending": sum(1 for item in items if item["feedback"]["application_status"] != "applied"),
+            "applied": sum(1 for item in items if item["feedback"]["application_status"] == "applied"),
+        },
+        "pagination": _pagination(limit=limit, offset=offset, total=total),
+    }
+
+
+def _intent_exclusion_feedback_row(
+    session: Session,
+    *,
+    context_id: str,
+    feedback_id: str,
+) -> dict[str, Any] | None:
+    row = (
+        session.execute(
+            _intent_exclusion_feedback_select()
+            .where(feedback_events_table.c.id == feedback_id)
+            .where(feedback_events_table.c.target_type == "interest_intent_match")
+            .where(interest_intent_analysis_matches_table.c.context_id == context_id)
+        )
+        .mappings()
+        .first()
+    )
+    return dict(row) if row is not None else None
+
+
+def _intent_exclusion_feedback_select() -> Any:
+    return (
+        select(
+            feedback_events_table.c.id.label("feedback_id"),
+            feedback_events_table.c.target_id,
+            feedback_events_table.c.action,
+            feedback_events_table.c.reason_code,
+            feedback_events_table.c.feedback_scope,
+            feedback_events_table.c.learning_effect,
+            feedback_events_table.c.application_status,
+            feedback_events_table.c.applied_entity_type,
+            feedback_events_table.c.applied_entity_id,
+            feedback_events_table.c.applied_at,
+            feedback_events_table.c.comment,
+            feedback_events_table.c.created_by,
+            feedback_events_table.c.created_at.label("feedback_created_at"),
+            feedback_events_table.c.metadata_json,
+            interest_intent_analysis_matches_table.c.id.label("match_id"),
+            interest_intent_analysis_matches_table.c.run_id,
+            interest_intent_analysis_matches_table.c.context_id,
+            interest_intent_analysis_matches_table.c.intent_layer_id,
+            interest_intent_analysis_matches_table.c.telegram_message_id,
+            interest_intent_analysis_matches_table.c.message_date,
+            interest_intent_analysis_matches_table.c.sender_id,
+            interest_intent_analysis_matches_table.c.message_text,
+            interest_intent_analysis_matches_table.c.canonical_name,
+            interest_intent_analysis_matches_table.c.category,
+            interest_intent_analysis_matches_table.c.score,
+            interest_intent_analysis_matches_table.c.broad_score,
+            interest_intent_analysis_matches_table.c.evidence_json,
+            monitored_sources_table.c.username.label("_source_username"),
+            monitored_sources_table.c.input_ref.label("_source_input_ref"),
+            monitored_sources_table.c.telegram_id.label("_source_telegram_id"),
+        )
+        .join(
+            interest_intent_analysis_matches_table,
+            interest_intent_analysis_matches_table.c.id == feedback_events_table.c.target_id,
+        )
+        .join(
+            source_messages_table,
+            source_messages_table.c.id == interest_intent_analysis_matches_table.c.source_message_id,
+            isouter=True,
+        )
+        .join(
+            monitored_sources_table,
+            monitored_sources_table.c.id == source_messages_table.c.monitored_source_id,
+            isouter=True,
+        )
+    )
+
+
+def _intent_exclusion_feedback_payload(
+    session: Session,
+    row: dict[str, Any],
+    *,
+    context_id: str,
+) -> dict[str, Any]:
+    suggestions = _intent_exclusion_suggestions(str(row.get("message_text") or ""))
+    metadata = row.get("metadata_json") if isinstance(row.get("metadata_json"), dict) else {}
+    applied_exclusion = (
+        metadata.get("applied_exclusion") if isinstance(metadata.get("applied_exclusion"), dict) else {}
+    )
+    term = str(applied_exclusion.get("term") or (suggestions[0] if suggestions else "")).strip()
+    preview = _intent_exclusion_preview_payload(
+        session,
+        context_id=context_id,
+        run_id=str(row["run_id"]),
+        match_id=str(row["match_id"]),
+        term=term,
+        suggestions=suggestions,
+    )
+    return {
+        "feedback": {
+            "id": row["feedback_id"],
+            "action": row["action"],
+            "reason_code": row["reason_code"],
+            "feedback_scope": row["feedback_scope"],
+            "learning_effect": row["learning_effect"],
+            "application_status": row["application_status"],
+            "applied_entity_type": row["applied_entity_type"],
+            "applied_entity_id": row["applied_entity_id"],
+            "applied_at": row["applied_at"],
+            "comment": row["comment"],
+            "created_by": row["created_by"],
+            "created_at": row["feedback_created_at"],
+        },
+        "match": _intent_preview_payload({**row, "id": row["match_id"]}),
+        "run_id": row["run_id"],
+        "intent_layer_id": row["intent_layer_id"],
+        "category": row["category"],
+        "evidence": row["evidence_json"] if isinstance(row.get("evidence_json"), dict) else {},
+        "suggestions": suggestions,
+        "selected_term": term,
+        "preview": preview,
+    }
+
+
+def _intent_exclusion_preview_payload(
+    session: Session,
+    *,
+    context_id: str,
+    run_id: str,
+    match_id: str,
+    term: str,
+    suggestions: list[str],
+) -> dict[str, Any]:
+    rows = _intent_match_rows_for_run(session, context_id=context_id, run_id=run_id)
+    removed = [row for row in rows if term and _plain_term_hits(term, str(row["message_text"] or ""))]
+    return {
+        "match_id": match_id,
+        "run_id": run_id,
+        "suggestions": suggestions,
+        "term": term,
+        "total_matches": len(rows),
+        "removed_count": len(removed),
+        "remaining_count": max(0, len(rows) - len(removed)),
+        "target_removed": any(str(row["id"]) == match_id for row in removed),
+        "removed_samples": [_intent_preview_payload(row) for row in removed[:10]],
+        "explanation": (
+            "Preview считает, сколько текущих сообщений слоя намерений исчезнет, "
+            "если добавить это исключение в слой. Изменение не применяется без кнопки."
+        ),
+    }
 
 
 def _intent_match_rows_for_run(

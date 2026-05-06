@@ -3760,6 +3760,8 @@ function initInterestContexts() {
     intentMatchesLimit: 10,
     intentMatchesOffset: 0,
     selectedIntentRunId: null,
+    intentExclusionsLimit: 10,
+    intentExclusionsOffset: 0,
     prepTextsLimit: 10,
     prepTextsOffset: 0,
     prepFeaturesLimit: 10,
@@ -3813,6 +3815,12 @@ function initInterestContexts() {
   document
     .querySelector("#interest-intent-matches")
     ?.addEventListener("click", (event) => handleInterestIntentMatchesClick(event, state));
+  document
+    .querySelector("#interest-intent-exclusions-refresh")
+    ?.addEventListener("click", () => loadInterestIntentExclusions(state));
+  document
+    .querySelector("#interest-intent-exclusions")
+    ?.addEventListener("click", (event) => handleInterestIntentExclusionsClick(event, state));
   document
     .querySelector("#interest-context-build-draft")
     ?.addEventListener("click", () => buildInterestContextDraft(state));
@@ -4017,6 +4025,10 @@ async function loadInterestContextDetail(contextId, state) {
     if (state.selectedIntentRunId) {
       await loadInterestIntentMatches(state, state.selectedIntentRunId);
     }
+  }
+  if (state.step === "intent_exclusions") {
+    state.intentExclusionsOffset = 0;
+    await loadInterestIntentExclusions(state);
   }
   if (state.step === "brief") {
     await loadInterestCoreBriefStatus(state, { silent: true });
@@ -5135,7 +5147,135 @@ async function previewIntentMatchExclusion(matchId, state, panel) {
     <br>Эффект: уберет ${escapeHtml(String(payload.removed_count || 0))} из ${escapeHtml(String(payload.total_matches || 0))}; выбранное сообщение ${payload.target_removed ? "исчезнет" : "останется"}; оценка: ${escapeHtml(risk)}.
     ${suggestions.length ? `<br>Другие кандидаты: ${escapeHtml(suggestions.join("; "))}` : ""}
     ${samples.length ? `<br>Что еще зацепит: ${samples.map((item) => item.message_url ? `<a href="${escapeHtml(item.message_url)}" target="_blank" rel="noreferrer">#${escapeHtml(String(item.telegram_message_id))}</a>` : `#${escapeHtml(String(item.telegram_message_id))}`).join(", ")}` : ""}
+    <br><a href="${escapeHtml(interestContextStepHref("/interest-contexts/intent-exclusions", state.selectedId))}">Открыть страницу применения исключений</a>
     <br><span class="muted">Изменение сейчас не применяется автоматически: сначала проверяем влияние, потом переносим условие в слой.</span>`;
+}
+
+async function loadInterestIntentExclusions(state) {
+  const target = document.querySelector("#interest-intent-exclusions");
+  const status = document.querySelector("#interest-intent-status") || document.querySelector("#interest-context-status");
+  if (!target || !state.selectedId) return;
+  target.innerHTML = '<div class="empty-state">Загружаю очередь исключений...</div>';
+  try {
+    const params = new URLSearchParams({
+      limit: String(state.intentExclusionsLimit),
+      offset: String(state.intentExclusionsOffset),
+    });
+    const payload = await api(
+      `/api/interest-contexts/${encodeURIComponent(state.selectedId)}/intent-exclusions?${params.toString()}`
+    );
+    renderInterestIntentExclusions(payload, state);
+  } catch (error) {
+    target.innerHTML = `<div class="empty-state">${escapeHtml(error.message)}</div>`;
+    if (status) status.textContent = error.message;
+  }
+}
+
+function handleInterestIntentExclusionsClick(event, state) {
+  const pageButton = event.target.closest("[data-intent-exclusions-page-action]");
+  if (pageButton) {
+    const action = pageButton.dataset.intentExclusionsPageAction;
+    if (action === "prev") {
+      state.intentExclusionsOffset = Math.max(
+        0,
+        state.intentExclusionsOffset - state.intentExclusionsLimit
+      );
+    }
+    if (action === "next") {
+      state.intentExclusionsOffset += state.intentExclusionsLimit;
+    }
+    loadInterestIntentExclusions(state);
+    return;
+  }
+  const applyButton = event.target.closest("[data-apply-intent-exclusion]");
+  if (applyButton) {
+    applyInterestIntentExclusion(applyButton, state);
+  }
+}
+
+function renderInterestIntentExclusions(payload, state) {
+  const target = document.querySelector("#interest-intent-exclusions");
+  if (!target) return;
+  const items = payload.items || [];
+  const pagination =
+    payload.pagination || { limit: state.intentExclusionsLimit, offset: 0, total: 0 };
+  const summary = payload.summary || {};
+  target.innerHTML = `<section class="draft-review-section">
+    <div class="operations-summary raw-review-summary">
+      <div class="ops-metric-row">
+        ${renderOpsMetric("Feedback", summary.total || 0, "не интересно")}
+        ${renderOpsMetric("На применении", summary.pending || 0, "ожидает решения")}
+        ${renderOpsMetric("Применено", summary.applied || 0, "в слой")}
+      </div>
+    </div>
+    ${items.length ? `<div class="table-list">${items.map(renderInterestIntentExclusionRow).join("")}</div>` : '<div class="empty-state">Feedback “Не интересно” пока нет. Откройте сообщения намерений и отметьте нерелевантные.</div>'}
+    ${renderPageControls(pagination, "intent-exclusions")}
+  </section>`;
+}
+
+function renderInterestIntentExclusionRow(item) {
+  const feedback = item.feedback || {};
+  const match = item.match || {};
+  const preview = item.preview || {};
+  const suggestions = item.suggestions || [];
+  const applied = feedback.application_status === "applied";
+  const risk =
+    preview.target_removed && preview.removed_count <= Math.max(3, Math.ceil((preview.total_matches || 0) * 0.05))
+      ? "точечно"
+      : preview.target_removed
+        ? "широко"
+        : "не убирает цель";
+  return `<div class="table-row draft-item-row">
+    <div>
+      <strong>${escapeHtml(match.canonical_name || "сообщение слоя намерений")}</strong>
+      <p class="muted">${escapeHtml([`feedback ${shortId(feedback.id)}`, `run ${shortId(item.run_id)}`, `layer ${shortId(item.intent_layer_id)}`, time(feedback.created_at)].filter(Boolean).join(" / "))}</p>
+      <p>${escapeHtml(shortText(match.message_text || "", 520))}</p>
+      <div class="badges">
+        ${badge(label(feedback.application_status || "recorded"), applied ? "" : "is-warn")}
+        ${badge(`score ${formatScore(match.score)}`)}
+        ${badge(`эффект ${risk}`)}
+        ${badge(`уберет ${preview.removed_count || 0}/${preview.total_matches || 0}`)}
+        ${preview.target_removed ? badge("цель исчезнет") : badge("цель останется", "is-danger")}
+      </div>
+      ${renderTelegramMessageLink(match)}
+      <label class="material-select-line">Исключающее условие
+        <input data-intent-exclusion-term="${escapeHtml(feedback.id)}" list="intent-exclusion-options-${escapeHtml(feedback.id)}" value="${escapeHtml(item.selected_term || "")}" ${applied ? "disabled" : ""}>
+        <datalist id="intent-exclusion-options-${escapeHtml(feedback.id)}">
+          ${suggestions.map((term) => `<option value="${escapeHtml(term)}"></option>`).join("")}
+        </datalist>
+      </label>
+      <p class="draft-evidence"><strong>Что произойдет:</strong> ${escapeHtml(preview.explanation || "preview недоступен")}</p>
+      ${preview.removed_samples?.length ? `<p class="draft-evidence"><strong>Что еще зацепит:</strong> ${preview.removed_samples.map((sample) => sample.message_url ? `<a href="${escapeHtml(sample.message_url)}" target="_blank" rel="noreferrer">#${escapeHtml(String(sample.telegram_message_id))}</a>` : `#${escapeHtml(String(sample.telegram_message_id))}`).join(", ")}</p>` : ""}
+    </div>
+    <div class="row-actions">
+      <md-filled-tonal-button type="button" data-apply-intent-exclusion="${escapeHtml(feedback.id)}" ${applied ? "disabled" : ""}>
+        Применить исключение
+      </md-filled-tonal-button>
+    </div>
+  </div>`;
+}
+
+async function applyInterestIntentExclusion(button, state) {
+  const feedbackId = button.dataset.applyIntentExclusion;
+  const status = document.querySelector("#interest-context-status");
+  const input = document.querySelector(`[data-intent-exclusion-term="${CSS.escape(feedbackId)}"]`);
+  const term = String(input?.value || "").trim();
+  if (!feedbackId || !term || !state.selectedId) return;
+  button.disabled = true;
+  try {
+    await api(
+      `/api/interest-contexts/${encodeURIComponent(state.selectedId)}/intent-exclusions/${encodeURIComponent(feedbackId)}/apply`,
+      {
+        method: "POST",
+        body: JSON.stringify({ term }),
+      }
+    );
+    if (status) status.textContent = "Исключение применено к слою. Перезапустите слой намерений для нового результата.";
+    await loadInterestIntentExclusions(state);
+  } catch (error) {
+    button.disabled = false;
+    if (status) status.textContent = error.message;
+  }
 }
 
 async function saveManualInterestCoreBrief(event, state) {
@@ -6298,15 +6438,17 @@ function renderPageControls(pagination, kind) {
             ? "data-intent-runs-page-action"
             : kind === "intent-matches"
               ? "data-intent-matches-page-action"
-              : kind === "prep-texts"
-                ? "data-prep-texts-page-action"
-                : kind === "prep-features"
-                  ? "data-prep-features-page-action"
-                  : kind === "prep-entities"
-                    ? "data-prep-entities-page-action"
-                    : kind === "prep-ngrams"
-                      ? "data-prep-ngrams-page-action"
-                      : "data-draft-page-action";
+              : kind === "intent-exclusions"
+                ? "data-intent-exclusions-page-action"
+                : kind === "prep-texts"
+                  ? "data-prep-texts-page-action"
+                  : kind === "prep-features"
+                    ? "data-prep-features-page-action"
+                    : kind === "prep-entities"
+                      ? "data-prep-entities-page-action"
+                      : kind === "prep-ngrams"
+                        ? "data-prep-ngrams-page-action"
+                        : "data-draft-page-action";
   return `<div class="queue-pagination">
     <span class="muted">${escapeHtml(`${from}-${to} из ${pagination.total}`)}</span>
     <div class="button-row">

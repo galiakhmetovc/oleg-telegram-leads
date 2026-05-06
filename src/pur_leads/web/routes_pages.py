@@ -549,6 +549,16 @@ def interest_context_intent_matches_page(
     return HTMLResponse(_interest_context_step_page("intent_matches"))
 
 
+@router.get("/interest-contexts/intent-exclusions", response_class=HTMLResponse)
+def interest_context_intent_exclusions_page(
+    request: Request,
+    auth_service: WebAuthService = Depends(get_auth_service),
+) -> Response:
+    if not _has_page_session(request, auth_service):
+        return RedirectResponse("/login", status_code=303)
+    return HTMLResponse(_interest_context_step_page("intent_exclusions"))
+
+
 _INTEREST_CONTEXT_STEPS = (
     ("context", "/interest-contexts", "Контекст"),
     ("load_archive", "/interest-contexts/source-archive", "Архив источника"),
@@ -572,6 +582,7 @@ _INTEREST_CONTEXT_STEPS = (
     ("intent_layers", "/interest-contexts/intent-layers", "Слои намерений"),
     ("intent_runs", "/interest-contexts/intent-runs", "Запуски намерений"),
     ("intent_matches", "/interest-contexts/intent-matches", "Сообщения намерений"),
+    ("intent_exclusions", "/interest-contexts/intent-exclusions", "Исключения"),
 )
 
 
@@ -600,6 +611,7 @@ def _interest_context_step_page(step: str) -> str:
         "intent_layers": "Слои намерений",
         "intent_runs": "Запуски намерений",
         "intent_matches": "Сообщения намерений",
+        "intent_exclusions": "Применение исключений",
     }
     intro_by_step = {
         "context": "Создайте или выберите контекст. Дальше все источники, ядро, анализ и намерения привязаны к нему.",
@@ -625,6 +637,7 @@ def _interest_context_step_page(step: str) -> str:
         "intent_layers": "Создайте или примените настраиваемый слой намерений поверх широкого анализа.",
         "intent_runs": "Выберите запуск слоя намерений. Это отдельный проверяемый артефакт.",
         "intent_matches": "Постранично смотрите сообщения, прошедшие слой намерений, и объяснение почему.",
+        "intent_exclusions": "Применяйте исключения из feedback после проверки влияния на текущий запуск.",
     }
     step = step if step in title_by_step else "context"
     title = title_by_step[step]
@@ -722,6 +735,7 @@ def _interest_context_step_body(step: str) -> str:
         "intent_layers": _interest_context_intent_layers_body,
         "intent_runs": _interest_context_intent_runs_body,
         "intent_matches": _interest_context_intent_matches_body,
+        "intent_exclusions": _interest_context_intent_exclusions_body,
     }
     return bodies[step]()
 
@@ -1614,6 +1628,43 @@ def _interest_context_intent_matches_body() -> str:
                     </div>
                     <div id="interest-intent-matches" class="draft-review-panel" aria-live="polite"></div>
                   </section>
+                  <section class="detail-section">
+                    <div class="section-head">
+                      <h3>Следующий шаг</h3>
+                      <a class="interest-next-link" href="/interest-contexts/intent-exclusions">Открыть исключения</a>
+                    </div>
+                    <p class="muted">Если оператор отметил сообщение как “Не интересно”, применяйте исключение отдельным явным действием.</p>
+                  </section>
+    """
+
+
+def _interest_context_intent_exclusions_body() -> str:
+    return """
+                  <section class="detail-section">
+                    <div class="section-head">
+                      <div>
+                        <h3>Применение исключений</h3>
+                        <p class="muted">
+                          Один артефакт: очередь feedback “Не интересно”. Здесь видно, что именно предлагается
+                          добавить в исключающие условия и какие сообщения это зацепит.
+                        </p>
+                      </div>
+                      <md-outlined-button id="interest-intent-exclusions-refresh" type="button">
+                        <md-icon slot="icon">refresh</md-icon>
+                        Обновить
+                      </md-outlined-button>
+                    </div>
+                    <div class="explain-box">
+                      <strong>Как применять безопасно</strong>
+                      <ul>
+                        <li>Сначала оператор нажимает “Не интересно” на конкретном сообщении слоя намерений.</li>
+                        <li>Эта страница показывает impact preview: исчезнет ли целевое сообщение и сколько других сообщений уйдет вместе с ним.</li>
+                        <li>Кнопка “Применить исключение” меняет настройки слоя намерений, но не переписывает старый запуск.</li>
+                        <li>Чтобы увидеть новый результат, после применения перезапустите слой намерений.</li>
+                      </ul>
+                    </div>
+                    <div id="interest-intent-exclusions" class="draft-review-panel" aria-live="polite"></div>
+                  </section>
     """
 
 
@@ -1768,6 +1819,7 @@ def _interest_context_stage_hint(step: str) -> str:
         "intent_layers": "настройка фильтра",
         "intent_runs": "запуски фильтра",
         "intent_matches": "сообщения с намерением",
+        "intent_exclusions": "feedback и влияние",
     }[step]
 
 
