@@ -121,3 +121,22 @@ Rationale:
 - Persisted job state makes snapshots and page recovery possible.
 - Starting with the worker boundary avoids replacing the execution model after
   the UI contract is built.
+
+## 2026-05-07: Host Caddy Exposes Dev UI
+
+Expose the v2 dev web interface through the existing host Caddy service at
+`https://secclaw.qlbc.ru:19443/`.
+
+Routing:
+
+- `/` proxies to the Vite dev server on `127.0.0.1:5173`.
+- `/api/*` proxies to FastAPI on `127.0.0.1:8000`.
+- SSE uses the same `/api/*` route and requires streaming-friendly proxying.
+
+Rationale:
+
+- The user can review the interface without opening a browser from the agent
+  environment.
+- Backend and frontend remain in Docker Compose dev mode with localhost-bound
+  ports.
+- Caddy is an external ingress concern and stays outside the repository.

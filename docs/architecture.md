@@ -23,6 +23,23 @@ Everything currently runs in development mode.
 - Redis is the local Celery broker.
 - React + Vite + TypeScript owns the operator UI.
 - Docker Compose owns the local dev stack and service wiring.
+- Host Caddy exposes the dev UI over HTTPS for operator review.
+
+## Caddy Dev Access
+
+External dev access is provided by the host-level Caddy service, not by the
+Docker Compose stack.
+
+- Public URL: `https://secclaw.qlbc.ru:19443/`
+- Site file: `/etc/caddy/sites/53-pur-leads-v2-dev.conf`
+- Main Caddy import: `/etc/caddy/Caddyfile`
+- Frontend route: `/` -> `127.0.0.1:5173`
+- Backend route: `/api/*` -> `127.0.0.1:8000`
+- SSE route: `/api/v1/enrichments/{job_id}/events` is covered by `/api/*`
+  and requires proxy streaming to stay enabled.
+
+The Docker services stay bound to localhost in dev mode. Caddy is the only
+external ingress for this slice.
 
 ## Backend
 

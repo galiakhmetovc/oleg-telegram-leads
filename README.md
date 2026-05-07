@@ -27,6 +27,24 @@ Services:
 - redis: `127.0.0.1:6379`
 - caddy dev access: `https://secclaw.qlbc.ru:19443`
 
+## Внешний Dev-Доступ
+
+Caddy на хосте прокидывает dev-интерфейс наружу через:
+
+`https://secclaw.qlbc.ru:19443/`
+
+Маршрутизация:
+
+- `/` -> Vite dev server на `127.0.0.1:5173`
+- `/api/*` -> FastAPI на `127.0.0.1:8000`
+- SSE endpoint `/api/v1/enrichments/{job_id}/events` проходит через тот же
+  Caddy route; в reverse proxy включен streaming-friendly `flush_interval -1`.
+
+Caddy-конфигурация находится вне репозитория:
+
+- `/etc/caddy/sites/53-pur-leads-v2-dev.conf`
+- импорт подключен из `/etc/caddy/Caddyfile`
+
 The first workflow uses the backend API to create text enrichment jobs, a Celery
 worker to run the NLP pipeline, Redis as the broker, PostgreSQL for persisted
 job state, and SSE for progress updates.
