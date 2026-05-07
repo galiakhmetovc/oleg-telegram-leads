@@ -55,6 +55,37 @@ signals:
       - tokens:
           - normalized: "клиент"
           - normalized: "хотеть"
+      - tokens:
+          - normalized: "запрос"
+          - normalized: "от"
+          - normalized: "клиент"
+
+  - type: provider_search
+    label: Поиск исполнителя / контактов
+    color: "#ad1457"
+    confidence: 0.86
+    patterns:
+      - tokens:
+          - normalized: "посоветовать"
+          - normalized: "контакт"
+      - tokens:
+          - normalized: "к"
+          - normalized: "кто"
+          - normalized: "идти"
+
+  - type: installation_request
+    label: Запрос на установку / подключение
+    color: "#0277bd"
+    confidence: 0.84
+    patterns:
+      - tokens:
+          - normalized: "установить"
+          - normalized: "и"
+          - normalized: "подключить"
+      - tokens:
+          - normalized: "установить"
+      - tokens:
+          - normalized: "подключить"
 
   - type: smart_home_automation
     label: Умный дом / автоматизация
@@ -66,6 +97,33 @@ signals:
           - normalized: "дом"
       - tokens:
           - normalized: "автоматизация"
+      - tokens:
+          - caseless: "zigbee"
+          - normalized: "шлюз"
+      - tokens:
+          - normalized: "алиса"
+      - tokens:
+          - normalized: "система"
+          - normalized: "защита"
+          - normalized: "от"
+          - normalized: "протечка"
+
+  - type: hot_lead_intent
+    label: Горячий лид
+    color: "#d32f2f"
+    confidence: 0.9
+    patterns:
+      - tokens:
+          - normalized: "запрос"
+          - normalized: "от"
+          - normalized: "клиент"
+      - tokens:
+          - normalized: "посоветовать"
+          - normalized: "контакт"
+      - tokens:
+          - normalized: "установить"
+          - normalized: "и"
+          - normalized: "подключить"
 
   - type: electrical_design_context
     label: Контекст электрики

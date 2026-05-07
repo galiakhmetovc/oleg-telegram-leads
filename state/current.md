@@ -13,6 +13,8 @@
   `https://secclaw.qlbc.ru:19443/`; `/api/*` and SSE are proxied to FastAPI.
 - Default NLP config now recognizes the smart-home automation lead case with
   customer intent, vendor, solution area, and electrical design context signals.
+- Default NLP config also recognizes hot Zigbee installation requests with
+  provider search, service location, automation components, and controlled devices.
 
 ## Blockers
 

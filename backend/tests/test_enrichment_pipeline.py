@@ -70,3 +70,29 @@ def test_default_config_marks_smart_home_automation_lead_text() -> None:
     assert "solution_area" in fact_types
     assert "vendor" in fact_types
     assert "design_scope" in fact_types
+
+
+def test_default_config_marks_hot_zigbee_installation_lead_text() -> None:
+    config = load_nlp_config(Path("config/nlp"))
+    enricher = RussianTextEnricher(config)
+    text = (
+        "Коллеги, такой запрос от клиента. К кому идти? Посоветуйте контакты "
+        "по Москве 🙏🏻\n\nУстановить и подключить zigbee шлюз для управления "
+        "через приложение/алису.\n\nСвет, розетки, входной замок, ТВ, "
+        "кондиционер, электрокарниз (если будет), система защиты от протечек."
+    )
+
+    result = enricher.enrich(text)
+
+    signal_types = {signal.type for signal in result.domain_signals}
+    fact_types = {fact.type for fact in result.facts}
+
+    assert "hot_lead_intent" in signal_types
+    assert "customer_intent" in signal_types
+    assert "provider_search" in signal_types
+    assert "installation_request" in signal_types
+    assert "smart_home_automation" in signal_types
+    assert "service_location" in fact_types
+    assert "work_type" in fact_types
+    assert "automation_component" in fact_types
+    assert "controlled_device" in fact_types

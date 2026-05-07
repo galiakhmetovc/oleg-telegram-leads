@@ -52,3 +52,58 @@ facts:
           - normalized: "розетка"
       - tokens:
           - normalized: "освещение"
+
+  - type: service_location
+    label: Локация работ
+    confidence: 0.72
+    patterns:
+      - tokens:
+          - normalized: "москва"
+
+  - type: work_type
+    label: Тип работ
+    confidence: 0.76
+    patterns:
+      - tokens:
+          - normalized: "установить"
+          - normalized: "и"
+          - normalized: "подключить"
+      - tokens:
+          - normalized: "управление"
+          - normalized: "через"
+          - normalized: "приложение"
+
+  - type: automation_component
+    label: Компонент автоматизации
+    confidence: 0.74
+    patterns:
+      - tokens:
+          - caseless: "zigbee"
+          - normalized: "шлюз"
+      - tokens:
+          - normalized: "приложение"
+      - tokens:
+          - normalized: "алиса"
+
+  - type: controlled_device
+    label: Управляемое устройство
+    confidence: 0.66
+    patterns:
+      - tokens:
+          - normalized: "свет"
+      - tokens:
+          - normalized: "розетка"
+      - tokens:
+          - normalized: "входной"
+          - normalized: "замок"
+      - tokens:
+          - caseless: "тв"
+      - tokens:
+          - normalized: "кондиционер"
+      - tokens:
+          - normalized: "электрокарниз"
+      - tokens:
+          - normalized: "система"
+          - normalized: "защита"
+          - normalized: "от"
+          - normalized: "протечка"
