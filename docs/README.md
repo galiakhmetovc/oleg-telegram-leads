@@ -1,6 +1,13 @@
 # PUR Leads Documentation Index
 
-Last audited: 2026-05-06.
+Last audited: 2026-05-07.
+
+## Historical Status
+
+As of 2026-05-07, this repository state is the historical PUR Leads v1
+implementation. Product development for this version is stopped. Use the code,
+database schema, docs, and production artifacts only as reference material and
+as an extraction source for the next version.
 
 This is the main entry point for project documentation. Treat this file as the
 current map of what is implemented, what is partial, and which secondary

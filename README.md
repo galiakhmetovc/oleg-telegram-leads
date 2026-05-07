@@ -2,6 +2,13 @@
 
 Greenfield implementation for PUR catalog source-of-truth, Telegram lead detection, and lightweight CRM.
 
+## Historical Status
+
+As of 2026-05-07, this implementation is frozen as the historical PUR Leads v1
+codebase. Do not extend this version with new product behavior. Keep it only as
+a reference and as a source for extracting production data needed by the next
+version.
+
 Start with `docs/README.md` for the current documentation map and implementation
 status. The full target design remains in
 `docs/superpowers/specs/2026-04-28-pur-catalog-source-of-truth-design.md`.
