@@ -140,6 +140,8 @@ Rationale:
 - Backend and frontend remain in Docker Compose dev mode with localhost-bound
   ports.
 - Caddy is an external ingress concern and stays outside the repository.
+- The host firewall must explicitly allow `19443/tcp`; otherwise local checks
+  from the host can pass while external browsers time out.
 
 ## 2026-05-07: Settings Center Stores NLP Settings In PostgreSQL
 

@@ -37,6 +37,10 @@ Docker Compose stack.
 - Backend route: `/api/*` -> `127.0.0.1:8000`
 - SSE route: `/api/v1/enrichments/{job_id}/events` is covered by `/api/*`
   and requires proxy streaming to stay enabled.
+- Site file permissions: the Caddy service user must be able to read the site
+  file, for example `root:caddy 640`.
+- Firewall: `19443/tcp` must be allowed on the host, for example
+  `sudo ufw allow 19443/tcp comment 'PUR Leads v2 dev UI'`.
 
 The Docker services stay bound to localhost in dev mode. Caddy is the only
 external ingress for this slice.

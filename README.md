@@ -44,6 +44,10 @@ Caddy-конфигурация находится вне репозитория:
 
 - `/etc/caddy/sites/53-pur-leads-v2-dev.conf`
 - импорт подключен из `/etc/caddy/Caddyfile`
+- файл site-конфига должен быть читаем service user Caddy, например
+  `root:caddy 640`
+- хостовый firewall должен пропускать внешний порт:
+  `sudo ufw allow 19443/tcp comment 'PUR Leads v2 dev UI'`
 
 The first workflow uses the backend API to create text enrichment jobs, a Celery
 worker to run the NLP pipeline, Redis as the broker, PostgreSQL for persisted
