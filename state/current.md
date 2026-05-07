@@ -41,7 +41,12 @@
   questions, commercial intercom/access-control recovery, white-box smart-home
   design planning, security technical projects with video/access/alarm systems,
   nanny camera contractor search, and Wi-Fi electric curtain control.
-- Dev PostgreSQL active NLP config was refreshed to revision 12 from the current
+- Default NLP config recognizes the latest motion-lighting, Zigbee/Yandex relay,
+  and HVAC/design leads: timed night lighting by motion sensor with independent
+  wall-light control, smart relay modules for lights/tracks connected to Alice,
+  and O'Climate/Orac static-pressure chambers for channel air conditioning
+  without misclassifying them as video surveillance.
+- Dev PostgreSQL active NLP config was refreshed to revision 13 from the current
   bootstrap config so worker jobs use the new PUR scoring settings.
 - Agent verification should avoid Caddy smoke checks unless explicitly requested;
   use backend tests and direct service/container checks by default.

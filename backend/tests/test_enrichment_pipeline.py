@@ -347,7 +347,7 @@ def test_default_config_marks_follow_up_pur_leads_with_specific_explanations() -
                 "white box"
             ),
             "signals": {"smart_home_automation", "education_request", "electrical_design_context"},
-            "facts": {"solution_area", "property_type", "controlled_device"},
+            "facts": {"solution_area", "property_type"},
             "areas": {"smart_home"},
             "segments": {"private_residential", "research_project", "designer_partner"},
             "temperatures": {"warm", "hot"},
@@ -409,6 +409,65 @@ def test_default_config_marks_follow_up_pur_leads_with_specific_explanations() -
         assert case["facts"] <= {fact.type for fact in result.facts}, case["id"]
         assert case["areas"] <= {item.type for item in result.lead_assessment.solution_areas}, case["id"]
         assert case["segments"] <= {item.type for item in result.lead_assessment.customer_segments}, case["id"]
+
+
+def test_default_config_marks_latest_motion_relay_and_hvac_leads() -> None:
+    config = load_nlp_config(Path("config/nlp"))
+    enricher = RussianTextEnricher(config)
+
+    motion_result = enricher.enrich(
+        "Коллеги, помогите решить такую задачу. Я хочу сделать в туалете ночной "
+        "свет, примерно как ступени лесницы освещают: у пола, и чтобы включалось "
+        "оно на движение в определенные часы, а заодно на это и два бра в коридоре "
+        "запитать, чтобы при движении ночью они включались. Как реализуется такая "
+        "схема или можно ли при этом оставить независимое механическое включение бра?"
+    )
+    motion_signals = {signal.type for signal in motion_result.domain_signals}
+    motion_facts = {fact.type for fact in motion_result.facts}
+
+    assert motion_result.lead_assessment is not None
+    assert motion_result.lead_assessment.is_lead is True
+    assert motion_result.lead_assessment.temperature in {"warm", "hot"}
+    assert {"motion_lighting_automation", "lighting_control", "consultation_request"} <= motion_signals
+    assert {"controlled_device", "design_scope"} <= motion_facts
+    assert "smart_home" in {item.type for item in motion_result.lead_assessment.solution_areas}
+
+    relay_result = enricher.enrich(
+        "Добрый день всем) Подскажите на счет умного дома Яндекс, нашла видео как "
+        "подключить через Зигби устройства с пультами к Алисе. А как подключить "
+        "свет (бра, треки), клиент говорит, что есть какие то шайбы которые "
+        "ставятся на электрику и так же можно подключить к Алисе. Слышали про такое?"
+    )
+    relay_signals = {signal.type for signal in relay_result.domain_signals}
+    relay_facts = {fact.type for fact in relay_result.facts}
+
+    assert relay_result.lead_assessment is not None
+    assert relay_result.lead_assessment.is_lead is True
+    assert relay_result.lead_assessment.temperature in {"warm", "hot"}
+    assert {"smart_home_automation", "smart_relay_control", "lighting_control"} <= relay_signals
+    assert {"solution_area", "vendor", "automation_component", "controlled_device"} <= relay_facts
+    assert "smart_home" in {item.type for item in relay_result.lead_assessment.solution_areas}
+
+    hvac_result = enricher.enrich(
+        "Дизайнеры, добрый день! Подскажите, кто-нибудь работал с камерами "
+        "статического давления O’CLIMATE для Ораковских изделий? Хочу сделать "
+        "решетки в потолочных карнизах в проекте канального кондиционирования, "
+        "инженеры говорят что это не возможно. Или может есть еще какие-то "
+        "устройства для Orac."
+    )
+    hvac_signals = {signal.type for signal in hvac_result.domain_signals}
+    hvac_facts = {fact.type for fact in hvac_result.facts}
+
+    assert hvac_result.lead_assessment is not None
+    assert hvac_result.lead_assessment.is_lead is True
+    assert hvac_result.lead_assessment.temperature in {"warm", "hot"}
+    hvac_areas = {item.type for item in hvac_result.lead_assessment.solution_areas}
+    assert {"climate_control", "consultation_request", "designer_context"} <= hvac_signals
+    assert "video_surveillance" not in hvac_signals
+    assert {"solution_area", "vendor", "design_scope"} <= hvac_facts
+    assert "climate" in hvac_areas
+    assert "security" not in hvac_areas
+    assert "designer_partner" in {item.type for item in hvac_result.lead_assessment.customer_segments}
 
 
 def test_default_config_does_not_mark_diy_equipment_sale_as_lead() -> None:

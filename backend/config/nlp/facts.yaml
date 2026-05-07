@@ -67,6 +67,11 @@ facts:
           - normalized: "управление"
           - normalized: "освещение"
       - tokens:
+          - normalized: "канальный"
+          - normalized: "кондиционирование"
+      - tokens:
+          - normalized: "кондиционирование"
+      - tokens:
           - normalized: "умный"
           - normalized: "функционал"
       - tokens:
@@ -113,6 +118,14 @@ facts:
           - caseless: "yandex"
       - tokens:
           - caseless: "livicom"
+      - tokens:
+          - caseless: "o’climate"
+      - tokens:
+          - caseless: "o'climate"
+      - tokens:
+          - caseless: "orac"
+      - tokens:
+          - normalized: "ораковский"
 
   - type: design_scope
     label: Раздел проектирования
@@ -149,6 +162,9 @@ facts:
           - normalized: "по"
           - normalized: "умный"
           - normalized: "функционал"
+      - tokens:
+          - normalized: "канальный"
+          - normalized: "кондиционирование"
 
   - type: service_location
     label: Локация работ
@@ -224,6 +240,11 @@ facts:
           - normalized: "алиса"
       - tokens:
           - normalized: "камера"
+          - normalized: "на"
+          - normalized: "стена"
+      - tokens:
+          - normalized: "установить"
+          - normalized: "камера"
       - tokens:
           - normalized: "датчик"
           - normalized: "протечка"
@@ -247,6 +268,12 @@ facts:
       - tokens:
           - normalized: "датчик"
           - normalized: "движение"
+      - tokens:
+          - normalized: "устройство"
+          - normalized: "с"
+          - normalized: "пульт"
+      - tokens:
+          - normalized: "шайба"
 
   - type: installation_surface
     label: Место монтажа
@@ -312,6 +339,13 @@ facts:
           - normalized: "сценарий"
           - normalized: "освещение"
       - tokens:
+          - normalized: "ночной"
+          - normalized: "свет"
+      - tokens:
+          - normalized: "бра"
+      - tokens:
+          - normalized: "трек"
+      - tokens:
           - normalized: "электромагнитный"
           - normalized: "замок"
       - tokens:
@@ -328,8 +362,6 @@ facts:
           - normalized: "подсветка"
       - tokens:
           - normalized: "электрический"
-          - normalized: "карниз"
-      - tokens:
           - normalized: "карниз"
 
   - type: power_equipment

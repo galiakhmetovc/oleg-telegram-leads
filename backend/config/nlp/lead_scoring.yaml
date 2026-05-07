@@ -15,6 +15,7 @@ lead_scoring:
       solution_selection_request: 25
       education_request: 15
       smart_home_value_question: 25
+      smart_relay_control: 25
       budget_constraint: 5
       installation_context: 12
       water_leak_protection: 25
@@ -32,6 +33,7 @@ lead_scoring:
       power_quality: 30
       climate_control: 25
       lighting_control: 25
+      motion_lighting_automation: 20
       electric_curtain_control: 25
       network_infrastructure: 25
       commercial_object: 20
@@ -65,7 +67,9 @@ lead_scoring:
         - renovation_modification_context
         - solution_selection_request
         - smart_home_value_question
+        - smart_relay_control
         - lighting_control
+        - motion_lighting_automation
         - climate_control
         - electric_curtain_control
         - water_leak_protection
@@ -105,7 +109,8 @@ lead_scoring:
       label: Управление климатом
       signal_types:
         - climate_control
-      fact_types: []
+      fact_types:
+        - design_scope
   customer_segments:
     designer_partner:
       label: Дизайнер / проектировщик
@@ -162,12 +167,14 @@ lead_scoring:
     - solution_selection_request
     - education_request
     - smart_home_value_question
+    - smart_relay_control
     - budget_constraint
     - implementation_intent
     - hot_lead_intent
     - developer_smart_home_context
     - renovation_modification_context
     - warranty_risk
+    - motion_lighting_automation
   noise_signal_types:
     - supply
     - diy_or_equipment_only

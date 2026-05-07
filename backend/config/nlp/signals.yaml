@@ -135,14 +135,14 @@ signals:
           - normalized: "видеонаблюдение"
       - tokens:
           - normalized: "видеонаблюдение"
-      - tokens:
-          - normalized: "камера"
 
   - type: consultation_request
     label: Нужна консультация
     color: "#7b1fa2"
     confidence: 0.78
     patterns:
+      - tokens:
+          - normalized: "подсказать"
       - tokens:
           - normalized: "подсказать"
           - normalized: "пожалуйста"
@@ -169,6 +169,12 @@ signals:
       - tokens:
           - normalized: "может"
           - normalized: "помочь"
+      - tokens:
+          - normalized: "помочь"
+          - normalized: "решить"
+      - tokens:
+          - normalized: "как"
+          - normalized: "реализоваться"
 
   - type: solution_selection_request
     label: Подбор полезных решений
@@ -352,6 +358,25 @@ signals:
       - tokens:
           - normalized: "умный"
           - normalized: "дом"
+
+  - type: smart_relay_control
+    label: Реле / модули умного света
+    color: "#00897b"
+    confidence: 0.78
+    patterns:
+      - tokens:
+          - normalized: "шайба"
+      - tokens:
+          - normalized: "ставиться"
+          - normalized: "на"
+          - normalized: "электрика"
+      - tokens:
+          - normalized: "подключить"
+          - normalized: "свет"
+      - tokens:
+          - normalized: "устройство"
+          - normalized: "с"
+          - normalized: "пульт"
           - normalized: "от"
           - normalized: "застройщик"
       - tokens:
@@ -520,6 +545,15 @@ signals:
           - normalized: "пол"
       - tokens:
           - normalized: "отопление"
+      - tokens:
+          - normalized: "канальный"
+          - normalized: "кондиционирование"
+      - tokens:
+          - normalized: "статический"
+          - normalized: "давление"
+      - tokens:
+          - normalized: "потолочный"
+          - normalized: "карниз"
 
   - type: lighting_control
     label: Управление освещением
@@ -535,6 +569,38 @@ signals:
       - tokens:
           - normalized: "сценарий"
           - normalized: "освещение"
+      - tokens:
+          - normalized: "ночной"
+          - normalized: "свет"
+      - tokens:
+          - normalized: "датчик"
+          - normalized: "движение"
+      - tokens:
+          - normalized: "при"
+          - normalized: "движение"
+      - tokens:
+          - normalized: "бра"
+      - tokens:
+          - normalized: "трек"
+
+  - type: motion_lighting_automation
+    label: Автоматизация света по движению
+    color: "#7cb342"
+    confidence: 0.8
+    patterns:
+      - tokens:
+          - normalized: "включаться"
+          - normalized: "на"
+          - normalized: "движение"
+      - tokens:
+          - normalized: "при"
+          - normalized: "движение"
+      - tokens:
+          - normalized: "определенный"
+          - normalized: "часы"
+      - tokens:
+          - normalized: "механический"
+          - normalized: "включение"
 
   - type: electric_curtain_control
     label: Электрические карнизы / шторы
