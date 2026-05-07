@@ -6,6 +6,7 @@ import EditIcon from "@mui/icons-material/Edit";
 import ErrorIcon from "@mui/icons-material/Error";
 import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
 import HelpOutlineIcon from "@mui/icons-material/HelpOutlineOutlined";
+import InsightsIcon from "@mui/icons-material/Insights";
 import PlayArrowIcon from "@mui/icons-material/PlayArrow";
 import SaveIcon from "@mui/icons-material/Save";
 import SettingsIcon from "@mui/icons-material/Settings";
@@ -51,6 +52,8 @@ import {
 } from "@mui/material";
 import { FormEvent, SyntheticEvent, useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
+
+import { AnalyticsPage } from "./AnalyticsPage";
 
 type TextRange = {
   start: number;
@@ -409,6 +412,7 @@ export function App() {
               aria-label="Основная навигация"
             >
               <Tab label="Обогащение" />
+              <Tab icon={<InsightsIcon fontSize="small" />} iconPosition="start" label="Аналитика" />
               <Tab icon={<SettingsIcon fontSize="small" />} iconPosition="start" label="Настройки" />
               <Tab icon={<HelpOutlineIcon fontSize="small" />} iconPosition="start" label="Справка" />
             </Tabs>
@@ -489,6 +493,8 @@ export function App() {
               </Stack>
             </Box>
           ) : activePage === 1 ? (
+            <AnalyticsPage apiBaseUrl={apiBaseUrl} />
+          ) : activePage === 2 ? (
             <SettingsCenter />
           ) : (
             <SettingsHelpPage />

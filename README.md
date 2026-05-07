@@ -85,6 +85,24 @@ uv run python -m app.cli.batch_enrich \
 The batch output is JSONL with `message_id`, `text`, and full
 `TextEnrichmentResult` under `result`. `artifacts/` is ignored by git.
 
+## Batch Analytics
+
+Lead candidates from a completed batch run can be imported into PostgreSQL for
+the web analytics tab. The import reads the compact `lead-candidates.jsonl`
+file and the batch summary, not the full enrichment dump:
+
+```bash
+cd backend
+PUR_DATABASE_URL='postgresql+psycopg://pur_leads:pur_leads_dev_password@127.0.0.1:55433/pur_leads_v2' \
+uv run python -m app.cli.import_analytics \
+  --summary ../artifacts/designer-channel/runs/2026-05-07-full-8workers/full-enrichment.summary.json \
+  --lead-candidates ../artifacts/designer-channel/runs/2026-05-07-full-8workers/lead-candidates.jsonl \
+  --name designer-channel-2026-05-07-full-8workers
+```
+
+The UI tab `Аналитика` shows imported runs, high-level KPIs, score buckets, top
+signals/reasons/segments, and a filterable candidate table.
+
 Checks:
 
 ```bash

@@ -24,6 +24,8 @@ Everything currently runs in development mode.
 - React + Vite + TypeScript owns the operator UI.
 - Docker Compose owns the local dev stack and service wiring.
 - Host Caddy exposes the dev UI over HTTPS for operator review.
+- Batch analytics imports store completed lead-candidate runs in PostgreSQL for
+  operator review.
 
 ## Caddy Dev Access
 
@@ -133,6 +135,31 @@ enabled:
 Older persisted results without `lead_assessment` remain readable and return the
 field as `null`.
 
+## Batch Analytics
+
+Batch enrichment produces local JSONL artifacts under `artifacts/`. The
+analytics import CLI turns a completed batch run into PostgreSQL records:
+
+- `analytics_runs` stores run metadata, source paths, totals, timing, and raw
+  summary JSON.
+- `analytics_candidates` stores only candidate lead messages with message id,
+  source text, score, temperature, assessment arrays, matched signals, and facts.
+- `analytics_aggregates` stores precomputed counts for score buckets,
+  temperatures, domain signals, facts, reasons, solution areas, customer
+  segments, intent signals, and noise signals.
+
+FastAPI exposes this slice through:
+
+- `GET /api/v1/analytics/runs`
+- `GET /api/v1/analytics/runs/{run_id}/summary`
+- `GET /api/v1/analytics/runs/{run_id}/candidates`
+
+The repository currently uses PostgreSQL because the UI needs imported run
+review, filters, and aggregates over tens of thousands of candidates, not raw
+warehouse analytics over every enriched span. ClickHouse remains a future option
+for full historical OLAP over all messages, traces, token-level data, and many
+batch runs.
+
 ## Settings Center
 
 The settings UI exposes the active NLP configuration through FastAPI:
@@ -186,6 +213,13 @@ The first operator screen provides:
   segments, and noise signals;
 - structured result tabs for overview, entities, facts, domain signals, tokens,
   syntax, and pipeline trace.
+
+The analytics screen provides imported batch-run review:
+
+- run selector and refresh;
+- KPIs for processed messages, lead candidates, candidate rate, and failures;
+- score buckets and top aggregate lists;
+- filterable candidate table by score, temperature, domain signal, and text.
 
 ## Legacy Reference
 

@@ -208,6 +208,96 @@ test("loads settings center on demand", async () => {
   expect(screen.getByText("environment")).toBeInTheDocument();
 });
 
+test("loads analytics dashboard on demand", async () => {
+  const run = sampleAnalyticsRun();
+  const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+    const url = String(input);
+    if (url === "/api/v1/analytics/runs") {
+      return jsonResponse({ runs: [run] });
+    }
+    if (url === `/api/v1/analytics/runs/${run.id}/summary`) {
+      return jsonResponse({
+        run,
+        aggregates: {
+          score_bucket: [
+            { kind: "score_bucket", key: "35-59", label: "35-59", count: 10765, payload: {} },
+            { kind: "score_bucket", key: "60-89", label: "60-89", count: 3982, payload: {} },
+            { kind: "score_bucket", key: "90-129", label: "90-129", count: 1064, payload: {} },
+            { kind: "score_bucket", key: "130+", label: "130+", count: 190, payload: {} }
+          ],
+          signal: [
+            {
+              kind: "signal",
+              key: "designer_context",
+              label: "designer_context",
+              count: 4525,
+              payload: { examples: ["дизайнеры"] }
+            }
+          ],
+          reason: [
+            {
+              kind: "reason",
+              key: "smart_home_platform",
+              label: "smart_home_platform",
+              count: 3200,
+              payload: { examples: ["умный дом"], weight: 35 }
+            }
+          ],
+          solution_area: [
+            { kind: "solution_area", key: "automation", label: "Автоматизация", count: 2700, payload: {} }
+          ],
+          customer_segment: [
+            { kind: "customer_segment", key: "designers", label: "Дизайнеры", count: 1800, payload: {} }
+          ]
+        }
+      });
+    }
+    if (url.startsWith(`/api/v1/analytics/runs/${run.id}/candidates`)) {
+      return jsonResponse({
+        total: 1,
+        limit: 50,
+        offset: 0,
+        items: [
+          {
+            message_id: "672162",
+            text: "Подскажите на счет умного дома Яндекс, как подключить свет к Алисе?",
+            score: 454,
+            temperature: "hot",
+            solution_areas: [{ type: "automation", label: "Автоматизация", matched_types: ["smart_home_platform"] }],
+            customer_segments: [],
+            intent_signals: [],
+            noise_signals: [],
+            reasons: [
+              {
+                source: "domain_signal",
+                key: "smart_home_platform",
+                label: "smart_home_platform",
+                weight: 35,
+                matched_texts: ["умного дома"]
+              }
+            ],
+            domain_signals: [{ type: "smart_home_platform", label: "Умный дом", text: "умного дома" }],
+            facts: []
+          }
+        ]
+      });
+    }
+    throw new Error(`Unhandled fetch: ${url}`);
+  });
+  vi.stubGlobal("fetch", fetchMock);
+  render(<App />);
+
+  fireEvent.click(screen.getByRole("tab", { name: /аналитика/i }));
+
+  await waitFor(() => expect(fetchMock).toHaveBeenCalledWith("/api/v1/analytics/runs"));
+  expect(await screen.findByRole("heading", { name: "Аналитика лидов" })).toBeInTheDocument();
+  expect(screen.getByText((content) => content.replace(/\s/g, "") === "528953")).toBeInTheDocument();
+  expect(screen.getByText((content) => content.replace(/\s/g, "") === "16001")).toBeInTheDocument();
+  expect(screen.getByText("3.03%")).toBeInTheDocument();
+  expect(screen.getByText("designer_context")).toBeInTheDocument();
+  expect(screen.getByText(/Подскажите на счет умного дома Яндекс/i)).toBeInTheDocument();
+});
+
 test("adds semantic pattern through backend lemmatization", async () => {
   const fetchMock = vi
     .fn()
@@ -309,6 +399,32 @@ function sampleLeadScoringSettings() {
     customer_segments: {},
     intent_signal_types: ["provider_search"],
     noise_signal_types: ["diy_or_equipment_only"]
+  };
+}
+
+function sampleAnalyticsRun() {
+  return {
+    id: "1ce74b24-4b8a-4f65-ac1d-3649b9e1e226",
+    name: "designer-channel-2026-05-07-full-8workers",
+    source: "batch",
+    input_path: "artifacts/designer-channel/messages.jsonl",
+    run_dir: "artifacts/designer-channel/runs/2026-05-07-full-8workers",
+    processed: 528953,
+    skipped: 0,
+    failed: 0,
+    leads: 16001,
+    candidate_rate: 3.025032,
+    started_at: "2026-05-07T18:00:00+00:00",
+    finished_at: "2026-05-07T19:15:43+00:00",
+    imported_at: "2026-05-07T19:20:00+00:00",
+    summary: {}
+  };
+}
+
+function jsonResponse(payload: unknown) {
+  return {
+    ok: true,
+    json: async () => payload
   };
 }
 

@@ -233,3 +233,22 @@ Rationale:
 - Old `caseless` documents are not supported by v2. They should be replaced by
   a fresh PostgreSQL config revision or reseeded from current bootstrap YAML
   instead of hidden compatibility code.
+
+## 2026-05-07: Analytics Starts In PostgreSQL
+
+Store imported batch analytics in PostgreSQL first: runs, candidate lead
+messages, and precomputed aggregates. Do not introduce ClickHouse until the
+product needs a raw analytical warehouse over all messages, all spans, many
+historical runs, or ad-hoc OLAP workloads that PostgreSQL cannot serve well.
+
+Rationale:
+
+- The immediate UI workflow reviews roughly tens of thousands of candidates per
+  run, filters them, and compares aggregate counts.
+- PostgreSQL is already the operational source of truth and keeps migrations,
+  backup, deployment, and local dev simpler while the product workflow is still
+  changing.
+- Precomputed aggregates avoid scanning the 3+ GB full enrichment dump on every
+  page load.
+- A later ClickHouse slice should receive stable export/import contracts from
+  this boundary instead of becoming another active source of truth too early.
