@@ -50,10 +50,35 @@ class RuleSettings(BaseModel):
         return self
 
 
+class LeadCategorySettings(BaseModel):
+    label: str = Field(min_length=1)
+    signal_types: list[str] = Field(default_factory=list)
+    fact_types: list[str] = Field(default_factory=list)
+
+
+class LeadScoringSettings(BaseModel):
+    lead_threshold: int = Field(ge=0)
+    warm_threshold: int = Field(ge=0)
+    hot_threshold: int = Field(ge=0)
+    signal_weights: dict[str, int] = Field(default_factory=dict)
+    fact_weights: dict[str, int] = Field(default_factory=dict)
+    solution_areas: dict[str, LeadCategorySettings] = Field(default_factory=dict)
+    customer_segments: dict[str, LeadCategorySettings] = Field(default_factory=dict)
+    intent_signal_types: list[str] = Field(default_factory=list)
+    noise_signal_types: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def validate_threshold_order(self) -> LeadScoringSettings:
+        if not (self.lead_threshold <= self.warm_threshold <= self.hot_threshold):
+            raise ValueError("lead scoring thresholds must be ordered: lead <= warm <= hot")
+        return self
+
+
 class NlpSettings(BaseModel):
     pipeline: PipelineSettings
     signals: list[RuleSettings]
     facts: list[RuleSettings]
+    lead_scoring: LeadScoringSettings
 
 
 class NlpSettingsSource(BaseModel):
@@ -145,6 +170,7 @@ def _nlp_snapshot_from_revision(revision: NlpConfigRevision) -> NlpSettingsSnaps
         pipeline=PipelineSettings.model_validate(documents["pipeline"]),
         signals=[_rule_from_document(item) for item in documents["signals"].get("signals", [])],
         facts=[_rule_from_document(item) for item in documents["facts"].get("facts", [])],
+        lead_scoring=_lead_scoring_from_document(documents.get("lead_scoring", {})),
         source=NlpSettingsSource(
             type="postgres",
             path="nlp_config_revisions.config",
@@ -159,6 +185,7 @@ def _nlp_settings_to_documents(payload: NlpSettings) -> dict[str, dict[str, Any]
         "pipeline": payload.pipeline.model_dump(),
         "signals": {"signals": [_rule_to_document(rule) for rule in payload.signals]},
         "facts": {"facts": [_rule_to_document(rule) for rule in payload.facts]},
+        "lead_scoring": _lead_scoring_to_document(payload.lead_scoring),
     }
 
 
@@ -195,6 +222,53 @@ def _rule_from_document(raw_rule: dict[str, Any]) -> RuleSettings:
         for raw_pattern in payload.get("patterns", [])
     ]
     return RuleSettings.model_validate(payload)
+
+
+def _lead_scoring_to_document(settings: LeadScoringSettings) -> dict[str, Any]:
+    return {
+        "lead_scoring": {
+            "thresholds": {
+                "lead": settings.lead_threshold,
+                "warm": settings.warm_threshold,
+                "hot": settings.hot_threshold,
+            },
+            "weights": {
+                "signals": settings.signal_weights,
+                "facts": settings.fact_weights,
+            },
+            "solution_areas": {
+                key: value.model_dump() for key, value in settings.solution_areas.items()
+            },
+            "customer_segments": {
+                key: value.model_dump() for key, value in settings.customer_segments.items()
+            },
+            "intent_signal_types": settings.intent_signal_types,
+            "noise_signal_types": settings.noise_signal_types,
+        }
+    }
+
+
+def _lead_scoring_from_document(raw_document: dict[str, Any]) -> LeadScoringSettings:
+    raw = raw_document.get("lead_scoring", raw_document)
+    thresholds = raw.get("thresholds", {})
+    weights = raw.get("weights", {})
+    return LeadScoringSettings(
+        lead_threshold=int(thresholds.get("lead", 1)),
+        warm_threshold=int(thresholds.get("warm", thresholds.get("lead", 1))),
+        hot_threshold=int(thresholds.get("hot", thresholds.get("warm", thresholds.get("lead", 1)))),
+        signal_weights={str(key): int(value) for key, value in weights.get("signals", {}).items()},
+        fact_weights={str(key): int(value) for key, value in weights.get("facts", {}).items()},
+        solution_areas={
+            str(key): LeadCategorySettings.model_validate(value)
+            for key, value in raw.get("solution_areas", {}).items()
+        },
+        customer_segments={
+            str(key): LeadCategorySettings.model_validate(value)
+            for key, value in raw.get("customer_segments", {}).items()
+        },
+        intent_signal_types=[str(value) for value in raw.get("intent_signal_types", [])],
+        noise_signal_types=[str(value) for value in raw.get("noise_signal_types", [])],
+    )
 
 
 def _system_settings(settings: Settings) -> list[SystemSetting]:

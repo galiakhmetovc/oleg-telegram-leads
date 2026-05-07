@@ -49,6 +49,37 @@ facts:
 """,
         encoding="utf-8",
     )
+    (config_dir / "lead_scoring.yaml").write_text(
+        """
+lead_scoring:
+  thresholds:
+    lead: 35
+    warm: 55
+    hot: 80
+  weights:
+    signals:
+      demand: 20
+    facts:
+      deadline: 5
+  solution_areas:
+    supply:
+      label: Снабжение
+      signal_types:
+        - demand
+      fact_types: []
+  customer_segments:
+    active_request:
+      label: Активный запрос
+      signal_types:
+        - demand
+      fact_types:
+        - deadline
+  intent_signal_types:
+    - demand
+  noise_signal_types: []
+""",
+        encoding="utf-8",
+    )
 
 
 class InMemoryNlpConfigRepository:
@@ -114,6 +145,9 @@ def test_get_settings_returns_editable_nlp_and_readonly_system_settings(tmp_path
         "value": "нужный",
     }
     assert payload["nlp"]["facts"][0]["type"] == "deadline"
+    assert payload["nlp"]["lead_scoring"]["lead_threshold"] == 35
+    assert payload["nlp"]["lead_scoring"]["signal_weights"]["demand"] == 20
+    assert payload["nlp"]["lead_scoring"]["solution_areas"]["supply"]["label"] == "Снабжение"
     assert any(item["key"] == "environment" and item["editable"] is False for item in payload["system"])
     assert repository.active is not None
 
@@ -125,6 +159,7 @@ def test_update_nlp_settings_validates_and_writes_database_revision_not_yaml(tmp
     client = _app_with_settings_repo(config_dir, repository)
     updated = client.get("/api/v1/settings").json()["nlp"]
     updated["signals"][0]["phrases"].append(["ищем", "поставщика"])
+    updated["lead_scoring"]["signal_weights"]["demand"] = 25
 
     response = client.put("/api/v1/settings/nlp", json=updated)
 
@@ -135,6 +170,7 @@ def test_update_nlp_settings_validates_and_writes_database_revision_not_yaml(tmp
     assert ["ищем", "поставщика"] in payload["signals"][0]["phrases"]
     assert repository.active is not None
     assert ["ищем", "поставщика"] in repository.active["signals"]["signals"][0]["phrases"]
+    assert repository.active["lead_scoring"]["lead_scoring"]["weights"]["signals"]["demand"] == 25
     assert "ищем" not in (config_dir / "signals.yaml").read_text(encoding="utf-8")
 
 
@@ -145,6 +181,8 @@ def test_preview_nlp_settings_uses_draft_without_saving(tmp_path: Path) -> None:
     client = _app_with_settings_repo(config_dir, repository)
     draft = client.get("/api/v1/settings").json()["nlp"]
     draft["signals"][0]["phrases"].append(["ищем", "поставщика"])
+    draft["pipeline"]["stages"].append({"name": "lead_scoring", "enabled": True})
+    draft["lead_scoring"]["lead_threshold"] = 20
 
     response = client.post(
         "/api/v1/settings/nlp/preview",
@@ -154,6 +192,7 @@ def test_preview_nlp_settings_uses_draft_without_saving(tmp_path: Path) -> None:
     assert response.status_code == 200
     payload = response.json()
     assert any(item["type"] == "demand" for item in payload["domain_signals"])
+    assert payload["lead_assessment"]["is_lead"] is True
     assert "ищем" not in (config_dir / "signals.yaml").read_text(encoding="utf-8")
     assert repository.active is not None
     assert ["ищем", "поставщика"] not in repository.active["signals"]["signals"][0]["phrases"]

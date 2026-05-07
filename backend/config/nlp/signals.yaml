@@ -214,3 +214,210 @@ signals:
           - normalized: "розетка"
       - tokens:
           - normalized: "освещение"
+
+  - type: designer_context
+    label: Дизайнер / проектировщик
+    color: "#3949ab"
+    confidence: 0.7
+    patterns:
+      - tokens:
+          - normalized: "дизайнер"
+      - tokens:
+          - normalized: "проектировщик"
+      - tokens:
+          - normalized: "проект"
+
+  - type: access_control
+    label: СКУД / контроль доступа
+    color: "#00897b"
+    confidence: 0.82
+    patterns:
+      - tokens:
+          - caseless: "скуд"
+      - tokens:
+          - normalized: "контроль"
+          - normalized: "доступ"
+      - tokens:
+          - normalized: "система"
+          - normalized: "контроль"
+          - normalized: "доступ"
+
+  - type: intercom
+    label: Домофония
+    color: "#546e7a"
+    confidence: 0.8
+    patterns:
+      - tokens:
+          - normalized: "домофон"
+      - tokens:
+          - normalized: "вызывной"
+          - normalized: "панель"
+
+  - type: gate_automation
+    label: Автоматизация ворот / шлагбаумов
+    color: "#6d4c41"
+    confidence: 0.8
+    patterns:
+      - tokens:
+          - normalized: "автоматизация"
+          - normalized: "ворота"
+      - tokens:
+          - normalized: "ворота"
+      - tokens:
+          - normalized: "шлагбаум"
+      - tokens:
+          - normalized: "въездной"
+          - normalized: "группа"
+
+  - type: power_quality
+    label: Электропитание / ИБП / стабилизаторы
+    color: "#f57f17"
+    confidence: 0.8
+    patterns:
+      - tokens:
+          - caseless: "ибп"
+      - tokens:
+          - normalized: "бесперебойный"
+          - normalized: "питание"
+      - tokens:
+          - normalized: "стабилизатор"
+          - normalized: "напряжение"
+      - tokens:
+          - normalized: "нестабильный"
+          - normalized: "электроснабжение"
+      - tokens:
+          - normalized: "скачок"
+          - normalized: "напряжение"
+
+  - type: climate_control
+    label: Управление климатом
+    color: "#0277bd"
+    confidence: 0.78
+    patterns:
+      - tokens:
+          - normalized: "управление"
+          - normalized: "климат"
+      - tokens:
+          - normalized: "кондиционер"
+      - tokens:
+          - normalized: "теплый"
+          - normalized: "пол"
+      - tokens:
+          - normalized: "отопление"
+
+  - type: lighting_control
+    label: Управление освещением
+    color: "#afb42b"
+    confidence: 0.78
+    patterns:
+      - tokens:
+          - normalized: "управление"
+          - normalized: "освещение"
+      - tokens:
+          - normalized: "умный"
+          - normalized: "свет"
+      - tokens:
+          - normalized: "сценарий"
+          - normalized: "освещение"
+
+  - type: network_infrastructure
+    label: СКС / слаботочные сети
+    color: "#5e35b1"
+    confidence: 0.76
+    patterns:
+      - tokens:
+          - caseless: "скс"
+      - tokens:
+          - normalized: "структурированный"
+          - normalized: "кабельный"
+          - normalized: "сеть"
+      - tokens:
+          - normalized: "слаботочный"
+          - normalized: "сеть"
+      - tokens:
+          - normalized: "инженерный"
+          - normalized: "система"
+
+  - type: commercial_object
+    label: Коммерческий объект
+    color: "#455a64"
+    confidence: 0.68
+    patterns:
+      - tokens:
+          - normalized: "офис"
+      - tokens:
+          - caseless: "тц"
+      - tokens:
+          - normalized: "медицинский"
+          - normalized: "учреждение"
+      - tokens:
+          - normalized: "коммерческий"
+          - normalized: "объект"
+
+  - type: country_house
+    label: Загородный дом / дача
+    color: "#558b2f"
+    confidence: 0.72
+    patterns:
+      - tokens:
+          - normalized: "частный"
+          - normalized: "дом"
+      - tokens:
+          - normalized: "коттедж"
+      - tokens:
+          - normalized: "дача"
+      - tokens:
+          - normalized: "загородный"
+          - normalized: "дом"
+      - tokens:
+          - normalized: "коттеджный"
+          - normalized: "поселок"
+
+  - type: diy_or_equipment_only
+    label: DIY / только оборудование
+    color: "#757575"
+    confidence: 0.74
+    patterns:
+      - tokens:
+          - normalized: "сам"
+          - normalized: "поставить"
+      - tokens:
+          - normalized: "своими"
+          - normalized: "рука"
+      - tokens:
+          - normalized: "без"
+          - normalized: "монтаж"
+      - tokens:
+          - normalized: "только"
+          - normalized: "оборудование"
+      - tokens:
+          - normalized: "самовывоз"
+
+  - type: irrelevant_or_sale
+    label: Нерелевантная продажа / объявление
+    color: "#616161"
+    confidence: 0.72
+    patterns:
+      - tokens:
+          - normalized: "продать"
+      - tokens:
+          - normalized: "б"
+          - caseless: "у"
+      - tokens:
+          - normalized: "в"
+          - normalized: "наличие"
+          - normalized: "самовывоз"
+
+  - type: price_only
+    label: Только цена / дешево
+    color: "#8d6e63"
+    confidence: 0.66
+    patterns:
+      - tokens:
+          - normalized: "дешево"
+      - tokens:
+          - normalized: "самый"
+          - normalized: "дешевый"
+      - tokens:
+          - normalized: "без"
+          - normalized: "переплата"

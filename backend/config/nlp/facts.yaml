@@ -35,6 +35,37 @@ facts:
           - normalized: "видеонаблюдение"
       - tokens:
           - normalized: "видеонаблюдение"
+      - tokens:
+          - caseless: "скуд"
+      - tokens:
+          - normalized: "контроль"
+          - normalized: "доступ"
+      - tokens:
+          - normalized: "домофония"
+      - tokens:
+          - normalized: "домофон"
+      - tokens:
+          - normalized: "автоматизация"
+          - normalized: "ворота"
+      - tokens:
+          - normalized: "шлагбаум"
+      - tokens:
+          - caseless: "скс"
+      - tokens:
+          - normalized: "структурированный"
+          - normalized: "кабельный"
+          - normalized: "сеть"
+      - tokens:
+          - caseless: "ибп"
+      - tokens:
+          - normalized: "стабилизатор"
+          - normalized: "напряжение"
+      - tokens:
+          - normalized: "управление"
+          - normalized: "климат"
+      - tokens:
+          - normalized: "управление"
+          - normalized: "освещение"
 
   - type: property_type
     label: Тип объекта
@@ -42,6 +73,20 @@ facts:
     patterns:
       - tokens:
           - normalized: "квартира"
+      - tokens:
+          - normalized: "частный"
+          - normalized: "дом"
+      - tokens:
+          - normalized: "коттедж"
+      - tokens:
+          - normalized: "дача"
+      - tokens:
+          - normalized: "офис"
+      - tokens:
+          - caseless: "тц"
+      - tokens:
+          - normalized: "коммерческий"
+          - normalized: "объект"
 
   - type: vendor
     label: Вендор
@@ -95,6 +140,15 @@ facts:
           - normalized: "видеонаблюдение"
       - tokens:
           - normalized: "проконсультироваться"
+      - tokens:
+          - normalized: "проектирование"
+      - tokens:
+          - normalized: "монтаж"
+      - tokens:
+          - normalized: "обслуживание"
+      - tokens:
+          - normalized: "под"
+          - normalized: "ключ"
 
   - type: automation_component
     label: Компонент автоматизации
@@ -112,6 +166,17 @@ facts:
       - tokens:
           - normalized: "датчик"
           - normalized: "протечка"
+      - tokens:
+          - normalized: "домофон"
+      - tokens:
+          - normalized: "вызывной"
+          - normalized: "панель"
+      - tokens:
+          - normalized: "замок"
+      - tokens:
+          - normalized: "ворота"
+      - tokens:
+          - normalized: "шлагбаум"
 
   - type: installation_surface
     label: Место монтажа
@@ -159,3 +224,53 @@ facts:
           - normalized: "защита"
           - normalized: "от"
           - normalized: "протечка"
+      - tokens:
+          - normalized: "теплый"
+          - normalized: "пол"
+      - tokens:
+          - normalized: "отопление"
+      - tokens:
+          - normalized: "сценарий"
+          - normalized: "освещение"
+
+  - type: power_equipment
+    label: Оборудование электропитания
+    confidence: 0.68
+    patterns:
+      - tokens:
+          - caseless: "ибп"
+      - tokens:
+          - normalized: "стабилизатор"
+          - normalized: "напряжение"
+      - tokens:
+          - normalized: "бесперебойный"
+          - normalized: "питание"
+
+  - type: access_device
+    label: Устройство доступа
+    confidence: 0.68
+    patterns:
+      - tokens:
+          - caseless: "скуд"
+      - tokens:
+          - normalized: "домофон"
+      - tokens:
+          - normalized: "вызывной"
+          - normalized: "панель"
+      - tokens:
+          - normalized: "шлагбаум"
+      - tokens:
+          - normalized: "ворота"
+
+  - type: network_scope
+    label: Сеть / слаботочный раздел
+    confidence: 0.66
+    patterns:
+      - tokens:
+          - caseless: "скс"
+      - tokens:
+          - normalized: "кабельный"
+          - normalized: "сеть"
+      - tokens:
+          - normalized: "слаботочный"
+          - normalized: "сеть"

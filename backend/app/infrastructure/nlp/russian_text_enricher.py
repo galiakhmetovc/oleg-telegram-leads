@@ -14,6 +14,7 @@ from app.domain.enrichment import EnrichmentMetrics, ExtractedFact, PipelineTrac
 from app.domain.enrichment import SyntaxDependency, TextEnrichmentResult, TextRange
 from app.infrastructure.nlp.config_loader import NlpPipelineConfig, PhraseRuleConfig
 from app.infrastructure.nlp.config_loader import RuleTokenConfig
+from app.infrastructure.nlp.lead_scorer import LeadScorer
 
 ProgressCallback = Callable[[str, int, str], None]
 
@@ -77,6 +78,14 @@ class RussianTextEnricher:
         if self._config.is_enabled("domain_signals"):
             mark("domain_signals", 90, "Найдены доменные сигналы-кандидаты")
 
+        lead_assessment = (
+            LeadScorer(self._config.lead_scoring).assess(signals=signals, facts=facts)
+            if self._config.is_enabled("lead_scoring")
+            else None
+        )
+        if self._config.is_enabled("lead_scoring"):
+            mark("lead_scoring", 95, "Рассчитана оценка потенциального лида")
+
         sentences = [
             EnrichedSentence(
                 id=f"sentence-{index}",
@@ -138,6 +147,7 @@ class RussianTextEnricher:
             syntax=syntax,
             metrics=metrics,
             pipeline_trace=trace,
+            lead_assessment=lead_assessment,
         )
 
     def _embedding_instance(self) -> NewsEmbedding:

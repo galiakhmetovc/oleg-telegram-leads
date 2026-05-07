@@ -11,5 +11,7 @@ stages:
     enabled: true
   - name: domain_signals
     enabled: true
+  - name: lead_scoring
+    enabled: true
   - name: metrics
     enabled: true

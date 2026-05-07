@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from copy import deepcopy
 from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID, uuid4
@@ -22,6 +23,26 @@ class PostgresNlpConfigRepository:
         async with self._session_factory() as session:
             active = await self._get_active_revision(session)
             if active is not None:
+                merged_documents = merge_missing_default_documents(default_documents, active.documents)
+                if merged_documents == active.documents:
+                    return active
+
+                revision = await self._next_revision(session)
+                await session.execute(
+                    nlp_config_revisions.update()
+                    .where(nlp_config_revisions.c.is_active.is_(True))
+                    .values(is_active=False)
+                )
+                await self._insert_revision(
+                    session,
+                    documents=merged_documents,
+                    revision=revision,
+                    source="bootstrap_merge",
+                )
+                await session.commit()
+                active = await self._get_active_revision(session)
+                if active is None:
+                    raise RuntimeError("active NLP config revision is not readable after merge")
                 return active
 
             revision = await self._next_revision(session)
@@ -112,3 +133,47 @@ def _revision_from_row(row: Any) -> NlpConfigRevision:
         source=row["source"],
         created_at=row["created_at"],
     )
+
+
+def merge_missing_default_documents(
+    default_documents: dict[str, dict[str, Any]],
+    active_documents: dict[str, dict[str, Any]],
+) -> dict[str, dict[str, Any]]:
+    merged = deepcopy(active_documents)
+    for document_name, default_document in default_documents.items():
+        if document_name not in merged:
+            merged[document_name] = deepcopy(default_document)
+
+    if "pipeline" in default_documents and "pipeline" in merged:
+        merged["pipeline"] = _merge_pipeline_stages(
+            default_documents["pipeline"],
+            merged["pipeline"],
+        )
+
+    return merged
+
+
+def _merge_pipeline_stages(
+    default_pipeline: dict[str, Any],
+    active_pipeline: dict[str, Any],
+) -> dict[str, Any]:
+    merged_pipeline = deepcopy(active_pipeline)
+    active_stages = merged_pipeline.get("stages", [])
+    default_stages = default_pipeline.get("stages", [])
+    if not isinstance(active_stages, list) or not isinstance(default_stages, list):
+        return merged_pipeline
+
+    active_stage_names = {
+        str(stage.get("name"))
+        for stage in active_stages
+        if isinstance(stage, dict) and stage.get("name") is not None
+    }
+    for stage in default_stages:
+        if not isinstance(stage, dict):
+            continue
+        stage_name = stage.get("name")
+        if stage_name is not None and str(stage_name) not in active_stage_names:
+            active_stages.append(deepcopy(stage))
+            active_stage_names.add(str(stage_name))
+    merged_pipeline["stages"] = active_stages
+    return merged_pipeline

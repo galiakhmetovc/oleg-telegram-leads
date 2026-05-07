@@ -70,6 +70,11 @@ def test_default_config_marks_smart_home_automation_lead_text() -> None:
     assert "solution_area" in fact_types
     assert "vendor" in fact_types
     assert "design_scope" in fact_types
+    assert result.lead_assessment is not None
+    assert result.lead_assessment.is_lead is True
+    assert result.lead_assessment.temperature in {"warm", "hot"}
+    assert "smart_home" in {item.type for item in result.lead_assessment.solution_areas}
+    assert "designer_partner" in {item.type for item in result.lead_assessment.customer_segments}
 
 
 def test_default_config_marks_hot_zigbee_installation_lead_text() -> None:
@@ -96,6 +101,10 @@ def test_default_config_marks_hot_zigbee_installation_lead_text() -> None:
     assert "work_type" in fact_types
     assert "automation_component" in fact_types
     assert "controlled_device" in fact_types
+    assert result.lead_assessment is not None
+    assert result.lead_assessment.is_lead is True
+    assert result.lead_assessment.temperature == "hot"
+    assert "smart_home" in {item.type for item in result.lead_assessment.solution_areas}
 
 
 def test_default_config_marks_video_surveillance_apartment_lead_text() -> None:
@@ -121,6 +130,10 @@ def test_default_config_marks_video_surveillance_apartment_lead_text() -> None:
     assert "automation_component" in fact_types
     assert "installation_surface" in fact_types
     assert "wiring_output" in fact_types
+    assert result.lead_assessment is not None
+    assert result.lead_assessment.is_lead is True
+    assert result.lead_assessment.temperature in {"warm", "hot"}
+    assert "security" in {item.type for item in result.lead_assessment.solution_areas}
 
 
 def test_default_config_marks_water_leak_sensor_design_lead_from_artifact() -> None:
@@ -147,3 +160,20 @@ def test_default_config_marks_water_leak_sensor_design_lead_from_artifact() -> N
     assert "automation_component" in fact_types
     assert "installation_surface" in fact_types
     assert "design_scope" in fact_types
+    assert result.lead_assessment is not None
+    assert result.lead_assessment.is_lead is True
+    assert result.lead_assessment.temperature in {"warm", "hot"}
+    assert "smart_home" in {item.type for item in result.lead_assessment.solution_areas}
+
+
+def test_default_config_does_not_mark_diy_equipment_sale_as_lead() -> None:
+    config = load_nlp_config(Path("config/nlp"))
+    enricher = RussianTextEnricher(config)
+    text = "Продам камеру видеонаблюдения без монтажа, самовывоз, дешево."
+
+    result = enricher.enrich(text)
+
+    assert result.lead_assessment is not None
+    assert result.lead_assessment.is_lead is False
+    assert result.lead_assessment.temperature == "none"
+    assert "diy_or_equipment_only" in {item.type for item in result.lead_assessment.noise_signals}

@@ -1,0 +1,137 @@
+lead_scoring:
+  thresholds:
+    lead: 35
+    warm: 60
+    hot: 90
+  weights:
+    signals:
+      need: 10
+      customer_intent: 25
+      provider_search: 35
+      installation_request: 30
+      smart_home_automation: 35
+      video_surveillance: 35
+      consultation_request: 20
+      installation_context: 12
+      water_leak_protection: 25
+      implementation_intent: 25
+      hot_lead_intent: 35
+      electrical_design_context: 15
+      designer_context: 15
+      access_control: 35
+      intercom: 30
+      gate_automation: 30
+      power_quality: 30
+      climate_control: 25
+      lighting_control: 25
+      network_infrastructure: 25
+      commercial_object: 20
+      country_house: 20
+      supply: -30
+      diy_or_equipment_only: -50
+      irrelevant_or_sale: -40
+      price_only: -20
+    facts:
+      solution_area: 15
+      property_type: 8
+      vendor: 5
+      design_scope: 10
+      service_location: 5
+      work_type: 20
+      automation_component: 12
+      installation_surface: 6
+      wiring_output: 8
+      controlled_device: 10
+      power_equipment: 12
+      access_device: 12
+      network_scope: 10
+  solution_areas:
+    smart_home:
+      label: Умный дом / автоматизация
+      signal_types:
+        - smart_home_automation
+        - lighting_control
+        - climate_control
+        - water_leak_protection
+      fact_types:
+        - solution_area
+        - automation_component
+        - controlled_device
+    security:
+      label: Безопасность / видеонаблюдение
+      signal_types:
+        - video_surveillance
+        - access_control
+        - intercom
+        - water_leak_protection
+      fact_types:
+        - solution_area
+        - access_device
+    access_control:
+      label: СКУД / домофония / въездные группы
+      signal_types:
+        - access_control
+        - intercom
+        - gate_automation
+      fact_types:
+        - access_device
+    power_stability:
+      label: Бесперебойное электроснабжение
+      signal_types:
+        - power_quality
+      fact_types:
+        - power_equipment
+    engineering_networks:
+      label: СКС / инженерные системы
+      signal_types:
+        - network_infrastructure
+      fact_types:
+        - network_scope
+    climate:
+      label: Управление климатом
+      signal_types:
+        - climate_control
+      fact_types:
+        - controlled_device
+  customer_segments:
+    designer_partner:
+      label: Дизайнер / проектировщик
+      signal_types:
+        - designer_context
+        - electrical_design_context
+      fact_types:
+        - design_scope
+    private_residential:
+      label: Частное жилье
+      signal_types:
+        - country_house
+      fact_types:
+        - property_type
+    commercial_client:
+      label: Коммерческий объект
+      signal_types:
+        - commercial_object
+      fact_types:
+        - property_type
+    active_request:
+      label: Активный запрос на подрядчика
+      signal_types:
+        - customer_intent
+        - provider_search
+        - installation_request
+        - hot_lead_intent
+      fact_types:
+        - work_type
+  intent_signal_types:
+    - need
+    - customer_intent
+    - provider_search
+    - installation_request
+    - consultation_request
+    - implementation_intent
+    - hot_lead_intent
+  noise_signal_types:
+    - supply
+    - diy_or_equipment_only
+    - irrelevant_or_sale
+    - price_only
