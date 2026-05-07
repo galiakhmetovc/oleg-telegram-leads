@@ -1,0 +1,15 @@
+stages:
+  - name: segmentation
+    enabled: true
+  - name: morph
+    enabled: true
+  - name: syntax
+    enabled: true
+  - name: ner
+    enabled: true
+  - name: facts
+    enabled: true
+  - name: domain_signals
+    enabled: true
+  - name: metrics
+    enabled: true

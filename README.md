@@ -7,7 +7,8 @@ in this repository layout:
 
 - `backend/` - FastAPI service, SQLAlchemy/Alembic, PostgreSQL only.
 - `frontend/` - React + Vite + TypeScript operator UI.
-- `docker-compose.yml` - local container stack for PostgreSQL, backend, and frontend.
+- `docker-compose.yml` - local container stack for PostgreSQL, Redis, backend,
+  worker, and frontend.
 - `docs/` - architecture and durable decisions.
 - `state/` - current work and backlog.
 - `artifacts/` - ignored local exports and evidence, including production lead examples.
@@ -23,6 +24,12 @@ Services:
 - backend: `http://localhost:8000`
 - frontend: `http://localhost:5173`
 - postgres: `127.0.0.1:55433`
+- redis: `127.0.0.1:6379`
+- caddy dev access: `https://secclaw.qlbc.ru:19443`
+
+The first workflow uses the backend API to create text enrichment jobs, a Celery
+worker to run the NLP pipeline, Redis as the broker, PostgreSQL for persisted
+job state, and SSE for progress updates.
 
 Checks:
 

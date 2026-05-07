@@ -19,6 +19,31 @@ services:
       timeout: 5s
       retries: 20
 
+  redis:
+    image: redis:8-alpine
+    ports:
+      - "127.0.0.1:${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  migrate:
+    build:
+      context: ./backend
+    command: alembic upgrade head
+    environment:
+      PUR_DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-pur_leads}:${POSTGRES_PASSWORD:-pur_leads_dev_password}@postgres:5432/${POSTGRES_DB:-pur_leads_v2}
+      PUR_ENVIRONMENT: development
+    volumes:
+      - ./backend:/app
+    depends_on:
+      postgres:
+        condition: service_healthy
+
   backend:
     build:
       context: ./backend
@@ -26,12 +51,33 @@ services:
     environment:
       PUR_DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-pur_leads}:${POSTGRES_PASSWORD:-pur_leads_dev_password}@postgres:5432/${POSTGRES_DB:-pur_leads_v2}
       PUR_ENVIRONMENT: development
+      PUR_REDIS_URL: redis://redis:6379/0
+      PUR_NLP_CONFIG_DIR: /app/config/nlp
     ports:
-      - "${BACKEND_PORT:-8000}:8000"
+      - "127.0.0.1:${BACKEND_PORT:-8000}:8000"
     volumes:
       - ./backend:/app
     depends_on:
-      postgres:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+
+  worker:
+    build:
+      context: ./backend
+    command: celery -A app.worker.celery_app worker --loglevel=info --pool=solo
+    environment:
+      PUR_DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-pur_leads}:${POSTGRES_PASSWORD:-pur_leads_dev_password}@postgres:5432/${POSTGRES_DB:-pur_leads_v2}
+      PUR_ENVIRONMENT: development
+      PUR_REDIS_URL: redis://redis:6379/0
+      PUR_NLP_CONFIG_DIR: /app/config/nlp
+    volumes:
+      - ./backend:/app
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
         condition: service_healthy
 
   frontend:
@@ -39,9 +85,10 @@ services:
       context: ./frontend
     command: npm run dev -- --host 0.0.0.0 --port 5173
     environment:
-      VITE_API_BASE_URL: http://localhost:${BACKEND_PORT:-8000}
+      VITE_API_BASE_URL: ""
+      VITE_BACKEND_PROXY_TARGET: http://backend:8000
     ports:
-      - "${FRONTEND_PORT:-5173}:5173"
+      - "127.0.0.1:${FRONTEND_PORT:-5173}:5173"
     volumes:
       - ./frontend:/app
       - frontend-node-modules:/app/node_modules
@@ -50,4 +97,5 @@ services:
 
 volumes:
   postgres-data:
+  redis-data:
   frontend-node-modules:

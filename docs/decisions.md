@@ -94,3 +94,30 @@ Rationale:
 
 - Real lead examples are important for NLP/eval quality.
 - Data should be intentionally curated when it becomes part of the repository.
+
+## 2026-05-07: Externalized Domain Configuration
+
+Domain rules, signal definitions, dictionaries, thresholds, weights, enabled NLP
+pipeline stages, UI labels for domain types, and provider-specific settings
+should not be hardcoded in application code.
+
+Rationale:
+
+- PUR Leads will evolve through NLP experiments and domain feedback.
+- Changing signal definitions should not require editing application mechanics.
+- Configuration and rule files make behavior reviewable and reproducible.
+
+## 2026-05-07: Enrichment Jobs Use Worker Queue From The Start
+
+Use a separate Celery worker with Redis as the broker for text enrichment jobs.
+FastAPI creates jobs, exposes snapshots, and streams progress through SSE.
+PostgreSQL stores jobs, progress events, and final results.
+
+Rationale:
+
+- NLP enrichment is CPU-heavy enough to keep out of the API request path.
+- The frontend needs detailed backend progress, including current stage and
+  percentage.
+- Persisted job state makes snapshots and page recovery possible.
+- Starting with the worker boundary avoids replacing the execution model after
+  the UI contract is built.

@@ -19,6 +19,8 @@ Everything currently runs in development mode.
 
 - PostgreSQL is the only operational database.
 - FastAPI owns the backend HTTP API and database access.
+- Celery workers execute background NLP enrichment jobs.
+- Redis is the local Celery broker.
 - React + Vite + TypeScript owns the operator UI.
 - Docker Compose owns the local dev stack and service wiring.
 
@@ -32,6 +34,16 @@ The backend package lives in `backend/app`.
 - `app/db/session.py` centralizes SQLAlchemy async engine/session construction.
 - `backend/alembic/` is reserved for schema migrations.
 
+The first product slice uses a persisted enrichment job model:
+
+- FastAPI creates enrichment jobs, serves job snapshots, and streams progress
+  through Server-Sent Events.
+- Celery workers execute the configured NLP pipeline outside the API process.
+- PostgreSQL stores jobs, progress events, and final enrichment results.
+- Redis is only the Celery broker; durable business state stays in PostgreSQL.
+- NLP stages, domain signals, and rule sources are loaded from configuration
+  instead of being hardcoded into application code.
+
 ## Frontend
 
 The frontend package lives in `frontend/src`.
@@ -39,6 +51,14 @@ The frontend package lives in `frontend/src`.
 - `App.tsx` is the first operator workspace shell.
 - `main.tsx` mounts React.
 - `styles.css` holds application-level layout styles.
+
+The first operator screen provides:
+
+- text input for arbitrary text;
+- live backend progress with stage names and percentages;
+- annotated source text after completion;
+- structured result tabs for overview, entities, facts, domain signals, tokens,
+  syntax, and pipeline trace.
 
 ## Legacy Reference
 
