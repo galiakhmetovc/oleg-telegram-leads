@@ -199,3 +199,18 @@ Rationale:
   types keep lead scoring explainable.
 - The curated bootstrap pass is intentionally broad but not final; production
   review and eval data should continue extending these catalogs.
+
+## 2026-05-07: Yargy Parsers Share Morphology Resources
+
+Compile Yargy parsers once per `RussianTextEnricher` instance and share one
+Yargy `MorphTokenizer` across signal, fact, and alias parsers.
+
+Rationale:
+
+- Creating a parser per configured rule with its own default `MorphTokenizer`
+  also creates many `pymorphy2` analyzers.
+- With broad PUR settings this made ordinary tests and batch runs allocate
+  multiple GB of RSS and could kill unrelated terminal/tmux sessions under
+  memory pressure.
+- Shared tokenizer state keeps `normalized` semantic matching available while
+  making default backend tests safe to run by default.

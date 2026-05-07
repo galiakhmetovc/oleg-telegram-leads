@@ -72,17 +72,20 @@
   monitoring lead calibration, and revision 19 includes the smart-home alias
   catalogs plus calibrated semantic signal/fact weights.
 - `RussianTextEnricher` now precompiles Yargy parsers once per enricher
-  instance instead of rebuilding them for every message. A local batch CLI can
-  write full enrichment JSONL for exported messages without creating API/Celery
-  jobs per message.
+  instance and shares one Yargy `MorphTokenizer` across compiled rules instead
+  of creating a separate `pymorphy2` analyzer for every parser. This keeps
+  default-config rule tests around hundreds of MB instead of multi-GB RSS. A
+  local batch CLI can write full enrichment JSONL for exported messages without
+  creating API/Celery jobs per message.
 - Benchmark on the first 300 designer-channel messages with full enrichment:
   300 processed, 0 failed, 6 leads, 65.31 seconds, 4.59 messages/sec, peak RSS
   about 1.34 GB, output 1.9 MB. Linear estimate for 528953 messages on one
   process is about 32 hours and about 3.24 GiB JSONL output.
 - Agent verification should avoid Caddy smoke checks unless explicitly requested;
   use backend tests and direct service/container checks by default.
-- Full `tests/test_enrichment_pipeline.py` can peak around 6.1 GB RSS. Stop the
-  dev worker before running that full file locally, then start the worker again.
+- Backend `uv run pytest -q` skips slow full-Natasha NLP smoke tests by default.
+  Run them explicitly with `uv run pytest --runslow ...` when validating the
+  full morph/syntax/NER path.
 
 ## Blockers
 

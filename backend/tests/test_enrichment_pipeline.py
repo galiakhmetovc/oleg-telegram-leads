@@ -1,9 +1,13 @@
+from copy import deepcopy
 from pathlib import Path
 from typing import TypedDict
 
+import pytest
 from pytest import MonkeyPatch
 
-from app.infrastructure.nlp.config_loader import load_nlp_config
+from app.infrastructure.nlp.config_loader import NlpPipelineConfig, load_nlp_config
+from app.infrastructure.nlp.config_loader import load_nlp_config_from_documents
+from app.infrastructure.nlp.config_loader import read_nlp_config_documents
 from app.infrastructure.nlp.russian_text_enricher import RussianTextEnricher
 
 
@@ -17,6 +21,28 @@ class FollowUpLeadCase(TypedDict):
     temperatures: set[str]
 
 
+def _lead_detection_config_without_heavy_natasha() -> NlpPipelineConfig:
+    documents = deepcopy(read_nlp_config_documents(Path("config/nlp")))
+    pipeline = documents["pipeline"]
+    raw_stages = pipeline.get("stages", [])
+    if not isinstance(raw_stages, list):
+        raise AssertionError("pipeline stages must be a list")
+
+    for raw_stage in raw_stages:
+        if not isinstance(raw_stage, dict):
+            raise AssertionError("pipeline stage must be a mapping")
+        if raw_stage.get("name") in {"morph", "syntax", "ner"}:
+            raw_stage["enabled"] = False
+
+    return load_nlp_config_from_documents(documents)
+
+
+@pytest.fixture(scope="module")
+def default_lead_enricher() -> RussianTextEnricher:
+    return RussianTextEnricher(_lead_detection_config_without_heavy_natasha())
+
+
+@pytest.mark.slow
 def test_enriches_text_with_configured_domain_signal(tmp_path: Path) -> None:
     config_dir = tmp_path / "nlp"
     config_dir.mkdir()
@@ -123,6 +149,62 @@ facts:
     enricher.enrich("Нужен умный дом.")
 
     assert parser_calls == 2
+
+
+def test_reuses_one_yargy_tokenizer_between_compiled_rules(tmp_path: Path) -> None:
+    config_dir = tmp_path / "nlp"
+    config_dir.mkdir()
+    (config_dir / "pipeline.yaml").write_text(
+        """
+stages:
+  - name: segmentation
+    enabled: true
+  - name: facts
+    enabled: true
+  - name: domain_signals
+    enabled: true
+""",
+        encoding="utf-8",
+    )
+    (config_dir / "signals.yaml").write_text(
+        """
+signals:
+  - type: smart_home
+    label: Умный дом
+    patterns:
+      - tokens:
+          - normalized: "умный"
+          - normalized: "дом"
+  - type: leak
+    label: Протечки
+    patterns:
+      - tokens:
+          - normalized: "датчик"
+          - normalized: "протечка"
+""",
+        encoding="utf-8",
+    )
+    (config_dir / "facts.yaml").write_text(
+        """
+facts:
+  - type: solution_area
+    label: Направление
+    patterns:
+      - tokens:
+          - normalized: "умный"
+          - normalized: "дом"
+""",
+        encoding="utf-8",
+    )
+
+    enricher = RussianTextEnricher(load_nlp_config(config_dir))
+
+    tokenizer_ids = {
+        id(compiled_rule.parser.tokenizer)
+        for compiled_rules in (enricher._compiled_signal_rules, enricher._compiled_fact_rules)
+        for compiled_rule in compiled_rules
+    }
+    assert len(tokenizer_ids) == 1
 
 
 def test_enriches_text_with_alias_catalog_signals_and_facts(tmp_path: Path) -> None:
@@ -267,9 +349,10 @@ software:
     assert "smart_home" in {item.type for item in result.lead_assessment.solution_areas}
 
 
-def test_default_config_detects_curated_rf_cis_smart_home_aliases() -> None:
-    config = load_nlp_config(Path("config/nlp"))
-    enricher = RussianTextEnricher(config)
+def test_default_config_detects_curated_rf_cis_smart_home_aliases(
+    default_lead_enricher: RussianTextEnricher,
+) -> None:
+    enricher = default_lead_enricher
     text = (
         "Нужно подобрать Aqara Hub M3 или Яндекс Хаб для датчиков протечки "
         "Нептун, Zigbee реле Sonoff, сценариев в Home Assistant и управления "
@@ -290,9 +373,10 @@ def test_default_config_detects_curated_rf_cis_smart_home_aliases() -> None:
     assert result.lead_assessment.temperature in {"warm", "hot"}
 
 
-def test_default_config_marks_smart_home_automation_lead_text() -> None:
-    config = load_nlp_config(Path("config/nlp"))
-    enricher = RussianTextEnricher(config)
+def test_default_config_marks_smart_home_automation_lead_text(
+    default_lead_enricher: RussianTextEnricher,
+) -> None:
+    enricher = default_lead_enricher
     text = (
         "Всем добрый вечер! Дизайнеры, подскажите, пожалуйста, если заказчик "
         "хочет систему умного дома от яндекс, влияет ли это как-то на чертежи "
@@ -318,9 +402,10 @@ def test_default_config_marks_smart_home_automation_lead_text() -> None:
     assert "designer_partner" in {item.type for item in result.lead_assessment.customer_segments}
 
 
-def test_default_config_marks_hot_zigbee_installation_lead_text() -> None:
-    config = load_nlp_config(Path("config/nlp"))
-    enricher = RussianTextEnricher(config)
+def test_default_config_marks_hot_zigbee_installation_lead_text(
+    default_lead_enricher: RussianTextEnricher,
+) -> None:
+    enricher = default_lead_enricher
     text = (
         "Коллеги, такой запрос от клиента. К кому идти? Посоветуйте контакты "
         "по Москве 🙏🏻\n\nУстановить и подключить zigbee шлюз для управления "
@@ -348,9 +433,10 @@ def test_default_config_marks_hot_zigbee_installation_lead_text() -> None:
     assert "smart_home" in {item.type for item in result.lead_assessment.solution_areas}
 
 
-def test_default_config_marks_video_surveillance_apartment_lead_text() -> None:
-    config = load_nlp_config(Path("config/nlp"))
-    enricher = RussianTextEnricher(config)
+def test_default_config_marks_video_surveillance_apartment_lead_text(
+    default_lead_enricher: RussianTextEnricher,
+) -> None:
+    enricher = default_lead_enricher
     text = (
         "Подскажите, пожалуйста, где можно заказать систему видеонаблюдения "
         "для квартиры: это просто камера на стену, нужно проконсультироваться "
@@ -377,9 +463,10 @@ def test_default_config_marks_video_surveillance_apartment_lead_text() -> None:
     assert "security" in {item.type for item in result.lead_assessment.solution_areas}
 
 
-def test_default_config_marks_water_leak_sensor_design_lead_from_artifact() -> None:
-    config = load_nlp_config(Path("config/nlp"))
-    enricher = RussianTextEnricher(config)
+def test_default_config_marks_water_leak_sensor_design_lead_from_artifact(
+    default_lead_enricher: RussianTextEnricher,
+) -> None:
+    enricher = default_lead_enricher
     text = (
         "Всем привет! Подскажите пожалуйста, когда вы планируете на объекте "
         "спрятать датчик протечки в керамогранит, вы прикладываете на чертежах "
@@ -407,9 +494,10 @@ def test_default_config_marks_water_leak_sensor_design_lead_from_artifact() -> N
     assert "smart_home" in {item.type for item in result.lead_assessment.solution_areas}
 
 
-def test_default_config_marks_developer_smart_home_modification_lead_text() -> None:
-    config = load_nlp_config(Path("config/nlp"))
-    enricher = RussianTextEnricher(config)
+def test_default_config_marks_developer_smart_home_modification_lead_text(
+    default_lead_enricher: RussianTextEnricher,
+) -> None:
+    enricher = default_lead_enricher
     text = (
         "Добрый день! Коллеги, подскажите, работал ли кто-нибудь с квартирами "
         "с системой умный дом от застройщика? Электрики не хотят брать в работу "
@@ -442,9 +530,10 @@ def test_default_config_marks_developer_smart_home_modification_lead_text() -> N
     assert "commercial_client" not in segment_types
 
 
-def test_default_config_marks_smart_home_solution_selection_learning_lead_text() -> None:
-    config = load_nlp_config(Path("config/nlp"))
-    enricher = RussianTextEnricher(config)
+def test_default_config_marks_smart_home_solution_selection_learning_lead_text(
+    default_lead_enricher: RussianTextEnricher,
+) -> None:
+    enricher = default_lead_enricher
     text = (
         'Здравствуйте друзья. Подскажите какие действительно нужные и полезные '
         'системы "умного дома" можно внедрить в проект? Раньше вообще с этим '
@@ -469,9 +558,10 @@ def test_default_config_marks_smart_home_solution_selection_learning_lead_text()
     assert "research_project" in {item.type for item in result.lead_assessment.customer_segments}
 
 
-def test_default_config_marks_smart_home_value_evaluation_family_apartment_lead_text() -> None:
-    config = load_nlp_config(Path("config/nlp"))
-    enricher = RussianTextEnricher(config)
+def test_default_config_marks_smart_home_value_evaluation_family_apartment_lead_text(
+    default_lead_enricher: RussianTextEnricher,
+) -> None:
+    enricher = default_lead_enricher
     text = (
         "Вопрос от заказчиков: а посоветуйте, надо ли нам умный дом? В квартиру. "
         "Родители и двое детей. У меня как-то до этого все сами знали, надо им "
@@ -504,9 +594,10 @@ def test_default_config_marks_smart_home_value_evaluation_family_apartment_lead_
     assert "renovation_project" not in segment_types
 
 
-def test_default_config_marks_follow_up_pur_leads_with_specific_explanations() -> None:
-    config = load_nlp_config(Path("config/nlp"))
-    enricher = RussianTextEnricher(config)
+def test_default_config_marks_follow_up_pur_leads_with_specific_explanations(
+    default_lead_enricher: RussianTextEnricher,
+) -> None:
+    enricher = default_lead_enricher
     cases: list[FollowUpLeadCase] = [
         {
             "id": "children_audio_wiring",
@@ -641,9 +732,10 @@ def test_default_config_marks_follow_up_pur_leads_with_specific_explanations() -
         assert case["segments"] <= {item.type for item in result.lead_assessment.customer_segments}, case["id"]
 
 
-def test_default_config_marks_latest_motion_relay_and_hvac_leads() -> None:
-    config = load_nlp_config(Path("config/nlp"))
-    enricher = RussianTextEnricher(config)
+def test_default_config_marks_latest_motion_relay_and_hvac_leads(
+    default_lead_enricher: RussianTextEnricher,
+) -> None:
+    enricher = default_lead_enricher
 
     motion_result = enricher.enrich(
         "Коллеги, помогите решить такую задачу. Я хочу сделать в туалете ночной "
@@ -700,9 +792,10 @@ def test_default_config_marks_latest_motion_relay_and_hvac_leads() -> None:
     assert "designer_partner" in {item.type for item in hvac_result.lead_assessment.customer_segments}
 
 
-def test_default_config_marks_neptun_water_leak_monitoring_lead() -> None:
-    config = load_nlp_config(Path("config/nlp"))
-    enricher = RussianTextEnricher(config)
+def test_default_config_marks_neptun_water_leak_monitoring_lead(
+    default_lead_enricher: RussianTextEnricher,
+) -> None:
+    enricher = default_lead_enricher
 
     result = enricher.enrich(
         "Коллеги, подскажите кто ставил систему Нептуп ProW, хочу ее выбрать, "
@@ -723,9 +816,10 @@ def test_default_config_marks_neptun_water_leak_monitoring_lead() -> None:
     assert "security" in {item.type for item in result.lead_assessment.solution_areas}
 
 
-def test_default_config_does_not_mark_diy_equipment_sale_as_lead() -> None:
-    config = load_nlp_config(Path("config/nlp"))
-    enricher = RussianTextEnricher(config)
+def test_default_config_does_not_mark_diy_equipment_sale_as_lead(
+    default_lead_enricher: RussianTextEnricher,
+) -> None:
+    enricher = default_lead_enricher
     text = "Продам камеру видеонаблюдения без монтажа, самовывоз, дешево."
 
     result = enricher.enrich(text)

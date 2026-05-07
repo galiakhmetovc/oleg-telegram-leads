@@ -82,7 +82,8 @@ The batch output is JSONL with `message_id`, `text`, and full
 Checks:
 
 ```bash
-cd backend && uv run --extra dev pytest -q
+cd backend && uv run pytest -q
+cd backend && uv run pytest --runslow tests/test_enrichment_pipeline.py::test_enriches_text_with_configured_domain_signal -q
 cd frontend && npm test && npm run build
 docker compose config
 ```

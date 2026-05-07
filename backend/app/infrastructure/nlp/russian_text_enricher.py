@@ -9,6 +9,7 @@ from natasha import Doc, MorphVocab, NewsEmbedding, NewsMorphTagger, NewsNERTagg
 from natasha import NewsSyntaxParser, Segmenter
 from yargy import Parser, or_, rule
 from yargy.predicates import eq, normalized
+from yargy.tokenizer import MorphTokenizer
 
 from app.domain.enrichment import DomainSignal, EnrichedEntity, EnrichedSentence, EnrichedToken
 from app.domain.enrichment import EnrichmentMetrics, ExtractedFact, PipelineTraceItem
@@ -41,6 +42,7 @@ class RussianTextEnricher:
         self._morph_tagger: NewsMorphTagger | None = None
         self._syntax_parser: NewsSyntaxParser | None = None
         self._ner_tagger: NewsNERTagger | None = None
+        self._yargy_tokenizer = MorphTokenizer()
         self._signal_rules_by_type = {rule.type: rule for rule in config.signals}
         self._compiled_signal_rules = self._compile_phrase_rules(config.signals)
         self._compiled_fact_rules = self._compile_phrase_rules(config.facts)
@@ -305,7 +307,7 @@ class RussianTextEnricher:
             rule(*[self._token_predicate(token) for token in pattern.tokens])
             for pattern in rule_config.patterns
         )
-        return _parser_from_rules(yargy_rules)
+        return _parser_from_rules(yargy_rules, tokenizer=self._yargy_tokenizer)
 
     def _build_alias_parser(self, alias_config: AliasRuleConfig) -> Any:
         yargy_rules = [
@@ -313,7 +315,7 @@ class RussianTextEnricher:
             for alias in alias_config.aliases
             if alias.strip()
         ]
-        return _parser_from_rules(yargy_rules)
+        return _parser_from_rules(yargy_rules, tokenizer=self._yargy_tokenizer)
 
     def _find_phrase_matches(
         self,
@@ -337,11 +339,11 @@ class RussianTextEnricher:
         raise ValueError(f"unsupported Yargy token predicate: {token.predicate}")
 
 
-def _parser_from_rules(yargy_rules: list[Any]) -> Any:
+def _parser_from_rules(yargy_rules: list[Any], tokenizer: Any | None = None) -> Any:
     with warnings.catch_warnings():
         warnings.filterwarnings("ignore", category=UserWarning, module="pymorphy2.analyzer")
         warnings.filterwarnings("ignore", message="pkg_resources is deprecated.*")
-        return Parser(or_(*yargy_rules))
+        return Parser(or_(*yargy_rules), tokenizer=tokenizer)
 
 
 def _alias_fact_label(alias_config: AliasRuleConfig, fact_type: str) -> str:

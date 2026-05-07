@@ -32,9 +32,9 @@ and common РФ/СНГ brand aliases.
 
 ## Verification Notes
 
-- Full `uv run pytest -q` was attempted twice and the process was killed with
-  exit code 137 while running the heavy NLP pipeline suite.
-- To verify behavior without holding all Natasha/Yargy-heavy cases in one
-  process, all non-pipeline backend tests were run together, and every
-  `tests/test_enrichment_pipeline.py` test case was run individually in its own
-  pytest process.
+- The first verification attempt exposed a memory issue: each compiled Yargy
+  parser created its own default `MorphTokenizer`/`pymorphy2` analyzer, so the
+  broad default config could push a single pytest process into multi-GB RSS.
+- `RussianTextEnricher` now shares one Yargy `MorphTokenizer` across compiled
+  signal, fact, and alias parsers. Backend `uv run pytest -q` runs safely by
+  default and skips only the explicit slow full-Natasha smoke test.
