@@ -152,6 +152,12 @@ facts:
           - normalized: "под"
           - normalized: "ключ"
       - tokens:
+          - normalized: "внедрить"
+      - tokens:
+          - normalized: "внедрить"
+          - normalized: "в"
+          - normalized: "проект"
+      - tokens:
           - normalized: "добавление"
           - normalized: "розетка"
       - tokens:

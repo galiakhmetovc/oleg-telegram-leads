@@ -29,7 +29,10 @@
 - Default NLP config recognizes the developer-provided smart-home apartment
   modification lead: apartments with smart home from a developer, socket/switch
   changes, electrical scheme changes, and warranty risk.
-- Dev PostgreSQL active NLP config was refreshed to revision 7 from the current
+- Default NLP config recognizes early research/design leads where the author asks
+  which useful smart-home systems to implement in a project and where to study
+  the topic.
+- Dev PostgreSQL active NLP config was refreshed to revision 8 from the current
   bootstrap config so worker jobs use the new PUR scoring settings.
 
 ## Blockers

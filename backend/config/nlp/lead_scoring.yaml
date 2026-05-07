@@ -12,6 +12,8 @@ lead_scoring:
       smart_home_automation: 35
       video_surveillance: 35
       consultation_request: 20
+      solution_selection_request: 25
+      education_request: 15
       installation_context: 12
       water_leak_protection: 25
       implementation_intent: 25
@@ -56,6 +58,7 @@ lead_scoring:
         - smart_home_automation
         - developer_smart_home_context
         - renovation_modification_context
+        - solution_selection_request
         - lighting_control
         - climate_control
         - water_leak_protection
@@ -131,12 +134,21 @@ lead_scoring:
       fact_types:
         - design_scope
         - controlled_device
+    research_project:
+      label: Подбор решений для проекта
+      signal_types:
+        - solution_selection_request
+        - education_request
+      fact_types:
+        - work_type
   intent_signal_types:
     - need
     - customer_intent
     - provider_search
     - installation_request
     - consultation_request
+    - solution_selection_request
+    - education_request
     - implementation_intent
     - hot_lead_intent
     - developer_smart_home_context

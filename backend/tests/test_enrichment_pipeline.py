@@ -201,6 +201,33 @@ def test_default_config_marks_developer_smart_home_modification_lead_text() -> N
     assert "commercial_client" not in segment_types
 
 
+def test_default_config_marks_smart_home_solution_selection_learning_lead_text() -> None:
+    config = load_nlp_config(Path("config/nlp"))
+    enricher = RussianTextEnricher(config)
+    text = (
+        'Здравствуйте друзья. Подскажите какие действительно нужные и полезные '
+        'системы "умного дома" можно внедрить в проект? Раньше вообще с этим '
+        "не сталеивался. Где можно изучить эту тему?"
+    )
+
+    result = enricher.enrich(text)
+
+    signal_types = {signal.type for signal in result.domain_signals}
+    fact_types = {fact.type for fact in result.facts}
+
+    assert "smart_home_automation" in signal_types
+    assert "solution_selection_request" in signal_types
+    assert "education_request" in signal_types
+    assert "consultation_request" in signal_types
+    assert "solution_area" in fact_types
+    assert "work_type" in fact_types
+    assert result.lead_assessment is not None
+    assert result.lead_assessment.is_lead is True
+    assert result.lead_assessment.temperature in {"warm", "hot"}
+    assert "smart_home" in {item.type for item in result.lead_assessment.solution_areas}
+    assert "research_project" in {item.type for item in result.lead_assessment.customer_segments}
+
+
 def test_default_config_does_not_mark_diy_equipment_sale_as_lead() -> None:
     config = load_nlp_config(Path("config/nlp"))
     enricher = RussianTextEnricher(config)

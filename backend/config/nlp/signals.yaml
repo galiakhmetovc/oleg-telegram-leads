@@ -144,6 +144,51 @@ signals:
       - tokens:
           - normalized: "хотеть"
           - normalized: "понять"
+      - tokens:
+          - normalized: "подсказать"
+          - normalized: "какой"
+
+  - type: solution_selection_request
+    label: Подбор полезных решений
+    color: "#00897b"
+    confidence: 0.82
+    patterns:
+      - tokens:
+          - normalized: "какой"
+          - normalized: "действительно"
+          - normalized: "нужный"
+      - tokens:
+          - normalized: "нужный"
+          - normalized: "и"
+          - normalized: "полезный"
+      - tokens:
+          - normalized: "можно"
+          - normalized: "внедрить"
+      - tokens:
+          - normalized: "внедрить"
+          - normalized: "в"
+          - normalized: "проект"
+
+  - type: education_request
+    label: Изучение темы / первый опыт
+    color: "#5e35b1"
+    confidence: 0.74
+    patterns:
+      - tokens:
+          - normalized: "где"
+          - normalized: "можно"
+          - normalized: "изучить"
+      - tokens:
+          - normalized: "изучить"
+          - normalized: "этот"
+          - normalized: "тема"
+      - tokens:
+          - normalized: "раньше"
+          - normalized: "вообще"
+          - normalized: "с"
+          - normalized: "это"
+          - normalized: "не"
+          - normalized: "сталкиваться"
 
   - type: installation_context
     label: Монтажный контекст
