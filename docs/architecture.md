@@ -92,6 +92,13 @@ The persisted config still uses `phrases` and `patterns` as the storage shape
 because that is what the rule engine consumes. The web UI does not expose Yargy
 predicate names as the product vocabulary.
 
+Exact phrases are matched as lowercased literal text with word-like boundaries,
+not through Yargy morphology. This keeps technical variants such as `Wi-Fi`,
+`220v`, `Z-Wave`, product names, and abbreviations in the exact matching mode.
+Lemmatized phrases use Yargy `normalized` tokens. Legacy documents that still
+contain `caseless` tokens are canonicalized on read into exact phrases or
+lemmatized phrases; new API/UI saves should not emit `caseless`.
+
 Alias catalogs are separate from domain signals. Domain signals remain semantic
 categories such as `smart_home_platform`, `protocol_gateway`, `leak_protection`,
 `lighting_automation`, `climate_automation`, `access_control`, `intercom`,

@@ -20,6 +20,10 @@ facts:
   - type: solution_area
     label: Решение / направление
     confidence: 0.72
+    phrases:
+      - ["скуд"]
+      - ["скс"]
+      - ["ибп"]
     patterns:
       - tokens:
           - normalized: "система"
@@ -36,8 +40,6 @@ facts:
       - tokens:
           - normalized: "видеонаблюдение"
       - tokens:
-          - caseless: "скуд"
-      - tokens:
           - normalized: "контроль"
           - normalized: "доступ"
       - tokens:
@@ -50,13 +52,9 @@ facts:
       - tokens:
           - normalized: "шлагбаум"
       - tokens:
-          - caseless: "скс"
-      - tokens:
           - normalized: "структурированный"
           - normalized: "кабельный"
           - normalized: "сеть"
-      - tokens:
-          - caseless: "ибп"
       - tokens:
           - normalized: "стабилизатор"
           - normalized: "напряжение"
@@ -87,6 +85,8 @@ facts:
   - type: property_type
     label: Тип объекта
     confidence: 0.68
+    phrases:
+      - ["тц"]
     patterns:
       - tokens:
           - normalized: "квартира"
@@ -99,8 +99,6 @@ facts:
           - normalized: "дача"
       - tokens:
           - normalized: "офис"
-      - tokens:
-          - caseless: "тц"
       - tokens:
           - normalized: "коммерческий"
           - normalized: "объект"
@@ -117,19 +115,14 @@ facts:
       - ["нептуп"]
       - ["prow"]
       - ["profi"]
+      - ["yandex"]
+      - ["livicom"]
+      - ["o’climate"]
+      - ["o'climate"]
+      - ["orac"]
     patterns:
       - tokens:
           - normalized: "яндекс"
-      - tokens:
-          - caseless: "yandex"
-      - tokens:
-          - caseless: "livicom"
-      - tokens:
-          - caseless: "o’climate"
-      - tokens:
-          - caseless: "o'climate"
-      - tokens:
-          - caseless: "orac"
       - tokens:
           - normalized: "ораковский"
 
@@ -175,11 +168,11 @@ facts:
   - type: service_location
     label: Локация работ
     confidence: 0.72
+    phrases:
+      - ["спб"]
     patterns:
       - tokens:
           - normalized: "москва"
-      - tokens:
-          - caseless: "спб"
       - tokens:
           - normalized: "санкт"
           - normalized: "петербург"
@@ -236,9 +229,11 @@ facts:
   - type: automation_component
     label: Компонент автоматизации
     confidence: 0.74
+    phrases:
+      - ["wi-fi", "модуль"]
     patterns:
       - tokens:
-          - caseless: "zigbee"
+          - normalized: "zigbee"
           - normalized: "шлюз"
       - tokens:
           - normalized: "приложение"
@@ -281,9 +276,6 @@ facts:
           - normalized: "электрический"
           - normalized: "карниз"
       - tokens:
-          - caseless: "wi-fi"
-          - normalized: "модуль"
-      - tokens:
           - normalized: "датчик"
           - normalized: "движение"
       - tokens:
@@ -309,6 +301,8 @@ facts:
   - type: wiring_output
     label: Выводы / подключение
     confidence: 0.66
+    phrases:
+      - ["220v"]
     patterns:
       - tokens:
           - normalized: "проконсультироваться"
@@ -321,12 +315,12 @@ facts:
       - tokens:
           - normalized: "кабель"
           - normalized: "канал"
-      - tokens:
-          - caseless: "220v"
 
   - type: controlled_device
     label: Управляемое устройство
     confidence: 0.66
+    phrases:
+      - ["тв"]
     patterns:
       - tokens:
           - normalized: "свет"
@@ -337,8 +331,6 @@ facts:
       - tokens:
           - normalized: "входной"
           - normalized: "замок"
-      - tokens:
-          - caseless: "тв"
       - tokens:
           - normalized: "кондиционер"
       - tokens:
@@ -393,9 +385,9 @@ facts:
   - type: power_equipment
     label: Оборудование электропитания
     confidence: 0.68
+    phrases:
+      - ["ибп"]
     patterns:
-      - tokens:
-          - caseless: "ибп"
       - tokens:
           - normalized: "стабилизатор"
           - normalized: "напряжение"
@@ -406,9 +398,9 @@ facts:
   - type: access_device
     label: Устройство доступа
     confidence: 0.68
+    phrases:
+      - ["скуд"]
     patterns:
-      - tokens:
-          - caseless: "скуд"
       - tokens:
           - normalized: "домофон"
       - tokens:
@@ -428,9 +420,9 @@ facts:
   - type: network_scope
     label: Сеть / слаботочный раздел
     confidence: 0.66
+    phrases:
+      - ["скс"]
     patterns:
-      - tokens:
-          - caseless: "скс"
       - tokens:
           - normalized: "кабельный"
           - normalized: "сеть"

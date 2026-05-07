@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import warnings
 from collections.abc import Callable
 from dataclasses import dataclass, replace
@@ -8,7 +9,7 @@ from typing import Any
 from natasha import Doc, MorphVocab, NewsEmbedding, NewsMorphTagger, NewsNERTagger
 from natasha import NewsSyntaxParser, Segmenter
 from yargy import Parser, or_, rule
-from yargy.predicates import eq, normalized
+from yargy.predicates import normalized
 from yargy.tokenizer import MorphTokenizer
 
 from app.domain.enrichment import DomainSignal, EnrichedEntity, EnrichedSentence, EnrichedToken
@@ -24,13 +25,19 @@ ProgressCallback = Callable[[str, int, str], None]
 @dataclass(frozen=True)
 class CompiledPhraseRule:
     config: PhraseRuleConfig
-    parser: Any
+    exact_phrases: tuple[CompiledExactPhrase, ...]
+    parser: Any | None
 
 
 @dataclass(frozen=True)
 class CompiledAliasRule:
     config: AliasRuleConfig
-    parser: Any
+    exact_phrases: tuple[CompiledExactPhrase, ...]
+
+
+@dataclass(frozen=True)
+class CompiledExactPhrase:
+    pattern: re.Pattern[str]
 
 
 class RussianTextEnricher:
@@ -206,12 +213,17 @@ class RussianTextEnricher:
                 )
                 for start, stop, match_text in self._find_phrase_matches(
                     text,
+                    compiled_rule.exact_phrases,
                     compiled_rule.parser,
                 )
             )
         for compiled_alias in self._compiled_alias_rules:
             alias_config = compiled_alias.config
-            for start, stop, match_text in self._find_phrase_matches(text, compiled_alias.parser):
+            for start, stop, match_text in self._find_phrase_matches(
+                text,
+                compiled_alias.exact_phrases,
+                None,
+            ):
                 signals.extend(
                     self._signal_from_alias(
                         alias_config=alias_config,
@@ -241,12 +253,17 @@ class RussianTextEnricher:
                 )
                 for start, stop, match_text in self._find_phrase_matches(
                     text,
+                    compiled_rule.exact_phrases,
                     compiled_rule.parser,
                 )
             )
         for compiled_alias in self._compiled_alias_rules:
             alias_config = compiled_alias.config
-            for start, stop, match_text in self._find_phrase_matches(text, compiled_alias.parser):
+            for start, stop, match_text in self._find_phrase_matches(
+                text,
+                compiled_alias.exact_phrases,
+                None,
+            ):
                 facts.extend(
                     ExtractedFact(
                         id=f"fact-{len(facts) + offset + 1}",
@@ -288,7 +305,11 @@ class RussianTextEnricher:
         rule_configs: tuple[PhraseRuleConfig, ...],
     ) -> tuple[CompiledPhraseRule, ...]:
         return tuple(
-            CompiledPhraseRule(config=rule_config, parser=self._build_parser(rule_config))
+            CompiledPhraseRule(
+                config=rule_config,
+                exact_phrases=_compile_exact_phrases(rule_config.phrases),
+                parser=self._build_parser(rule_config),
+            )
             for rule_config in rule_configs
         )
 
@@ -297,46 +318,79 @@ class RussianTextEnricher:
         alias_configs: tuple[AliasRuleConfig, ...],
     ) -> tuple[CompiledAliasRule, ...]:
         return tuple(
-            CompiledAliasRule(config=alias_config, parser=self._build_alias_parser(alias_config))
+            CompiledAliasRule(
+                config=alias_config,
+                exact_phrases=_compile_exact_phrases(
+                    tuple(
+                        tuple(alias.strip().split())
+                        for alias in alias_config.aliases
+                        if alias.strip()
+                    )
+                ),
+            )
             for alias_config in alias_configs
         )
 
-    def _build_parser(self, rule_config: PhraseRuleConfig) -> Any:
-        yargy_rules = [rule(*[eq(word.lower()) for word in phrase]) for phrase in rule_config.phrases]
-        yargy_rules.extend(
+    def _build_parser(self, rule_config: PhraseRuleConfig) -> Any | None:
+        yargy_rules = [
             rule(*[self._token_predicate(token) for token in pattern.tokens])
             for pattern in rule_config.patterns
-        )
-        return _parser_from_rules(yargy_rules, tokenizer=self._yargy_tokenizer)
-
-    def _build_alias_parser(self, alias_config: AliasRuleConfig) -> Any:
-        yargy_rules = [
-            rule(*[eq(word.lower()) for word in alias.strip().split()])
-            for alias in alias_config.aliases
-            if alias.strip()
         ]
+        if not yargy_rules:
+            return None
         return _parser_from_rules(yargy_rules, tokenizer=self._yargy_tokenizer)
 
     def _find_phrase_matches(
         self,
         text: str,
-        parser: Any,
+        exact_phrases: tuple[CompiledExactPhrase, ...],
+        parser: Any | None,
     ) -> list[tuple[int, int, str]]:
-        matches: list[tuple[int, int, str]] = []
-        search_text = text.lower()
-        with warnings.catch_warnings():
-            warnings.filterwarnings("ignore", category=UserWarning, module="pymorphy2.analyzer")
-            warnings.filterwarnings("ignore", message="pkg_resources is deprecated.*")
-            for match in parser.findall(search_text):
-                matches.append((match.span.start, match.span.stop, text[match.span.start:match.span.stop]))
-        return matches
+        matches = _find_exact_matches(text, exact_phrases)
+        if parser is not None:
+            search_text = text.lower()
+            with warnings.catch_warnings():
+                warnings.filterwarnings("ignore", category=UserWarning, module="pymorphy2.analyzer")
+                warnings.filterwarnings("ignore", message="pkg_resources is deprecated.*")
+                for match in parser.findall(search_text):
+                    matches.append(
+                        (match.span.start, match.span.stop, text[match.span.start:match.span.stop])
+                    )
+        return sorted(matches, key=lambda item: (item[0], item[1], item[2].lower()))
 
     def _token_predicate(self, token: RuleTokenConfig) -> Any:
         if token.predicate == "normalized":
             return normalized(token.value)
-        if token.predicate == "caseless":
-            return eq(token.value.lower())
         raise ValueError(f"unsupported Yargy token predicate: {token.predicate}")
+
+
+def _compile_exact_phrases(phrases: tuple[tuple[str, ...], ...]) -> tuple[CompiledExactPhrase, ...]:
+    return tuple(
+        CompiledExactPhrase(pattern=_exact_phrase_pattern(phrase))
+        for phrase in phrases
+        if _clean_phrase_tokens(phrase)
+    )
+
+
+def _exact_phrase_pattern(phrase: tuple[str, ...]) -> re.Pattern[str]:
+    body = r"\s+".join(re.escape(token) for token in _clean_phrase_tokens(phrase))
+    return re.compile(rf"(?<![\w]){body}(?![\w])", flags=re.UNICODE)
+
+
+def _clean_phrase_tokens(phrase: tuple[str, ...]) -> tuple[str, ...]:
+    return tuple(token.strip().lower() for token in phrase if token.strip())
+
+
+def _find_exact_matches(
+    text: str,
+    exact_phrases: tuple[CompiledExactPhrase, ...],
+) -> list[tuple[int, int, str]]:
+    search_text = text.lower()
+    return [
+        (match.start(), match.end(), text[match.start():match.end()])
+        for exact_phrase in exact_phrases
+        for match in exact_phrase.pattern.finditer(search_text)
+    ]
 
 
 def _parser_from_rules(yargy_rules: list[Any], tokenizer: Any | None = None) -> Any:

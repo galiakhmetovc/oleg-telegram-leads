@@ -160,7 +160,7 @@ type PipelineStageSetting = {
 };
 
 type PatternTokenSetting = {
-  predicate: "caseless" | "normalized";
+  predicate: "normalized";
   value: string;
 };
 

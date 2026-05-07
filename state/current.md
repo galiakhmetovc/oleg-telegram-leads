@@ -24,6 +24,10 @@
   phrases and lemmatized phrases. Exact/semantic rules are edited with explicit
   add/edit/delete actions. New lemmatized phrases are built by the backend from
   operator-entered text and preserve `source_text` alongside generated lemmas.
+- Rule matching no longer exposes `caseless` as an active mode. Exact phrases
+  are literal lowercased matches for technical spellings such as `Wi-Fi`, `220v`,
+  `Z-Wave`, and abbreviations; lemmatized phrases remain Yargy `normalized`
+  rules. Legacy `caseless` documents are canonicalized on read.
 - A Help tab in the web UI explains exact versus lemmatized matching and when to
   use each mode.
 - Settings Center now also exposes editable alias catalogs for `vendors`,

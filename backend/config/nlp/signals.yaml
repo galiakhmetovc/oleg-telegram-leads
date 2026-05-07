@@ -118,7 +118,7 @@ signals:
       - tokens:
           - normalized: "автоматизация"
       - tokens:
-          - caseless: "zigbee"
+          - normalized: "zigbee"
           - normalized: "шлюз"
       - tokens:
           - normalized: "алиса"
@@ -163,7 +163,7 @@ signals:
     patterns:
       - source_text: "zigbee шлюз"
         tokens:
-          - caseless: "zigbee"
+          - normalized: "zigbee"
           - normalized: "шлюз"
       - source_text: "умный хаб"
         tokens:
@@ -289,8 +289,8 @@ signals:
       - ["кому", "и", "зачем"]
     patterns:
       - tokens:
-          - caseless: "надо"
-          - caseless: "ли"
+          - normalized: "надо"
+          - normalized: "ли"
       - tokens:
           - normalized: "какой"
           - normalized: "плюшка"
@@ -313,6 +313,8 @@ signals:
     label: Монтажный контекст
     color: "#6d4c41"
     confidence: 0.72
+    phrases:
+      - ["220v"]
     patterns:
       - tokens:
           - normalized: "камера"
@@ -328,8 +330,6 @@ signals:
       - tokens:
           - normalized: "кабель"
           - normalized: "канал"
-      - tokens:
-          - caseless: "220v"
 
   - type: water_leak_protection
     label: Защита от протечек
@@ -544,9 +544,9 @@ signals:
     label: СКУД / контроль доступа
     color: "#00897b"
     confidence: 0.82
+    phrases:
+      - ["скуд"]
     patterns:
-      - tokens:
-          - caseless: "скуд"
       - tokens:
           - normalized: "контроль"
           - normalized: "доступ"
@@ -609,9 +609,9 @@ signals:
     label: Электропитание / ИБП / стабилизаторы
     color: "#f57f17"
     confidence: 0.8
+    phrases:
+      - ["ибп"]
     patterns:
-      - tokens:
-          - caseless: "ибп"
       - tokens:
           - normalized: "бесперебойный"
           - normalized: "питание"
@@ -761,13 +761,12 @@ signals:
     label: Электрические карнизы / шторы
     color: "#8e24aa"
     confidence: 0.78
+    phrases:
+      - ["wi-fi", "модуль"]
     patterns:
       - tokens:
           - normalized: "электрический"
           - normalized: "карниз"
-      - tokens:
-          - caseless: "wi-fi"
-          - normalized: "модуль"
       - tokens:
           - normalized: "работа"
           - normalized: "с"
@@ -777,9 +776,9 @@ signals:
     label: СКС / слаботочные сети
     color: "#5e35b1"
     confidence: 0.76
+    phrases:
+      - ["скс"]
     patterns:
-      - tokens:
-          - caseless: "скс"
       - tokens:
           - normalized: "структурированный"
           - normalized: "кабельный"
@@ -795,11 +794,11 @@ signals:
     label: Коммерческий объект
     color: "#455a64"
     confidence: 0.68
+    phrases:
+      - ["тц"]
     patterns:
       - tokens:
           - normalized: "офис"
-      - tokens:
-          - caseless: "тц"
       - tokens:
           - normalized: "медицинский"
           - normalized: "учреждение"
@@ -874,12 +873,11 @@ signals:
     label: Нерелевантная продажа / объявление
     color: "#616161"
     confidence: 0.72
+    phrases:
+      - ["б", "у"]
     patterns:
       - tokens:
           - normalized: "продать"
-      - tokens:
-          - normalized: "б"
-          - caseless: "у"
       - tokens:
           - normalized: "в"
           - normalized: "наличие"

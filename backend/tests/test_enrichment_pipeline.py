@@ -203,6 +203,7 @@ facts:
         id(compiled_rule.parser.tokenizer)
         for compiled_rules in (enricher._compiled_signal_rules, enricher._compiled_fact_rules)
         for compiled_rule in compiled_rules
+        if compiled_rule.parser is not None
     }
     assert len(tokenizer_ids) == 1
 
@@ -347,6 +348,41 @@ software:
     assert result.lead_assessment is not None
     assert result.lead_assessment.is_lead is True
     assert "smart_home" in {item.type for item in result.lead_assessment.solution_areas}
+
+
+def test_exact_phrases_match_technical_punctuation_and_digits(tmp_path: Path) -> None:
+    config_dir = tmp_path / "nlp"
+    config_dir.mkdir()
+    (config_dir / "pipeline.yaml").write_text(
+        """
+stages:
+  - name: segmentation
+    enabled: true
+  - name: domain_signals
+    enabled: true
+""",
+        encoding="utf-8",
+    )
+    (config_dir / "signals.yaml").write_text(
+        """
+signals:
+  - type: technical_exact
+    label: Точные технические варианты
+    phrases:
+      - ["wi-fi"]
+      - ["220v"]
+      - ["z-wave"]
+      - ["o’climate"]
+""",
+        encoding="utf-8",
+    )
+
+    result = RussianTextEnricher(load_nlp_config(config_dir)).enrich(
+        "Нужны Wi-Fi модуль, вывод 220v, Z-Wave реле и O’CLIMATE."
+    )
+
+    matched_texts = {signal.text for signal in result.domain_signals}
+    assert {"Wi-Fi", "220v", "Z-Wave", "O’CLIMATE"} <= matched_texts
 
 
 def test_default_config_detects_curated_rf_cis_smart_home_aliases(

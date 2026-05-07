@@ -62,6 +62,37 @@ signals:
     assert config.signals[0].patterns[0].tokens[1].value == "дом"
 
 
+def test_canonicalizes_legacy_caseless_patterns(tmp_path: Path) -> None:
+    config_dir = tmp_path / "nlp"
+    config_dir.mkdir()
+    (config_dir / "pipeline.yaml").write_text("stages: []\n", encoding="utf-8")
+    (config_dir / "signals.yaml").write_text(
+        """
+signals:
+  - type: technical_terms
+    label: Технические термины
+    patterns:
+      - tokens:
+          - caseless: "СКУД"
+      - tokens:
+          - caseless: "zigbee"
+          - normalized: "шлюз"
+      - tokens:
+          - caseless: "wi-fi"
+          - normalized: "модуль"
+""",
+        encoding="utf-8",
+    )
+
+    config = load_nlp_config(config_dir)
+
+    assert config.signals[0].phrases == (("скуд",), ("wi-fi", "модуль"))
+    assert config.signals[0].patterns[0].tokens[0].predicate == "normalized"
+    assert config.signals[0].patterns[0].tokens[0].value == "zigbee"
+    assert config.signals[0].patterns[0].tokens[1].predicate == "normalized"
+    assert config.signals[0].patterns[0].tokens[1].value == "шлюз"
+
+
 def test_loads_alias_catalogs_from_yaml(tmp_path: Path) -> None:
     config_dir = tmp_path / "nlp"
     config_dir.mkdir()

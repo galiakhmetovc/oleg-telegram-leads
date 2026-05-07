@@ -219,6 +219,59 @@ def test_get_settings_returns_editable_nlp_and_readonly_system_settings(tmp_path
     assert repository.active is not None
 
 
+def test_get_settings_exposes_legacy_caseless_as_exact_or_lemmatized_rules(tmp_path: Path) -> None:
+    config_dir = tmp_path / "nlp"
+    _write_config(config_dir)
+    repository = InMemoryNlpConfigRepository()
+    repository.active = {
+        "pipeline": {"stages": []},
+        "signals": {
+            "signals": [
+                {
+                    "type": "technical_terms",
+                    "label": "Технические термины",
+                    "patterns": [
+                        {"tokens": [{"caseless": "СКУД"}]},
+                        {
+                            "tokens": [
+                                {"caseless": "zigbee"},
+                                {"normalized": "шлюз"},
+                            ]
+                        },
+                    ],
+                }
+            ]
+        },
+        "facts": {"facts": []},
+        "vendors": {"vendors": []},
+        "protocols": {"protocols": []},
+        "devices": {"devices": []},
+        "software": {"software": []},
+        "lead_scoring": {
+            "lead_scoring": {
+                "thresholds": {"lead": 1, "warm": 1, "hot": 1},
+                "weights": {"signals": {}, "facts": {}},
+                "solution_areas": {},
+                "customer_segments": {},
+                "intent_signal_types": [],
+                "noise_signal_types": [],
+            }
+        },
+    }
+    repository.revision = 4
+    client = _app_with_settings_repo(config_dir, repository)
+
+    response = client.get("/api/v1/settings")
+
+    assert response.status_code == 200
+    rule = response.json()["nlp"]["signals"][0]
+    assert rule["phrases"] == [["скуд"]]
+    assert rule["patterns"][0]["tokens"] == [
+        {"predicate": "normalized", "value": "zigbee"},
+        {"predicate": "normalized", "value": "шлюз"},
+    ]
+
+
 def test_build_semantic_pattern_returns_lemmas_and_operator_text(tmp_path: Path) -> None:
     config_dir = tmp_path / "nlp"
     _write_config(config_dir)

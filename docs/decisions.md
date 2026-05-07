@@ -214,3 +214,19 @@ Rationale:
   memory pressure.
 - Shared tokenizer state keeps `normalized` semantic matching available while
   making default backend tests safe to run by default.
+
+## 2026-05-07: Rule Matching Has Two Operator Modes
+
+Expose only two rule matching modes to operators and API clients: exact phrases
+and lemmatized phrases. Exact phrases are literal lowercased text matches with
+word-like boundaries; lemmatized phrases are stored as Yargy `normalized` tokens.
+Do not use `caseless` as a new persisted/operator-facing rule predicate.
+
+Rationale:
+
+- The user-facing distinction must stay understandable: exact spelling versus
+  semantic Russian word forms.
+- Technical tokens such as `Wi-Fi`, `220v`, `Z-Wave`, abbreviations, and product
+  names are exact spellings and should not depend on Yargy tokenization.
+- Legacy `caseless` documents can be canonicalized on read for compatibility,
+  but new UI/API saves should persist the simpler model.
