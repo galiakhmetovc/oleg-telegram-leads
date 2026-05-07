@@ -1,21 +1,12 @@
-# Secrets and local runtime state
+# Local environment
 .env
-sessions/
-*.session
-*.session-journal
-*.session-wal
-*.deploy_key
-*.deploy_key.pub
+.venv/
+node_modules/
 
-# Runtime data
-data/
+# Runtime data and exports
 artifacts/
-vault/
-output/
-
-# Local agent/tool outputs
-.playwright-cli/
-.superpowers/
+data/
+tmp/
 
 # Python
 __pycache__/
@@ -23,17 +14,14 @@ __pycache__/
 .pytest_cache/
 .ruff_cache/
 .mypy_cache/
-.coverage
-htmlcov/
 dist/
 build/
 *.egg-info/
-tg-venv/
-venv/
-.venv/
 
 # Frontend
-node_modules/
+coverage/
+frontend/dist/
+frontend/node_modules/
 
 # IDE and OS files
 .idea/

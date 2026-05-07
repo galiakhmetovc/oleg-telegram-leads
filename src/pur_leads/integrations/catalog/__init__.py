@@ -1,1 +1,0 @@
-"""Catalog extraction integrations."""
