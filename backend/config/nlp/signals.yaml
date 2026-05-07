@@ -79,6 +79,12 @@ signals:
           - normalized: "где"
           - normalized: "можно"
           - normalized: "заказать"
+      - tokens:
+          - normalized: "поделиться"
+          - normalized: "контакт"
+      - tokens:
+          - normalized: "хороший"
+          - normalized: "подрядчик"
 
   - type: installation_request
     label: Запрос на установку / подключение
@@ -92,7 +98,8 @@ signals:
       - tokens:
           - normalized: "установить"
       - tokens:
-          - normalized: "подключить"
+          - normalized: "хотеть"
+          - normalized: "установить"
 
   - type: smart_home_automation
     label: Умный дом / автоматизация
@@ -114,6 +121,9 @@ signals:
           - normalized: "защита"
           - normalized: "от"
           - normalized: "протечка"
+      - tokens:
+          - normalized: "умный"
+          - normalized: "функционал"
 
   - type: video_surveillance
     label: Видеонаблюдение
@@ -147,6 +157,18 @@ signals:
       - tokens:
           - normalized: "подсказать"
           - normalized: "какой"
+      - tokens:
+          - normalized: "поделиться"
+          - normalized: "опыт"
+      - tokens:
+          - normalized: "нужный"
+          - normalized: "помощь"
+      - tokens:
+          - normalized: "кто"
+          - normalized: "сталкиваться"
+      - tokens:
+          - normalized: "может"
+          - normalized: "помочь"
 
   - type: solution_selection_request
     label: Подбор полезных решений
@@ -189,6 +211,15 @@ signals:
           - normalized: "это"
           - normalized: "не"
           - normalized: "сталкиваться"
+      - tokens:
+          - normalized: "впервые"
+          - normalized: "сталкиваться"
+      - tokens:
+          - normalized: "ни"
+          - normalized: "раз"
+      - tokens:
+          - normalized: "первый"
+          - normalized: "раз"
 
   - type: smart_home_value_question
     label: Вопрос о ценности умного дома
@@ -234,6 +265,11 @@ signals:
           - normalized: "датчик"
       - tokens:
           - normalized: "керамогранит"
+      - tokens:
+          - normalized: "кабель"
+          - normalized: "канал"
+      - tokens:
+          - caseless: "220v"
 
   - type: water_leak_protection
     label: Защита от протечек
@@ -287,6 +323,26 @@ signals:
           - normalized: "розетка"
       - tokens:
           - normalized: "освещение"
+      - tokens:
+          - normalized: "проектировать"
+          - normalized: "дизайн"
+      - tokens:
+          - normalized: "технический"
+          - normalized: "проект"
+      - tokens:
+          - normalized: "проект"
+          - normalized: "по"
+          - normalized: "умный"
+          - normalized: "дом"
+      - tokens:
+          - normalized: "проект"
+          - normalized: "по"
+          - normalized: "умный"
+          - normalized: "функционал"
+      - tokens:
+          - normalized: "проработать"
+          - normalized: "с"
+          - normalized: "электрик"
 
   - type: developer_smart_home_context
     label: Умный дом от застройщика
@@ -328,6 +384,13 @@ signals:
           - normalized: "делать"
           - normalized: "с"
           - normalized: "нуль"
+      - tokens:
+          - normalized: "конец"
+          - normalized: "ремонт"
+      - tokens:
+          - normalized: "не"
+          - normalized: "сделать"
+          - normalized: "вывод"
 
   - type: warranty_risk
     label: Риск гарантии / проблем с системой
@@ -371,6 +434,29 @@ signals:
           - normalized: "система"
           - normalized: "контроль"
           - normalized: "доступ"
+      - tokens:
+          - normalized: "электромагнитный"
+          - normalized: "замок"
+      - tokens:
+          - normalized: "кнопка"
+          - normalized: "открывание"
+
+  - type: security_alarm
+    label: Охранная / пожарная сигнализация
+    color: "#c62828"
+    confidence: 0.82
+    patterns:
+      - tokens:
+          - normalized: "охранный"
+          - normalized: "сигнализация"
+      - tokens:
+          - normalized: "пожарный"
+          - normalized: "сигнализация"
+      - tokens:
+          - normalized: "охранный"
+          - normalized: "и"
+          - normalized: "пожарный"
+          - normalized: "сигнализация"
 
   - type: intercom
     label: Домофония
@@ -450,6 +536,22 @@ signals:
           - normalized: "сценарий"
           - normalized: "освещение"
 
+  - type: electric_curtain_control
+    label: Электрические карнизы / шторы
+    color: "#8e24aa"
+    confidence: 0.78
+    patterns:
+      - tokens:
+          - normalized: "электрический"
+          - normalized: "карниз"
+      - tokens:
+          - caseless: "wi-fi"
+          - normalized: "модуль"
+      - tokens:
+          - normalized: "работа"
+          - normalized: "с"
+          - normalized: "алиса"
+
   - type: network_infrastructure
     label: СКС / слаботочные сети
     color: "#5e35b1"
@@ -483,6 +585,11 @@ signals:
       - tokens:
           - normalized: "коммерческий"
           - normalized: "объект"
+      - tokens:
+          - normalized: "коммерческий"
+          - normalized: "помещение"
+      - tokens:
+          - normalized: "коммерция"
 
   - type: country_house
     label: Загородный дом / дача

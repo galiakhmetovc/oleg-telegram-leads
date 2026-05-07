@@ -36,7 +36,12 @@
   ask whether they need a smart home, who it is for, what benefits it gives, and
   mention family apartment context, budget constraints, climate, or lighting
   scenarios.
-- Dev PostgreSQL active NLP config was refreshed to revision 11 from the current
+- Default NLP config recognizes the latest follow-up PUR lead examples: child
+  room smart speaker/audio wiring as a warm lead, leak sensor power/output
+  questions, commercial intercom/access-control recovery, white-box smart-home
+  design planning, security technical projects with video/access/alarm systems,
+  nanny camera contractor search, and Wi-Fi electric curtain control.
+- Dev PostgreSQL active NLP config was refreshed to revision 12 from the current
   bootstrap config so worker jobs use the new PUR scoring settings.
 - Agent verification should avoid Caddy smoke checks unless explicitly requested;
   use backend tests and direct service/container checks by default.

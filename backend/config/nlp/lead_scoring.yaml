@@ -27,10 +27,12 @@ lead_scoring:
       designer_context: 15
       access_control: 35
       intercom: 30
+      security_alarm: 30
       gate_automation: 30
       power_quality: 30
       climate_control: 25
       lighting_control: 25
+      electric_curtain_control: 25
       network_infrastructure: 25
       commercial_object: 20
       country_house: 20
@@ -65,6 +67,7 @@ lead_scoring:
         - smart_home_value_question
         - lighting_control
         - climate_control
+        - electric_curtain_control
         - water_leak_protection
       fact_types:
         - controlled_device
@@ -74,6 +77,7 @@ lead_scoring:
         - video_surveillance
         - access_control
         - intercom
+        - security_alarm
         - water_leak_protection
       fact_types:
         - access_device

@@ -66,6 +66,18 @@ facts:
       - tokens:
           - normalized: "управление"
           - normalized: "освещение"
+      - tokens:
+          - normalized: "умный"
+          - normalized: "функционал"
+      - tokens:
+          - normalized: "электрический"
+          - normalized: "карниз"
+      - tokens:
+          - normalized: "охранный"
+          - normalized: "сигнализация"
+      - tokens:
+          - normalized: "пожарный"
+          - normalized: "сигнализация"
 
   - type: property_type
     label: Тип объекта
@@ -87,6 +99,9 @@ facts:
       - tokens:
           - normalized: "коммерческий"
           - normalized: "объект"
+      - tokens:
+          - normalized: "коммерческий"
+          - normalized: "помещение"
 
   - type: vendor
     label: Вендор
@@ -96,6 +111,8 @@ facts:
           - normalized: "яндекс"
       - tokens:
           - caseless: "yandex"
+      - tokens:
+          - caseless: "livicom"
 
   - type: design_scope
     label: Раздел проектирования
@@ -116,6 +133,22 @@ facts:
           - normalized: "примечание"
       - tokens:
           - normalized: "схема"
+      - tokens:
+          - normalized: "проектировать"
+          - normalized: "дизайн"
+      - tokens:
+          - normalized: "технический"
+          - normalized: "проект"
+      - tokens:
+          - normalized: "проект"
+          - normalized: "по"
+          - normalized: "умный"
+          - normalized: "дом"
+      - tokens:
+          - normalized: "проект"
+          - normalized: "по"
+          - normalized: "умный"
+          - normalized: "функционал"
 
   - type: service_location
     label: Локация работ
@@ -123,6 +156,11 @@ facts:
     patterns:
       - tokens:
           - normalized: "москва"
+      - tokens:
+          - caseless: "спб"
+      - tokens:
+          - normalized: "санкт"
+          - normalized: "петербург"
 
   - type: work_type
     label: Тип работ
@@ -168,6 +206,10 @@ facts:
           - normalized: "делать"
           - normalized: "с"
           - normalized: "нуль"
+      - tokens:
+          - normalized: "разработать"
+          - normalized: "технический"
+          - normalized: "проект"
 
   - type: automation_component
     label: Компонент автоматизации
@@ -196,6 +238,15 @@ facts:
           - normalized: "ворота"
       - tokens:
           - normalized: "шлагбаум"
+      - tokens:
+          - normalized: "электрический"
+          - normalized: "карниз"
+      - tokens:
+          - caseless: "wi-fi"
+          - normalized: "модуль"
+      - tokens:
+          - normalized: "датчик"
+          - normalized: "движение"
 
   - type: installation_surface
     label: Место монтажа
@@ -220,6 +271,13 @@ facts:
           - normalized: "вывод"
       - tokens:
           - normalized: "вывод"
+      - tokens:
+          - normalized: "вывести"
+      - tokens:
+          - normalized: "кабель"
+          - normalized: "канал"
+      - tokens:
+          - caseless: "220v"
 
   - type: controlled_device
     label: Управляемое устройство
@@ -253,6 +311,26 @@ facts:
       - tokens:
           - normalized: "сценарий"
           - normalized: "освещение"
+      - tokens:
+          - normalized: "электромагнитный"
+          - normalized: "замок"
+      - tokens:
+          - normalized: "кнопка"
+          - normalized: "открывание"
+      - tokens:
+          - normalized: "датчик"
+          - normalized: "движение"
+      - tokens:
+          - normalized: "дежурный"
+          - normalized: "свет"
+      - tokens:
+          - normalized: "закарнизный"
+          - normalized: "подсветка"
+      - tokens:
+          - normalized: "электрический"
+          - normalized: "карниз"
+      - tokens:
+          - normalized: "карниз"
 
   - type: power_equipment
     label: Оборудование электропитания
@@ -282,6 +360,12 @@ facts:
           - normalized: "шлагбаум"
       - tokens:
           - normalized: "ворота"
+      - tokens:
+          - normalized: "электромагнитный"
+          - normalized: "замок"
+      - tokens:
+          - normalized: "кнопка"
+          - normalized: "открывание"
 
   - type: network_scope
     label: Сеть / слаботочный раздел
