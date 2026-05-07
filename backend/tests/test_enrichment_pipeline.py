@@ -121,3 +121,29 @@ def test_default_config_marks_video_surveillance_apartment_lead_text() -> None:
     assert "automation_component" in fact_types
     assert "installation_surface" in fact_types
     assert "wiring_output" in fact_types
+
+
+def test_default_config_marks_water_leak_sensor_design_lead_from_artifact() -> None:
+    config = load_nlp_config(Path("config/nlp"))
+    enricher = RussianTextEnricher(config)
+    text = (
+        "Всем привет! Подскажите пожалуйста, когда вы планируете на объекте "
+        "спрятать датчик протечки в керамогранит, вы прикладываете на чертежах "
+        "схему подробную или просто примечание указываете соответствующее, "
+        "или с прорабом уже на месте обсуждаете?\n"
+        "Хочу реализовать в текущем проекте, хочу понять как отобразить это "
+        "решение правильно"
+    )
+
+    result = enricher.enrich(text)
+
+    signal_types = {signal.type for signal in result.domain_signals}
+    fact_types = {fact.type for fact in result.facts}
+
+    assert "consultation_request" in signal_types
+    assert "installation_context" in signal_types
+    assert "water_leak_protection" in signal_types
+    assert "implementation_intent" in signal_types
+    assert "automation_component" in fact_types
+    assert "installation_surface" in fact_types
+    assert "design_scope" in fact_types

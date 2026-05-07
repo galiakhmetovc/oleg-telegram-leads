@@ -19,6 +19,8 @@
   provider search, consultation need, camera, wall mounting, and wiring outputs.
 - Settings Center is available in the UI. NLP/domain YAML settings can be viewed,
   edited, saved, and previewed; runtime/env settings are shown read-only.
+- Default NLP config recognizes the confirmed artifact lead about hiding a leak
+  sensor in porcelain stoneware and documenting the solution on drawings/schemes.
 
 ## Blockers
 

@@ -64,6 +64,11 @@ facts:
           - normalized: "розетка"
       - tokens:
           - normalized: "освещение"
+      - tokens:
+          - normalized: "чертеж"
+          - normalized: "схема"
+      - tokens:
+          - normalized: "примечание"
 
   - type: service_location
     label: Локация работ
@@ -104,6 +109,9 @@ facts:
           - normalized: "алиса"
       - tokens:
           - normalized: "камера"
+      - tokens:
+          - normalized: "датчик"
+          - normalized: "протечка"
 
   - type: installation_surface
     label: Место монтажа
@@ -115,6 +123,8 @@ facts:
           - normalized: "стена"
       - tokens:
           - normalized: "стена"
+      - tokens:
+          - normalized: "керамогранит"
 
   - type: wiring_output
     label: Выводы / подключение

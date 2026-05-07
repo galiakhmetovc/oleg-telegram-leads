@@ -59,6 +59,9 @@ signals:
           - normalized: "запрос"
           - normalized: "от"
           - normalized: "клиент"
+      - tokens:
+          - normalized: "хотеть"
+          - normalized: "реализовать"
 
   - type: provider_search
     label: Поиск исполнителя / контактов
@@ -131,10 +134,16 @@ signals:
     confidence: 0.78
     patterns:
       - tokens:
+          - normalized: "подсказать"
+          - normalized: "пожалуйста"
+      - tokens:
           - normalized: "проконсультироваться"
       - tokens:
           - normalized: "нужно"
           - normalized: "проконсультироваться"
+      - tokens:
+          - normalized: "хотеть"
+          - normalized: "понять"
 
   - type: installation_context
     label: Монтажный контекст
@@ -147,6 +156,33 @@ signals:
           - normalized: "стена"
       - tokens:
           - normalized: "вывод"
+      - tokens:
+          - normalized: "спрятать"
+          - normalized: "датчик"
+      - tokens:
+          - normalized: "керамогранит"
+
+  - type: water_leak_protection
+    label: Защита от протечек
+    color: "#00695c"
+    confidence: 0.82
+    patterns:
+      - tokens:
+          - normalized: "датчик"
+          - normalized: "протечка"
+      - tokens:
+          - normalized: "протечка"
+
+  - type: implementation_intent
+    label: Намерение реализовать
+    color: "#2e7d32"
+    confidence: 0.78
+    patterns:
+      - tokens:
+          - normalized: "хотеть"
+          - normalized: "реализовать"
+      - tokens:
+          - normalized: "отобразить"
 
   - type: hot_lead_intent
     label: Горячий лид
