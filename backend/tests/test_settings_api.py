@@ -181,11 +181,16 @@ class InMemoryNlpConfigRepository:
         )
 
 
-def _app_with_settings_repo(config_dir: Path, repository: InMemoryNlpConfigRepository) -> TestClient:
+def _app_with_settings_repo(
+    config_dir: Path,
+    repository: InMemoryNlpConfigRepository,
+    *,
+    raise_server_exceptions: bool = True,
+) -> TestClient:
     app = create_app()
     app.dependency_overrides[get_nlp_config_dir] = lambda: config_dir
     app.dependency_overrides[get_nlp_config_repository] = lambda: repository
-    return TestClient(app)
+    return TestClient(app, raise_server_exceptions=raise_server_exceptions)
 
 
 def test_get_settings_returns_editable_nlp_and_readonly_system_settings(tmp_path: Path) -> None:
@@ -219,7 +224,7 @@ def test_get_settings_returns_editable_nlp_and_readonly_system_settings(tmp_path
     assert repository.active is not None
 
 
-def test_get_settings_exposes_legacy_caseless_as_exact_or_lemmatized_rules(tmp_path: Path) -> None:
+def test_get_settings_rejects_unsupported_rule_predicates(tmp_path: Path) -> None:
     config_dir = tmp_path / "nlp"
     _write_config(config_dir)
     repository = InMemoryNlpConfigRepository()
@@ -259,17 +264,15 @@ def test_get_settings_exposes_legacy_caseless_as_exact_or_lemmatized_rules(tmp_p
         },
     }
     repository.revision = 4
-    client = _app_with_settings_repo(config_dir, repository)
+    client = _app_with_settings_repo(
+        config_dir,
+        repository,
+        raise_server_exceptions=False,
+    )
 
     response = client.get("/api/v1/settings")
 
-    assert response.status_code == 200
-    rule = response.json()["nlp"]["signals"][0]
-    assert rule["phrases"] == [["скуд"]]
-    assert rule["patterns"][0]["tokens"] == [
-        {"predicate": "normalized", "value": "zigbee"},
-        {"predicate": "normalized", "value": "шлюз"},
-    ]
+    assert response.status_code == 500
 
 
 def test_build_semantic_pattern_returns_lemmas_and_operator_text(tmp_path: Path) -> None:

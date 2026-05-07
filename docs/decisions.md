@@ -228,5 +228,6 @@ Rationale:
   semantic Russian word forms.
 - Technical tokens such as `Wi-Fi`, `220v`, `Z-Wave`, abbreviations, and product
   names are exact spellings and should not depend on Yargy tokenization.
-- Legacy `caseless` documents can be canonicalized on read for compatibility,
-  but new UI/API saves should persist the simpler model.
+- Old `caseless` documents are not supported by v2. They should be replaced by
+  a fresh PostgreSQL config revision or reseeded from current bootstrap YAML
+  instead of hidden compatibility code.

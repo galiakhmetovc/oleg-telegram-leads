@@ -10,7 +10,6 @@ from pydantic import BaseModel, Field, model_validator
 from app.core.config import Settings, get_settings
 from app.db.session import create_sessionmaker
 from app.domain.settings import NlpConfigRevision
-from app.infrastructure.nlp.config_loader import canonicalize_nlp_documents
 from app.infrastructure.nlp.config_loader import load_nlp_config_from_documents
 from app.infrastructure.nlp.config_loader import read_nlp_config_documents
 from app.infrastructure.nlp.rule_phrase_normalizer import RussianRulePhraseNormalizer
@@ -224,7 +223,7 @@ async def _read_nlp_snapshot(
 
 
 def _nlp_snapshot_from_revision(revision: NlpConfigRevision) -> NlpSettingsSnapshot:
-    documents = canonicalize_nlp_documents(revision.documents)
+    documents = revision.documents
     return NlpSettingsSnapshot(
         pipeline=PipelineSettings.model_validate(documents["pipeline"]),
         signals=[_rule_from_document(item) for item in documents["signals"].get("signals", [])],

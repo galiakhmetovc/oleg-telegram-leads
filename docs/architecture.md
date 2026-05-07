@@ -95,9 +95,9 @@ predicate names as the product vocabulary.
 Exact phrases are matched as lowercased literal text with word-like boundaries,
 not through Yargy morphology. This keeps technical variants such as `Wi-Fi`,
 `220v`, `Z-Wave`, product names, and abbreviations in the exact matching mode.
-Lemmatized phrases use Yargy `normalized` tokens. Legacy documents that still
-contain `caseless` tokens are canonicalized on read into exact phrases or
-lemmatized phrases; new API/UI saves should not emit `caseless`.
+Lemmatized phrases use Yargy `normalized` tokens. Documents that still contain
+`caseless` are invalid for v2 and must be replaced by a new PostgreSQL config
+revision or reseeded from current bootstrap YAML.
 
 Alias catalogs are separate from domain signals. Domain signals remain semantic
 categories such as `smart_home_platform`, `protocol_gateway`, `leak_protection`,

@@ -27,7 +27,8 @@
 - Rule matching no longer exposes `caseless` as an active mode. Exact phrases
   are literal lowercased matches for technical spellings such as `Wi-Fi`, `220v`,
   `Z-Wave`, and abbreviations; lemmatized phrases remain Yargy `normalized`
-  rules. Legacy `caseless` documents are canonicalized on read.
+  rules. Old `caseless` config revisions are invalid and should be replaced,
+  not adapted at runtime.
 - A Help tab in the web UI explains exact versus lemmatized matching and when to
   use each mode.
 - Settings Center now also exposes editable alias catalogs for `vendors`,
@@ -69,12 +70,13 @@
 - Default NLP config recognizes Neptun/Нептун water leak monitoring leads,
   including the typo `Нептуп`, ProW/Profi product mentions, wired leak sensors,
   sensor-trigger monitoring, and smartphone information output.
-- Dev PostgreSQL active NLP config was refreshed to revision 19. The `need`
+- Dev PostgreSQL active NLP config was refreshed to revision 20. The `need`
   signal no longer stores Russian forms such as `нужно`, `нужна`, `нужен` as
   exact phrases; they are represented as lemmatized phrase rules with preserved
   operator source text. Revision 16 also includes the Neptun water leak
   monitoring lead calibration, and revision 19 includes the smart-home alias
-  catalogs plus calibrated semantic signal/fact weights.
+  catalogs plus calibrated semantic signal/fact weights. Revision 20 was
+  reseeded from current bootstrap YAML after dropping `caseless` compatibility.
 - `RussianTextEnricher` now precompiles Yargy parsers once per enricher
   instance and shares one Yargy `MorphTokenizer` across compiled rules instead
   of creating a separate `pymorphy2` analyzer for every parser. This keeps

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from copy import deepcopy
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -101,7 +100,6 @@ def read_nlp_config_documents(config_dir: Path) -> dict[str, dict[str, Any]]:
 
 
 def load_nlp_config_from_documents(documents: dict[str, dict[str, Any]]) -> NlpPipelineConfig:
-    documents = canonicalize_nlp_documents(documents)
     pipeline = documents["pipeline"]
     signals = documents["signals"]
     facts = documents.get("facts", {"facts": []})
@@ -120,24 +118,6 @@ def load_nlp_config_from_documents(documents: dict[str, dict[str, Any]]) -> NlpP
         ),
         lead_scoring=_parse_lead_scoring(lead_scoring.get("lead_scoring", {})),
     )
-
-
-def canonicalize_nlp_documents(
-    documents: dict[str, dict[str, Any]],
-) -> dict[str, dict[str, Any]]:
-    canonical = deepcopy(documents)
-    for document_name, collection_name in (("signals", "signals"), ("facts", "facts")):
-        document = canonical.get(document_name)
-        if not isinstance(document, dict):
-            continue
-        rules = document.get(collection_name, [])
-        if not isinstance(rules, list):
-            continue
-        document[collection_name] = [
-            _canonicalize_phrase_rule_document(rule)
-            for rule in rules
-        ]
-    return canonical
 
 
 def _load_yaml(path: Path) -> dict[str, Any]:
@@ -321,79 +301,3 @@ def _catalog_item_kind(catalog_name: str) -> str:
         "devices": "device",
         "software": "software",
     }.get(catalog_name, catalog_name.rstrip("s"))
-
-
-def _canonicalize_phrase_rule_document(raw_rule: Any) -> Any:
-    if not isinstance(raw_rule, dict):
-        return raw_rule
-
-    canonical = deepcopy(raw_rule)
-    phrases = [
-        [str(token).lower() for token in phrase if str(token).strip()]
-        for phrase in canonical.get("phrases", [])
-        if isinstance(phrase, list)
-    ]
-    patterns: list[dict[str, Any]] = []
-
-    for raw_pattern in canonical.get("patterns", []):
-        converted = _canonicalize_pattern_document(raw_pattern)
-        if converted["kind"] == "phrase":
-            phrases.append(converted["phrase"])
-        else:
-            patterns.append(converted["pattern"])
-
-    if phrases:
-        canonical["phrases"] = phrases
-    else:
-        canonical.pop("phrases", None)
-
-    if patterns:
-        canonical["patterns"] = patterns
-    else:
-        canonical.pop("patterns", None)
-
-    return canonical
-
-
-def _canonicalize_pattern_document(raw_pattern: Any) -> dict[str, Any]:
-    if not isinstance(raw_pattern, dict):
-        return {"kind": "pattern", "pattern": raw_pattern}
-
-    raw_tokens = raw_pattern.get("tokens")
-    if not isinstance(raw_tokens, list):
-        return {"kind": "pattern", "pattern": raw_pattern}
-
-    token_pairs: list[tuple[str, str]] = []
-    for raw_token in raw_tokens:
-        if not isinstance(raw_token, dict) or len(raw_token) != 1:
-            return {"kind": "pattern", "pattern": raw_pattern}
-        predicate, value = next(iter(raw_token.items()))
-        token_pairs.append((str(predicate), str(value)))
-
-    if not token_pairs or not any(predicate == "caseless" for predicate, _ in token_pairs):
-        return {"kind": "pattern", "pattern": raw_pattern}
-
-    phrase = [value.lower() for _, value in token_pairs if value.strip()]
-    if all(predicate == "caseless" for predicate, _ in token_pairs):
-        return {"kind": "phrase", "phrase": phrase}
-
-    if any(
-        predicate == "caseless" and not _can_convert_legacy_caseless_to_normalized(value)
-        for predicate, value in token_pairs
-    ):
-        return {"kind": "phrase", "phrase": phrase}
-
-    pattern = {key: deepcopy(value) for key, value in raw_pattern.items() if key != "tokens"}
-    pattern["tokens"] = [
-        {
-            "normalized" if predicate == "caseless" else predicate: (
-                value.lower() if predicate == "caseless" else value
-            )
-        }
-        for predicate, value in token_pairs
-    ]
-    return {"kind": "pattern", "pattern": pattern}
-
-
-def _can_convert_legacy_caseless_to_normalized(value: str) -> bool:
-    return value.strip().isalpha()
