@@ -48,6 +48,14 @@
   without misclassifying them as video surveillance.
 - Dev PostgreSQL active NLP config was refreshed to revision 13 from the current
   bootstrap config so worker jobs use the new PUR scoring settings.
+- `RussianTextEnricher` now precompiles Yargy parsers once per enricher
+  instance instead of rebuilding them for every message. A local batch CLI can
+  write full enrichment JSONL for exported messages without creating API/Celery
+  jobs per message.
+- Benchmark on the first 300 designer-channel messages with full enrichment:
+  300 processed, 0 failed, 6 leads, 65.31 seconds, 4.59 messages/sec, peak RSS
+  about 1.34 GB, output 1.9 MB. Linear estimate for 528953 messages on one
+  process is about 32 hours and about 3.24 GiB JSONL output.
 - Agent verification should avoid Caddy smoke checks unless explicitly requested;
   use backend tests and direct service/container checks by default.
 - Full `tests/test_enrichment_pipeline.py` can peak around 6.1 GB RSS. Stop the

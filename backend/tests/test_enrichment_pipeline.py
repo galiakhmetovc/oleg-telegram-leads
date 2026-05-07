@@ -1,6 +1,8 @@
 from pathlib import Path
 from typing import TypedDict
 
+from pytest import MonkeyPatch
+
 from app.infrastructure.nlp.config_loader import load_nlp_config
 from app.infrastructure.nlp.russian_text_enricher import RussianTextEnricher
 
@@ -58,6 +60,69 @@ signals:
     ] == ["demand"]
     assert result.metrics.token_count > 0
     assert any(item.stage == "domain_signals" for item in result.pipeline_trace)
+
+
+def test_reuses_compiled_yargy_parsers_between_enrichments(
+    tmp_path: Path,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    config_dir = tmp_path / "nlp"
+    config_dir.mkdir()
+    (config_dir / "pipeline.yaml").write_text(
+        """
+stages:
+  - name: segmentation
+    enabled: true
+  - name: facts
+    enabled: true
+  - name: domain_signals
+    enabled: true
+""",
+        encoding="utf-8",
+    )
+    (config_dir / "signals.yaml").write_text(
+        """
+signals:
+  - type: smart_home
+    label: Умный дом
+    patterns:
+      - tokens:
+          - normalized: "умный"
+          - normalized: "дом"
+""",
+        encoding="utf-8",
+    )
+    (config_dir / "facts.yaml").write_text(
+        """
+facts:
+  - type: solution_area
+    label: Направление
+    patterns:
+      - tokens:
+          - normalized: "умный"
+          - normalized: "дом"
+""",
+        encoding="utf-8",
+    )
+
+    import app.infrastructure.nlp.russian_text_enricher as enricher_module
+
+    parser_calls = 0
+    original_parser = getattr(enricher_module, "Parser")
+
+    def counting_parser(*args: object, **kwargs: object) -> object:
+        nonlocal parser_calls
+        parser_calls += 1
+        return original_parser(*args, **kwargs)
+
+    monkeypatch.setattr(enricher_module, "Parser", counting_parser)
+
+    config = load_nlp_config(config_dir)
+    enricher = RussianTextEnricher(config)
+    enricher.enrich("Заказчик хочет умный дом.")
+    enricher.enrich("Нужен умный дом.")
+
+    assert parser_calls == 2
 
 
 def test_default_config_marks_smart_home_automation_lead_text() -> None:

@@ -60,6 +60,22 @@ verdict with score, temperature, solution areas, customer segments, positive
 reasons, and noise signals. Scoring thresholds, weights, and taxonomy mappings
 are edited through the same PostgreSQL-backed Settings Center.
 
+## Batch Enrichment
+
+Local exports can be enriched without creating one API/Celery job per message:
+
+```bash
+cd backend
+uv run python -m app.cli.batch_enrich \
+  --input ../artifacts/designer-channel/messages.jsonl \
+  --output ../artifacts/designer-channel/full-enrichment.jsonl \
+  --summary ../artifacts/designer-channel/full-enrichment.summary.json \
+  --progress-interval 1000
+```
+
+The batch output is JSONL with `message_id`, `text`, and full
+`TextEnrichmentResult` under `result`. `artifacts/` is ignored by git.
+
 Checks:
 
 ```bash

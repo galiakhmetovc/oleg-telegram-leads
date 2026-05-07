@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import warnings
 from collections.abc import Callable
+from dataclasses import dataclass
 from typing import Any
 
 from natasha import Doc, MorphVocab, NewsEmbedding, NewsMorphTagger, NewsNERTagger
@@ -19,6 +20,12 @@ from app.infrastructure.nlp.lead_scorer import LeadScorer
 ProgressCallback = Callable[[str, int, str], None]
 
 
+@dataclass(frozen=True)
+class CompiledPhraseRule:
+    config: PhraseRuleConfig
+    parser: Any
+
+
 class RussianTextEnricher:
     def __init__(self, config: NlpPipelineConfig) -> None:
         self._config = config
@@ -28,6 +35,8 @@ class RussianTextEnricher:
         self._morph_tagger: NewsMorphTagger | None = None
         self._syntax_parser: NewsSyntaxParser | None = None
         self._ner_tagger: NewsNERTagger | None = None
+        self._compiled_signal_rules = self._compile_phrase_rules(config.signals)
+        self._compiled_fact_rules = self._compile_phrase_rules(config.facts)
 
     def enrich(
         self,
@@ -172,7 +181,8 @@ class RussianTextEnricher:
 
     def _extract_domain_signals(self, text: str) -> list[DomainSignal]:
         signals: list[DomainSignal] = []
-        for rule_config in self._config.signals:
+        for compiled_rule in self._compiled_signal_rules:
+            rule_config = compiled_rule.config
             signals.extend(
                 DomainSignal(
                     id=f"signal-{len(signals) + 1}",
@@ -184,13 +194,17 @@ class RussianTextEnricher:
                     confidence=rule_config.confidence,
                     color=rule_config.color,
                 )
-                for start, stop, match_text in self._find_phrase_matches(text, rule_config)
+                for start, stop, match_text in self._find_phrase_matches(
+                    text,
+                    compiled_rule.parser,
+                )
             )
         return signals
 
     def _extract_facts(self, text: str) -> list[ExtractedFact]:
         facts: list[ExtractedFact] = []
-        for rule_config in self._config.facts:
+        for compiled_rule in self._compiled_fact_rules:
+            rule_config = compiled_rule.config
             facts.extend(
                 ExtractedFact(
                     id=f"fact-{len(facts) + 1}",
@@ -201,28 +215,42 @@ class RussianTextEnricher:
                     source="yargy",
                     confidence=rule_config.confidence,
                 )
-                for start, stop, match_text in self._find_phrase_matches(text, rule_config)
+                for start, stop, match_text in self._find_phrase_matches(
+                    text,
+                    compiled_rule.parser,
+                )
             )
         return facts
 
-    def _find_phrase_matches(
+    def _compile_phrase_rules(
         self,
-        text: str,
-        rule_config: PhraseRuleConfig,
-    ) -> list[tuple[int, int, str]]:
-        yargy_rules = [
-            rule(*[caseless(word) for word in phrase])
-            for phrase in rule_config.phrases
-        ]
+        rule_configs: tuple[PhraseRuleConfig, ...],
+    ) -> tuple[CompiledPhraseRule, ...]:
+        return tuple(
+            CompiledPhraseRule(config=rule_config, parser=self._build_parser(rule_config))
+            for rule_config in rule_configs
+        )
+
+    def _build_parser(self, rule_config: PhraseRuleConfig) -> Any:
+        yargy_rules = [rule(*[caseless(word) for word in phrase]) for phrase in rule_config.phrases]
         yargy_rules.extend(
             rule(*[self._token_predicate(token) for token in pattern.tokens])
             for pattern in rule_config.patterns
         )
+        with warnings.catch_warnings():
+            warnings.filterwarnings("ignore", category=UserWarning, module="pymorphy2.analyzer")
+            warnings.filterwarnings("ignore", message="pkg_resources is deprecated.*")
+            return Parser(or_(*yargy_rules))
+
+    def _find_phrase_matches(
+        self,
+        text: str,
+        parser: Any,
+    ) -> list[tuple[int, int, str]]:
         matches: list[tuple[int, int, str]] = []
         with warnings.catch_warnings():
             warnings.filterwarnings("ignore", category=UserWarning, module="pymorphy2.analyzer")
             warnings.filterwarnings("ignore", message="pkg_resources is deprecated.*")
-            parser = Parser(or_(*yargy_rules))
             for match in parser.findall(text):
                 matches.append((match.span.start, match.span.stop, text[match.span.start:match.span.stop]))
         return matches
