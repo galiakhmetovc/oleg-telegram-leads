@@ -22,6 +22,12 @@
   defaults only. Runtime/env settings are shown read-only.
 - Default NLP config recognizes the confirmed artifact lead about hiding a leak
   sensor in porcelain stoneware and documenting the solution on drawings/schemes.
+- Enrichment results include `lead_assessment`: deterministic PUR lead verdict,
+  score, temperature, solution areas, customer segments, reasons, and noise
+  signals. Lead scoring thresholds, weights, and mappings are editable in the
+  Settings Center and stored in PostgreSQL config revisions.
+- Dev PostgreSQL active NLP config was refreshed to revision 5 from the current
+  bootstrap config so worker jobs use the new PUR scoring settings.
 
 ## Blockers
 
@@ -31,6 +37,7 @@
 
 ## Next Steps
 
-1. Review the first enrichment UI through Caddy.
-2. Specify the next product flow after arbitrary text enrichment.
+1. Review the lead assessment UI through Caddy.
+2. Start curating a versioned eval dataset of positive leads, non-leads, and
+   borderline cases.
 3. Keep an eye on host disk usage before larger dependency/model downloads.

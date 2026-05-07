@@ -32,12 +32,12 @@
 - Create: `backend/app/infrastructure/nlp/lead_scorer.py`
 - Test: `backend/tests/test_lead_scorer.py`
 
-- [ ] Write failing tests for hot/warm/non-lead scoring using synthetic `DomainSignal` and `ExtractedFact` inputs.
-- [ ] Add `LeadTemperature`, `LeadReason`, `LeadAssessment`, and config dataclasses.
-- [ ] Parse `lead_scoring` documents with thresholds, weights, solution mappings, segment mappings, and noise mappings.
-- [ ] Implement `LeadScorer.assess(signals, facts)` with deterministic score, temperature, areas, segments, reasons, and noise.
-- [ ] Run `cd backend && uv run pytest tests/test_lead_scorer.py`.
-- [ ] Commit backend scoring core.
+- [x] Write failing tests for hot/warm/non-lead scoring using synthetic `DomainSignal` and `ExtractedFact` inputs.
+- [x] Add `LeadTemperature`, `LeadReason`, `LeadAssessment`, and config dataclasses.
+- [x] Parse `lead_scoring` documents with thresholds, weights, solution mappings, segment mappings, and noise mappings.
+- [x] Implement `LeadScorer.assess(signals, facts)` with deterministic score, temperature, areas, segments, reasons, and noise.
+- [x] Run `cd backend && uv run pytest tests/test_lead_scorer.py`.
+- [x] Commit backend scoring core.
 
 ## Task 2: Pipeline Integration And Bootstrap Config
 
@@ -51,12 +51,12 @@
 - Test: `backend/tests/test_enrichment_pipeline.py`
 - Test: `backend/tests/test_enrichment_config.py`
 
-- [ ] Write failing regression tests that current lead examples return `lead_assessment.is_lead == true`.
-- [ ] Add the `lead_scoring` pipeline stage and progress callback message.
-- [ ] Load `lead_scoring.yaml` as bootstrap config and include it in DB revisions.
-- [ ] Expand PUR taxonomy rules from the brief using Yargy phrases/patterns, not regex.
-- [ ] Run focused backend pipeline/config tests.
-- [ ] Commit pipeline integration.
+- [x] Write failing regression tests that current lead examples return `lead_assessment.is_lead == true`.
+- [x] Add the `lead_scoring` pipeline stage and progress callback message.
+- [x] Load `lead_scoring.yaml` as bootstrap config and include it in DB revisions.
+- [x] Expand PUR taxonomy rules from the brief using Yargy phrases/patterns, not regex.
+- [x] Run focused backend pipeline/config tests.
+- [x] Commit pipeline integration.
 
 ## Task 3: Settings API And UI
 
@@ -66,13 +66,13 @@
 - Modify: `frontend/src/App.tsx`
 - Modify: `frontend/src/App.test.tsx`
 
-- [ ] Write failing settings API tests proving `lead_scoring` is returned, previewed, and saved as a DB revision.
-- [ ] Extend settings schemas for lead scoring without changing YAML directly.
-- [ ] Add UI types for `lead_assessment` and lead scoring settings.
-- [ ] Render lead verdict, score, temperature, solution areas, customer segments, reasons, and noise on the overview tab.
-- [ ] Add Settings Center section for editable thresholds, weights, and mappings.
-- [ ] Run focused backend settings tests and frontend tests.
-- [ ] Commit API/UI settings work.
+- [x] Write failing settings API tests proving `lead_scoring` is returned, previewed, and saved as a DB revision.
+- [x] Extend settings schemas for lead scoring without changing YAML directly.
+- [x] Add UI types for `lead_assessment` and lead scoring settings.
+- [x] Render lead verdict, score, temperature, solution areas, customer segments, reasons, and noise on the overview tab.
+- [x] Add Settings Center section for editable thresholds, weights, and mappings.
+- [x] Run focused backend settings tests and frontend tests.
+- [x] Commit API/UI settings work.
 
 ## Task 4: Runtime Verification And Documentation
 
@@ -82,10 +82,10 @@
 - Modify: `docs/decisions.md`
 - Modify: `state/current.md`
 
-- [ ] Apply migration/config revision in dev by saving the current settings through the API after code loads the new bootstrap shape.
-- [ ] Run full backend checks: `uv run ruff check .`, `uv run mypy .`, `uv run pytest`.
-- [ ] Run full frontend checks: `npm test -- --run`, `npm run build`.
-- [ ] Run infra check: `docker compose config`.
-- [ ] Runtime smoke through Caddy with at least the smart-home, Zigbee, video-surveillance, and leak-sensor examples.
-- [ ] Update docs and current state with the lead assessment contract.
-- [ ] Commit final docs/runtime evidence.
+- [x] Apply migration/config revision in dev by saving the current settings through the API after code loads the new bootstrap shape.
+- [x] Run full backend checks: `uv run ruff check .`, `uv run mypy .`, `uv run pytest`.
+- [x] Run full frontend checks: `npm test -- --run`, `npm run build`.
+- [x] Run infra check: `docker compose config`.
+- [x] Runtime smoke through Caddy with at least the smart-home, Zigbee, video-surveillance, and leak-sensor examples.
+- [x] Update docs and current state with the lead assessment contract.
+- [x] Commit final docs/runtime evidence.

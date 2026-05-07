@@ -159,3 +159,22 @@ Rationale:
   but it is not the active editable store.
 - Runtime settings affect process wiring and secrets; showing them read-only is
   safer until auth, audit, and restart procedures exist.
+
+## 2026-05-07: PUR Lead Assessment Is Deterministic And Explainable
+
+Detect potential PUR clients with a deterministic lead assessment layer instead
+of an LLM. The layer consumes extracted domain signals and facts, applies
+PostgreSQL-backed scoring settings, and returns `lead_assessment` with a score,
+temperature, solution areas, customer segments, reasons, and noise signals.
+
+Rationale:
+
+- The current task needs explainable classification that can be edited from the
+  Settings Center and verified against known lead examples.
+- Business meaning belongs in PostgreSQL config revisions: thresholds, weights,
+  taxonomy mappings, and noise definitions are product settings, not code.
+- A deterministic layer gives a stable baseline for future evals; ML/LLM
+  classifiers can be added later once we have enough labeled examples and known
+  failure modes.
+- Noise signals must be first-class so equipment-only/DIY/sale posts can be
+  explained as non-leads rather than silently missed.

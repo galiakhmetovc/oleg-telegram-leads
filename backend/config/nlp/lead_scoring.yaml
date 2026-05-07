@@ -54,8 +54,6 @@ lead_scoring:
         - climate_control
         - water_leak_protection
       fact_types:
-        - solution_area
-        - automation_component
         - controlled_device
     security:
       label: Безопасность / видеонаблюдение
@@ -65,7 +63,6 @@ lead_scoring:
         - intercom
         - water_leak_protection
       fact_types:
-        - solution_area
         - access_device
     access_control:
       label: СКУД / домофония / въездные группы
@@ -91,8 +88,7 @@ lead_scoring:
       label: Управление климатом
       signal_types:
         - climate_control
-      fact_types:
-        - controlled_device
+      fact_types: []
   customer_segments:
     designer_partner:
       label: Дизайнер / проектировщик

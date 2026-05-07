@@ -70,6 +70,8 @@ when the database is empty.
 - `pipeline` controls enabled stages.
 - `signals` defines domain signals shown to the operator.
 - `facts` defines structured fact extraction.
+- `lead_scoring` defines PUR lead thresholds, signal/fact weights, solution area
+  mappings, customer segment mappings, intent signals, and noise signals.
 
 Yargy rules are externalized as configuration data. Two rule forms are currently
 supported:
@@ -89,6 +91,26 @@ patterns:
 
 Use `patterns` for Russian domain language that appears in different cases or
 forms, for example `умный дом`, `умного дома`, and `умному дому`.
+
+## Lead Assessment
+
+The `lead_scoring` stage runs after Yargy fact and signal extraction. It does not
+contain hardcoded PUR business rules: the code sums configured signal/fact
+weights, applies configured thresholds, maps matched signal/fact types to
+solution areas and customer segments, and returns explanatory reasons.
+
+`lead_assessment` is part of every new enrichment result when the stage is
+enabled:
+
+- `is_lead`: whether the score reaches the configured lead threshold.
+- `score`: non-negative deterministic score.
+- `temperature`: `none`, `cold`, `warm`, or `hot`.
+- `solution_areas` and `customer_segments`: configured taxonomy matches.
+- `intent_signals` and `noise_signals`: configured positive/noise categories.
+- `reasons`: score contributions with source, key, weight, and matched texts.
+
+Older persisted results without `lead_assessment` remain readable and return the
+field as `null`.
 
 ## Settings Center
 
@@ -111,6 +133,10 @@ configuration and may require process/container restart.
 
 Each save creates a new active revision and deactivates the previous one. This
 keeps future history/diff/rollback work aligned with the current API shape.
+When a new bootstrap document or pipeline stage is introduced, the repository
+can create a new active revision by merging missing bootstrap documents/stages
+into the current active configuration without overwriting existing edited
+signals or facts.
 
 ## Frontend
 
@@ -125,6 +151,8 @@ The first operator screen provides:
 - text input for arbitrary text;
 - live backend progress with stage names and percentages;
 - annotated source text after completion;
+- PUR lead verdict with score, temperature, reasons, solution areas, customer
+  segments, and noise signals;
 - structured result tabs for overview, entities, facts, domain signals, tokens,
   syntax, and pipeline trace.
 
