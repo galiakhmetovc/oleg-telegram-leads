@@ -49,6 +49,10 @@ The first workflow uses the backend API to create text enrichment jobs, a Celery
 worker to run the NLP pipeline, Redis as the broker, PostgreSQL for persisted
 job state, and SSE for progress updates.
 
+The operator UI also includes a Settings Center. It shows editable NLP/domain
+settings from `backend/config/nlp` and read-only runtime settings from the backend
+environment. Draft NLP settings can be previewed on text before saving.
+
 Checks:
 
 ```bash

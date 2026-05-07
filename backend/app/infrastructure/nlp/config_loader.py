@@ -49,11 +49,30 @@ class NlpPipelineConfig:
 
 
 def load_nlp_config(config_dir: Path) -> NlpPipelineConfig:
-    pipeline = _load_yaml(config_dir / "pipeline.yaml")
-    signals = _load_yaml(config_dir / "signals.yaml")
-    facts_path = config_dir / "facts.yaml"
-    facts = _load_yaml(facts_path) if facts_path.exists() else {"facts": []}
+    return load_nlp_config_from_documents(read_nlp_config_documents(config_dir))
 
+
+def read_nlp_config_documents(config_dir: Path) -> dict[str, dict[str, Any]]:
+    facts_path = config_dir / "facts.yaml"
+    return {
+        "pipeline": _load_yaml(config_dir / "pipeline.yaml"),
+        "signals": _load_yaml(config_dir / "signals.yaml"),
+        "facts": _load_yaml(facts_path) if facts_path.exists() else {"facts": []},
+    }
+
+
+def write_nlp_config_documents(config_dir: Path, documents: dict[str, dict[str, Any]]) -> None:
+    load_nlp_config_from_documents(documents)
+    config_dir.mkdir(parents=True, exist_ok=True)
+    _write_yaml(config_dir / "pipeline.yaml", documents["pipeline"])
+    _write_yaml(config_dir / "signals.yaml", documents["signals"])
+    _write_yaml(config_dir / "facts.yaml", documents["facts"])
+
+
+def load_nlp_config_from_documents(documents: dict[str, dict[str, Any]]) -> NlpPipelineConfig:
+    pipeline = documents["pipeline"]
+    signals = documents["signals"]
+    facts = documents.get("facts", {"facts": []})
     return NlpPipelineConfig(
         stages=tuple(_parse_stage(item) for item in pipeline.get("stages", [])),
         signals=tuple(_parse_phrase_rule(item, "signals") for item in signals.get("signals", [])),
@@ -68,6 +87,13 @@ def _load_yaml(path: Path) -> dict[str, Any]:
     if not isinstance(loaded, dict):
         raise ValueError(f"{path} must contain a YAML mapping")
     return loaded
+
+
+def _write_yaml(path: Path, payload: dict[str, Any]) -> None:
+    path.write_text(
+        yaml.safe_dump(payload, allow_unicode=True, sort_keys=False),
+        encoding="utf-8",
+    )
 
 
 def _parse_stage(raw: Any) -> PipelineStageConfig:

@@ -87,6 +87,28 @@ patterns:
 Use `patterns` for Russian domain language that appears in different cases or
 forms, for example `умный дом`, `умного дома`, and `умному дому`.
 
+## Settings Center
+
+The first settings UI slice exposes the active dev NLP configuration through
+FastAPI:
+
+- `GET /api/v1/settings` returns editable NLP/domain settings and read-only
+  runtime settings.
+- `PUT /api/v1/settings/nlp` validates and saves NLP settings back to
+  `backend/config/nlp/*.yaml`.
+- `POST /api/v1/settings/nlp/preview` runs a draft configuration against a text
+  without saving it.
+
+In dev mode, YAML files are the active source of truth for NLP settings. Celery
+loads the config per job, so saved YAML changes apply to the next enrichment job.
+Runtime settings such as database URL, Redis URL, CORS, and config paths are
+visible but read-only because they come from environment configuration and may
+require process/container restart.
+
+The API contract is intentionally storage-neutral: later PostgreSQL-backed
+config revisions can replace YAML persistence without changing the frontend
+shape.
+
 ## Frontend
 
 The frontend package lives in `frontend/src`.

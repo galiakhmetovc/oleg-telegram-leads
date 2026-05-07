@@ -17,6 +17,8 @@
   provider search, service location, automation components, and controlled devices.
 - Default NLP config recognizes apartment video surveillance requests with
   provider search, consultation need, camera, wall mounting, and wiring outputs.
+- Settings Center is available in the UI. NLP/domain YAML settings can be viewed,
+  edited, saved, and previewed; runtime/env settings are shown read-only.
 
 ## Blockers
 

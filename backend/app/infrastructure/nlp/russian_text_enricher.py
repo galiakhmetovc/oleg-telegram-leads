@@ -92,7 +92,10 @@ class RussianTextEnricher:
                 range=TextRange(start=token.start, stop=token.stop),
                 lemma=getattr(token, "lemma", None),
                 pos=getattr(token, "pos", None),
-                features={key: str(value) for key, value in getattr(token, "feats", {}).items()},
+                features={
+                    key: str(value)
+                    for key, value in (getattr(token, "feats", None) or {}).items()
+                },
             )
             for token in doc.tokens
         ]
@@ -104,7 +107,7 @@ class RussianTextEnricher:
                 range=TextRange(start=span.start, stop=span.stop),
                 source="natasha",
             )
-            for index, span in enumerate(doc.spans, start=1)
+            for index, span in enumerate(doc.spans or [], start=1)
         ]
         syntax = [
             SyntaxDependency(

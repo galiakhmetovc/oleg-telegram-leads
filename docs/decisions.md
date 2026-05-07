@@ -140,3 +140,20 @@ Rationale:
 - Backend and frontend remain in Docker Compose dev mode with localhost-bound
   ports.
 - Caddy is an external ingress concern and stays outside the repository.
+
+## 2026-05-07: Settings Center First Slice Uses YAML Storage
+
+Expose all current NLP/domain settings in the operator UI and allow editing them
+through FastAPI. For the first dev slice, persist edits to `backend/config/nlp`
+YAML files and keep runtime/env settings read-only.
+
+Rationale:
+
+- The project already treats YAML as the externalized source for domain signals,
+  facts, and pipeline stages.
+- Editing YAML through a validated API gives immediate product value without a
+  premature config-versioning schema.
+- The frontend API shape can later point at PostgreSQL-backed revisions with
+  draft/publish/history semantics.
+- Runtime settings affect process wiring and secrets; showing them read-only is
+  safer until auth, audit, and restart procedures exist.

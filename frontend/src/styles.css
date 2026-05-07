@@ -26,6 +26,11 @@ body {
   border-bottom: 1px solid #d9dee7;
 }
 
+.main-nav {
+  margin-left: 24px;
+  min-height: 40px;
+}
+
 .workspace {
   padding: 20px;
 }
@@ -74,8 +79,73 @@ body {
   overflow: auto;
 }
 
+.settings-shell {
+  display: grid;
+  grid-template-columns: 220px minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+}
+
+.settings-sidebar,
+.settings-toolbar,
+.settings-panel {
+  border-radius: 8px;
+  background: #ffffff;
+  padding: 16px;
+}
+
+.settings-sidebar {
+  display: grid;
+  gap: 8px;
+  position: sticky;
+  top: 16px;
+}
+
+.settings-main {
+  min-width: 0;
+}
+
+.settings-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.settings-content-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(320px, 0.6fr);
+  gap: 16px;
+  align-items: start;
+}
+
+.rule-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.rule-color {
+  width: 16px;
+  height: 16px;
+  border: 1px solid #b8c0cc;
+  border-radius: 4px;
+  flex: 0 0 auto;
+}
+
 @media (max-width: 980px) {
   .workspace-grid {
     grid-template-columns: 1fr;
+  }
+
+  .settings-shell,
+  .settings-content-grid,
+  .rule-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .settings-toolbar {
+    align-items: flex-start;
+    flex-direction: column;
   }
 }

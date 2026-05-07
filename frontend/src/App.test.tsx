@@ -65,3 +65,36 @@ test("starts enrichment job and subscribes to SSE progress", async () => {
     "/api/v1/enrichments/1e310b02-48b9-4652-ab32-e0d2a370d1f9/events"
   );
 });
+
+test("loads settings center on demand", async () => {
+  const fetchMock = vi.fn().mockResolvedValue({
+    ok: true,
+    json: async () => ({
+      nlp: {
+        pipeline: { stages: [{ name: "segmentation", enabled: true }] },
+        signals: [
+          {
+            type: "video_surveillance",
+            label: "Видеонаблюдение",
+            color: "#455a64",
+            confidence: 0.84,
+            phrases: [],
+            patterns: [{ tokens: [{ predicate: "normalized", value: "видеонаблюдение" }] }]
+          }
+        ],
+        facts: [],
+        source: { type: "yaml", path: "config/nlp", editable: true }
+      },
+      system: [{ key: "environment", value: "development", editable: false, source: "env" }]
+    })
+  });
+  vi.stubGlobal("fetch", fetchMock);
+  render(<App />);
+
+  fireEvent.click(screen.getByRole("tab", { name: /настройки/i }));
+
+  await waitFor(() => expect(fetchMock).toHaveBeenCalledWith("/api/v1/settings"));
+  expect(await screen.findByText("Видеонаблюдение")).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Runtime" }));
+  expect(screen.getByText("environment")).toBeInTheDocument();
+});
