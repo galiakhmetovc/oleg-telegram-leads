@@ -16,3 +16,39 @@ facts:
       - ["завтра"]
       - ["на", "следующей", "неделе"]
       - ["до", "конца", "недели"]
+
+  - type: solution_area
+    label: Решение / направление
+    confidence: 0.72
+    patterns:
+      - tokens:
+          - normalized: "система"
+          - normalized: "умный"
+          - normalized: "дом"
+      - tokens:
+          - normalized: "умный"
+          - normalized: "дом"
+      - tokens:
+          - normalized: "автоматизация"
+
+  - type: vendor
+    label: Вендор
+    confidence: 0.7
+    patterns:
+      - tokens:
+          - normalized: "яндекс"
+      - tokens:
+          - caseless: "yandex"
+
+  - type: design_scope
+    label: Раздел проектирования
+    confidence: 0.64
+    patterns:
+      - tokens:
+          - normalized: "чертеж"
+          - normalized: "электрика"
+      - tokens:
+          - normalized: "план"
+          - normalized: "розетка"
+      - tokens:
+          - normalized: "освещение"

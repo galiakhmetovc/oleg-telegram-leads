@@ -61,6 +61,32 @@ The first product slice uses a persisted enrichment job model:
 - NLP stages, domain signals, and rule sources are loaded from configuration
   instead of being hardcoded into application code.
 
+## NLP Configuration
+
+Runtime NLP behavior is configured under `backend/config/nlp`.
+
+- `pipeline.yaml` controls enabled stages.
+- `signals.yaml` defines domain signals shown to the operator.
+- `facts.yaml` defines structured fact extraction.
+
+Yargy rules are externalized as YAML. Two rule forms are currently supported:
+
+- `phrases`: exact case-insensitive token phrases for simple stable wording.
+- `patterns`: token predicates for Russian morphology, currently `normalized`
+  and `caseless`.
+
+Example:
+
+```yaml
+patterns:
+  - tokens:
+      - normalized: "умный"
+      - normalized: "дом"
+```
+
+Use `patterns` for Russian domain language that appears in different cases or
+forms, for example `умный дом`, `умного дома`, and `умному дому`.
+
 ## Frontend
 
 The frontend package lives in `frontend/src`.

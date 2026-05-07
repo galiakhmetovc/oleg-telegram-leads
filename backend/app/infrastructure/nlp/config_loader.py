@@ -14,10 +14,22 @@ class PipelineStageConfig:
 
 
 @dataclass(frozen=True)
+class RuleTokenConfig:
+    predicate: str
+    value: str
+
+
+@dataclass(frozen=True)
+class RulePatternConfig:
+    tokens: tuple[RuleTokenConfig, ...]
+
+
+@dataclass(frozen=True)
 class PhraseRuleConfig:
     type: str
     label: str
     phrases: tuple[tuple[str, ...], ...]
+    patterns: tuple[RulePatternConfig, ...]
     color: str | None = None
     confidence: float | None = None
 
@@ -69,8 +81,9 @@ def _parse_phrase_rule(raw: Any, collection_name: str) -> PhraseRuleConfig:
         raise ValueError(f"{collection_name} item must be a mapping")
 
     phrases = raw.get("phrases", [])
-    if not phrases:
-        raise ValueError(f"{collection_name} item must define phrases")
+    patterns = raw.get("patterns", [])
+    if not phrases and not patterns:
+        raise ValueError(f"{collection_name} item must define phrases or patterns")
 
     parsed_phrases: list[tuple[str, ...]] = []
     for phrase in phrases:
@@ -84,4 +97,34 @@ def _parse_phrase_rule(raw: Any, collection_name: str) -> PhraseRuleConfig:
         color=raw.get("color"),
         confidence=float(raw["confidence"]) if raw.get("confidence") is not None else None,
         phrases=tuple(parsed_phrases),
+        patterns=_parse_patterns(patterns, collection_name),
     )
+
+
+def _parse_patterns(raw_patterns: Any, collection_name: str) -> tuple[RulePatternConfig, ...]:
+    if not raw_patterns:
+        return ()
+    if not isinstance(raw_patterns, list):
+        raise ValueError(f"{collection_name} patterns must be a list")
+
+    patterns: list[RulePatternConfig] = []
+    for raw_pattern in raw_patterns:
+        if not isinstance(raw_pattern, dict):
+            raise ValueError(f"{collection_name} pattern must be a mapping")
+        raw_tokens = raw_pattern.get("tokens")
+        if not isinstance(raw_tokens, list) or not raw_tokens:
+            raise ValueError(f"{collection_name} pattern tokens must be a non-empty list")
+
+        tokens: list[RuleTokenConfig] = []
+        for raw_token in raw_tokens:
+            if not isinstance(raw_token, dict) or len(raw_token) != 1:
+                raise ValueError(f"{collection_name} pattern token must define one predicate")
+            predicate, value = next(iter(raw_token.items()))
+            predicate_name = str(predicate)
+            if predicate_name not in {"caseless", "normalized"}:
+                raise ValueError(f"unsupported {collection_name} pattern predicate: {predicate_name}")
+            tokens.append(RuleTokenConfig(predicate=predicate_name, value=str(value)))
+
+        patterns.append(RulePatternConfig(tokens=tuple(tokens)))
+
+    return tuple(patterns)

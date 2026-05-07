@@ -11,6 +11,8 @@
   Natasha/Yargy NLP pipeline.
 - Current dev UI is exposed through host Caddy at
   `https://secclaw.qlbc.ru:19443/`; `/api/*` and SSE are proxied to FastAPI.
+- Default NLP config now recognizes the smart-home automation lead case with
+  customer intent, vendor, solution area, and electrical design context signals.
 
 ## Blockers
 

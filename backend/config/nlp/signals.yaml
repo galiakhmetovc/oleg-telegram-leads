@@ -11,6 +11,9 @@ signals:
       - ["ищем", "поставщика"]
       - ["купим"]
       - ["требуется"]
+    patterns:
+      - tokens:
+          - normalized: "нужный"
 
   - type: supply
     label: Предложение
@@ -40,3 +43,40 @@ signals:
       - ["без", "ндс"]
       - ["по", "договору"]
       - ["предоплата"]
+
+  - type: customer_intent
+    label: Запрос заказчика
+    color: "#ef6c00"
+    confidence: 0.76
+    patterns:
+      - tokens:
+          - normalized: "заказчик"
+          - normalized: "хотеть"
+      - tokens:
+          - normalized: "клиент"
+          - normalized: "хотеть"
+
+  - type: smart_home_automation
+    label: Умный дом / автоматизация
+    color: "#00838f"
+    confidence: 0.84
+    patterns:
+      - tokens:
+          - normalized: "умный"
+          - normalized: "дом"
+      - tokens:
+          - normalized: "автоматизация"
+
+  - type: electrical_design_context
+    label: Контекст электрики
+    color: "#5d4037"
+    confidence: 0.74
+    patterns:
+      - tokens:
+          - normalized: "чертеж"
+          - normalized: "электрика"
+      - tokens:
+          - normalized: "план"
+          - normalized: "розетка"
+      - tokens:
+          - normalized: "освещение"

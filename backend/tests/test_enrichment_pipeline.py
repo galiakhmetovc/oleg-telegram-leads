@@ -47,3 +47,26 @@ signals:
     ] == ["demand"]
     assert result.metrics.token_count > 0
     assert any(item.stage == "domain_signals" for item in result.pipeline_trace)
+
+
+def test_default_config_marks_smart_home_automation_lead_text() -> None:
+    config = load_nlp_config(Path("config/nlp"))
+    enricher = RussianTextEnricher(config)
+    text = (
+        "Всем добрый вечер! Дизайнеры, подскажите, пожалуйста, если заказчик "
+        "хочет систему умного дома от яндекс, влияет ли это как-то на чертежи "
+        "электрики? Не могу просто понять, нужно ли учесть какие-то нюансы, "
+        "что-то добавить на планах розеток или освещения"
+    )
+
+    result = enricher.enrich(text)
+
+    signal_types = {signal.type for signal in result.domain_signals}
+    fact_types = {fact.type for fact in result.facts}
+
+    assert "smart_home_automation" in signal_types
+    assert "customer_intent" in signal_types
+    assert "electrical_design_context" in signal_types
+    assert "solution_area" in fact_types
+    assert "vendor" in fact_types
+    assert "design_scope" in fact_types

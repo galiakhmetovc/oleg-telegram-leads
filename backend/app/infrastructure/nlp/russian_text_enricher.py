@@ -2,16 +2,18 @@ from __future__ import annotations
 
 import warnings
 from collections.abc import Callable
+from typing import Any
 
 from natasha import Doc, MorphVocab, NewsEmbedding, NewsMorphTagger, NewsNERTagger
 from natasha import NewsSyntaxParser, Segmenter
 from yargy import Parser, or_, rule
-from yargy.predicates import caseless
+from yargy.predicates import caseless, normalized
 
 from app.domain.enrichment import DomainSignal, EnrichedEntity, EnrichedSentence, EnrichedToken
 from app.domain.enrichment import EnrichmentMetrics, ExtractedFact, PipelineTraceItem
 from app.domain.enrichment import SyntaxDependency, TextEnrichmentResult, TextRange
 from app.infrastructure.nlp.config_loader import NlpPipelineConfig, PhraseRuleConfig
+from app.infrastructure.nlp.config_loader import RuleTokenConfig
 
 ProgressCallback = Callable[[str, int, str], None]
 
@@ -195,15 +197,26 @@ class RussianTextEnricher:
         text: str,
         rule_config: PhraseRuleConfig,
     ) -> list[tuple[int, int, str]]:
-        phrase_rules = [
+        yargy_rules = [
             rule(*[caseless(word) for word in phrase])
             for phrase in rule_config.phrases
         ]
+        yargy_rules.extend(
+            rule(*[self._token_predicate(token) for token in pattern.tokens])
+            for pattern in rule_config.patterns
+        )
         matches: list[tuple[int, int, str]] = []
         with warnings.catch_warnings():
             warnings.filterwarnings("ignore", category=UserWarning, module="pymorphy2.analyzer")
             warnings.filterwarnings("ignore", message="pkg_resources is deprecated.*")
-            parser = Parser(or_(*phrase_rules))
+            parser = Parser(or_(*yargy_rules))
             for match in parser.findall(text):
                 matches.append((match.span.start, match.span.stop, text[match.span.start:match.span.stop]))
         return matches
+
+    def _token_predicate(self, token: RuleTokenConfig) -> Any:
+        if token.predicate == "normalized":
+            return normalized(token.value)
+        if token.predicate == "caseless":
+            return caseless(token.value)
+        raise ValueError(f"unsupported Yargy token predicate: {token.predicate}")
