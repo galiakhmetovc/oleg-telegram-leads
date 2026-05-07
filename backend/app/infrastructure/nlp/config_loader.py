@@ -61,14 +61,6 @@ def read_nlp_config_documents(config_dir: Path) -> dict[str, dict[str, Any]]:
     }
 
 
-def write_nlp_config_documents(config_dir: Path, documents: dict[str, dict[str, Any]]) -> None:
-    load_nlp_config_from_documents(documents)
-    config_dir.mkdir(parents=True, exist_ok=True)
-    _write_yaml(config_dir / "pipeline.yaml", documents["pipeline"])
-    _write_yaml(config_dir / "signals.yaml", documents["signals"])
-    _write_yaml(config_dir / "facts.yaml", documents["facts"])
-
-
 def load_nlp_config_from_documents(documents: dict[str, dict[str, Any]]) -> NlpPipelineConfig:
     pipeline = documents["pipeline"]
     signals = documents["signals"]
@@ -87,13 +79,6 @@ def _load_yaml(path: Path) -> dict[str, Any]:
     if not isinstance(loaded, dict):
         raise ValueError(f"{path} must contain a YAML mapping")
     return loaded
-
-
-def _write_yaml(path: Path, payload: dict[str, Any]) -> None:
-    path.write_text(
-        yaml.safe_dump(payload, allow_unicode=True, sort_keys=False),
-        encoding="utf-8",
-    )
 
 
 def _parse_stage(raw: Any) -> PipelineStageConfig:

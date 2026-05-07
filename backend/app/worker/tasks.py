@@ -6,9 +6,11 @@ from uuid import UUID
 
 from app.core.config import get_settings
 from app.db.session import create_sessionmaker
-from app.infrastructure.nlp.config_loader import load_nlp_config
+from app.infrastructure.nlp.config_loader import load_nlp_config_from_documents
+from app.infrastructure.nlp.config_loader import read_nlp_config_documents
 from app.infrastructure.nlp.russian_text_enricher import RussianTextEnricher
 from app.infrastructure.persistence.enrichment_repository import PostgresEnrichmentJobRepository
+from app.infrastructure.persistence.nlp_config_repository import PostgresNlpConfigRepository
 from app.worker.celery_app import celery_app
 
 
@@ -19,12 +21,17 @@ def enrich_text_job(job_id: str) -> None:
 
 async def _run_enrichment_job(job_id: UUID) -> None:
     settings = get_settings()
-    repository = PostgresEnrichmentJobRepository(create_sessionmaker())
+    session_factory = create_sessionmaker()
+    repository = PostgresEnrichmentJobRepository(session_factory)
     snapshot = await repository.get_job(job_id)
     if snapshot is None:
         return
 
-    config = load_nlp_config(settings.nlp_config_dir)
+    config_repository = PostgresNlpConfigRepository(session_factory)
+    config_revision = await config_repository.get_active_or_seed(
+        read_nlp_config_documents(settings.nlp_config_dir)
+    )
+    config = load_nlp_config_from_documents(config_revision.documents)
     stage_names = [stage.name for stage in config.enabled_stages]
     stage_count = len(stage_names)
     stage_index_by_name = {stage_name: index for index, stage_name in enumerate(stage_names, start=1)}

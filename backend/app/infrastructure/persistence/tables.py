@@ -47,3 +47,14 @@ enrichment_events = sa.Table(
     sa.Column("payload", JSONB(), nullable=False),
     sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
 )
+
+nlp_config_revisions = sa.Table(
+    "nlp_config_revisions",
+    metadata,
+    sa.Column("id", UUID(as_uuid=True), primary_key=True),
+    sa.Column("revision", sa.Integer(), nullable=False),
+    sa.Column("config", JSONB(), nullable=False),
+    sa.Column("is_active", sa.Boolean(), nullable=False),
+    sa.Column("source", sa.Text(), nullable=False),
+    sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
+)

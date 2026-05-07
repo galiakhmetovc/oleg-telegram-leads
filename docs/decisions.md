@@ -141,19 +141,21 @@ Rationale:
   ports.
 - Caddy is an external ingress concern and stays outside the repository.
 
-## 2026-05-07: Settings Center First Slice Uses YAML Storage
+## 2026-05-07: Settings Center Stores NLP Settings In PostgreSQL
 
 Expose all current NLP/domain settings in the operator UI and allow editing them
-through FastAPI. For the first dev slice, persist edits to `backend/config/nlp`
-YAML files and keep runtime/env settings read-only.
+through FastAPI. Persist editable NLP/domain settings as PostgreSQL revisions in
+`nlp_config_revisions`. Keep `backend/config/nlp` YAML files as bootstrap
+defaults only, used when the database has no active revision yet. Keep runtime/env
+settings read-only.
 
 Rationale:
 
-- The project already treats YAML as the externalized source for domain signals,
-  facts, and pipeline stages.
-- Editing YAML through a validated API gives immediate product value without a
-  premature config-versioning schema.
-- The frontend API shape can later point at PostgreSQL-backed revisions with
-  draft/publish/history semantics.
+- Settings are product data and must survive through the operational database,
+  not through mutable files.
+- Revision rows make future diff, audit, rollback, and publication workflows
+  natural.
+- YAML remains useful as versioned bootstrap defaults and reviewable seed data,
+  but it is not the active editable store.
 - Runtime settings affect process wiring and secrets; showing them read-only is
   safer until auth, audit, and restart procedures exist.

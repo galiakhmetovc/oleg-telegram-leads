@@ -154,6 +154,7 @@ type NlpSettings = {
     type: string;
     path: string;
     editable: boolean;
+    revision?: number;
   };
 };
 
@@ -639,7 +640,7 @@ function SettingsCenter() {
                     Preview draft
                   </Typography>
                   <Typography variant="body2" color="text.secondary">
-                    Проверяет текущие несохраненные настройки без записи в YAML.
+                    Проверяет текущие несохраненные настройки без сохранения.
                   </Typography>
                 </Box>
                 <TextField

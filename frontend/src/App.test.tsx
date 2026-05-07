@@ -83,7 +83,12 @@ test("loads settings center on demand", async () => {
           }
         ],
         facts: [],
-        source: { type: "yaml", path: "config/nlp", editable: true }
+        source: {
+          type: "postgres",
+          path: "nlp_config_revisions.config",
+          editable: true,
+          revision: 1
+        }
       },
       system: [{ key: "environment", value: "development", editable: false, source: "env" }]
     })

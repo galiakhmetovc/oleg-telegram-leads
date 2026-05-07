@@ -17,8 +17,9 @@
   provider search, service location, automation components, and controlled devices.
 - Default NLP config recognizes apartment video surveillance requests with
   provider search, consultation need, camera, wall mounting, and wiring outputs.
-- Settings Center is available in the UI. NLP/domain YAML settings can be viewed,
-  edited, saved, and previewed; runtime/env settings are shown read-only.
+- Settings Center is available in the UI. NLP/domain settings are viewed,
+  previewed, and saved as active PostgreSQL revisions; YAML files are bootstrap
+  defaults only. Runtime/env settings are shown read-only.
 - Default NLP config recognizes the confirmed artifact lead about hiding a leak
   sensor in porcelain stoneware and documenting the solution on drawings/schemes.
 

@@ -7,10 +7,12 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field, model_validator
 
 from app.core.config import Settings, get_settings
+from app.db.session import create_sessionmaker
+from app.domain.settings import NlpConfigRevision
 from app.infrastructure.nlp.config_loader import load_nlp_config_from_documents
 from app.infrastructure.nlp.config_loader import read_nlp_config_documents
-from app.infrastructure.nlp.config_loader import write_nlp_config_documents
 from app.infrastructure.nlp.russian_text_enricher import RussianTextEnricher
+from app.infrastructure.persistence.nlp_config_repository import PostgresNlpConfigRepository
 
 router = APIRouter(prefix="/settings", tags=["settings"])
 
@@ -55,9 +57,10 @@ class NlpSettings(BaseModel):
 
 
 class NlpSettingsSource(BaseModel):
-    type: Literal["yaml"]
+    type: Literal["postgres"]
     path: str
     editable: bool
+    revision: int
 
 
 class NlpSettingsSnapshot(NlpSettings):
@@ -86,13 +89,18 @@ def get_nlp_config_dir(settings: Settings = Depends(get_settings)) -> Path:
     return settings.nlp_config_dir
 
 
+def get_nlp_config_repository() -> PostgresNlpConfigRepository:
+    return PostgresNlpConfigRepository(create_sessionmaker())
+
+
 @router.get("", response_model=SettingsSnapshot)
 async def get_all_settings(
     config_dir: Path = Depends(get_nlp_config_dir),
+    repository: PostgresNlpConfigRepository = Depends(get_nlp_config_repository),
     settings: Settings = Depends(get_settings),
 ) -> SettingsSnapshot:
     return SettingsSnapshot(
-        nlp=_read_nlp_snapshot(config_dir),
+        nlp=await _read_nlp_snapshot(config_dir, repository),
         system=_system_settings(settings),
     )
 
@@ -101,13 +109,15 @@ async def get_all_settings(
 async def update_nlp_settings(
     payload: NlpSettings,
     config_dir: Path = Depends(get_nlp_config_dir),
+    repository: PostgresNlpConfigRepository = Depends(get_nlp_config_repository),
 ) -> NlpSettingsSnapshot:
     documents = _nlp_settings_to_documents(payload)
     try:
-        write_nlp_config_documents(config_dir, documents)
+        load_nlp_config_from_documents(documents)
     except (KeyError, TypeError, ValueError) as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
-    return _read_nlp_snapshot(config_dir)
+    revision = await repository.replace_active(documents, source="ui")
+    return _nlp_snapshot_from_revision(revision)
 
 
 @router.post("/nlp/preview")
@@ -120,13 +130,27 @@ async def preview_nlp_settings(request: PreviewRequest) -> dict[str, Any]:
     return RussianTextEnricher(config).enrich(request.text).to_dict()
 
 
-def _read_nlp_snapshot(config_dir: Path) -> NlpSettingsSnapshot:
-    documents = read_nlp_config_documents(config_dir)
+async def _read_nlp_snapshot(
+    config_dir: Path,
+    repository: PostgresNlpConfigRepository,
+) -> NlpSettingsSnapshot:
+    bootstrap_documents = read_nlp_config_documents(config_dir)
+    revision = await repository.get_active_or_seed(bootstrap_documents)
+    return _nlp_snapshot_from_revision(revision)
+
+
+def _nlp_snapshot_from_revision(revision: NlpConfigRevision) -> NlpSettingsSnapshot:
+    documents = revision.documents
     return NlpSettingsSnapshot(
         pipeline=PipelineSettings.model_validate(documents["pipeline"]),
         signals=[_rule_from_document(item) for item in documents["signals"].get("signals", [])],
         facts=[_rule_from_document(item) for item in documents["facts"].get("facts", [])],
-        source=NlpSettingsSource(type="yaml", path=str(config_dir), editable=True),
+        source=NlpSettingsSource(
+            type="postgres",
+            path="nlp_config_revisions.config",
+            editable=True,
+            revision=revision.revision,
+        ),
     )
 
 

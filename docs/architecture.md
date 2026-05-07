@@ -63,13 +63,16 @@ The first product slice uses a persisted enrichment job model:
 
 ## NLP Configuration
 
-Runtime NLP behavior is configured under `backend/config/nlp`.
+Editable NLP behavior is stored in PostgreSQL table `nlp_config_revisions`.
+`backend/config/nlp` contains only bootstrap defaults used to seed revision 1
+when the database is empty.
 
-- `pipeline.yaml` controls enabled stages.
-- `signals.yaml` defines domain signals shown to the operator.
-- `facts.yaml` defines structured fact extraction.
+- `pipeline` controls enabled stages.
+- `signals` defines domain signals shown to the operator.
+- `facts` defines structured fact extraction.
 
-Yargy rules are externalized as YAML. Two rule forms are currently supported:
+Yargy rules are externalized as configuration data. Two rule forms are currently
+supported:
 
 - `phrases`: exact case-insensitive token phrases for simple stable wording.
 - `patterns`: token predicates for Russian morphology, currently `normalized`
@@ -89,25 +92,25 @@ forms, for example `умный дом`, `умного дома`, and `умном
 
 ## Settings Center
 
-The first settings UI slice exposes the active dev NLP configuration through
-FastAPI:
+The settings UI exposes the active NLP configuration through FastAPI:
 
 - `GET /api/v1/settings` returns editable NLP/domain settings and read-only
   runtime settings.
-- `PUT /api/v1/settings/nlp` validates and saves NLP settings back to
-  `backend/config/nlp/*.yaml`.
+- `PUT /api/v1/settings/nlp` validates NLP settings and creates a new active
+  PostgreSQL config revision.
 - `POST /api/v1/settings/nlp/preview` runs a draft configuration against a text
   without saving it.
 
-In dev mode, YAML files are the active source of truth for NLP settings. Celery
-loads the config per job, so saved YAML changes apply to the next enrichment job.
-Runtime settings such as database URL, Redis URL, CORS, and config paths are
-visible but read-only because they come from environment configuration and may
-require process/container restart.
+PostgreSQL table `nlp_config_revisions` is the active source of truth for
+editable NLP settings. `backend/config/nlp/*.yaml` is only a bootstrap default:
+if the database has no active revision, the backend seeds revision 1 from YAML.
+Celery loads the active database revision per job, so saved UI changes apply to
+the next enrichment job. Runtime settings such as database URL, Redis URL, CORS,
+and config paths are visible but read-only because they come from environment
+configuration and may require process/container restart.
 
-The API contract is intentionally storage-neutral: later PostgreSQL-backed
-config revisions can replace YAML persistence without changing the frontend
-shape.
+Each save creates a new active revision and deactivates the previous one. This
+keeps future history/diff/rollback work aligned with the current API shape.
 
 ## Frontend
 
