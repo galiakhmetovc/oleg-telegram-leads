@@ -136,8 +136,16 @@ test("loads settings center on demand", async () => {
             label: "Видеонаблюдение",
             color: "#455a64",
             confidence: 0.84,
-            phrases: [],
-            patterns: [{ tokens: [{ predicate: "normalized", value: "видеонаблюдение" }] }]
+            phrases: [["с", "ндс"]],
+            patterns: [
+              {
+                source_text: "Нужна консультация",
+                tokens: [
+                  { predicate: "normalized", value: "нужный" },
+                  { predicate: "normalized", value: "консультация" }
+                ]
+              }
+            ]
           }
         ],
         facts: [],
@@ -159,10 +167,99 @@ test("loads settings center on demand", async () => {
 
   await waitFor(() => expect(fetchMock).toHaveBeenCalledWith("/api/v1/settings"));
   expect(await screen.findByText("Видеонаблюдение")).toBeInTheDocument();
+  fireEvent.click(screen.getByText("Видеонаблюдение"));
+  expect(screen.getByText("Точные фразы")).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Добавить точную фразу" })).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Редактировать точную фразу: с ндс" })).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Удалить точную фразу: с ндс" })).toBeInTheDocument();
+  expect(screen.getByText("Лемматические фразы")).toBeInTheDocument();
+  expect(screen.getByText("Нужна консультация")).toBeInTheDocument();
+  expect(screen.getByText("нужный консультация")).toBeInTheDocument();
+  expect(screen.queryByText(/normalized:/)).not.toBeInTheDocument();
   fireEvent.click(screen.getByRole("button", { name: "Оценка лида" }));
   expect(screen.getByText("Пороги оценки")).toBeInTheDocument();
   fireEvent.click(screen.getByRole("button", { name: "Runtime" }));
   expect(screen.getByText("environment")).toBeInTheDocument();
+});
+
+test("adds semantic pattern through backend lemmatization", async () => {
+  const fetchMock = vi
+    .fn()
+    .mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        nlp: {
+          pipeline: { stages: [{ name: "segmentation", enabled: true }] },
+          signals: [
+            {
+              type: "video_surveillance",
+              label: "Видеонаблюдение",
+              color: "#455a64",
+              confidence: 0.84,
+              phrases: [],
+              patterns: []
+            }
+          ],
+          facts: [],
+          lead_scoring: sampleLeadScoringSettings(),
+          source: {
+            type: "postgres",
+            path: "nlp_config_revisions.config",
+            editable: true,
+            revision: 1
+          }
+        },
+        system: []
+      })
+    })
+    .mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        source_text: "Нужна консультация",
+        lemma_text: "нужный консультация",
+        tokens: [
+          { predicate: "normalized", value: "нужный" },
+          { predicate: "normalized", value: "консультация" }
+        ]
+      })
+    });
+  vi.stubGlobal("fetch", fetchMock);
+  render(<App />);
+
+  fireEvent.click(screen.getByRole("tab", { name: /настройки/i }));
+  expect(await screen.findByText("Видеонаблюдение")).toBeInTheDocument();
+  fireEvent.click(screen.getByText("Видеонаблюдение"));
+  fireEvent.click(screen.getByRole("button", { name: "Добавить лемматическую фразу" }));
+  fireEvent.change(screen.getByLabelText("Текст правила"), {
+    target: { value: "Нужна консультация" }
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Сохранить правило" }));
+
+  await waitFor(() =>
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/v1/settings/nlp/semantic-pattern",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ text: "Нужна консультация" })
+      })
+    )
+  );
+  expect(await screen.findByText("Нужна консультация")).toBeInTheDocument();
+  expect(screen.getByText("нужный консультация")).toBeInTheDocument();
+});
+
+test("renders settings help page for rule matching modes", () => {
+  render(<App />);
+
+  fireEvent.click(screen.getByRole("tab", { name: /справка/i }));
+
+  expect(screen.getByRole("heading", { name: "Справка по настройкам" })).toBeInTheDocument();
+  expect(screen.getAllByText("Точное совпадение").length).toBeGreaterThan(0);
+  expect(screen.getAllByText("Лемматическое совпадение").length).toBeGreaterThan(0);
+  expect(screen.getByText("нужна консультация")).toBeInTheDocument();
+  expect(screen.getByText("нужный консультация")).toBeInTheDocument();
+  expect(screen.queryByText(/caseless:/)).not.toBeInTheDocument();
+  expect(screen.queryByText(/normalized:/)).not.toBeInTheDocument();
 });
 
 function sampleLeadScoringSettings() {

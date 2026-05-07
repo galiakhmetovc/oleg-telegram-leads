@@ -20,6 +20,12 @@
 - Settings Center is available in the UI. NLP/domain settings are viewed,
   previewed, and saved as active PostgreSQL revisions; YAML files are bootstrap
   defaults only. Runtime/env settings are shown read-only.
+- Settings rule editing now presents operator-facing matching modes: exact
+  phrases and lemmatized phrases. Exact/semantic rules are edited with explicit
+  add/edit/delete actions. New lemmatized phrases are built by the backend from
+  operator-entered text and preserve `source_text` alongside generated lemmas.
+- A Help tab in the web UI explains exact versus lemmatized matching and when to
+  use each mode.
 - Default NLP config recognizes the confirmed artifact lead about hiding a leak
   sensor in porcelain stoneware and documenting the solution on drawings/schemes.
 - Enrichment results include `lead_assessment`: deterministic PUR lead verdict,
@@ -46,8 +52,10 @@
   wall-light control, smart relay modules for lights/tracks connected to Alice,
   and O'Climate/Orac static-pressure chambers for channel air conditioning
   without misclassifying them as video surveillance.
-- Dev PostgreSQL active NLP config was refreshed to revision 13 from the current
-  bootstrap config so worker jobs use the new PUR scoring settings.
+- Dev PostgreSQL active NLP config was refreshed to revision 15. The `need`
+  signal no longer stores Russian forms such as `нужно`, `нужна`, `нужен` as
+  exact phrases; they are represented as lemmatized phrase rules with preserved
+  operator source text.
 - `RussianTextEnricher` now precompiles Yargy parsers once per enricher
   instance instead of rebuilding them for every message. A local batch CLI can
   write full enrichment JSONL for exported messages without creating API/Celery

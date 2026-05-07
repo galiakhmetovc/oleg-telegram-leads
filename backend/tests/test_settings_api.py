@@ -152,13 +152,45 @@ def test_get_settings_returns_editable_nlp_and_readonly_system_settings(tmp_path
     assert repository.active is not None
 
 
+def test_build_semantic_pattern_returns_lemmas_and_operator_text(tmp_path: Path) -> None:
+    config_dir = tmp_path / "nlp"
+    _write_config(config_dir)
+    repository = InMemoryNlpConfigRepository()
+    client = _app_with_settings_repo(config_dir, repository)
+
+    response = client.post(
+        "/api/v1/settings/nlp/semantic-pattern",
+        json={"text": "Нужна консультация по умному дому"},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["source_text"] == "Нужна консультация по умному дому"
+    assert payload["lemma_text"] == "нужный консультация по умный дом"
+    assert payload["tokens"] == [
+        {"predicate": "normalized", "value": "нужный"},
+        {"predicate": "normalized", "value": "консультация"},
+        {"predicate": "normalized", "value": "по"},
+        {"predicate": "normalized", "value": "умный"},
+        {"predicate": "normalized", "value": "дом"},
+    ]
+
+
 def test_update_nlp_settings_validates_and_writes_database_revision_not_yaml(tmp_path: Path) -> None:
     config_dir = tmp_path / "nlp"
     _write_config(config_dir)
     repository = InMemoryNlpConfigRepository()
     client = _app_with_settings_repo(config_dir, repository)
     updated = client.get("/api/v1/settings").json()["nlp"]
-    updated["signals"][0]["phrases"].append(["ищем", "поставщика"])
+    updated["signals"][0]["patterns"].append(
+        {
+            "source_text": "Нужна консультация",
+            "tokens": [
+                {"predicate": "normalized", "value": "нужный"},
+                {"predicate": "normalized", "value": "консультация"},
+            ],
+        }
+    )
     updated["lead_scoring"]["signal_weights"]["demand"] = 25
 
     response = client.put("/api/v1/settings/nlp", json=updated)
@@ -167,11 +199,11 @@ def test_update_nlp_settings_validates_and_writes_database_revision_not_yaml(tmp
     payload = response.json()
     assert payload["source"]["type"] == "postgres"
     assert payload["source"]["revision"] == 2
-    assert ["ищем", "поставщика"] in payload["signals"][0]["phrases"]
+    assert payload["signals"][0]["patterns"][1]["source_text"] == "Нужна консультация"
     assert repository.active is not None
-    assert ["ищем", "поставщика"] in repository.active["signals"]["signals"][0]["phrases"]
+    assert repository.active["signals"]["signals"][0]["patterns"][1]["source_text"] == "Нужна консультация"
     assert repository.active["lead_scoring"]["lead_scoring"]["weights"]["signals"]["demand"] == 25
-    assert "ищем" not in (config_dir / "signals.yaml").read_text(encoding="utf-8")
+    assert "консультация" not in (config_dir / "signals.yaml").read_text(encoding="utf-8")
 
 
 def test_preview_nlp_settings_uses_draft_without_saving(tmp_path: Path) -> None:

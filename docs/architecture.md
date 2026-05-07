@@ -73,24 +73,22 @@ when the database is empty.
 - `lead_scoring` defines PUR lead thresholds, signal/fact weights, solution area
   mappings, customer segment mappings, intent signals, and noise signals.
 
-Yargy rules are externalized as configuration data. Two rule forms are currently
-supported:
+Yargy rules are externalized as configuration data, but the operator-facing
+model is intentionally simpler than Yargy internals:
 
-- `phrases`: exact case-insensitive token phrases for simple stable wording.
-- `patterns`: token predicates for Russian morphology, currently `normalized`
-  and `caseless`.
+- Exact phrases: stable token sequences for abbreviations, brands, protocols,
+  technical notation, and wording where the exact written form matters.
+- Lemmatized phrases: Russian domain phrases entered as normal text and stored
+  with both the operator's source text and backend-built lemmas.
 
-Example:
+Use lemmatized phrases for Russian domain language that appears in different
+cases or forms. For example, operator input `умный дом` is stored as lemmas
+`умный дом` and can match `умного дома` and `умному дому`. Operator input
+`нужна консультация` is stored as lemmas `нужный консультация`.
 
-```yaml
-patterns:
-  - tokens:
-      - normalized: "умный"
-      - normalized: "дом"
-```
-
-Use `patterns` for Russian domain language that appears in different cases or
-forms, for example `умный дом`, `умного дома`, and `умному дому`.
+The persisted config still uses `phrases` and `patterns` as the storage shape
+because that is what the rule engine consumes. The web UI does not expose Yargy
+predicate names as the product vocabulary.
 
 ## Lead Assessment
 
@@ -122,6 +120,8 @@ The settings UI exposes the active NLP configuration through FastAPI:
   PostgreSQL config revision.
 - `POST /api/v1/settings/nlp/preview` runs a draft configuration against a text
   without saving it.
+- `POST /api/v1/settings/nlp/semantic-pattern` converts operator-entered rule
+  text into a lemmatized phrase and returns both `source_text` and lemma tokens.
 
 PostgreSQL table `nlp_config_revisions` is the active source of truth for
 editable NLP settings. `backend/config/nlp/*.yaml` is only a bootstrap default:
@@ -137,6 +137,12 @@ When a new bootstrap document or pipeline stage is introduced, the repository
 can create a new active revision by merging missing bootstrap documents/stages
 into the current active configuration without overwriting existing edited
 signals or facts.
+
+The frontend Settings Center edits exact phrases and lemmatized phrases as
+separate lists with add/edit/delete actions. New lemmatized phrases are created
+from natural operator input through the backend semantic-pattern endpoint so the
+UI can show both the original text and the generated lemmas. The UI also has a
+Help page that explains these matching modes.
 
 ## Frontend
 

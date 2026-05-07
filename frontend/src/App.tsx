@@ -2,8 +2,10 @@ import AddIcon from "@mui/icons-material/Add";
 import AutoAwesomeIcon from "@mui/icons-material/AutoAwesome";
 import CheckCircleIcon from "@mui/icons-material/CheckCircle";
 import DeleteIcon from "@mui/icons-material/Delete";
+import EditIcon from "@mui/icons-material/Edit";
 import ErrorIcon from "@mui/icons-material/Error";
 import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
+import HelpOutlineIcon from "@mui/icons-material/HelpOutlineOutlined";
 import PlayArrowIcon from "@mui/icons-material/PlayArrow";
 import SaveIcon from "@mui/icons-material/Save";
 import SettingsIcon from "@mui/icons-material/Settings";
@@ -21,6 +23,10 @@ import {
   Container,
   CssBaseline,
   Divider,
+  Dialog,
+  DialogActions,
+  DialogContent,
+  DialogTitle,
   FormControlLabel,
   IconButton,
   LinearProgress,
@@ -38,6 +44,7 @@ import {
   TextField,
   ThemeProvider,
   Toolbar,
+  Tooltip,
   Typography,
   createTheme
 } from "@mui/material";
@@ -158,6 +165,13 @@ type PatternTokenSetting = {
 };
 
 type RulePatternSetting = {
+  source_text?: string | null;
+  tokens: PatternTokenSetting[];
+};
+
+type SemanticPatternResponse = {
+  source_text: string;
+  lemma_text: string;
   tokens: PatternTokenSetting[];
 };
 
@@ -369,6 +383,7 @@ export function App() {
             <Tabs value={activePage} onChange={handlePageChange} className="main-nav">
               <Tab label="Обогащение" />
               <Tab icon={<SettingsIcon fontSize="small" />} iconPosition="start" label="Настройки" />
+              <Tab icon={<HelpOutlineIcon fontSize="small" />} iconPosition="start" label="Справка" />
             </Tabs>
           </Toolbar>
         </AppBar>
@@ -437,8 +452,10 @@ export function App() {
                 )}
               </Stack>
             </Box>
-          ) : (
+          ) : activePage === 1 ? (
             <SettingsCenter />
+          ) : (
+            <SettingsHelpPage />
           )}
         </Container>
       </Box>
@@ -746,6 +763,109 @@ function SettingsCenter() {
   );
 }
 
+function SettingsHelpPage() {
+  return (
+    <Box className="help-shell">
+      <Paper variant="outlined" className="settings-panel">
+        <Stack spacing={3}>
+          <Box>
+            <Typography variant="h5" component="h2" sx={{ fontWeight: 800 }}>
+              Справка по настройкам
+            </Typography>
+            <Typography variant="body2" color="text.secondary">
+              Правила поиска делятся на точные фразы и лемматические фразы. Это разные инструменты:
+              первый ищет устойчивую запись, второй ищет смысловую словоформу.
+            </Typography>
+          </Box>
+
+          <Box className="help-grid">
+            <Paper variant="outlined" className="help-section">
+              <Typography variant="h6">Точное совпадение</Typography>
+              <Typography variant="body2" color="text.secondary">
+                Используй для фраз, где важна именно запись: аббревиатуры, бренды, протоколы,
+                технические обозначения и короткие устойчивые выражения. Регистр не важен.
+              </Typography>
+              <Stack spacing={0.75}>
+                {["с ндс", "white box", "220v", "wi-fi"].map((item) => (
+                  <Chip key={item} label={item} size="small" variant="outlined" />
+                ))}
+              </Stack>
+            </Paper>
+
+            <Paper variant="outlined" className="help-section">
+              <Typography variant="h6">Лемматическое совпадение</Typography>
+              <Typography variant="body2" color="text.secondary">
+                Используй для русских доменных смыслов. Оператор вводит обычную фразу, backend
+                приводит слова к леммам, а правило потом находит разные падежи, роды и числа.
+              </Typography>
+              <TableContainer>
+                <Table size="small">
+                  <TableHead>
+                    <TableRow>
+                      <TableCell>Ввод оператора</TableCell>
+                      <TableCell>Леммы в правиле</TableCell>
+                      <TableCell>Что найдет</TableCell>
+                    </TableRow>
+                  </TableHead>
+                  <TableBody>
+                    <TableRow>
+                      <TableCell>нужна консультация</TableCell>
+                      <TableCell>нужный консультация</TableCell>
+                      <TableCell>нужную консультацию, нужны консультации</TableCell>
+                    </TableRow>
+                    <TableRow>
+                      <TableCell>умный дом</TableCell>
+                      <TableCell>умный дом</TableCell>
+                      <TableCell>умного дома, умному дому</TableCell>
+                    </TableRow>
+                    <TableRow>
+                      <TableCell>система видеонаблюдения</TableCell>
+                      <TableCell>система видеонаблюдение</TableCell>
+                      <TableCell>систему видеонаблюдения</TableCell>
+                    </TableRow>
+                  </TableBody>
+                </Table>
+              </TableContainer>
+            </Paper>
+          </Box>
+
+          <Paper variant="outlined" className="help-section">
+            <Typography variant="h6">Как выбирать режим</Typography>
+            <TableContainer>
+              <Table size="small">
+                <TableHead>
+                  <TableRow>
+                    <TableCell>Ситуация</TableCell>
+                    <TableCell>Что выбрать</TableCell>
+                    <TableCell>Почему</TableCell>
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  <TableRow>
+                    <TableCell>Русская предметная фраза</TableCell>
+                    <TableCell>Лемматическое совпадение</TableCell>
+                    <TableCell>Поймает формы слов без перечисления падежей.</TableCell>
+                  </TableRow>
+                  <TableRow>
+                    <TableCell>Аббревиатура, бренд, техническая запись</TableCell>
+                    <TableCell>Точное совпадение</TableCell>
+                    <TableCell>Такие токены часто нельзя надежно лемматизировать.</TableCell>
+                  </TableRow>
+                  <TableRow>
+                    <TableCell>Новое правило непонятно как сработает</TableCell>
+                    <TableCell>Preview draft</TableCell>
+                    <TableCell>Проверяет черновик без сохранения новой ревизии.</TableCell>
+                  </TableRow>
+                </TableBody>
+              </Table>
+            </TableContainer>
+          </Paper>
+        </Stack>
+      </Paper>
+    </Box>
+  );
+}
+
 function PipelineSettingsEditor({
   draft,
   onStageChange
@@ -996,23 +1116,13 @@ function RuleEditor({
               onChange={(event) => onUpdate({ ...rule, color: event.target.value })}
             />
           </Box>
-          <TextField
-            label="phrases"
-            helperText="Одна фраза на строку, токены через пробел"
-            value={phrasesToText(rule.phrases)}
-            onChange={(event) => onUpdate({ ...rule, phrases: textToPhrases(event.target.value) })}
-            multiline
-            minRows={3}
-            fullWidth
+          <ExactPhraseEditor
+            phrases={rule.phrases}
+            onUpdate={(phrases) => onUpdate({ ...rule, phrases })}
           />
-          <TextField
-            label="patterns"
-            helperText="Одна pattern-строка: normalized:умный normalized:дом или caseless:zigbee normalized:шлюз"
-            value={patternsToText(rule.patterns)}
-            onChange={(event) => onUpdate({ ...rule, patterns: textToPatterns(event.target.value) })}
-            multiline
-            minRows={4}
-            fullWidth
+          <SemanticPatternEditor
+            patterns={rule.patterns}
+            onUpdate={(patterns) => onUpdate({ ...rule, patterns })}
           />
           <Box>
             <IconButton aria-label="Удалить правило" color="error" onClick={onRemove}>
@@ -1022,6 +1132,291 @@ function RuleEditor({
         </Stack>
       </AccordionDetails>
     </Accordion>
+  );
+}
+
+type RuleDialogState = {
+  index: number | null;
+  value: string;
+};
+
+function ExactPhraseEditor({
+  phrases,
+  onUpdate
+}: {
+  phrases: string[][];
+  onUpdate: (phrases: string[][]) => void;
+}) {
+  const [dialog, setDialog] = useState<RuleDialogState | null>(null);
+
+  function savePhrase() {
+    if (!dialog) {
+      return;
+    }
+    const phrase = textToExactPhrase(dialog.value);
+    if (phrase.length === 0) {
+      return;
+    }
+    const nextPhrases =
+      dialog.index === null
+        ? [...phrases, phrase]
+        : phrases.map((item, itemIndex) => (itemIndex === dialog.index ? phrase : item));
+    onUpdate(nextPhrases);
+    setDialog(null);
+  }
+
+  return (
+    <Stack spacing={1}>
+      <RuleListHeader
+        title="Точные фразы"
+        description="Совпадение по такой же последовательности слов без учета регистра. Используй для устойчивых выражений, аббревиатур, брендов и технических обозначений."
+        addLabel="Добавить точную фразу"
+        onAdd={() => setDialog({ index: null, value: "" })}
+      />
+      {phrases.length === 0 ? (
+        <Typography variant="body2" color="text.secondary">
+          Точных фраз нет.
+        </Typography>
+      ) : (
+        <Stack spacing={1}>
+          {phrases.map((phrase, index) => {
+            const phraseText = phrase.join(" ");
+            return (
+              <Box className="rule-list-row" key={`${phraseText}-${index}`}>
+                <Typography sx={{ flex: 1 }} noWrap>
+                  {phraseText}
+                </Typography>
+                <Tooltip title="Редактировать">
+                  <IconButton
+                    aria-label={`Редактировать точную фразу: ${phraseText}`}
+                    onClick={() => setDialog({ index, value: phraseText })}
+                  >
+                    <EditIcon fontSize="small" />
+                  </IconButton>
+                </Tooltip>
+                <Tooltip title="Удалить">
+                  <IconButton
+                    aria-label={`Удалить точную фразу: ${phraseText}`}
+                    color="error"
+                    onClick={() => onUpdate(phrases.filter((_, itemIndex) => itemIndex !== index))}
+                  >
+                    <DeleteIcon fontSize="small" />
+                  </IconButton>
+                </Tooltip>
+              </Box>
+            );
+          })}
+        </Stack>
+      )}
+      <RuleTextDialog
+        open={dialog !== null}
+        title={dialog?.index === null ? "Добавить точную фразу" : "Редактировать точную фразу"}
+        label="Текст точной фразы"
+        value={dialog?.value ?? ""}
+        saveLabel="Сохранить фразу"
+        onChange={(value) => setDialog((current) => (current ? { ...current, value } : current))}
+        onClose={() => setDialog(null)}
+        onSave={savePhrase}
+      />
+    </Stack>
+  );
+}
+
+function SemanticPatternEditor({
+  patterns,
+  onUpdate
+}: {
+  patterns: RulePatternSetting[];
+  onUpdate: (patterns: RulePatternSetting[]) => void;
+}) {
+  const [dialog, setDialog] = useState<RuleDialogState | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function savePattern() {
+    if (!dialog || !dialog.value.trim()) {
+      return;
+    }
+    setSaving(true);
+    setError(null);
+    try {
+      const response = await fetch(`${apiBaseUrl}/api/v1/settings/nlp/semantic-pattern`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: dialog.value.trim() })
+      });
+      if (!response.ok) {
+        throw new Error(`Backend вернул ${response.status}`);
+      }
+      const semanticPattern = (await response.json()) as SemanticPatternResponse;
+      const nextPattern: RulePatternSetting = {
+        source_text: semanticPattern.source_text,
+        tokens: semanticPattern.tokens
+      };
+      const nextPatterns =
+        dialog.index === null
+          ? [...patterns, nextPattern]
+          : patterns.map((item, itemIndex) => (itemIndex === dialog.index ? nextPattern : item));
+      onUpdate(nextPatterns);
+      setDialog(null);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Не удалось построить лемматическое правило");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <Stack spacing={1}>
+      <RuleListHeader
+        title="Лемматические фразы"
+        description="Оператор вводит обычную фразу. Backend превращает слова в леммы, а правило потом находит разные падежи, роды и числа."
+        addLabel="Добавить лемматическую фразу"
+        onAdd={() => {
+          setError(null);
+          setDialog({ index: null, value: "" });
+        }}
+      />
+      {patterns.length === 0 ? (
+        <Typography variant="body2" color="text.secondary">
+          Лемматических фраз нет.
+        </Typography>
+      ) : (
+        <Stack spacing={1}>
+          {patterns.map((pattern, index) => {
+            const sourceText = patternSourceText(pattern);
+            const lemmaText = patternLemmaText(pattern);
+            return (
+              <Box className="rule-list-row" key={`${sourceText}-${index}`}>
+                <Box sx={{ minWidth: 0, flex: 1 }}>
+                  <Typography noWrap>{sourceText}</Typography>
+                  <Typography variant="caption" color="text.secondary" noWrap>
+                    {lemmaText}
+                  </Typography>
+                </Box>
+                <Tooltip title="Редактировать">
+                  <IconButton
+                    aria-label={`Редактировать лемматическую фразу: ${sourceText}`}
+                    onClick={() => {
+                      setError(null);
+                      setDialog({ index, value: sourceText });
+                    }}
+                  >
+                    <EditIcon fontSize="small" />
+                  </IconButton>
+                </Tooltip>
+                <Tooltip title="Удалить">
+                  <IconButton
+                    aria-label={`Удалить лемматическую фразу: ${sourceText}`}
+                    color="error"
+                    onClick={() => onUpdate(patterns.filter((_, itemIndex) => itemIndex !== index))}
+                  >
+                    <DeleteIcon fontSize="small" />
+                  </IconButton>
+                </Tooltip>
+              </Box>
+            );
+          })}
+        </Stack>
+      )}
+      {error && <Alert severity="error">{error}</Alert>}
+      <RuleTextDialog
+        open={dialog !== null}
+        title={dialog?.index === null ? "Добавить лемматическую фразу" : "Редактировать лемматическую фразу"}
+        label="Текст правила"
+        value={dialog?.value ?? ""}
+        saveLabel="Сохранить правило"
+        saving={saving}
+        onChange={(value) => setDialog((current) => (current ? { ...current, value } : current))}
+        onClose={() => {
+          if (!saving) {
+            setDialog(null);
+          }
+        }}
+        onSave={() => {
+          void savePattern();
+        }}
+      />
+    </Stack>
+  );
+}
+
+function RuleListHeader({
+  title,
+  description,
+  addLabel,
+  onAdd
+}: {
+  title: string;
+  description: string;
+  addLabel: string;
+  onAdd: () => void;
+}) {
+  return (
+    <Box className="rule-list-header">
+      <Box sx={{ minWidth: 0 }}>
+        <Typography variant="subtitle1" sx={{ fontWeight: 700 }}>
+          {title}
+        </Typography>
+        <Typography variant="body2" color="text.secondary">
+          {description}
+        </Typography>
+      </Box>
+      <Button aria-label={addLabel} startIcon={<AddIcon />} variant="outlined" onClick={onAdd}>
+        Добавить
+      </Button>
+    </Box>
+  );
+}
+
+function RuleTextDialog({
+  open,
+  title,
+  label,
+  value,
+  saveLabel,
+  saving = false,
+  onChange,
+  onClose,
+  onSave
+}: {
+  open: boolean;
+  title: string;
+  label: string;
+  value: string;
+  saveLabel: string;
+  saving?: boolean;
+  onChange: (value: string) => void;
+  onClose: () => void;
+  onSave: () => void;
+}) {
+  return (
+    <Dialog open={open} onClose={onClose} fullWidth maxWidth="sm">
+      <DialogTitle>{title}</DialogTitle>
+      <DialogContent>
+        <TextField
+          autoFocus
+          fullWidth
+          label={label}
+          margin="dense"
+          value={value}
+          onChange={(event) => onChange(event.target.value)}
+        />
+      </DialogContent>
+      <DialogActions>
+        <Button onClick={onClose} disabled={saving}>
+          Отмена
+        </Button>
+        <Button
+          variant="contained"
+          onClick={onSave}
+          disabled={saving || !value.trim()}
+          startIcon={saving ? <CircularProgress size={18} color="inherit" /> : undefined}
+        >
+          {saveLabel}
+        </Button>
+      </DialogActions>
+    </Dialog>
   );
 }
 
@@ -1055,40 +1450,20 @@ function SystemSettingsTable({ settings }: { settings: SystemSetting[] }) {
   );
 }
 
-function phrasesToText(phrases: string[][]) {
-  return phrases.map((phrase) => phrase.join(" ")).join("\n");
-}
-
-function textToPhrases(value: string): string[][] {
+function textToExactPhrase(value: string): string[] {
   return value
-    .split("\n")
-    .map((line) => line.trim())
-    .filter(Boolean)
-    .map((line) => line.split(/\s+/));
+    .trim()
+    .toLocaleLowerCase("ru-RU")
+    .split(/\s+/)
+    .filter(Boolean);
 }
 
-function patternsToText(patterns: RulePatternSetting[]) {
-  return patterns
-    .map((pattern) => pattern.tokens.map((token) => `${token.predicate}:${token.value}`).join(" "))
-    .join("\n");
+function patternSourceText(pattern: RulePatternSetting) {
+  return pattern.source_text?.trim() || patternLemmaText(pattern);
 }
 
-function textToPatterns(value: string): RulePatternSetting[] {
-  return value
-    .split("\n")
-    .map((line) => line.trim())
-    .filter(Boolean)
-    .map((line) => ({
-      tokens: line
-        .split(/\s+/)
-        .map((part) => {
-          const [rawPredicate, ...rawValue] = part.split(":");
-          const predicate: PatternTokenSetting["predicate"] =
-            rawPredicate === "caseless" ? "caseless" : "normalized";
-          return { predicate, value: rawValue.join(":") || part };
-        })
-        .filter((token) => token.value)
-    }));
+function patternLemmaText(pattern: RulePatternSetting) {
+  return pattern.tokens.map((token) => token.value).join(" ");
 }
 
 function numberInput(value: string): number {

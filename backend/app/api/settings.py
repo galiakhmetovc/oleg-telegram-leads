@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from functools import lru_cache
 from pathlib import Path
 from typing import Any, Literal
 
@@ -11,6 +12,7 @@ from app.db.session import create_sessionmaker
 from app.domain.settings import NlpConfigRevision
 from app.infrastructure.nlp.config_loader import load_nlp_config_from_documents
 from app.infrastructure.nlp.config_loader import read_nlp_config_documents
+from app.infrastructure.nlp.rule_phrase_normalizer import RussianRulePhraseNormalizer
 from app.infrastructure.nlp.russian_text_enricher import RussianTextEnricher
 from app.infrastructure.persistence.nlp_config_repository import PostgresNlpConfigRepository
 
@@ -32,6 +34,7 @@ class PatternTokenSettings(BaseModel):
 
 
 class PatternSettings(BaseModel):
+    source_text: str | None = None
     tokens: list[PatternTokenSettings] = Field(min_length=1)
 
 
@@ -110,12 +113,27 @@ class PreviewRequest(BaseModel):
     nlp: NlpSettings
 
 
+class SemanticPatternRequest(BaseModel):
+    text: str = Field(min_length=1)
+
+
+class SemanticPatternResponse(BaseModel):
+    source_text: str
+    lemma_text: str
+    tokens: list[PatternTokenSettings]
+
+
 def get_nlp_config_dir(settings: Settings = Depends(get_settings)) -> Path:
     return settings.nlp_config_dir
 
 
 def get_nlp_config_repository() -> PostgresNlpConfigRepository:
     return PostgresNlpConfigRepository(create_sessionmaker())
+
+
+@lru_cache(maxsize=1)
+def get_rule_phrase_normalizer() -> RussianRulePhraseNormalizer:
+    return RussianRulePhraseNormalizer()
 
 
 @router.get("", response_model=SettingsSnapshot)
@@ -153,6 +171,25 @@ async def preview_nlp_settings(request: PreviewRequest) -> dict[str, Any]:
     except (KeyError, TypeError, ValueError) as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     return RussianTextEnricher(config).enrich(request.text).to_dict()
+
+
+@router.post("/nlp/semantic-pattern", response_model=SemanticPatternResponse)
+async def build_semantic_pattern(
+    request: SemanticPatternRequest,
+    normalizer: RussianRulePhraseNormalizer = Depends(get_rule_phrase_normalizer),
+) -> SemanticPatternResponse:
+    try:
+        semantic_phrase = normalizer.to_semantic_phrase(request.text)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return SemanticPatternResponse(
+        source_text=semantic_phrase.source_text,
+        lemma_text=semantic_phrase.lemma_text,
+        tokens=[
+            PatternTokenSettings(predicate="normalized", value=lemma)
+            for lemma in semantic_phrase.lemmas
+        ],
+    )
 
 
 async def _read_nlp_snapshot(
@@ -202,7 +239,10 @@ def _rule_to_document(rule: RuleSettings) -> dict[str, Any]:
         payload["phrases"] = rule.phrases
     if rule.patterns:
         payload["patterns"] = [
-            {"tokens": [{token.predicate: token.value} for token in pattern.tokens]}
+            {
+                **({"source_text": pattern.source_text} if pattern.source_text else {}),
+                "tokens": [{token.predicate: token.value} for token in pattern.tokens],
+            }
             for pattern in rule.patterns
         ]
     return payload
@@ -213,6 +253,7 @@ def _rule_from_document(raw_rule: dict[str, Any]) -> RuleSettings:
     payload["phrases"] = payload.get("phrases", [])
     payload["patterns"] = [
         {
+            "source_text": raw_pattern.get("source_text"),
             "tokens": [
                 {"predicate": str(predicate), "value": str(value)}
                 for raw_token in raw_pattern.get("tokens", [])

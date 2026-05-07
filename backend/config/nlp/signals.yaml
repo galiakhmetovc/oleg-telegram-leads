@@ -3,17 +3,23 @@ signals:
     label: Потребность
     color: "#2e7d32"
     confidence: 0.72
-    phrases:
-      - ["нужно"]
-      - ["нужна"]
-      - ["нужен"]
-      - ["ищем"]
-      - ["ищем", "поставщика"]
-      - ["купим"]
-      - ["требуется"]
     patterns:
-      - tokens:
+      - source_text: "нужно"
+        tokens:
           - normalized: "нужный"
+      - source_text: "ищем"
+        tokens:
+          - normalized: "искать"
+      - source_text: "ищем поставщика"
+        tokens:
+          - normalized: "искать"
+          - normalized: "поставщик"
+      - source_text: "купим"
+        tokens:
+          - normalized: "купить"
+      - source_text: "требуется"
+        tokens:
+          - normalized: "требоваться"
 
   - type: supply
     label: Предложение
