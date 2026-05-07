@@ -298,6 +298,67 @@ test("loads analytics dashboard on demand", async () => {
   expect(screen.getByText(/Подскажите на счет умного дома Яндекс/i)).toBeInTheDocument();
 });
 
+test("pages analytics candidates with backend limit and offset", async () => {
+  const run = sampleAnalyticsRun();
+  const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+    const url = String(input);
+    if (url === "/api/v1/analytics/runs") {
+      return jsonResponse({ runs: [run] });
+    }
+    if (url === `/api/v1/analytics/runs/${run.id}/summary`) {
+      return jsonResponse({
+        run,
+        aggregates: {
+          score_bucket: [],
+          signal: [],
+          reason: [],
+          solution_area: [],
+          customer_segment: []
+        }
+      });
+    }
+    if (url.startsWith(`/api/v1/analytics/runs/${run.id}/candidates`)) {
+      const parsed = new URL(url, "http://localhost");
+      const offset = Number(parsed.searchParams.get("offset") ?? "0");
+      return jsonResponse({
+        total: 75,
+        limit: 50,
+        offset,
+        items: [
+          {
+            message_id: offset === 0 ? "page-1" : "page-2",
+            text: offset === 0 ? "Первая страница кандидатов" : "Вторая страница кандидатов",
+            score: offset === 0 ? 90 : 80,
+            temperature: "warm",
+            solution_areas: [],
+            customer_segments: [],
+            intent_signals: [],
+            noise_signals: [],
+            reasons: [],
+            domain_signals: [],
+            facts: []
+          }
+        ]
+      });
+    }
+    throw new Error(`Unhandled fetch: ${url}`);
+  });
+  vi.stubGlobal("fetch", fetchMock);
+  render(<App />);
+
+  fireEvent.click(screen.getByRole("tab", { name: /аналитика/i }));
+  expect(await screen.findByText("Первая страница кандидатов")).toBeInTheDocument();
+
+  fireEvent.click(screen.getByRole("button", { name: "Следующая страница" }));
+
+  await waitFor(() =>
+    expect(fetchMock).toHaveBeenCalledWith(
+      `/api/v1/analytics/runs/${run.id}/candidates?limit=50&offset=50`
+    )
+  );
+  expect(await screen.findByText("Вторая страница кандидатов")).toBeInTheDocument();
+});
+
 test("adds semantic pattern through backend lemmatization", async () => {
   const fetchMock = vi
     .fn()

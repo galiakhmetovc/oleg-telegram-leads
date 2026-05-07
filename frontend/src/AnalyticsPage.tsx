@@ -16,6 +16,7 @@ import {
   TableCell,
   TableContainer,
   TableHead,
+  TablePagination,
   TableRow,
   TextField,
   Typography
@@ -110,6 +111,7 @@ type AnalyticsPageProps = {
 };
 
 const numberFormatter = new Intl.NumberFormat("ru-RU");
+const candidatePageSize = 50;
 const defaultFilters: CandidateFilters = {
   scoreMin: "",
   temperature: "",
@@ -124,10 +126,13 @@ export function AnalyticsPage({ apiBaseUrl }: AnalyticsPageProps) {
   const [candidatePage, setCandidatePage] = useState<CandidatePage | null>(null);
   const [filters, setFilters] = useState<CandidateFilters>(defaultFilters);
   const [appliedFilters, setAppliedFilters] = useState<CandidateFilters>(defaultFilters);
+  const [candidateOffset, setCandidateOffset] = useState(0);
   const [loadingRuns, setLoadingRuns] = useState(true);
-  const [loadingData, setLoadingData] = useState(false);
+  const [loadingSummary, setLoadingSummary] = useState(false);
+  const [loadingCandidates, setLoadingCandidates] = useState(false);
   const [analyticsError, setAnalyticsError] = useState<string | null>(null);
 
+  const loadingData = loadingSummary || loadingCandidates;
   const selectedRun = useMemo(
     () => runs.find((run) => run.id === selectedRunId) ?? summary?.run ?? null,
     [runs, selectedRunId, summary]
@@ -174,54 +179,87 @@ export function AnalyticsPage({ apiBaseUrl }: AnalyticsPageProps) {
   useEffect(() => {
     if (!selectedRunId) {
       setSummary(null);
+      return;
+    }
+
+    let active = true;
+    async function loadSummary() {
+      setLoadingSummary(true);
+      setAnalyticsError(null);
+      try {
+        const response = await fetch(`${apiBaseUrl}/api/v1/analytics/runs/${selectedRunId}/summary`);
+        if (!response.ok) {
+          throw new Error(`Backend вернул ${response.status}`);
+        }
+        const nextSummary = (await response.json()) as AnalyticsSummary;
+        if (active) {
+          setSummary(nextSummary);
+        }
+      } catch (caught) {
+        if (active) {
+          setAnalyticsError(caught instanceof Error ? caught.message : "Не удалось загрузить сводку аналитики");
+        }
+      } finally {
+        if (active) {
+          setLoadingSummary(false);
+        }
+      }
+    }
+
+    void loadSummary();
+    return () => {
+      active = false;
+    };
+  }, [apiBaseUrl, selectedRunId]);
+
+  useEffect(() => {
+    if (!selectedRunId) {
       setCandidatePage(null);
       return;
     }
 
     let active = true;
-    async function loadRunData() {
-      setLoadingData(true);
+    async function loadCandidates() {
+      setLoadingCandidates(true);
       setAnalyticsError(null);
       try {
-        const [summaryResponse, candidatesResponse] = await Promise.all([
-          fetch(`${apiBaseUrl}/api/v1/analytics/runs/${selectedRunId}/summary`),
-          fetch(`${apiBaseUrl}/api/v1/analytics/runs/${selectedRunId}/candidates?${candidateQuery(appliedFilters)}`)
-        ]);
-        if (!summaryResponse.ok || !candidatesResponse.ok) {
-          throw new Error(
-            `Backend вернул ${!summaryResponse.ok ? summaryResponse.status : candidatesResponse.status}`
-          );
+        const response = await fetch(
+          `${apiBaseUrl}/api/v1/analytics/runs/${selectedRunId}/candidates?${candidateQuery(
+            appliedFilters,
+            candidatePageSize,
+            candidateOffset
+          )}`
+        );
+        if (!response.ok) {
+          throw new Error(`Backend вернул ${response.status}`);
         }
-        const [nextSummary, nextCandidates] = (await Promise.all([
-          summaryResponse.json(),
-          candidatesResponse.json()
-        ])) as [AnalyticsSummary, CandidatePage];
+        const nextCandidates = (await response.json()) as CandidatePage;
         if (active) {
-          setSummary(nextSummary);
           setCandidatePage(nextCandidates);
         }
       } catch (caught) {
         if (active) {
-          setAnalyticsError(caught instanceof Error ? caught.message : "Не удалось загрузить аналитику");
+          setAnalyticsError(caught instanceof Error ? caught.message : "Не удалось загрузить кандидатов");
         }
       } finally {
         if (active) {
-          setLoadingData(false);
+          setLoadingCandidates(false);
         }
       }
     }
 
-    void loadRunData();
+    void loadCandidates();
     return () => {
       active = false;
     };
-  }, [apiBaseUrl, selectedRunId, appliedFilters]);
+  }, [apiBaseUrl, selectedRunId, appliedFilters, candidateOffset]);
 
   function refreshRuns() {
     setSelectedRunId("");
     setRuns([]);
     setSummary(null);
     setCandidatePage(null);
+    setCandidateOffset(0);
     setLoadingRuns(true);
     void fetch(`${apiBaseUrl}/api/v1/analytics/runs`)
       .then((response) => {
@@ -242,7 +280,18 @@ export function AnalyticsPage({ apiBaseUrl }: AnalyticsPageProps) {
 
   function applyFilters(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    setCandidateOffset(0);
     setAppliedFilters(filters);
+  }
+
+  function handleSelectedRunChange(nextRunId: string) {
+    setCandidateOffset(0);
+    setSelectedRunId(nextRunId);
+  }
+
+  function handleCandidatePageChange(nextPage: number) {
+    const limit = candidatePage?.limit ?? candidatePageSize;
+    setCandidateOffset(nextPage * limit);
   }
 
   const runForKpi = summary?.run ?? selectedRun;
@@ -271,7 +320,7 @@ export function AnalyticsPage({ apiBaseUrl }: AnalyticsPageProps) {
               fullWidth
               label="Запуск"
               value={selectedRunId}
-              onChange={(event) => setSelectedRunId(event.target.value)}
+              onChange={(event) => handleSelectedRunChange(event.target.value)}
               disabled={loadingRuns || runs.length === 0}
             >
               {runs.map((run) => (
@@ -389,7 +438,7 @@ export function AnalyticsPage({ apiBaseUrl }: AnalyticsPageProps) {
                   </Button>
                 </Stack>
               </Stack>
-              <CandidateTable page={candidatePage} loading={loadingData} />
+              <CandidateTable page={candidatePage} loading={loadingData} onPageChange={handleCandidatePageChange} />
             </Stack>
           </Paper>
         </>
@@ -509,7 +558,15 @@ function AggregateChips({ items }: { items: AnalyticsAggregate[] }) {
   );
 }
 
-function CandidateTable({ page, loading }: { page: CandidatePage | null; loading: boolean }) {
+function CandidateTable({
+  page,
+  loading,
+  onPageChange
+}: {
+  page: CandidatePage | null;
+  loading: boolean;
+  onPageChange: (nextPage: number) => void;
+}) {
   if (loading && page === null) {
     return (
       <Stack direction="row" spacing={1.5} sx={{ alignItems: "center" }}>
@@ -527,48 +584,77 @@ function CandidateTable({ page, loading }: { page: CandidatePage | null; loading
     );
   }
 
+  const currentPage = Math.floor(page.offset / page.limit);
+
   return (
-    <TableContainer>
-      <Table size="small" className="analytics-candidate-table">
-        <TableHead>
-          <TableRow>
-            <TableCell>ID</TableCell>
-            <TableCell>Score</TableCell>
-            <TableCell>Температура</TableCell>
-            <TableCell>Текст</TableCell>
-            <TableCell>Причины</TableCell>
-          </TableRow>
-        </TableHead>
-        <TableBody>
-          {page.items.map((candidate) => (
-            <TableRow key={candidate.message_id}>
-              <TableCell>{candidate.message_id}</TableCell>
-              <TableCell>{candidate.score}</TableCell>
-              <TableCell>{candidate.temperature}</TableCell>
-              <TableCell className="candidate-text">{candidate.text}</TableCell>
-              <TableCell className="candidate-reasons">
-                <Stack direction="row" spacing={0.5} useFlexGap sx={{ flexWrap: "wrap" }}>
-                  {candidate.reasons.slice(0, 4).map((reason) => (
-                    <Chip
-                      key={`${candidate.message_id}-${reason.source}-${reason.key}`}
-                      size="small"
-                      label={`${reason.label || reason.key} +${reason.weight}`}
-                    />
-                  ))}
-                </Stack>
-              </TableCell>
+    <Box>
+      <TableContainer>
+        <Table size="small" className="analytics-candidate-table">
+          <TableHead>
+            <TableRow>
+              <TableCell>ID</TableCell>
+              <TableCell>Score</TableCell>
+              <TableCell>Температура</TableCell>
+              <TableCell>Текст</TableCell>
+              <TableCell>Причины</TableCell>
             </TableRow>
-          ))}
-        </TableBody>
-      </Table>
-    </TableContainer>
+          </TableHead>
+          <TableBody>
+            {page.items.map((candidate) => (
+              <TableRow key={candidate.message_id}>
+                <TableCell>{candidate.message_id}</TableCell>
+                <TableCell>{candidate.score}</TableCell>
+                <TableCell>{candidate.temperature}</TableCell>
+                <TableCell className="candidate-text">{candidate.text}</TableCell>
+                <TableCell className="candidate-reasons">
+                  <Stack direction="row" spacing={0.5} useFlexGap sx={{ flexWrap: "wrap" }}>
+                    {candidate.reasons.slice(0, 4).map((reason) => (
+                      <Chip
+                        key={`${candidate.message_id}-${reason.source}-${reason.key}`}
+                        size="small"
+                        label={`${reason.label || reason.key} +${reason.weight}`}
+                      />
+                    ))}
+                  </Stack>
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </TableContainer>
+      <TablePagination
+        component="div"
+        count={page.total}
+        page={currentPage}
+        rowsPerPage={page.limit}
+        rowsPerPageOptions={[page.limit]}
+        labelRowsPerPage="Строк на странице"
+        labelDisplayedRows={({ from, to, count }) =>
+          `${formatInteger(from)}-${formatInteger(to)} из ${formatInteger(count)}`
+        }
+        getItemAriaLabel={(type) => {
+          if (type === "next") {
+            return "Следующая страница";
+          }
+          if (type === "previous") {
+            return "Предыдущая страница";
+          }
+          if (type === "first") {
+            return "Первая страница";
+          }
+          return "Последняя страница";
+        }}
+        onPageChange={(_, nextPage) => onPageChange(nextPage)}
+        onRowsPerPageChange={() => undefined}
+      />
+    </Box>
   );
 }
 
-function candidateQuery(filters: CandidateFilters) {
+function candidateQuery(filters: CandidateFilters, limit: number, offset: number) {
   const params = new URLSearchParams();
-  params.set("limit", "50");
-  params.set("offset", "0");
+  params.set("limit", String(limit));
+  params.set("offset", String(offset));
   if (filters.scoreMin.trim()) {
     params.set("score_min", filters.scoreMin.trim());
   }
