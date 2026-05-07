@@ -52,10 +52,14 @@
   wall-light control, smart relay modules for lights/tracks connected to Alice,
   and O'Climate/Orac static-pressure chambers for channel air conditioning
   without misclassifying them as video surveillance.
-- Dev PostgreSQL active NLP config was refreshed to revision 15. The `need`
+- Default NLP config recognizes Neptun/Нептун water leak monitoring leads,
+  including the typo `Нептуп`, ProW/Profi product mentions, wired leak sensors,
+  sensor-trigger monitoring, and smartphone information output.
+- Dev PostgreSQL active NLP config was refreshed to revision 16. The `need`
   signal no longer stores Russian forms such as `нужно`, `нужна`, `нужен` as
   exact phrases; they are represented as lemmatized phrase rules with preserved
-  operator source text.
+  operator source text. Revision 16 also includes the Neptun water leak
+  monitoring lead calibration.
 - `RussianTextEnricher` now precompiles Yargy parsers once per enricher
   instance instead of rebuilding them for every message. A local batch CLI can
   write full enrichment JSONL for exported messages without creating API/Celery

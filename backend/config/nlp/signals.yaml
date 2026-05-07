@@ -287,12 +287,33 @@ signals:
     label: Защита от протечек
     color: "#00695c"
     confidence: 0.82
+    phrases:
+      - ["нептун"]
+      - ["нептуп"]
+      - ["neptun"]
+      - ["prow"]
     patterns:
-      - tokens:
+      - source_text: "датчик протечки"
+        tokens:
           - normalized: "датчик"
           - normalized: "протечка"
-      - tokens:
+      - source_text: "протечка"
+        tokens:
           - normalized: "протечка"
+      - source_text: "проводной датчик"
+        tokens:
+          - normalized: "проводной"
+          - normalized: "датчик"
+      - source_text: "датчик сработал"
+        tokens:
+          - normalized: "датчик"
+          - normalized: "сработать"
+      - source_text: "вывод информации на смартфон"
+        tokens:
+          - normalized: "вывод"
+          - normalized: "информация"
+          - normalized: "на"
+          - normalized: "смартфон"
 
   - type: implementation_intent
     label: Намерение реализовать

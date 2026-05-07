@@ -535,6 +535,29 @@ def test_default_config_marks_latest_motion_relay_and_hvac_leads() -> None:
     assert "designer_partner" in {item.type for item in hvac_result.lead_assessment.customer_segments}
 
 
+def test_default_config_marks_neptun_water_leak_monitoring_lead() -> None:
+    config = load_nlp_config(Path("config/nlp"))
+    enricher = RussianTextEnricher(config)
+
+    result = enricher.enrich(
+        "Коллеги, подскажите кто ставил систему Нептуп ProW, хочу ее выбрать, "
+        "проводные датчик...но в то же время важно чтобы понимать где какой "
+        "датчик сработал- то это только на смартфон вывод инфы получается и "
+        "уже только система Profi WI-Fi или я ошибаюсь?"
+    )
+
+    signal_types = {signal.type for signal in result.domain_signals}
+    fact_types = {fact.type for fact in result.facts}
+
+    assert result.lead_assessment is not None
+    assert result.lead_assessment.is_lead is True
+    assert result.lead_assessment.temperature in {"warm", "hot"}
+    assert {"water_leak_protection", "consultation_request"} <= signal_types
+    assert {"vendor", "automation_component", "controlled_device"} <= fact_types
+    assert "smart_home" in {item.type for item in result.lead_assessment.solution_areas}
+    assert "security" in {item.type for item in result.lead_assessment.solution_areas}
+
+
 def test_default_config_does_not_mark_diy_equipment_sale_as_lead() -> None:
     config = load_nlp_config(Path("config/nlp"))
     enricher = RussianTextEnricher(config)
