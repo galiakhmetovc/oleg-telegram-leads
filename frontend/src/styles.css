@@ -68,6 +68,12 @@ body {
   white-space: pre-wrap;
 }
 
+.lead-assessment-panel {
+  border-radius: 8px;
+  background: #fbfcfe;
+  padding: 14px;
+}
+
 .annotation {
   border: 1px solid;
   border-radius: 4px;
@@ -125,6 +131,12 @@ body {
   gap: 12px;
 }
 
+.settings-two-column {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
 .rule-color {
   width: 16px;
   height: 16px;
@@ -140,6 +152,7 @@ body {
 
   .settings-shell,
   .settings-content-grid,
+  .settings-two-column,
   .rule-grid {
     grid-template-columns: 1fr;
   }

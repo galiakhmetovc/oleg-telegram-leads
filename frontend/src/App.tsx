@@ -82,6 +82,31 @@ type PipelineTraceItem = {
   progress_percent: number;
 };
 
+type LeadCategory = {
+  type: string;
+  label: string;
+  matched_types: string[];
+};
+
+type LeadReason = {
+  source: string;
+  key: string;
+  label: string;
+  weight: number;
+  matched_texts: string[];
+};
+
+type LeadAssessment = {
+  is_lead: boolean;
+  score: number;
+  temperature: string;
+  solution_areas: LeadCategory[];
+  customer_segments: LeadCategory[];
+  intent_signals: LeadCategory[];
+  noise_signals: LeadCategory[];
+  reasons: LeadReason[];
+};
+
 type TextEnrichmentResult = {
   original_text: string;
   normalized_text: string;
@@ -92,6 +117,7 @@ type TextEnrichmentResult = {
   syntax: SyntaxDependency[];
   metrics: Record<string, number>;
   pipeline_trace: PipelineTraceItem[];
+  lead_assessment?: LeadAssessment | null;
 };
 
 type EnrichmentJob = {
@@ -144,12 +170,31 @@ type RuleSetting = {
   confidence?: number | null;
 };
 
+type LeadCategorySetting = {
+  label: string;
+  signal_types: string[];
+  fact_types: string[];
+};
+
+type LeadScoringSettings = {
+  lead_threshold: number;
+  warm_threshold: number;
+  hot_threshold: number;
+  signal_weights: Record<string, number>;
+  fact_weights: Record<string, number>;
+  solution_areas: Record<string, LeadCategorySetting>;
+  customer_segments: Record<string, LeadCategorySetting>;
+  intent_signal_types: string[];
+  noise_signal_types: string[];
+};
+
 type NlpSettings = {
   pipeline: {
     stages: PipelineStageSetting[];
   };
   signals: RuleSetting[];
   facts: RuleSetting[];
+  lead_scoring: LeadScoringSettings;
   source?: {
     type: string;
     path: string;
@@ -171,7 +216,7 @@ type SettingsSnapshot = {
   system: SystemSetting[];
 };
 
-type SettingsSection = "pipeline" | "signals" | "facts" | "system";
+type SettingsSection = "pipeline" | "signals" | "facts" | "lead_scoring" | "system";
 
 const apiBaseUrl = import.meta.env.VITE_API_BASE_URL ?? "";
 
@@ -548,6 +593,13 @@ function SettingsCenter() {
     updateDraft({ ...draft, [collection]: draft[collection].filter((_, itemIndex) => itemIndex !== index) });
   }
 
+  function updateLeadScoring(leadScoring: LeadScoringSettings) {
+    if (!draft) {
+      return;
+    }
+    updateDraft({ ...draft, lead_scoring: leadScoring });
+  }
+
   const dirty = JSON.stringify(settings?.nlp ?? null) !== JSON.stringify(draft);
 
   return (
@@ -568,6 +620,13 @@ function SettingsCenter() {
         </Button>
         <Button fullWidth variant={section === "facts" ? "contained" : "text"} onClick={() => setSection("facts")}>
           Факты
+        </Button>
+        <Button
+          fullWidth
+          variant={section === "lead_scoring" ? "contained" : "text"}
+          onClick={() => setSection("lead_scoring")}
+        >
+          Оценка лида
         </Button>
         <Button fullWidth variant={section === "system" ? "contained" : "text"} onClick={() => setSection("system")}>
           Runtime
@@ -630,6 +689,12 @@ function SettingsCenter() {
                   onUpdate={updateRule}
                 />
               )}
+              {section === "lead_scoring" && (
+                <LeadScoringSettingsEditor
+                  settings={draft.lead_scoring}
+                  onUpdate={updateLeadScoring}
+                />
+              )}
               {section === "system" && <SystemSettingsTable settings={settings?.system ?? []} />}
             </Paper>
 
@@ -662,6 +727,9 @@ function SettingsCenter() {
                 {previewResult && (
                   <Stack spacing={1}>
                     <Typography variant="subtitle2">Найдено</Typography>
+                    {previewResult.lead_assessment && (
+                      <LeadAssessmentSummary assessment={previewResult.lead_assessment} compact />
+                    )}
                     <Box sx={{ display: "flex", flexWrap: "wrap", gap: 1 }}>
                       {[...previewResult.domain_signals, ...previewResult.facts].map((item) => (
                         <Chip key={`${item.type}-${item.text}-${item.range.start}`} label={`${item.label ?? item.type}: ${item.text}`} />
@@ -694,6 +762,159 @@ function PipelineSettingsEditor({
           control={<Switch checked={stage.enabled} onChange={(event) => onStageChange(index, event.target.checked)} />}
           label={`${stage.name} ${stage.enabled ? "включен" : "выключен"}`}
         />
+      ))}
+    </Stack>
+  );
+}
+
+function LeadScoringSettingsEditor({
+  settings,
+  onUpdate
+}: {
+  settings: LeadScoringSettings;
+  onUpdate: (settings: LeadScoringSettings) => void;
+}) {
+  return (
+    <Stack spacing={2}>
+      <Typography variant="h6">Оценка лида</Typography>
+      <Box className="rule-grid">
+        <TextField
+          label="lead threshold"
+          type="number"
+          value={settings.lead_threshold}
+          onChange={(event) => onUpdate({ ...settings, lead_threshold: numberInput(event.target.value) })}
+        />
+        <TextField
+          label="warm threshold"
+          type="number"
+          value={settings.warm_threshold}
+          onChange={(event) => onUpdate({ ...settings, warm_threshold: numberInput(event.target.value) })}
+        />
+        <TextField
+          label="hot threshold"
+          type="number"
+          value={settings.hot_threshold}
+          onChange={(event) => onUpdate({ ...settings, hot_threshold: numberInput(event.target.value) })}
+        />
+      </Box>
+      <Typography variant="subtitle1" sx={{ fontWeight: 700 }}>
+        Пороги оценки
+      </Typography>
+      <Box className="settings-two-column">
+        <TextField
+          label="signal weights"
+          helperText="Одна строка: type: weight"
+          value={numberRecordToText(settings.signal_weights)}
+          onChange={(event) => onUpdate({ ...settings, signal_weights: textToNumberRecord(event.target.value) })}
+          multiline
+          minRows={8}
+          fullWidth
+        />
+        <TextField
+          label="fact weights"
+          helperText="Одна строка: type: weight"
+          value={numberRecordToText(settings.fact_weights)}
+          onChange={(event) => onUpdate({ ...settings, fact_weights: textToNumberRecord(event.target.value) })}
+          multiline
+          minRows={8}
+          fullWidth
+        />
+      </Box>
+      <CategoryMappingEditor
+        title="Направления решений"
+        mappings={settings.solution_areas}
+        onUpdate={(solutionAreas) => onUpdate({ ...settings, solution_areas: solutionAreas })}
+      />
+      <CategoryMappingEditor
+        title="Сегменты клиентов"
+        mappings={settings.customer_segments}
+        onUpdate={(customerSegments) => onUpdate({ ...settings, customer_segments: customerSegments })}
+      />
+      <Box className="settings-two-column">
+        <TextField
+          label="intent signal types"
+          value={stringListToText(settings.intent_signal_types)}
+          onChange={(event) => onUpdate({ ...settings, intent_signal_types: textToStringList(event.target.value) })}
+          multiline
+          minRows={4}
+          fullWidth
+        />
+        <TextField
+          label="noise signal types"
+          value={stringListToText(settings.noise_signal_types)}
+          onChange={(event) => onUpdate({ ...settings, noise_signal_types: textToStringList(event.target.value) })}
+          multiline
+          minRows={4}
+          fullWidth
+        />
+      </Box>
+    </Stack>
+  );
+}
+
+function CategoryMappingEditor({
+  title,
+  mappings,
+  onUpdate
+}: {
+  title: string;
+  mappings: Record<string, LeadCategorySetting>;
+  onUpdate: (mappings: Record<string, LeadCategorySetting>) => void;
+}) {
+  return (
+    <Stack spacing={1}>
+      <Typography variant="subtitle1" sx={{ fontWeight: 700 }}>
+        {title}
+      </Typography>
+      {Object.entries(mappings).map(([key, mapping]) => (
+        <Accordion key={key} variant="outlined" disableGutters>
+          <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+            <Box sx={{ alignItems: "center", display: "flex", gap: 1, width: "100%" }}>
+              <Typography sx={{ flex: 1, fontWeight: 700 }} noWrap>
+                {mapping.label}
+              </Typography>
+              <Chip label={key} size="small" variant="outlined" />
+            </Box>
+          </AccordionSummary>
+          <AccordionDetails>
+            <Stack spacing={2}>
+              <TextField
+                label="label"
+                value={mapping.label}
+                onChange={(event) =>
+                  onUpdate({
+                    ...mappings,
+                    [key]: { ...mapping, label: event.target.value }
+                  })
+                }
+              />
+              <TextField
+                label="signal_types"
+                value={stringListToText(mapping.signal_types)}
+                onChange={(event) =>
+                  onUpdate({
+                    ...mappings,
+                    [key]: { ...mapping, signal_types: textToStringList(event.target.value) }
+                  })
+                }
+                multiline
+                minRows={3}
+              />
+              <TextField
+                label="fact_types"
+                value={stringListToText(mapping.fact_types)}
+                onChange={(event) =>
+                  onUpdate({
+                    ...mappings,
+                    [key]: { ...mapping, fact_types: textToStringList(event.target.value) }
+                  })
+                }
+                multiline
+                minRows={3}
+              />
+            </Stack>
+          </AccordionDetails>
+        </Accordion>
       ))}
     </Stack>
   );
@@ -870,6 +1091,42 @@ function textToPatterns(value: string): RulePatternSetting[] {
     }));
 }
 
+function numberInput(value: string): number {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function numberRecordToText(record: Record<string, number>) {
+  return Object.entries(record)
+    .map(([key, value]) => `${key}: ${value}`)
+    .join("\n");
+}
+
+function textToNumberRecord(value: string): Record<string, number> {
+  return Object.fromEntries(
+    value
+      .split("\n")
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .map((line) => {
+        const [key, ...rawValue] = line.split(":");
+        return [key.trim(), numberInput(rawValue.join(":").trim())] as const;
+      })
+      .filter(([key]) => key)
+  );
+}
+
+function stringListToText(items: string[]) {
+  return items.join("\n");
+}
+
+function textToStringList(value: string): string[] {
+  return value
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean);
+}
+
 function StatusPanel({
   job,
   events,
@@ -934,6 +1191,7 @@ function StatusPanel({
 function Overview({ result }: { result: TextEnrichmentResult }) {
   return (
     <Stack spacing={2}>
+      {result.lead_assessment && <LeadAssessmentPanel assessment={result.lead_assessment} />}
       <AnnotatedText result={result} />
       <Box sx={{ display: "flex", flexWrap: "wrap", gap: 1 }}>
         {Object.entries(result.metrics).map(([key, value]) => (
@@ -942,6 +1200,115 @@ function Overview({ result }: { result: TextEnrichmentResult }) {
       </Box>
     </Stack>
   );
+}
+
+function LeadAssessmentPanel({ assessment }: { assessment: LeadAssessment }) {
+  return (
+    <Paper variant="outlined" className="lead-assessment-panel">
+      <Stack spacing={1.5}>
+        <LeadAssessmentSummary assessment={assessment} />
+        <ChipGroup title="Направления" items={assessment.solution_areas.map((item) => item.label)} />
+        <ChipGroup title="Сегменты" items={assessment.customer_segments.map((item) => item.label)} />
+        <ChipGroup title="Шум" items={assessment.noise_signals.map((item) => item.label)} color="warning" />
+        {assessment.reasons.length > 0 && (
+          <TableContainer>
+            <Table size="small">
+              <TableHead>
+                <TableRow>
+                  <TableCell>Причина</TableCell>
+                  <TableCell>Вес</TableCell>
+                  <TableCell>Совпадения</TableCell>
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                {assessment.reasons.map((reason) => (
+                  <TableRow key={`${reason.source}-${reason.key}`}>
+                    <TableCell>{reason.label}</TableCell>
+                    <TableCell>{reason.weight}</TableCell>
+                    <TableCell>{reason.matched_texts.join(", ")}</TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </TableContainer>
+        )}
+      </Stack>
+    </Paper>
+  );
+}
+
+function LeadAssessmentSummary({
+  assessment,
+  compact = false
+}: {
+  assessment: LeadAssessment;
+  compact?: boolean;
+}) {
+  return (
+    <Box sx={{ alignItems: "center", display: "flex", flexWrap: "wrap", gap: 1 }}>
+      <Chip
+        label={leadTemperatureLabel(assessment)}
+        color={leadTemperatureColor(assessment)}
+        size={compact ? "small" : "medium"}
+      />
+      <Chip label={`${assessment.score} баллов`} variant="outlined" size={compact ? "small" : "medium"} />
+      <Typography variant={compact ? "caption" : "body2"} color="text.secondary">
+        {assessment.is_lead ? "Потенциальный клиент ПУР" : "Недостаточно признаков лида"}
+      </Typography>
+    </Box>
+  );
+}
+
+function ChipGroup({
+  title,
+  items,
+  color = "default"
+}: {
+  title: string;
+  items: string[];
+  color?: "default" | "primary" | "secondary" | "error" | "info" | "success" | "warning";
+}) {
+  if (items.length === 0) {
+    return null;
+  }
+  return (
+    <Stack spacing={0.75}>
+      <Typography variant="subtitle2">{title}</Typography>
+      <Box sx={{ display: "flex", flexWrap: "wrap", gap: 1 }}>
+        {items.map((item) => (
+          <Chip key={item} label={item} color={color} size="small" variant={color === "default" ? "outlined" : "filled"} />
+        ))}
+      </Box>
+    </Stack>
+  );
+}
+
+function leadTemperatureLabel(assessment: LeadAssessment) {
+  if (!assessment.is_lead) {
+    return "Не лид";
+  }
+  if (assessment.temperature === "hot") {
+    return "Горячий лид";
+  }
+  if (assessment.temperature === "warm") {
+    return "Теплый лид";
+  }
+  return "Холодный лид";
+}
+
+function leadTemperatureColor(
+  assessment: LeadAssessment
+): "default" | "primary" | "secondary" | "error" | "info" | "success" | "warning" {
+  if (!assessment.is_lead) {
+    return "default";
+  }
+  if (assessment.temperature === "hot") {
+    return "error";
+  }
+  if (assessment.temperature === "warm") {
+    return "warning";
+  }
+  return "success";
 }
 
 function AnnotatedText({ result }: { result: TextEnrichmentResult }) {
