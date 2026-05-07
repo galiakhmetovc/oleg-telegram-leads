@@ -35,10 +35,24 @@ class PhraseRuleConfig:
 
 
 @dataclass(frozen=True)
+class LeadScoringConfig:
+    lead_threshold: int
+    warm_threshold: int
+    hot_threshold: int
+    signal_weights: dict[str, int]
+    fact_weights: dict[str, int]
+    solution_areas: dict[str, dict[str, Any]]
+    customer_segments: dict[str, dict[str, Any]]
+    intent_signal_types: list[str]
+    noise_signal_types: list[str]
+
+
+@dataclass(frozen=True)
 class NlpPipelineConfig:
     stages: tuple[PipelineStageConfig, ...]
     signals: tuple[PhraseRuleConfig, ...]
     facts: tuple[PhraseRuleConfig, ...]
+    lead_scoring: LeadScoringConfig
 
     @property
     def enabled_stages(self) -> tuple[PipelineStageConfig, ...]:
@@ -54,10 +68,14 @@ def load_nlp_config(config_dir: Path) -> NlpPipelineConfig:
 
 def read_nlp_config_documents(config_dir: Path) -> dict[str, dict[str, Any]]:
     facts_path = config_dir / "facts.yaml"
+    lead_scoring_path = config_dir / "lead_scoring.yaml"
     return {
         "pipeline": _load_yaml(config_dir / "pipeline.yaml"),
         "signals": _load_yaml(config_dir / "signals.yaml"),
         "facts": _load_yaml(facts_path) if facts_path.exists() else {"facts": []},
+        "lead_scoring": (
+            _load_yaml(lead_scoring_path) if lead_scoring_path.exists() else {"lead_scoring": {}}
+        ),
     }
 
 
@@ -65,10 +83,12 @@ def load_nlp_config_from_documents(documents: dict[str, dict[str, Any]]) -> NlpP
     pipeline = documents["pipeline"]
     signals = documents["signals"]
     facts = documents.get("facts", {"facts": []})
+    lead_scoring = documents.get("lead_scoring", {"lead_scoring": {}})
     return NlpPipelineConfig(
         stages=tuple(_parse_stage(item) for item in pipeline.get("stages", [])),
         signals=tuple(_parse_phrase_rule(item, "signals") for item in signals.get("signals", [])),
         facts=tuple(_parse_phrase_rule(item, "facts") for item in facts.get("facts", [])),
+        lead_scoring=_parse_lead_scoring(lead_scoring.get("lead_scoring", {})),
     )
 
 
@@ -139,3 +159,67 @@ def _parse_patterns(raw_patterns: Any, collection_name: str) -> tuple[RulePatter
         patterns.append(RulePatternConfig(tokens=tuple(tokens)))
 
     return tuple(patterns)
+
+
+def _parse_lead_scoring(raw: Any) -> LeadScoringConfig:
+    if raw is None:
+        raw = {}
+    if not isinstance(raw, dict):
+        raise ValueError("lead_scoring must be a mapping")
+
+    thresholds = raw.get("thresholds", {})
+    if thresholds and not isinstance(thresholds, dict):
+        raise ValueError("lead_scoring thresholds must be a mapping")
+
+    weights = raw.get("weights", {})
+    if weights and not isinstance(weights, dict):
+        raise ValueError("lead_scoring weights must be a mapping")
+
+    signal_weights = _parse_weight_mapping(weights.get("signals", {}), "lead_scoring weights.signals")
+    fact_weights = _parse_weight_mapping(weights.get("facts", {}), "lead_scoring weights.facts")
+
+    return LeadScoringConfig(
+        lead_threshold=int(thresholds.get("lead", 1)),
+        warm_threshold=int(thresholds.get("warm", 1)),
+        hot_threshold=int(thresholds.get("hot", 1)),
+        signal_weights=signal_weights,
+        fact_weights=fact_weights,
+        solution_areas=_parse_category_mapping(raw.get("solution_areas", {}), "solution_areas"),
+        customer_segments=_parse_category_mapping(raw.get("customer_segments", {}), "customer_segments"),
+        intent_signal_types=_parse_string_list(raw.get("intent_signal_types", []), "intent_signal_types"),
+        noise_signal_types=_parse_string_list(raw.get("noise_signal_types", []), "noise_signal_types"),
+    )
+
+
+def _parse_weight_mapping(raw: Any, name: str) -> dict[str, int]:
+    if raw is None:
+        return {}
+    if not isinstance(raw, dict):
+        raise ValueError(f"{name} must be a mapping")
+    return {str(key): int(value) for key, value in raw.items()}
+
+
+def _parse_category_mapping(raw: Any, name: str) -> dict[str, dict[str, Any]]:
+    if raw is None:
+        return {}
+    if not isinstance(raw, dict):
+        raise ValueError(f"lead_scoring {name} must be a mapping")
+
+    categories: dict[str, dict[str, Any]] = {}
+    for key, value in raw.items():
+        if not isinstance(value, dict):
+            raise ValueError(f"lead_scoring {name}.{key} must be a mapping")
+        categories[str(key)] = {
+            "label": str(value.get("label", key)),
+            "signal_types": _parse_string_list(value.get("signal_types", []), f"{name}.{key}.signal_types"),
+            "fact_types": _parse_string_list(value.get("fact_types", []), f"{name}.{key}.fact_types"),
+        }
+    return categories
+
+
+def _parse_string_list(raw: Any, name: str) -> list[str]:
+    if raw is None:
+        return []
+    if not isinstance(raw, list):
+        raise ValueError(f"lead_scoring {name} must be a list")
+    return [str(item) for item in raw]

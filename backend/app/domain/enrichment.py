@@ -70,6 +70,34 @@ class DomainSignal:
 
 
 @dataclass(frozen=True)
+class LeadCategory:
+    type: str
+    label: str
+    matched_types: list[str]
+
+
+@dataclass(frozen=True)
+class LeadReason:
+    source: str
+    key: str
+    label: str
+    weight: int
+    matched_texts: list[str]
+
+
+@dataclass(frozen=True)
+class LeadAssessment:
+    is_lead: bool
+    score: int
+    temperature: str
+    solution_areas: list[LeadCategory]
+    customer_segments: list[LeadCategory]
+    intent_signals: list[LeadCategory]
+    noise_signals: list[LeadCategory]
+    reasons: list[LeadReason]
+
+
+@dataclass(frozen=True)
 class SyntaxDependency:
     token_id: str
     head_id: str | None
@@ -106,6 +134,7 @@ class TextEnrichmentResult:
     syntax: list[SyntaxDependency]
     metrics: EnrichmentMetrics
     pipeline_trace: list[PipelineTraceItem]
+    lead_assessment: LeadAssessment | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -179,6 +208,7 @@ class TextEnrichmentResult:
             ],
             metrics=EnrichmentMetrics(**data["metrics"]),
             pipeline_trace=[PipelineTraceItem(**item) for item in data.get("pipeline_trace", [])],
+            lead_assessment=_lead_assessment_from_dict(data.get("lead_assessment")),
         )
 
 
@@ -213,3 +243,55 @@ class EnrichmentEvent:
     message: str
     payload: dict[str, Any]
     created_at: datetime
+
+
+def _lead_assessment_from_dict(data: Any) -> LeadAssessment | None:
+    if data is None:
+        return None
+    return LeadAssessment(
+        is_lead=bool(data["is_lead"]),
+        score=int(data["score"]),
+        temperature=str(data["temperature"]),
+        solution_areas=[
+            LeadCategory(
+                type=str(item["type"]),
+                label=str(item["label"]),
+                matched_types=[str(value) for value in item.get("matched_types", [])],
+            )
+            for item in data.get("solution_areas", [])
+        ],
+        customer_segments=[
+            LeadCategory(
+                type=str(item["type"]),
+                label=str(item["label"]),
+                matched_types=[str(value) for value in item.get("matched_types", [])],
+            )
+            for item in data.get("customer_segments", [])
+        ],
+        intent_signals=[
+            LeadCategory(
+                type=str(item["type"]),
+                label=str(item["label"]),
+                matched_types=[str(value) for value in item.get("matched_types", [])],
+            )
+            for item in data.get("intent_signals", [])
+        ],
+        noise_signals=[
+            LeadCategory(
+                type=str(item["type"]),
+                label=str(item["label"]),
+                matched_types=[str(value) for value in item.get("matched_types", [])],
+            )
+            for item in data.get("noise_signals", [])
+        ],
+        reasons=[
+            LeadReason(
+                source=str(item["source"]),
+                key=str(item["key"]),
+                label=str(item["label"]),
+                weight=int(item["weight"]),
+                matched_texts=[str(value) for value in item.get("matched_texts", [])],
+            )
+            for item in data.get("reasons", [])
+        ],
+    )
