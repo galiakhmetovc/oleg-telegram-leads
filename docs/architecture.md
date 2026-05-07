@@ -152,7 +152,9 @@ FastAPI exposes this slice through:
 
 - `GET /api/v1/analytics/runs`
 - `GET /api/v1/analytics/runs/{run_id}/summary`
-- `GET /api/v1/analytics/runs/{run_id}/candidates`
+- `GET /api/v1/analytics/runs/{run_id}/candidates`, with filters for score,
+  temperature, domain signal, reason key, solution area, customer segment, and
+  text search.
 
 The repository currently uses PostgreSQL because the UI needs imported run
 review, filters, and aggregates over tens of thousands of candidates, not raw
@@ -219,7 +221,9 @@ The analytics screen provides imported batch-run review:
 - run selector and refresh;
 - KPIs for processed messages, lead candidates, candidate rate, and failures;
 - score buckets and top aggregate lists;
-- filterable candidate table by score, temperature, domain signal, and text.
+- filterable candidate table by score, temperature, domain signal, reason,
+  solution area, customer segment, and text. Domain filters are selected from
+  imported aggregate values instead of free-form operator input.
 
 ## Legacy Reference
 

@@ -103,6 +103,9 @@ type CandidateFilters = {
   scoreMin: string;
   temperature: string;
   signal: string;
+  reason: string;
+  solutionArea: string;
+  customerSegment: string;
   q: string;
 };
 
@@ -116,6 +119,9 @@ const defaultFilters: CandidateFilters = {
   scoreMin: "",
   temperature: "",
   signal: "",
+  reason: "",
+  solutionArea: "",
+  customerSegment: "",
   q: ""
 };
 
@@ -300,6 +306,10 @@ export function AnalyticsPage({ apiBaseUrl }: AnalyticsPageProps) {
   const topReasons = (summary?.aggregates.reason ?? []).slice(0, 8);
   const solutionAreas = (summary?.aggregates.solution_area ?? []).slice(0, 6);
   const customerSegments = (summary?.aggregates.customer_segment ?? []).slice(0, 6);
+  const signalOptions = summary?.aggregates.signal ?? [];
+  const reasonOptions = summary?.aggregates.reason ?? [];
+  const solutionAreaOptions = summary?.aggregates.solution_area ?? [];
+  const customerSegmentOptions = summary?.aggregates.customer_segment ?? [];
 
   return (
     <Box className="analytics-shell">
@@ -419,12 +429,29 @@ export function AnalyticsPage({ apiBaseUrl }: AnalyticsPageProps) {
                     <MenuItem value="warm">warm</MenuItem>
                     <MenuItem value="cold">cold</MenuItem>
                   </TextField>
-                  <TextField
-                    size="small"
+                  <AggregateFilterSelect
                     label="Сигнал"
                     value={filters.signal}
-                    onChange={(event) => setFilters((current) => ({ ...current, signal: event.target.value }))}
-                    sx={{ width: { sm: 180 } }}
+                    options={signalOptions}
+                    onChange={(value) => setFilters((current) => ({ ...current, signal: value }))}
+                  />
+                  <AggregateFilterSelect
+                    label="Причина score"
+                    value={filters.reason}
+                    options={reasonOptions}
+                    onChange={(value) => setFilters((current) => ({ ...current, reason: value }))}
+                  />
+                  <AggregateFilterSelect
+                    label="Зона решения"
+                    value={filters.solutionArea}
+                    options={solutionAreaOptions}
+                    onChange={(value) => setFilters((current) => ({ ...current, solutionArea: value }))}
+                  />
+                  <AggregateFilterSelect
+                    label="Сегмент клиента"
+                    value={filters.customerSegment}
+                    options={customerSegmentOptions}
+                    onChange={(value) => setFilters((current) => ({ ...current, customerSegment: value }))}
                   />
                   <TextField
                     size="small"
@@ -558,6 +585,37 @@ function AggregateChips({ items }: { items: AnalyticsAggregate[] }) {
   );
 }
 
+function AggregateFilterSelect({
+  label,
+  value,
+  options,
+  onChange
+}: {
+  label: string;
+  value: string;
+  options: AnalyticsAggregate[];
+  onChange: (value: string) => void;
+}) {
+  return (
+    <TextField
+      select
+      size="small"
+      label={label}
+      value={value}
+      onChange={(event) => onChange(event.target.value)}
+      disabled={options.length === 0}
+      sx={{ width: { sm: 220 } }}
+    >
+      <MenuItem value="">Любой</MenuItem>
+      {options.map((option) => (
+        <MenuItem key={option.key} value={option.key}>
+          {aggregateOptionLabel(option)}
+        </MenuItem>
+      ))}
+    </TextField>
+  );
+}
+
 function CandidateTable({
   page,
   loading,
@@ -664,6 +722,15 @@ function candidateQuery(filters: CandidateFilters, limit: number, offset: number
   if (filters.signal.trim()) {
     params.set("signal", filters.signal.trim());
   }
+  if (filters.reason.trim()) {
+    params.set("reason", filters.reason.trim());
+  }
+  if (filters.solutionArea.trim()) {
+    params.set("solution_area", filters.solutionArea.trim());
+  }
+  if (filters.customerSegment.trim()) {
+    params.set("customer_segment", filters.customerSegment.trim());
+  }
   if (filters.q.trim()) {
     params.set("q", filters.q.trim());
   }
@@ -687,4 +754,8 @@ function aggregateDetail(item: AnalyticsAggregate) {
     parts.push(item.payload.examples.slice(0, 3).join(", "));
   }
   return parts.join(" · ");
+}
+
+function aggregateOptionLabel(item: AnalyticsAggregate) {
+  return `${item.label || item.key} · ${formatInteger(item.count)}`;
 }

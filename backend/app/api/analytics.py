@@ -6,7 +6,7 @@ from typing import Any
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
 from app.db.session import create_sessionmaker
 from app.domain.analytics import AnalyticsAggregate, AnalyticsCandidate, AnalyticsRun
@@ -107,6 +107,9 @@ async def list_analytics_candidates(
     score_min: int | None = Query(default=None, ge=0),
     temperature: str | None = None,
     signal: str | None = None,
+    reason: str | None = None,
+    solution_area: str | None = None,
+    customer_segment: str | None = None,
     q: str | None = Query(default=None, min_length=1),
     repository: PostgresAnalyticsRepository = Depends(get_analytics_repository),
 ) -> AnalyticsCandidatePageResponse:
@@ -121,6 +124,9 @@ async def list_analytics_candidates(
         score_min=score_min,
         temperature=temperature,
         signal=signal,
+        reason=reason,
+        solution_area=solution_area,
+        customer_segment=customer_segment,
         q=q,
     )
     return AnalyticsCandidatePageResponse(

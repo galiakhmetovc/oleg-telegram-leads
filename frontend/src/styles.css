@@ -273,6 +273,7 @@ body {
 
 .analytics-filter-row {
   align-items: center;
+  flex-wrap: wrap;
   justify-content: flex-end;
 }
 

@@ -359,6 +359,92 @@ test("pages analytics candidates with backend limit and offset", async () => {
   expect(await screen.findByText("Вторая страница кандидатов")).toBeInTheDocument();
 });
 
+test("selects analytics filters from summary aggregates", async () => {
+  const run = sampleAnalyticsRun();
+  const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+    const url = String(input);
+    if (url === "/api/v1/analytics/runs") {
+      return jsonResponse({ runs: [run] });
+    }
+    if (url === `/api/v1/analytics/runs/${run.id}/summary`) {
+      return jsonResponse({
+        run,
+        aggregates: {
+          score_bucket: [],
+          signal: [
+            {
+              kind: "signal",
+              key: "designer_context",
+              label: "designer_context",
+              count: 4525,
+              payload: {}
+            }
+          ],
+          reason: [
+            {
+              kind: "reason",
+              key: "smart_home_platform",
+              label: "smart_home_platform",
+              count: 3200,
+              payload: {}
+            }
+          ],
+          solution_area: [
+            { kind: "solution_area", key: "automation", label: "Автоматизация", count: 2700, payload: {} }
+          ],
+          customer_segment: [
+            { kind: "customer_segment", key: "designers", label: "Дизайнеры", count: 1800, payload: {} }
+          ]
+        }
+      });
+    }
+    if (url.startsWith(`/api/v1/analytics/runs/${run.id}/candidates`)) {
+      return jsonResponse({
+        total: 1,
+        limit: 50,
+        offset: 0,
+        items: [
+          {
+            message_id: "filtered",
+            text: "Отфильтрованный кандидат",
+            score: 140,
+            temperature: "hot",
+            solution_areas: [],
+            customer_segments: [],
+            intent_signals: [],
+            noise_signals: [],
+            reasons: [],
+            domain_signals: [],
+            facts: []
+          }
+        ]
+      });
+    }
+    throw new Error(`Unhandled fetch: ${url}`);
+  });
+  vi.stubGlobal("fetch", fetchMock);
+  render(<App />);
+
+  fireEvent.click(screen.getByRole("tab", { name: /аналитика/i }));
+  expect(await screen.findByText("Отфильтрованный кандидат")).toBeInTheDocument();
+
+  chooseMuiOption("Сигнал", /designer_context/);
+  chooseMuiOption("Причина score", /smart_home_platform/);
+  chooseMuiOption("Зона решения", /Автоматизация/);
+  chooseMuiOption("Сегмент клиента", /Дизайнеры/);
+  fireEvent.click(screen.getByRole("button", { name: "Применить" }));
+
+  await waitFor(() =>
+    expect(
+      fetchMock.mock.calls.some(
+        ([calledUrl]) =>
+          String(calledUrl) ===
+          `/api/v1/analytics/runs/${run.id}/candidates?limit=50&offset=0&signal=designer_context&reason=smart_home_platform&solution_area=automation&customer_segment=designers`
+      )
+    ).toBe(true)
+  );
+});
+
 test("adds semantic pattern through backend lemmatization", async () => {
   const fetchMock = vi
     .fn()
@@ -487,6 +573,11 @@ function jsonResponse(payload: unknown) {
     ok: true,
     json: async () => payload
   };
+}
+
+function chooseMuiOption(comboboxName: string, optionName: RegExp) {
+  fireEvent.mouseDown(screen.getByRole("combobox", { name: comboboxName }));
+  fireEvent.click(screen.getByRole("option", { name: optionName }));
 }
 
 function sampleResult() {

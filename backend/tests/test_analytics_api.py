@@ -61,7 +61,13 @@ class ApiInMemoryAnalyticsRepository:
                         "matched_types": ["smart_home_automation"],
                     }
                 ],
-                customer_segments=[],
+                customer_segments=[
+                    {
+                        "type": "designers",
+                        "label": "Дизайнеры",
+                        "matched_types": ["designer_context"],
+                    }
+                ],
                 intent_signals=[],
                 noise_signals=[],
                 reasons=[
@@ -98,6 +104,9 @@ class ApiInMemoryAnalyticsRepository:
         score_min: int | None,
         temperature: str | None,
         signal: str | None,
+        reason: str | None = None,
+        solution_area: str | None = None,
+        customer_segment: str | None = None,
         q: str | None,
     ) -> AnalyticsCandidatePage:
         items = self.candidates
@@ -105,6 +114,12 @@ class ApiInMemoryAnalyticsRepository:
             items = [item for item in items if item.score >= score_min]
         if temperature is not None:
             items = [item for item in items if item.temperature == temperature]
+        if reason is not None:
+            items = [item for item in items if any(item_reason["key"] == reason for item_reason in item.reasons)]
+        if solution_area is not None:
+            items = [item for item in items if any(area["type"] == solution_area for area in item.solution_areas)]
+        if customer_segment is not None:
+            items = [item for item in items if any(segment["type"] == customer_segment for segment in item.customer_segments)]
         return AnalyticsCandidatePage(total=len(items), items=items[offset : offset + limit])
 
 
@@ -156,3 +171,89 @@ def test_lists_analytics_candidates_with_filters() -> None:
     assert payload["items"][0]["message_id"] == "488906"
     assert payload["items"][0]["score"] == 247
     assert payload["items"][0]["reasons"][0]["matched_texts"] == ["умный дом"]
+
+
+def test_filters_analytics_candidates_by_reason_key() -> None:
+    repository = ApiInMemoryAnalyticsRepository()
+    repository.candidates.append(
+        AnalyticsCandidate(
+            run_id=repository.run_id,
+            message_id="488907",
+            text="Нерелевантная причина",
+            score=90,
+            temperature="hot",
+            solution_areas=[],
+            customer_segments=[],
+            intent_signals=[],
+            noise_signals=[],
+            reasons=[
+                {
+                    "source": "domain_signal",
+                    "key": "video_surveillance",
+                    "label": "Видеонаблюдение",
+                    "weight": 35,
+                    "matched_texts": ["камера"],
+                }
+            ],
+            domain_signals=[],
+            facts=[],
+        )
+    )
+    app = create_app()
+    app.dependency_overrides[get_analytics_repository] = lambda: repository
+    client = TestClient(app)
+
+    response = client.get(
+        f"/api/v1/analytics/runs/{repository.run_id}/candidates",
+        params={"reason": "smart_home_automation"},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["total"] == 1
+    assert payload["items"][0]["message_id"] == "488906"
+
+
+def test_filters_analytics_candidates_by_segments() -> None:
+    repository = ApiInMemoryAnalyticsRepository()
+    repository.candidates.append(
+        AnalyticsCandidate(
+            run_id=repository.run_id,
+            message_id="488908",
+            text="Другой сегмент",
+            score=110,
+            temperature="hot",
+            solution_areas=[
+                {
+                    "type": "security",
+                    "label": "Безопасность",
+                    "matched_types": ["video_surveillance"],
+                }
+            ],
+            customer_segments=[
+                {
+                    "type": "homeowners",
+                    "label": "Владельцы домов",
+                    "matched_types": ["private_house"],
+                }
+            ],
+            intent_signals=[],
+            noise_signals=[],
+            reasons=[],
+            domain_signals=[],
+            facts=[],
+        )
+    )
+    app = create_app()
+    app.dependency_overrides[get_analytics_repository] = lambda: repository
+    client = TestClient(app)
+
+    response = client.get(
+        f"/api/v1/analytics/runs/{repository.run_id}/candidates",
+        params={"solution_area": "smart_home", "customer_segment": "designers"},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["total"] == 1
+    assert payload["items"][0]["message_id"] == "488906"

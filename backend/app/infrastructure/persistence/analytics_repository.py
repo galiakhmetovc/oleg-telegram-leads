@@ -53,6 +53,9 @@ class PostgresAnalyticsRepository:
         score_min: int | None,
         temperature: str | None,
         signal: str | None,
+        reason: str | None,
+        solution_area: str | None,
+        customer_segment: str | None,
         q: str | None,
     ) -> AnalyticsCandidatePage:
         predicates = [analytics_candidates.c.run_id == run_id]
@@ -62,6 +65,12 @@ class PostgresAnalyticsRepository:
             predicates.append(analytics_candidates.c.temperature == temperature)
         if signal:
             predicates.append(sa.literal(signal) == sa.any_(analytics_candidates.c.signal_types))
+        if reason:
+            predicates.append(sa.literal(reason) == sa.any_(analytics_candidates.c.reason_keys))
+        if solution_area:
+            predicates.append(sa.literal(solution_area) == sa.any_(analytics_candidates.c.solution_area_types))
+        if customer_segment:
+            predicates.append(sa.literal(customer_segment) == sa.any_(analytics_candidates.c.customer_segment_types))
         if q:
             predicates.append(analytics_candidates.c.text.ilike(f"%{q}%"))
 
