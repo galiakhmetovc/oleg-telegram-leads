@@ -70,6 +70,8 @@ when the database is empty.
 - `pipeline` controls enabled stages.
 - `signals` defines domain signals shown to the operator.
 - `facts` defines structured fact extraction.
+- `vendors`, `protocols`, `devices`, and `software` define alias catalogs for
+  exact written variants of market terms.
 - `lead_scoring` defines PUR lead thresholds, signal/fact weights, solution area
   mappings, customer segment mappings, intent signals, and noise signals.
 
@@ -89,6 +91,16 @@ cases or forms. For example, operator input `умный дом` is stored as lem
 The persisted config still uses `phrases` and `patterns` as the storage shape
 because that is what the rule engine consumes. The web UI does not expose Yargy
 predicate names as the product vocabulary.
+
+Alias catalogs are separate from domain signals. Domain signals remain semantic
+categories such as `smart_home_platform`, `protocol_gateway`, `leak_protection`,
+`lighting_automation`, `climate_automation`, `access_control`, `intercom`,
+`video_surveillance`, and `power_backup`. Alias catalogs store written variants:
+canonical name, alias type (`vendor`, `protocol`, `device`, `software`, or
+`model`), Latin/Cyrillic/transliterated/mistyped spellings, and links to the
+semantic signal and fact types emitted when the alias matches. Exact alias
+matching lowercases the input text before matching and returns the original
+span text in enrichment output.
 
 ## Lead Assessment
 
@@ -142,7 +154,9 @@ The frontend Settings Center edits exact phrases and lemmatized phrases as
 separate lists with add/edit/delete actions. New lemmatized phrases are created
 from natural operator input through the backend semantic-pattern endpoint so the
 UI can show both the original text and the generated lemmas. The UI also has a
-Help page that explains these matching modes.
+Help page that explains these matching modes. The Settings Center also exposes
+the alias catalogs as editable lists for vended platforms, protocols, devices,
+and software.
 
 ## Frontend
 

@@ -149,6 +149,19 @@ test("loads settings center on demand", async () => {
           }
         ],
         facts: [],
+        vendors: [
+          {
+            key: "aqara",
+            canonical: "Aqara",
+            type: "vendor",
+            aliases: ["Aqara", "Акара"],
+            signal_types: ["smart_home_platform"],
+            fact_types: ["vendor"]
+          }
+        ],
+        protocols: [],
+        devices: [],
+        software: [],
         lead_scoring: sampleLeadScoringSettings(),
         source: {
           type: "postgres",
@@ -178,6 +191,11 @@ test("loads settings center on demand", async () => {
   expect(screen.queryByText(/normalized:/)).not.toBeInTheDocument();
   fireEvent.click(screen.getByRole("button", { name: "Оценка лида" }));
   expect(screen.getByText("Пороги оценки")).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Словари" }));
+  expect(screen.getByText("Alias-словари")).toBeInTheDocument();
+  expect(screen.getAllByText("Aqara").length).toBeGreaterThan(0);
+  expect(screen.getByText("Акара")).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Добавить alias в Вендоры" })).toBeInTheDocument();
   fireEvent.click(screen.getByRole("button", { name: "Runtime" }));
   expect(screen.getByText("environment")).toBeInTheDocument();
 });
@@ -200,8 +218,12 @@ test("adds semantic pattern through backend lemmatization", async () => {
               patterns: []
             }
           ],
-          facts: [],
-          lead_scoring: sampleLeadScoringSettings(),
+        facts: [],
+        vendors: [],
+        protocols: [],
+        devices: [],
+        software: [],
+        lead_scoring: sampleLeadScoringSettings(),
           source: {
             type: "postgres",
             path: "nlp_config_revisions.config",

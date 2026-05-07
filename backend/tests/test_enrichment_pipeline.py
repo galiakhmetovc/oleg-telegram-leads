@@ -125,6 +125,171 @@ facts:
     assert parser_calls == 2
 
 
+def test_enriches_text_with_alias_catalog_signals_and_facts(tmp_path: Path) -> None:
+    config_dir = tmp_path / "nlp"
+    config_dir.mkdir()
+    (config_dir / "pipeline.yaml").write_text(
+        """
+stages:
+  - name: segmentation
+    enabled: true
+  - name: facts
+    enabled: true
+  - name: domain_signals
+    enabled: true
+  - name: lead_scoring
+    enabled: true
+""",
+        encoding="utf-8",
+    )
+    (config_dir / "signals.yaml").write_text("signals: []\n", encoding="utf-8")
+    (config_dir / "facts.yaml").write_text("facts: []\n", encoding="utf-8")
+    (config_dir / "lead_scoring.yaml").write_text(
+        """
+lead_scoring:
+  thresholds:
+    lead: 35
+    warm: 55
+    hot: 80
+  weights:
+    signals:
+      smart_home_platform: 20
+      protocol_gateway: 20
+      water_leak_protection: 25
+    facts:
+      vendor: 5
+      protocol: 5
+      automation_component: 10
+      software: 5
+  solution_areas:
+    smart_home:
+      label: Умный дом / автоматизация
+      signal_types:
+        - smart_home_platform
+        - protocol_gateway
+        - water_leak_protection
+      fact_types:
+        - automation_component
+  customer_segments: {}
+  intent_signal_types:
+    - smart_home_platform
+    - protocol_gateway
+    - water_leak_protection
+  noise_signal_types: []
+""",
+        encoding="utf-8",
+    )
+    (config_dir / "vendors.yaml").write_text(
+        """
+vendors:
+  - key: aqara
+    canonical: Aqara
+    type: vendor
+    aliases:
+      - Aqara
+      - Акара
+    signal_types:
+      - smart_home_platform
+    fact_types:
+      - vendor
+""",
+        encoding="utf-8",
+    )
+    (config_dir / "protocols.yaml").write_text(
+        """
+protocols:
+  - key: zigbee
+    canonical: Zigbee
+    type: protocol
+    aliases:
+      - Zigbee
+      - Зигби
+    signal_types:
+      - protocol_gateway
+    fact_types:
+      - protocol
+""",
+        encoding="utf-8",
+    )
+    (config_dir / "devices.yaml").write_text(
+        """
+devices:
+  - key: leak_sensor
+    canonical: Датчик протечки
+    type: device
+    aliases:
+      - датчик протечки
+      - датчики протечки
+    signal_types:
+      - water_leak_protection
+    fact_types:
+      - automation_component
+  - key: relay
+    canonical: Реле
+    type: device
+    aliases:
+      - реле
+    signal_types:
+      - protocol_gateway
+    fact_types:
+      - automation_component
+""",
+        encoding="utf-8",
+    )
+    (config_dir / "software.yaml").write_text(
+        """
+software:
+  - key: alice
+    canonical: Алиса
+    type: software
+    aliases:
+      - Алиса
+    signal_types:
+      - smart_home_platform
+    fact_types:
+      - software
+""",
+        encoding="utf-8",
+    )
+
+    result = RussianTextEnricher(load_nlp_config(config_dir)).enrich(
+        "Клиент хочет Aqara, Zigbee реле, датчики протечки и Алиса."
+    )
+
+    signal_types = {signal.type for signal in result.domain_signals}
+    fact_types = {fact.type for fact in result.facts}
+    assert {"smart_home_platform", "protocol_gateway", "water_leak_protection"} <= signal_types
+    assert {"vendor", "protocol", "automation_component", "software"} <= fact_types
+    assert any(signal.source == "alias_catalog" for signal in result.domain_signals)
+    assert any(fact.text == "Aqara" and fact.source == "alias_catalog" for fact in result.facts)
+    assert result.lead_assessment is not None
+    assert result.lead_assessment.is_lead is True
+    assert "smart_home" in {item.type for item in result.lead_assessment.solution_areas}
+
+
+def test_default_config_detects_curated_rf_cis_smart_home_aliases() -> None:
+    config = load_nlp_config(Path("config/nlp"))
+    enricher = RussianTextEnricher(config)
+    text = (
+        "Нужно подобрать Aqara Hub M3 или Яндекс Хаб для датчиков протечки "
+        "Нептун, Zigbee реле Sonoff, сценариев в Home Assistant и управления "
+        "через Алису. Клиент еще спрашивает про Wiren Board и Tuya Smart Life."
+    )
+
+    result = enricher.enrich(text)
+
+    signal_types = {signal.type for signal in result.domain_signals}
+    fact_types = {fact.type for fact in result.facts}
+    matched_texts = {fact.text.casefold() for fact in result.facts}
+    assert {"smart_home_platform", "protocol_gateway", "water_leak_protection"} <= signal_types
+    assert {"vendor", "protocol", "automation_component", "software"} <= fact_types
+    assert any(text.startswith("aqara") for text in matched_texts)
+    assert {"яндекс", "нептун", "sonoff", "wiren board", "tuya smart life"} <= matched_texts
+    assert result.lead_assessment is not None
+    assert result.lead_assessment.is_lead is True
+    assert result.lead_assessment.temperature in {"warm", "hot"}
+
+
 def test_default_config_marks_smart_home_automation_lead_text() -> None:
     config = load_nlp_config(Path("config/nlp"))
     enricher = RussianTextEnricher(config)

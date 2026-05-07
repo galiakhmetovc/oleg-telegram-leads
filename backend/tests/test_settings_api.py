@@ -80,6 +80,68 @@ lead_scoring:
 """,
         encoding="utf-8",
     )
+    (config_dir / "vendors.yaml").write_text(
+        """
+vendors:
+  - key: aqara
+    canonical: Aqara
+    type: vendor
+    aliases:
+      - Aqara
+      - Акара
+    signal_types:
+      - smart_home_platform
+    fact_types:
+      - vendor
+""",
+        encoding="utf-8",
+    )
+    (config_dir / "protocols.yaml").write_text(
+        """
+protocols:
+  - key: zigbee
+    canonical: Zigbee
+    type: protocol
+    aliases:
+      - Zigbee
+      - Зигби
+    signal_types:
+      - protocol_gateway
+    fact_types:
+      - protocol
+""",
+        encoding="utf-8",
+    )
+    (config_dir / "devices.yaml").write_text(
+        """
+devices:
+  - key: relay
+    canonical: Реле
+    type: device
+    aliases:
+      - реле
+    signal_types:
+      - smart_relay_control
+    fact_types:
+      - automation_component
+""",
+        encoding="utf-8",
+    )
+    (config_dir / "software.yaml").write_text(
+        """
+software:
+  - key: alice
+    canonical: Алиса
+    type: software
+    aliases:
+      - Алиса
+    signal_types:
+      - smart_home_platform
+    fact_types:
+      - software
+""",
+        encoding="utf-8",
+    )
 
 
 class InMemoryNlpConfigRepository:
@@ -145,6 +207,11 @@ def test_get_settings_returns_editable_nlp_and_readonly_system_settings(tmp_path
         "value": "нужный",
     }
     assert payload["nlp"]["facts"][0]["type"] == "deadline"
+    assert payload["nlp"]["vendors"][0]["canonical"] == "Aqara"
+    assert payload["nlp"]["vendors"][0]["aliases"] == ["Aqara", "Акара"]
+    assert payload["nlp"]["protocols"][0]["fact_types"] == ["protocol"]
+    assert payload["nlp"]["devices"][0]["type"] == "device"
+    assert payload["nlp"]["software"][0]["canonical"] == "Алиса"
     assert payload["nlp"]["lead_scoring"]["lead_threshold"] == 35
     assert payload["nlp"]["lead_scoring"]["signal_weights"]["demand"] == 20
     assert payload["nlp"]["lead_scoring"]["solution_areas"]["supply"]["label"] == "Снабжение"
@@ -192,6 +259,7 @@ def test_update_nlp_settings_validates_and_writes_database_revision_not_yaml(tmp
         }
     )
     updated["lead_scoring"]["signal_weights"]["demand"] = 25
+    updated["vendors"][0]["aliases"].append("Аккара")
 
     response = client.put("/api/v1/settings/nlp", json=updated)
 
@@ -203,7 +271,9 @@ def test_update_nlp_settings_validates_and_writes_database_revision_not_yaml(tmp
     assert repository.active is not None
     assert repository.active["signals"]["signals"][0]["patterns"][1]["source_text"] == "Нужна консультация"
     assert repository.active["lead_scoring"]["lead_scoring"]["weights"]["signals"]["demand"] == 25
+    assert repository.active["vendors"]["vendors"][0]["aliases"] == ["Aqara", "Акара", "Аккара"]
     assert "консультация" not in (config_dir / "signals.yaml").read_text(encoding="utf-8")
+    assert "Аккара" not in (config_dir / "vendors.yaml").read_text(encoding="utf-8")
 
 
 def test_preview_nlp_settings_uses_draft_without_saving(tmp_path: Path) -> None:
@@ -213,18 +283,22 @@ def test_preview_nlp_settings_uses_draft_without_saving(tmp_path: Path) -> None:
     client = _app_with_settings_repo(config_dir, repository)
     draft = client.get("/api/v1/settings").json()["nlp"]
     draft["signals"][0]["phrases"].append(["ищем", "поставщика"])
+    draft["vendors"][0]["aliases"].append("Аккара")
     draft["pipeline"]["stages"].append({"name": "lead_scoring", "enabled": True})
     draft["lead_scoring"]["lead_threshold"] = 20
+    draft["lead_scoring"]["signal_weights"]["smart_home_platform"] = 20
 
     response = client.post(
         "/api/v1/settings/nlp/preview",
-        json={"text": "Ищем поставщика завтра", "nlp": draft},
+        json={"text": "Ищем поставщика Аккара завтра", "nlp": draft},
     )
 
     assert response.status_code == 200
     payload = response.json()
     assert any(item["type"] == "demand" for item in payload["domain_signals"])
+    assert any(item["type"] == "smart_home_platform" for item in payload["domain_signals"])
     assert payload["lead_assessment"]["is_lead"] is True
     assert "ищем" not in (config_dir / "signals.yaml").read_text(encoding="utf-8")
     assert repository.active is not None
     assert ["ищем", "поставщика"] not in repository.active["signals"]["signals"][0]["phrases"]
+    assert "Аккара" not in repository.active["vendors"]["vendors"][0]["aliases"]

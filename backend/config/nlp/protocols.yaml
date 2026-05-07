@@ -1,0 +1,310 @@
+protocols:
+  - key: zigbee
+    canonical: Zigbee
+    type: protocol
+    aliases:
+      - Zigbee
+      - zigbee
+      - Зигби
+      - ЗигБи
+      - Зиг БИ
+      - Zigbee 3.0
+      - ZigBee
+    signal_types:
+      - protocol_gateway
+    fact_types:
+      - protocol
+
+  - key: z_wave
+    canonical: Z-Wave
+    type: protocol
+    aliases:
+      - Z-Wave
+      - Z Wave
+      - ZWave
+      - Звейв
+      - З-Вейв
+      - З Вейв
+      - z-wave
+    signal_types:
+      - protocol_gateway
+    fact_types:
+      - protocol
+
+  - key: knx
+    canonical: KNX
+    type: protocol
+    aliases:
+      - KNX
+      - КНХ
+      - КNX
+      - KNX IP
+      - KNX TP
+    signal_types:
+      - protocol_gateway
+      - smart_home_platform
+    fact_types:
+      - protocol
+
+  - key: matter
+    canonical: Matter
+    type: protocol
+    aliases:
+      - Matter
+      - Маттер
+      - Matter over Wi-Fi
+      - Matter over WiFi
+      - Matter Wi-Fi
+      - Matter WiFi
+      - Matter over Thread
+    signal_types:
+      - protocol_gateway
+      - smart_home_platform
+    fact_types:
+      - protocol
+
+  - key: thread
+    canonical: Thread
+    type: protocol
+    aliases:
+      - Thread
+      - Тред
+      - Thread border router
+      - Border Router
+      - бордер роутер
+    signal_types:
+      - protocol_gateway
+    fact_types:
+      - protocol
+
+  - key: wifi
+    canonical: Wi-Fi
+    type: protocol
+    aliases:
+      - Wi-Fi
+      - WiFi
+      - Wi Fi
+      - вайфай
+      - вай фай
+      - Ви-Фи
+      - Wi-Fi 2.4
+      - Wi-Fi 2.4 ГГц
+      - Wi-Fi модуль
+      - вайфай модуль
+    signal_types:
+      - protocol_gateway
+    fact_types:
+      - protocol
+
+  - key: bluetooth_ble
+    canonical: Bluetooth BLE
+    type: protocol
+    aliases:
+      - Bluetooth
+      - BLE
+      - Bluetooth LE
+      - блютус
+      - блю туз
+      - Блютуз
+      - Bluetooth Low Energy
+    signal_types: []
+    fact_types:
+      - protocol
+
+  - key: rf_433
+    canonical: RF 433
+    type: protocol
+    aliases:
+      - RF 433
+      - RF433
+      - 433 МГц
+      - 433MHz
+      - радиоканал 433
+      - радио 433
+    signal_types:
+      - protocol_gateway
+    fact_types:
+      - protocol
+
+  - key: modbus
+    canonical: Modbus
+    type: protocol
+    aliases:
+      - Modbus
+      - Модбас
+      - Modbus RTU
+      - Modbus TCP
+      - быстрый Modbus
+      - Fast Modbus
+    signal_types:
+      - protocol_gateway
+      - network_infrastructure
+    fact_types:
+      - protocol
+
+  - key: rs_485
+    canonical: RS-485
+    type: protocol
+    aliases:
+      - RS-485
+      - RS485
+      - РС-485
+      - РС485
+      - 485 шина
+      - шина RS-485
+    signal_types:
+      - protocol_gateway
+      - network_infrastructure
+    fact_types:
+      - protocol
+
+  - key: mqtt
+    canonical: MQTT
+    type: protocol
+    aliases:
+      - MQTT
+      - mqtt
+      - МКЮТТ
+      - МКТТ
+      - mqtt брокер
+      - MQTT broker
+    signal_types:
+      - protocol_gateway
+      - network_infrastructure
+    fact_types:
+      - protocol
+
+  - key: poe
+    canonical: PoE
+    type: protocol
+    aliases:
+      - PoE
+      - POE
+      - poe
+      - питание по PoE
+      - Power over Ethernet
+    signal_types:
+      - protocol_gateway
+      - video_surveillance
+      - network_infrastructure
+      - power_backup
+    fact_types:
+      - protocol
+
+  - key: ethernet
+    canonical: Ethernet
+    type: protocol
+    aliases:
+      - Ethernet
+      - ethernet
+      - эзернет
+      - LAN
+      - ЛВС
+      - проводная сеть
+    signal_types:
+      - network_infrastructure
+      - protocol_gateway
+    fact_types:
+      - protocol
+
+  - key: dali
+    canonical: DALI
+    type: protocol
+    aliases:
+      - DALI
+      - ДАЛИ
+      - DALI-2
+      - DALI 2
+    signal_types:
+      - lighting_automation
+      - protocol_gateway
+    fact_types:
+      - protocol
+
+  - key: one_wire
+    canonical: 1-Wire
+    type: protocol
+    aliases:
+      - 1-Wire
+      - OneWire
+      - 1 Wire
+      - one wire
+      - ван вайр
+      - DS18B20
+    signal_types:
+      - climate_automation
+      - protocol_gateway
+    fact_types:
+      - protocol
+
+  - key: opentherm
+    canonical: OpenTherm
+    type: protocol
+    aliases:
+      - OpenTherm
+      - Open Therm
+      - Опентерм
+      - OpenTherm шлюз
+    signal_types:
+      - climate_automation
+      - protocol_gateway
+    fact_types:
+      - protocol
+
+  - key: ebus
+    canonical: eBUS
+    type: protocol
+    aliases:
+      - eBUS
+      - eBus
+      - ебас
+      - eBUS котел
+    signal_types:
+      - climate_automation
+      - protocol_gateway
+    fact_types:
+      - protocol
+
+  - key: infrared
+    canonical: IR
+    type: protocol
+    aliases:
+      - IR
+      - ИК
+      - ИК пульт
+      - инфракрасный пульт
+      - infrared
+      - IrDA
+    signal_types:
+      - protocol_gateway
+      - climate_automation
+    fact_types:
+      - protocol
+
+  - key: rtsp
+    canonical: RTSP
+    type: protocol
+    aliases:
+      - RTSP
+      - rtsp
+      - RTSP камера
+      - RTSP камеры
+    signal_types:
+      - video_surveillance
+      - protocol_gateway
+    fact_types:
+      - protocol
+
+  - key: onvif
+    canonical: ONVIF
+    type: protocol
+    aliases:
+      - ONVIF
+      - onvif
+      - ONVIF камера
+      - ONVIF камеры
+    signal_types:
+      - video_surveillance
+      - protocol_gateway
+    fact_types:
+      - protocol

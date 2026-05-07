@@ -178,3 +178,24 @@ Rationale:
   failure modes.
 - Noise signals must be first-class so equipment-only/DIY/sale posts can be
   explained as non-leads rather than silently missed.
+
+## 2026-05-07: Smart-Home Market Terms Live In Alias Catalogs
+
+Keep domain signals as semantic categories and move market spellings into
+separate PostgreSQL-backed alias catalogs: `vendors`, `protocols`, `devices`,
+and `software`. Each alias row stores canonical name, alias type, written
+variants, and links to signal/fact types. Bootstrap YAML files seed a curated
+first pass for common РФ/СНГ smart-home platforms, protocols, devices, software,
+and security/leak/power/climate brands.
+
+Rationale:
+
+- Vendor and device spellings change faster than the semantic taxonomy; mixing
+  them directly into signal rules makes settings hard to audit and edit.
+- Operators need to see and edit human spellings such as `Aqara/Акара`,
+  `Zigbee/Зигби`, `Home Assistant/Хоум Ассистант`, and `Neptun/Нептун/Нептуп`
+  without changing code.
+- Exact alias matching is deterministic and cheap, while linked signal/fact
+  types keep lead scoring explainable.
+- The curated bootstrap pass is intentionally broad but not final; production
+  review and eval data should continue extending these catalogs.

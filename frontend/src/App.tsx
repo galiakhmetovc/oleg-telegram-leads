@@ -184,6 +184,17 @@ type RuleSetting = {
   confidence?: number | null;
 };
 
+type AliasSetting = {
+  key: string;
+  canonical: string;
+  type: "vendor" | "protocol" | "device" | "software" | "model";
+  aliases: string[];
+  signal_types: string[];
+  fact_types: string[];
+  color?: string | null;
+  confidence?: number | null;
+};
+
 type LeadCategorySetting = {
   label: string;
   signal_types: string[];
@@ -208,6 +219,10 @@ type NlpSettings = {
   };
   signals: RuleSetting[];
   facts: RuleSetting[];
+  vendors: AliasSetting[];
+  protocols: AliasSetting[];
+  devices: AliasSetting[];
+  software: AliasSetting[];
   lead_scoring: LeadScoringSettings;
   source?: {
     type: string;
@@ -230,7 +245,9 @@ type SettingsSnapshot = {
   system: SystemSetting[];
 };
 
-type SettingsSection = "pipeline" | "signals" | "facts" | "lead_scoring" | "system";
+type AliasCatalogName = "vendors" | "protocols" | "devices" | "software";
+
+type SettingsSection = "pipeline" | "signals" | "facts" | "aliases" | "lead_scoring" | "system";
 
 const apiBaseUrl = import.meta.env.VITE_API_BASE_URL ?? "";
 
@@ -610,6 +627,40 @@ function SettingsCenter() {
     updateDraft({ ...draft, [collection]: draft[collection].filter((_, itemIndex) => itemIndex !== index) });
   }
 
+  function updateAlias(catalog: AliasCatalogName, index: number, alias: AliasSetting) {
+    if (!draft) {
+      return;
+    }
+    updateDraft({
+      ...draft,
+      [catalog]: draft[catalog].map((item, itemIndex) => (itemIndex === index ? alias : item))
+    });
+  }
+
+  function addAlias(catalog: AliasCatalogName) {
+    if (!draft) {
+      return;
+    }
+    const alias: AliasSetting = {
+      key: `new_${catalog.slice(0, -1)}`,
+      canonical: "Новый alias",
+      type: aliasTypeForCatalog(catalog),
+      aliases: ["новый alias"],
+      signal_types: [],
+      fact_types: [aliasTypeForCatalog(catalog)],
+      confidence: 0.7,
+      color: null
+    };
+    updateDraft({ ...draft, [catalog]: [...draft[catalog], alias] });
+  }
+
+  function removeAlias(catalog: AliasCatalogName, index: number) {
+    if (!draft) {
+      return;
+    }
+    updateDraft({ ...draft, [catalog]: draft[catalog].filter((_, itemIndex) => itemIndex !== index) });
+  }
+
   function updateLeadScoring(leadScoring: LeadScoringSettings) {
     if (!draft) {
       return;
@@ -637,6 +688,13 @@ function SettingsCenter() {
         </Button>
         <Button fullWidth variant={section === "facts" ? "contained" : "text"} onClick={() => setSection("facts")}>
           Факты
+        </Button>
+        <Button
+          fullWidth
+          variant={section === "aliases" ? "contained" : "text"}
+          onClick={() => setSection("aliases")}
+        >
+          Словари
         </Button>
         <Button
           fullWidth
@@ -704,6 +762,14 @@ function SettingsCenter() {
                   onAdd={addRule}
                   onRemove={removeRule}
                   onUpdate={updateRule}
+                />
+              )}
+              {section === "aliases" && (
+                <AliasCatalogsEditor
+                  settings={draft}
+                  onAdd={addAlias}
+                  onRemove={removeAlias}
+                  onUpdate={updateAlias}
                 />
               )}
               {section === "lead_scoring" && (
@@ -830,6 +896,16 @@ function SettingsHelpPage() {
           </Box>
 
           <Paper variant="outlined" className="help-section">
+            <Typography variant="h6">Alias-словари</Typography>
+            <Typography variant="body2" color="text.secondary">
+              Словари нужны для сущностей с множеством человеческих написаний: вендоры, протоколы,
+              устройства и приложения. Каждая запись хранит каноническое имя, варианты написания,
+              тип, связанные доменные сигналы и факты. Входной текст перед точным матчингом
+              приводится к нижнему регистру, поэтому регистр в alias не влияет на поиск.
+            </Typography>
+          </Paper>
+
+          <Paper variant="outlined" className="help-section">
             <Typography variant="h6">Как выбирать режим</Typography>
             <TableContainer>
               <Table size="small">
@@ -884,6 +960,172 @@ function PipelineSettingsEditor({
         />
       ))}
     </Stack>
+  );
+}
+
+function AliasCatalogsEditor({
+  settings,
+  onAdd,
+  onRemove,
+  onUpdate
+}: {
+  settings: NlpSettings;
+  onAdd: (catalog: AliasCatalogName) => void;
+  onRemove: (catalog: AliasCatalogName, index: number) => void;
+  onUpdate: (catalog: AliasCatalogName, index: number, alias: AliasSetting) => void;
+}) {
+  return (
+    <Stack spacing={2}>
+      <Box>
+        <Typography variant="h6">Alias-словари</Typography>
+        <Typography variant="body2" color="text.secondary">
+          Вендоры, протоколы, устройства и ПО матчятся как словари написаний и привязаны к смысловым сигналам и фактам.
+        </Typography>
+      </Box>
+      {aliasCatalogDefinitions.map((definition) => (
+        <AliasCatalogEditor
+          key={definition.name}
+          definition={definition}
+          aliases={settings[definition.name]}
+          onAdd={() => onAdd(definition.name)}
+          onRemove={(index) => onRemove(definition.name, index)}
+          onUpdate={(index, alias) => onUpdate(definition.name, index, alias)}
+        />
+      ))}
+    </Stack>
+  );
+}
+
+function AliasCatalogEditor({
+  definition,
+  aliases,
+  onAdd,
+  onRemove,
+  onUpdate
+}: {
+  definition: AliasCatalogDefinition;
+  aliases: AliasSetting[];
+  onAdd: () => void;
+  onRemove: (index: number) => void;
+  onUpdate: (index: number, alias: AliasSetting) => void;
+}) {
+  return (
+    <Stack spacing={1}>
+      <Box className="rule-list-header">
+        <Box sx={{ minWidth: 0 }}>
+          <Typography variant="subtitle1" sx={{ fontWeight: 700 }}>
+            {definition.label}
+          </Typography>
+          <Typography variant="body2" color="text.secondary">
+            {aliases.length} записей
+          </Typography>
+        </Box>
+        <Button
+          aria-label={`Добавить alias в ${definition.label}`}
+          startIcon={<AddIcon />}
+          variant="outlined"
+          onClick={onAdd}
+        >
+          Добавить
+        </Button>
+      </Box>
+      {aliases.map((alias, index) => (
+        <AliasEditor
+          key={`${definition.name}-${alias.key}-${index}`}
+          alias={alias}
+          onRemove={() => onRemove(index)}
+          onUpdate={(nextAlias) => onUpdate(index, nextAlias)}
+        />
+      ))}
+    </Stack>
+  );
+}
+
+function AliasEditor({
+  alias,
+  onRemove,
+  onUpdate
+}: {
+  alias: AliasSetting;
+  onRemove: () => void;
+  onUpdate: (alias: AliasSetting) => void;
+}) {
+  return (
+    <Accordion variant="outlined" disableGutters>
+      <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+        <Box sx={{ alignItems: "center", display: "flex", gap: 1, minWidth: 0, width: "100%" }}>
+          {alias.color && <Box className="rule-color" sx={{ backgroundColor: alias.color }} />}
+          <Typography sx={{ flex: 1, fontWeight: 700 }} noWrap>
+            {alias.canonical}
+          </Typography>
+          {alias.aliases.slice(0, 3).map((aliasText) => (
+            <Chip key={aliasText} label={aliasText} size="small" variant="outlined" />
+          ))}
+          <Chip label={alias.type} size="small" variant="outlined" />
+          <Chip label={alias.key} size="small" variant="outlined" />
+        </Box>
+      </AccordionSummary>
+      <AccordionDetails>
+        <Stack spacing={2}>
+          <Box className="rule-grid">
+            <TextField label="key" value={alias.key} onChange={(event) => onUpdate({ ...alias, key: event.target.value })} />
+            <TextField
+              label="canonical"
+              value={alias.canonical}
+              onChange={(event) => onUpdate({ ...alias, canonical: event.target.value })}
+            />
+            <TextField
+              label="type"
+              value={alias.type}
+              onChange={(event) => onUpdate({ ...alias, type: aliasTypeFromText(event.target.value) })}
+            />
+            <TextField
+              label="confidence"
+              type="number"
+              value={alias.confidence ?? ""}
+              onChange={(event) =>
+                onUpdate({ ...alias, confidence: event.target.value === "" ? null : Number(event.target.value) })
+              }
+              slotProps={{ htmlInput: { min: 0, max: 1, step: 0.01 } }}
+            />
+          </Box>
+          <Box className="settings-two-column">
+            <TextField
+              label="aliases"
+              helperText="Один вариант написания в строке"
+              value={stringListToText(alias.aliases)}
+              onChange={(event) => onUpdate({ ...alias, aliases: textToStringList(event.target.value) })}
+              multiline
+              minRows={5}
+              fullWidth
+            />
+            <Stack spacing={2}>
+              <TextField
+                label="signal_types"
+                value={stringListToText(alias.signal_types)}
+                onChange={(event) => onUpdate({ ...alias, signal_types: textToStringList(event.target.value) })}
+                multiline
+                minRows={2}
+              />
+              <TextField
+                label="fact_types"
+                value={stringListToText(alias.fact_types)}
+                onChange={(event) => onUpdate({ ...alias, fact_types: textToStringList(event.target.value) })}
+                multiline
+                minRows={2}
+              />
+            </Stack>
+          </Box>
+          <Box>
+            <Tooltip title="Удалить">
+              <IconButton aria-label={`Удалить alias: ${alias.canonical}`} color="error" onClick={onRemove}>
+                <DeleteIcon />
+              </IconButton>
+            </Tooltip>
+          </Box>
+        </Stack>
+      </AccordionDetails>
+    </Accordion>
   );
 }
 
@@ -1448,6 +1690,45 @@ function SystemSettingsTable({ settings }: { settings: SystemSetting[] }) {
       </TableContainer>
     </Stack>
   );
+}
+
+type AliasCatalogDefinition = {
+  name: AliasCatalogName;
+  label: string;
+};
+
+const aliasCatalogDefinitions: AliasCatalogDefinition[] = [
+  { name: "vendors", label: "Вендоры" },
+  { name: "protocols", label: "Протоколы" },
+  { name: "devices", label: "Устройства" },
+  { name: "software", label: "ПО" }
+];
+
+function aliasTypeForCatalog(catalog: AliasCatalogName): AliasSetting["type"] {
+  if (catalog === "vendors") {
+    return "vendor";
+  }
+  if (catalog === "protocols") {
+    return "protocol";
+  }
+  if (catalog === "devices") {
+    return "device";
+  }
+  return "software";
+}
+
+function aliasTypeFromText(value: string): AliasSetting["type"] {
+  const normalizedValue = value.trim();
+  if (
+    normalizedValue === "vendor" ||
+    normalizedValue === "protocol" ||
+    normalizedValue === "device" ||
+    normalizedValue === "software" ||
+    normalizedValue === "model"
+  ) {
+    return normalizedValue;
+  }
+  return "device";
 }
 
 function textToExactPhrase(value: string): string[] {

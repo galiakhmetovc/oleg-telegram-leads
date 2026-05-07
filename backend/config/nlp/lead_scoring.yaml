@@ -10,6 +10,8 @@ lead_scoring:
       provider_search: 35
       installation_request: 30
       smart_home_automation: 35
+      smart_home_platform: 25
+      protocol_gateway: 20
       video_surveillance: 35
       consultation_request: 20
       solution_selection_request: 25
@@ -19,6 +21,7 @@ lead_scoring:
       budget_constraint: 5
       installation_context: 12
       water_leak_protection: 25
+      leak_protection: 25
       implementation_intent: 25
       hot_lead_intent: 35
       electrical_design_context: 15
@@ -31,8 +34,11 @@ lead_scoring:
       security_alarm: 30
       gate_automation: 30
       power_quality: 30
+      power_backup: 30
       climate_control: 25
+      climate_automation: 25
       lighting_control: 25
+      lighting_automation: 25
       motion_lighting_automation: 20
       electric_curtain_control: 25
       network_infrastructure: 25
@@ -48,6 +54,8 @@ lead_scoring:
       solution_area: 15
       property_type: 8
       vendor: 5
+      software: 5
+      model: 5
       design_scope: 10
       service_location: 5
       work_type: 20
@@ -63,6 +71,8 @@ lead_scoring:
       label: Умный дом / автоматизация
       signal_types:
         - smart_home_automation
+        - smart_home_platform
+        - protocol_gateway
         - developer_smart_home_context
         - renovation_modification_context
         - solution_selection_request
@@ -73,8 +83,13 @@ lead_scoring:
         - climate_control
         - electric_curtain_control
         - water_leak_protection
+        - leak_protection
+        - lighting_automation
+        - climate_automation
       fact_types:
         - controlled_device
+        - protocol
+        - software
     security:
       label: Безопасность / видеонаблюдение
       signal_types:
@@ -83,6 +98,7 @@ lead_scoring:
         - intercom
         - security_alarm
         - water_leak_protection
+        - leak_protection
       fact_types:
         - access_device
     access_control:
@@ -97,18 +113,22 @@ lead_scoring:
       label: Бесперебойное электроснабжение
       signal_types:
         - power_quality
+        - power_backup
       fact_types:
         - power_equipment
     engineering_networks:
       label: СКС / инженерные системы
       signal_types:
         - network_infrastructure
+        - protocol_gateway
       fact_types:
         - network_scope
+        - protocol
     climate:
       label: Управление климатом
       signal_types:
         - climate_control
+        - climate_automation
       fact_types:
         - design_scope
   customer_segments:
@@ -163,6 +183,8 @@ lead_scoring:
     - customer_intent
     - provider_search
     - installation_request
+    - smart_home_platform
+    - protocol_gateway
     - consultation_request
     - solution_selection_request
     - education_request
@@ -175,6 +197,9 @@ lead_scoring:
     - renovation_modification_context
     - warranty_risk
     - motion_lighting_automation
+    - lighting_automation
+    - climate_automation
+    - power_backup
   noise_signal_types:
     - supply
     - diy_or_equipment_only

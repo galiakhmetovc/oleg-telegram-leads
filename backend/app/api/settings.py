@@ -53,6 +53,23 @@ class RuleSettings(BaseModel):
         return self
 
 
+class AliasSettings(BaseModel):
+    key: str = Field(min_length=1)
+    canonical: str = Field(min_length=1)
+    type: Literal["vendor", "protocol", "device", "software", "model"]
+    aliases: list[str] = Field(min_length=1)
+    signal_types: list[str] = Field(default_factory=list)
+    fact_types: list[str] = Field(default_factory=list)
+    color: str | None = None
+    confidence: float | None = None
+
+    @model_validator(mode="after")
+    def validate_alias_links(self) -> AliasSettings:
+        if not self.signal_types and not self.fact_types:
+            raise ValueError("alias must define signal_types or fact_types")
+        return self
+
+
 class LeadCategorySettings(BaseModel):
     label: str = Field(min_length=1)
     signal_types: list[str] = Field(default_factory=list)
@@ -81,6 +98,10 @@ class NlpSettings(BaseModel):
     pipeline: PipelineSettings
     signals: list[RuleSettings]
     facts: list[RuleSettings]
+    vendors: list[AliasSettings] = Field(default_factory=list)
+    protocols: list[AliasSettings] = Field(default_factory=list)
+    devices: list[AliasSettings] = Field(default_factory=list)
+    software: list[AliasSettings] = Field(default_factory=list)
     lead_scoring: LeadScoringSettings
 
 
@@ -207,6 +228,12 @@ def _nlp_snapshot_from_revision(revision: NlpConfigRevision) -> NlpSettingsSnaps
         pipeline=PipelineSettings.model_validate(documents["pipeline"]),
         signals=[_rule_from_document(item) for item in documents["signals"].get("signals", [])],
         facts=[_rule_from_document(item) for item in documents["facts"].get("facts", [])],
+        vendors=[_alias_from_document(item) for item in documents.get("vendors", {}).get("vendors", [])],
+        protocols=[
+            _alias_from_document(item) for item in documents.get("protocols", {}).get("protocols", [])
+        ],
+        devices=[_alias_from_document(item) for item in documents.get("devices", {}).get("devices", [])],
+        software=[_alias_from_document(item) for item in documents.get("software", {}).get("software", [])],
         lead_scoring=_lead_scoring_from_document(documents.get("lead_scoring", {})),
         source=NlpSettingsSource(
             type="postgres",
@@ -222,6 +249,10 @@ def _nlp_settings_to_documents(payload: NlpSettings) -> dict[str, dict[str, Any]
         "pipeline": payload.pipeline.model_dump(),
         "signals": {"signals": [_rule_to_document(rule) for rule in payload.signals]},
         "facts": {"facts": [_rule_to_document(rule) for rule in payload.facts]},
+        "vendors": {"vendors": [_alias_to_document(alias) for alias in payload.vendors]},
+        "protocols": {"protocols": [_alias_to_document(alias) for alias in payload.protocols]},
+        "devices": {"devices": [_alias_to_document(alias) for alias in payload.devices]},
+        "software": {"software": [_alias_to_document(alias) for alias in payload.software]},
         "lead_scoring": _lead_scoring_to_document(payload.lead_scoring),
     }
 
@@ -263,6 +294,37 @@ def _rule_from_document(raw_rule: dict[str, Any]) -> RuleSettings:
         for raw_pattern in payload.get("patterns", [])
     ]
     return RuleSettings.model_validate(payload)
+
+
+def _alias_to_document(alias: AliasSettings) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "key": alias.key,
+        "canonical": alias.canonical,
+        "type": alias.type,
+        "aliases": alias.aliases,
+        "signal_types": alias.signal_types,
+        "fact_types": alias.fact_types,
+    }
+    if alias.color:
+        payload["color"] = alias.color
+    if alias.confidence is not None:
+        payload["confidence"] = alias.confidence
+    return payload
+
+
+def _alias_from_document(raw_alias: dict[str, Any]) -> AliasSettings:
+    return AliasSettings.model_validate(
+        {
+            "key": raw_alias.get("key"),
+            "canonical": raw_alias.get("canonical", raw_alias.get("label", raw_alias.get("key"))),
+            "type": raw_alias.get("type"),
+            "aliases": raw_alias.get("aliases", []),
+            "signal_types": raw_alias.get("signal_types", []),
+            "fact_types": raw_alias.get("fact_types", []),
+            "color": raw_alias.get("color"),
+            "confidence": raw_alias.get("confidence"),
+        }
+    )
 
 
 def _lead_scoring_to_document(settings: LeadScoringSettings) -> dict[str, Any]:

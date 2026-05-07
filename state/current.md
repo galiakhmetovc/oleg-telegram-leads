@@ -26,6 +26,16 @@
   operator-entered text and preserve `source_text` alongside generated lemmas.
 - A Help tab in the web UI explains exact versus lemmatized matching and when to
   use each mode.
+- Settings Center now also exposes editable alias catalogs for `vendors`,
+  `protocols`, `devices`, and `software`. These catalogs keep canonical names,
+  Latin/Cyrillic/transliterated/mistyped aliases, alias type, and links to
+  semantic signal/fact types.
+- Default NLP config includes a broad curated first pass for РФ/СНГ smart-home
+  market terms: Яндекс/Сбер/Aqara/Xiaomi/Tuya/Sonoff/Rubetek/Livicom/Wiren Board,
+  leak protection brands, CCTV/access vendors, Matter/Zigbee/Z-Wave/KNX/Wi-Fi/
+  BLE/Modbus/MQTT/PoE protocols, common devices, and smart-home software such as
+  Алиса, Home Assistant, Apple Home/HomeKit, Google Home, Smart Life, Aqara Home,
+  Mi Home, eWeLink, Zigbee2MQTT, Node-RED, ioBroker, MajorDoMo, and video apps.
 - Default NLP config recognizes the confirmed artifact lead about hiding a leak
   sensor in porcelain stoneware and documenting the solution on drawings/schemes.
 - Enrichment results include `lead_assessment`: deterministic PUR lead verdict,
@@ -55,11 +65,12 @@
 - Default NLP config recognizes Neptun/Нептун water leak monitoring leads,
   including the typo `Нептуп`, ProW/Profi product mentions, wired leak sensors,
   sensor-trigger monitoring, and smartphone information output.
-- Dev PostgreSQL active NLP config was refreshed to revision 16. The `need`
+- Dev PostgreSQL active NLP config was refreshed to revision 19. The `need`
   signal no longer stores Russian forms such as `нужно`, `нужна`, `нужен` as
   exact phrases; they are represented as lemmatized phrase rules with preserved
   operator source text. Revision 16 also includes the Neptun water leak
-  monitoring lead calibration.
+  monitoring lead calibration, and revision 19 includes the smart-home alias
+  catalogs plus calibrated semantic signal/fact weights.
 - `RussianTextEnricher` now precompiles Yargy parsers once per enricher
   instance instead of rebuilding them for every message. A local batch CLI can
   write full enrichment JSONL for exported messages without creating API/Celery

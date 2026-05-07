@@ -1,0 +1,615 @@
+vendors:
+  - key: yandex
+    canonical: Яндекс
+    type: vendor
+    aliases:
+      - Яндекс
+      - Yandex
+      - Yandex Smart Home
+      - Умный дом Яндекс
+      - Умный дом от Яндекса
+      - Дом с Алисой
+      - Яндекс Хаб
+      - Yandex Hub
+      - Яндекс Станция
+      - Yandex Station
+    signal_types:
+      - smart_home_platform
+    fact_types:
+      - vendor
+
+  - key: sber
+    canonical: Sber
+    type: vendor
+    aliases:
+      - Sber
+      - Сбер
+      - СберДевайсы
+      - SberDevices
+      - Умный дом Сбер
+      - Сбер Салют
+      - Sber Salut
+    signal_types:
+      - smart_home_platform
+    fact_types:
+      - vendor
+
+  - key: aqara
+    canonical: Aqara
+    type: vendor
+    aliases:
+      - Aqara
+      - Акара
+      - Аккара
+      - Aqara Hub
+      - Aqara M2
+      - Aqara M3
+      - Aqara Hub M3
+      - Aqara Hub M2
+    signal_types:
+      - smart_home_platform
+    fact_types:
+      - vendor
+      - model
+
+  - key: xiaomi
+    canonical: Xiaomi
+    type: vendor
+    aliases:
+      - Xiaomi
+      - Сяоми
+      - Ксяоми
+      - Mi Home
+      - Ми Хоум
+      - Mijia
+      - Миджиа
+      - Mi Smart
+      - Xiaomi Smart Home
+    signal_types:
+      - smart_home_platform
+    fact_types:
+      - vendor
+
+  - key: tuya
+    canonical: Tuya
+    type: vendor
+    aliases:
+      - Tuya
+      - Туя
+      - Tuya Smart
+      - Smart Life
+      - Смарт Лайф
+      - Powered by Tuya
+    signal_types:
+      - smart_home_platform
+    fact_types:
+      - vendor
+
+  - key: sonoff
+    canonical: SONOFF
+    type: vendor
+    aliases:
+      - Sonoff
+      - SONOFF
+      - Сонофф
+      - eWeLink
+      - ивелинк
+      - eWeLink CUBE
+      - iHost
+      - ZBBridge
+      - ZB Bridge
+    signal_types:
+      - smart_home_platform
+      - protocol_gateway
+    fact_types:
+      - vendor
+      - model
+
+  - key: rubetek
+    canonical: Rubetek
+    type: vendor
+    aliases:
+      - Rubetek
+      - Рубетек
+      - rubetek
+    signal_types:
+      - smart_home_platform
+      - leak_protection
+      - video_surveillance
+      - access_control
+    fact_types:
+      - vendor
+
+  - key: livicom
+    canonical: Livicom
+    type: vendor
+    aliases:
+      - Livicom
+      - Ливиком
+      - Livi
+      - Livi LS
+      - Livi MS
+    signal_types:
+      - smart_home_platform
+      - security_alarm
+      - video_surveillance
+      - leak_protection
+    fact_types:
+      - vendor
+      - model
+
+  - key: wiren_board
+    canonical: Wiren Board
+    type: vendor
+    aliases:
+      - Wiren Board
+      - Вайрен Борд
+      - Вирен Борд
+      - Wirenboard
+      - WB
+      - WB7
+      - WB8
+      - Wiren Board 8
+      - Wiren Board 8M
+    signal_types:
+      - smart_home_platform
+      - protocol_gateway
+    fact_types:
+      - vendor
+      - model
+
+  - key: spruthub
+    canonical: SprutHub
+    type: vendor
+    aliases:
+      - SprutHub
+      - Sprut Hub
+      - СпрутХаб
+      - Спрут Хаб
+      - Sprut.home
+      - Sprut Home
+      - Спрут Хоум
+    signal_types:
+      - smart_home_platform
+      - protocol_gateway
+    fact_types:
+      - vendor
+      - software
+
+  - key: hdl
+    canonical: HDL
+    type: vendor
+    aliases:
+      - HDL
+      - ХДЛ
+      - HDL Buspro
+      - HDL Bus Pro
+    signal_types:
+      - smart_home_platform
+      - protocol_gateway
+    fact_types:
+      - vendor
+
+  - key: legrand_netatmo
+    canonical: Legrand with Netatmo
+    type: vendor
+    aliases:
+      - Legrand
+      - Легран
+      - Netatmo
+      - Нетатмо
+      - Legrand Netatmo
+      - Legrand with Netatmo
+      - Valena Life with Netatmo
+      - Home Control
+      - Home+Control
+      - Bticino
+      - BTicino
+      - Бтичино
+    signal_types:
+      - smart_home_platform
+      - lighting_automation
+      - power_backup
+    fact_types:
+      - vendor
+      - software
+
+  - key: schneider
+    canonical: Schneider Electric
+    type: vendor
+    aliases:
+      - Schneider
+      - Schneider Electric
+      - Шнайдер
+      - Wiser
+      - Вайзер
+      - Merten
+    signal_types:
+      - smart_home_platform
+      - lighting_automation
+      - power_backup
+    fact_types:
+      - vendor
+
+  - key: abb
+    canonical: ABB
+    type: vendor
+    aliases:
+      - ABB
+      - АББ
+      - ABB free@home
+      - free@home
+      - free home
+    signal_types:
+      - smart_home_platform
+      - lighting_automation
+    fact_types:
+      - vendor
+
+  - key: jung
+    canonical: JUNG
+    type: vendor
+    aliases:
+      - JUNG
+      - Jung
+      - Юнг
+      - LB Management
+    signal_types:
+      - smart_home_platform
+      - lighting_automation
+    fact_types:
+      - vendor
+
+  - key: gira
+    canonical: Gira
+    type: vendor
+    aliases:
+      - Gira
+      - Гира
+      - Gira X1
+      - Gira HomeServer
+    signal_types:
+      - smart_home_platform
+      - lighting_automation
+    fact_types:
+      - vendor
+      - model
+
+  - key: shelly
+    canonical: Shelly
+    type: vendor
+    aliases:
+      - Shelly
+      - Шелли
+      - Shelly Plus
+      - Shelly Pro
+    signal_types:
+      - smart_home_platform
+      - lighting_automation
+    fact_types:
+      - vendor
+      - model
+
+  - key: tp_link_tapo
+    canonical: TP-Link Tapo
+    type: vendor
+    aliases:
+      - TP-Link
+      - TP Link
+      - ТП Линк
+      - Tapo
+      - Тапо
+      - Kasa
+      - Каса
+    signal_types:
+      - smart_home_platform
+      - video_surveillance
+    fact_types:
+      - vendor
+
+  - key: hiper
+    canonical: HIPER IoT
+    type: vendor
+    aliases:
+      - HIPER
+      - Hiper
+      - Хайпер
+      - HIPER IoT
+      - Hiper IoT
+      - HIPER IOT
+    signal_types:
+      - smart_home_platform
+      - lighting_automation
+    fact_types:
+      - vendor
+      - software
+
+  - key: ekf_connect
+    canonical: EKF Connect
+    type: vendor
+    aliases:
+      - EKF
+      - ЕКФ
+      - EKF Connect
+      - EKF Connect Home
+      - ЕКФ Коннект
+    signal_types:
+      - smart_home_platform
+      - lighting_automation
+      - climate_automation
+      - leak_protection
+    fact_types:
+      - vendor
+      - software
+
+  - key: gauss
+    canonical: Gauss Smart Home
+    type: vendor
+    aliases:
+      - Gauss
+      - Гаусс
+      - Gauss Smart
+      - Gauss Smart Home
+      - Gauss Smart Light
+    signal_types:
+      - smart_home_platform
+      - lighting_automation
+    fact_types:
+      - vendor
+
+  - key: yeelight
+    canonical: Yeelight
+    type: vendor
+    aliases:
+      - Yeelight
+      - Йилайт
+      - Елайт
+      - Yilai
+    signal_types:
+      - smart_home_platform
+      - lighting_automation
+    fact_types:
+      - vendor
+
+  - key: dahua
+    canonical: Dahua
+    type: vendor
+    aliases:
+      - Dahua
+      - Дахуа
+      - IMOU
+      - Imou
+      - Аймоу
+      - DMSS
+    signal_types:
+      - video_surveillance
+      - access_control
+      - intercom
+    fact_types:
+      - vendor
+      - software
+
+  - key: hikvision
+    canonical: Hikvision
+    type: vendor
+    aliases:
+      - Hikvision
+      - Хиквижн
+      - Хиквизион
+      - HiWatch
+      - Хайвотч
+      - Ezviz
+      - EZVIZ
+      - Эзвиз
+      - Hik-Connect
+      - Hik Connect
+    signal_types:
+      - video_surveillance
+      - access_control
+      - intercom
+      - smart_home_platform
+    fact_types:
+      - vendor
+      - software
+
+  - key: trassir
+    canonical: TRASSIR
+    type: vendor
+    aliases:
+      - TRASSIR
+      - Trassir
+      - Трассир
+    signal_types:
+      - video_surveillance
+      - access_control
+    fact_types:
+      - vendor
+      - software
+
+  - key: ivideon
+    canonical: Ivideon
+    type: vendor
+    aliases:
+      - Ivideon
+      - Ивидеон
+      - Айвидеон
+    signal_types:
+      - video_surveillance
+    fact_types:
+      - vendor
+      - software
+
+  - key: neptun
+    canonical: Neptun
+    type: vendor
+    aliases:
+      - Neptun
+      - Нептун
+      - Нептуп
+      - Neptun ProW
+      - Neptun ProW+
+      - Нептун ProW
+      - Нептуп ProW
+      - Neptun Profi
+      - Нептун Profi
+      - Profi Wi-Fi
+      - Profi Smart
+      - Neptun Smart
+      - SST Cloud
+    signal_types:
+      - leak_protection
+      - water_leak_protection
+    fact_types:
+      - vendor
+      - model
+
+  - key: gidrolock
+    canonical: Gidrolock
+    type: vendor
+    aliases:
+      - Gidrolock
+      - GIDROLOCK
+      - Гидролок
+      - Гидро Лок
+      - WSP
+      - WSP+
+    signal_types:
+      - leak_protection
+      - water_leak_protection
+    fact_types:
+      - vendor
+      - model
+
+  - key: akvastorozh
+    canonical: Аквасторож
+    type: vendor
+    aliases:
+      - Аквасторож
+      - AquaStop
+      - Аквастоп
+      - Akvastorozh
+      - Аква Сторож
+    signal_types:
+      - leak_protection
+      - water_leak_protection
+    fact_types:
+      - vendor
+
+  - key: ajax
+    canonical: Ajax
+    type: vendor
+    aliases:
+      - Ajax
+      - Аякс
+      - Ajax Systems
+    signal_types:
+      - security_alarm
+      - access_control
+      - video_surveillance
+      - leak_protection
+    fact_types:
+      - vendor
+
+  - key: zont
+    canonical: ZONT
+    type: vendor
+    aliases:
+      - ZONT
+      - ЗОНТ
+      - Zont
+      - Зонт
+    signal_types:
+      - climate_automation
+      - climate_control
+    fact_types:
+      - vendor
+
+  - key: terneo
+    canonical: Terneo
+    type: vendor
+    aliases:
+      - Terneo
+      - Тернео
+    signal_types:
+      - climate_automation
+      - climate_control
+    fact_types:
+      - vendor
+
+  - key: salus
+    canonical: Salus
+    type: vendor
+    aliases:
+      - Salus
+      - Салус
+      - Salus Smart Home
+    signal_types:
+      - climate_automation
+      - climate_control
+    fact_types:
+      - vendor
+
+  - key: danfoss
+    canonical: Danfoss
+    type: vendor
+    aliases:
+      - Danfoss
+      - Данфосс
+      - Danfoss Ally
+    signal_types:
+      - climate_automation
+      - climate_control
+    fact_types:
+      - vendor
+      - model
+
+  - key: oclimate
+    canonical: O'Climate
+    type: vendor
+    aliases:
+      - O'Climate
+      - O’Climate
+      - O Climate
+      - OCLIMATE
+      - O’CLIMATE
+      - O'CLIMATE
+    signal_types:
+      - climate_automation
+      - climate_control
+    fact_types:
+      - vendor
+
+  - key: orac
+    canonical: Orac
+    type: vendor
+    aliases:
+      - Orac
+      - Орак
+      - Ораковский
+      - Orac Decor
+    signal_types:
+      - climate_automation
+      - climate_control
+    fact_types:
+      - vendor
+
+  - key: gate_automation_brands
+    canonical: Автоматика ворот
+    type: vendor
+    aliases:
+      - Nice
+      - Найс
+      - CAME
+      - Came
+      - Каме
+      - FAAC
+      - Фаак
+      - DoorHan
+      - Дорхан
+      - Alutech
+      - Алютех
+    signal_types:
+      - gate_automation
+      - access_control
+    fact_types:
+      - vendor

@@ -35,6 +35,18 @@ class PhraseRuleConfig:
 
 
 @dataclass(frozen=True)
+class AliasRuleConfig:
+    key: str
+    canonical: str
+    kind: str
+    aliases: tuple[str, ...]
+    signal_types: tuple[str, ...]
+    fact_types: tuple[str, ...]
+    color: str | None = None
+    confidence: float | None = None
+
+
+@dataclass(frozen=True)
 class LeadScoringConfig:
     lead_threshold: int
     warm_threshold: int
@@ -52,6 +64,7 @@ class NlpPipelineConfig:
     stages: tuple[PipelineStageConfig, ...]
     signals: tuple[PhraseRuleConfig, ...]
     facts: tuple[PhraseRuleConfig, ...]
+    aliases: tuple[AliasRuleConfig, ...]
     lead_scoring: LeadScoringConfig
 
     @property
@@ -69,6 +82,12 @@ def load_nlp_config(config_dir: Path) -> NlpPipelineConfig:
 def read_nlp_config_documents(config_dir: Path) -> dict[str, dict[str, Any]]:
     facts_path = config_dir / "facts.yaml"
     lead_scoring_path = config_dir / "lead_scoring.yaml"
+    alias_documents = {
+        catalog_name: _load_yaml(config_dir / f"{catalog_name}.yaml")
+        if (config_dir / f"{catalog_name}.yaml").exists()
+        else {catalog_name: []}
+        for catalog_name in _alias_catalog_names()
+    }
     return {
         "pipeline": _load_yaml(config_dir / "pipeline.yaml"),
         "signals": _load_yaml(config_dir / "signals.yaml"),
@@ -76,6 +95,7 @@ def read_nlp_config_documents(config_dir: Path) -> dict[str, dict[str, Any]]:
         "lead_scoring": (
             _load_yaml(lead_scoring_path) if lead_scoring_path.exists() else {"lead_scoring": {}}
         ),
+        **alias_documents,
     }
 
 
@@ -88,6 +108,14 @@ def load_nlp_config_from_documents(documents: dict[str, dict[str, Any]]) -> NlpP
         stages=tuple(_parse_stage(item) for item in pipeline.get("stages", [])),
         signals=tuple(_parse_phrase_rule(item, "signals") for item in signals.get("signals", [])),
         facts=tuple(_parse_phrase_rule(item, "facts") for item in facts.get("facts", [])),
+        aliases=tuple(
+            alias
+            for catalog_name in _alias_catalog_names()
+            for alias in _parse_alias_catalog(
+                documents.get(catalog_name, {catalog_name: []}),
+                catalog_name,
+            )
+        ),
         lead_scoring=_parse_lead_scoring(lead_scoring.get("lead_scoring", {})),
     )
 
@@ -161,6 +189,43 @@ def _parse_patterns(raw_patterns: Any, collection_name: str) -> tuple[RulePatter
     return tuple(patterns)
 
 
+def _parse_alias_catalog(
+    raw_document: dict[str, Any],
+    catalog_name: str,
+) -> tuple[AliasRuleConfig, ...]:
+    raw_items = raw_document.get(catalog_name, [])
+    if raw_items is None:
+        return ()
+    if not isinstance(raw_items, list):
+        raise ValueError(f"{catalog_name} must be a list")
+
+    items: list[AliasRuleConfig] = []
+    for raw in raw_items:
+        if not isinstance(raw, dict):
+            raise ValueError(f"{catalog_name} item must be a mapping")
+        aliases = _parse_string_list(raw.get("aliases", []), f"{catalog_name}.aliases")
+        if not aliases:
+            raise ValueError(f"{catalog_name} item must define aliases")
+        signal_types = _parse_string_list(raw.get("signal_types", []), f"{catalog_name}.signal_types")
+        fact_types = _parse_string_list(raw.get("fact_types", []), f"{catalog_name}.fact_types")
+        if not signal_types and not fact_types:
+            raise ValueError(f"{catalog_name} item must define signal_types or fact_types")
+        items.append(
+            AliasRuleConfig(
+                key=str(raw["key"]),
+                canonical=str(raw.get("canonical", raw.get("label", raw["key"]))),
+                kind=str(raw.get("type", _catalog_item_kind(catalog_name))),
+                aliases=tuple(aliases),
+                signal_types=tuple(signal_types),
+                fact_types=tuple(fact_types),
+                color=raw.get("color"),
+                confidence=float(raw["confidence"]) if raw.get("confidence") is not None else None,
+            )
+        )
+
+    return tuple(items)
+
+
 def _parse_lead_scoring(raw: Any) -> LeadScoringConfig:
     if raw is None:
         raw = {}
@@ -221,5 +286,18 @@ def _parse_string_list(raw: Any, name: str) -> list[str]:
     if raw is None:
         return []
     if not isinstance(raw, list):
-        raise ValueError(f"lead_scoring {name} must be a list")
-    return [str(item) for item in raw]
+        raise ValueError(f"{name} must be a list")
+    return [str(item) for item in raw if str(item).strip()]
+
+
+def _alias_catalog_names() -> tuple[str, ...]:
+    return ("vendors", "protocols", "devices", "software")
+
+
+def _catalog_item_kind(catalog_name: str) -> str:
+    return {
+        "vendors": "vendor",
+        "protocols": "protocol",
+        "devices": "device",
+        "software": "software",
+    }.get(catalog_name, catalog_name.rstrip("s"))

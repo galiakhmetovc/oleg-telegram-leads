@@ -1,0 +1,546 @@
+devices:
+  - key: smart_home_hub
+    canonical: Хаб умного дома
+    type: device
+    aliases:
+      - хаб
+      - умный хаб
+      - хаб умного дома
+      - шлюз
+      - gateway
+      - гейтвей
+      - центр умного дома
+      - контроллер умного дома
+      - zigbee шлюз
+      - зигби шлюз
+    signal_types:
+      - protocol_gateway
+      - smart_home_platform
+    fact_types:
+      - automation_component
+      - controlled_device
+
+  - key: controller
+    canonical: Контроллер
+    type: device
+    aliases:
+      - контроллер
+      - PLC
+      - ПЛК
+      - DIN контроллер
+      - контроллер на DIN рейку
+      - контроллер автоматизации
+      - центральный контроллер
+    signal_types:
+      - smart_home_platform
+      - protocol_gateway
+    fact_types:
+      - automation_component
+      - controlled_device
+
+  - key: relay_module
+    canonical: Реле / модуль
+    type: device
+    aliases:
+      - реле
+      - умное реле
+      - релейный модуль
+      - модуль реле
+      - микромодуль
+      - модуль в подрозетник
+      - реле в подрозетник
+      - сухой контакт
+      - шайба
+      - шайбы
+      - умная шайба
+      - модуль управления
+    signal_types:
+      - smart_relay_control
+      - lighting_automation
+    fact_types:
+      - automation_component
+      - controlled_device
+
+  - key: leak_sensor
+    canonical: Датчик протечки
+    type: device
+    aliases:
+      - датчик протечки
+      - датчики протечки
+      - датчик контроля протечки
+      - датчик воды
+      - датчик затопления
+      - датчик потопа
+      - сенсор протечки
+      - проводной датчик протечки
+      - беспроводной датчик протечки
+      - датчик сработал
+      - датчик срабатывания протечки
+    signal_types:
+      - leak_protection
+      - water_leak_protection
+    fact_types:
+      - automation_component
+      - controlled_device
+
+  - key: leak_valve
+    canonical: Кран защиты от протечки
+    type: device
+    aliases:
+      - шаровой кран
+      - электропривод крана
+      - кран с электроприводом
+      - перекрыть воду
+      - перекрывает воду
+      - клапан протечки
+      - электроклапан воды
+      - система контроля протечки
+      - система защиты от протечки
+      - система защиты от протечек
+    signal_types:
+      - leak_protection
+      - water_leak_protection
+    fact_types:
+      - automation_component
+      - controlled_device
+
+  - key: motion_sensor
+    canonical: Датчик движения
+    type: device
+    aliases:
+      - датчик движения
+      - датчики движения
+      - сенсор движения
+      - движение в определенные часы
+      - включалось на движение
+      - при движении
+      - датчик присутствия
+      - presence sensor
+      - PIR датчик
+      - PIR
+    signal_types:
+      - motion_lighting_automation
+      - lighting_automation
+    fact_types:
+      - automation_component
+      - controlled_device
+
+  - key: opening_sensor
+    canonical: Датчик открытия
+    type: device
+    aliases:
+      - датчик открытия
+      - датчик двери
+      - датчик окна
+      - геркон
+      - магнитоконтактный датчик
+      - датчик разбития стекла
+      - датчик удара
+    signal_types:
+      - security_alarm
+      - access_control
+    fact_types:
+      - automation_component
+      - access_device
+
+  - key: smoke_gas_sensor
+    canonical: Датчик дыма / газа
+    type: device
+    aliases:
+      - датчик дыма
+      - пожарный датчик
+      - датчик газа
+      - датчик утечки газа
+      - датчик CO2
+      - датчик угарного газа
+      - датчик качества воздуха
+    signal_types:
+      - security_alarm
+      - climate_automation
+    fact_types:
+      - automation_component
+      - controlled_device
+
+  - key: smart_socket
+    canonical: Умная розетка
+    type: device
+    aliases:
+      - умная розетка
+      - умные розетки
+      - Wi-Fi розетка
+      - Zigbee розетка
+      - розетка с мониторингом
+      - розетка с Алисой
+      - встраиваемая розетка
+      - smart plug
+      - smart socket
+    signal_types:
+      - smart_home_automation
+      - power_backup
+    fact_types:
+      - automation_component
+      - controlled_device
+
+  - key: smart_switch
+    canonical: Умный выключатель
+    type: device
+    aliases:
+      - умный выключатель
+      - умные выключатели
+      - выключатель с нейтралью
+      - выключатель без нейтрали
+      - сценарный выключатель
+      - беспроводной выключатель
+      - проходной выключатель
+      - кнопочный выключатель
+      - выключатель звонкового типа
+    signal_types:
+      - lighting_automation
+      - smart_relay_control
+    fact_types:
+      - automation_component
+      - controlled_device
+
+  - key: dimmer
+    canonical: Диммер
+    type: device
+    aliases:
+      - диммер
+      - умный диммер
+      - светорегулятор
+      - светорегулирование
+      - регулировка яркости
+    signal_types:
+      - lighting_automation
+      - smart_relay_control
+    fact_types:
+      - automation_component
+      - controlled_device
+
+  - key: smart_lighting
+    canonical: Умный свет
+    type: device
+    aliases:
+      - умный свет
+      - умная лампа
+      - умные лампы
+      - умная лампочка
+      - умные лампочки
+      - светодиодная лента
+      - LED лента
+      - RGB лента
+      - трековый свет
+      - треки
+      - бра
+      - ночной свет
+      - дежурный свет
+      - закарнизная подсветка
+      - сценарии освещения
+      - сценарий освещения
+    signal_types:
+      - lighting_automation
+      - lighting_control
+    fact_types:
+      - automation_component
+      - controlled_device
+
+  - key: thermostat
+    canonical: Термостат / терморегулятор
+    type: device
+    aliases:
+      - термостат
+      - умный термостат
+      - терморегулятор
+      - термоголовка
+      - умная термоголовка
+      - теплый пол
+      - теплые полы
+      - управление отоплением
+      - радиаторный термостат
+    signal_types:
+      - climate_automation
+      - climate_control
+    fact_types:
+      - automation_component
+      - controlled_device
+
+  - key: climate_control_device
+    canonical: Климатическое оборудование
+    type: device
+    aliases:
+      - кондиционер
+      - кондиционеры
+      - канальное кондиционирование
+      - фанкойл
+      - приточка
+      - вентиляция
+      - увлажнитель
+      - климат
+      - управление климатом
+      - ИК пульт для кондиционера
+    signal_types:
+      - climate_automation
+      - climate_control
+    fact_types:
+      - automation_component
+      - controlled_device
+
+  - key: electric_curtain
+    canonical: Электрокарниз
+    type: device
+    aliases:
+      - электрокарниз
+      - электрокарнизы
+      - электрический карниз
+      - электрические карнизы
+      - моторизированный карниз
+      - карниз с Wi-Fi
+      - карниз с Алисой
+      - реле для штор
+      - привод штор
+      - умные шторы
+      - рольставни
+      - рулонные шторы
+    signal_types:
+      - electric_curtain_control
+      - lighting_automation
+    fact_types:
+      - automation_component
+      - controlled_device
+
+  - key: camera
+    canonical: Камера видеонаблюдения
+    type: device
+    aliases:
+      - камера
+      - камеры
+      - IP камера
+      - IP-камера
+      - камера видеонаблюдения
+      - камеры видеонаблюдения
+      - видеокамера
+      - видеокамеры
+      - умная камера
+      - камера с ИИ
+      - камера на стену
+      - камера для няни
+      - следить за няней
+      - видеоглазок
+      - дверной глазок
+    signal_types:
+      - video_surveillance
+    fact_types:
+      - automation_component
+      - controlled_device
+
+  - key: nvr_dvr
+    canonical: Видеорегистратор
+    type: device
+    aliases:
+      - видеорегистратор
+      - NVR
+      - DVR
+      - XVR
+      - регистратор
+      - сетевой регистратор
+      - архив видеонаблюдения
+      - запись видео
+    signal_types:
+      - video_surveillance
+    fact_types:
+      - automation_component
+      - controlled_device
+
+  - key: intercom
+    canonical: Домофон / вызывная панель
+    type: device
+    aliases:
+      - домофон
+      - домофоны
+      - видеодомофон
+      - IP домофон
+      - Wi-Fi домофон
+      - домофон с вайфаем
+      - вызывная панель
+      - видеопанель
+      - панель вызова
+      - кнопка открывания
+      - кнопка выхода
+    signal_types:
+      - intercom
+      - access_control
+    fact_types:
+      - automation_component
+      - access_device
+
+  - key: smart_lock
+    canonical: Умный замок
+    type: device
+    aliases:
+      - умный замок
+      - входной замок
+      - электронный замок
+      - электромагнитный замок
+      - электромеханический замок
+      - замок с приложением
+      - замок с Алисой
+      - smart lock
+      - кодовая клавиатура
+    signal_types:
+      - access_control
+      - smart_home_automation
+    fact_types:
+      - automation_component
+      - access_device
+
+  - key: access_reader
+    canonical: Считыватель СКУД
+    type: device
+    aliases:
+      - считыватель
+      - считыватель карт
+      - RFID считыватель
+      - контроллер СКУД
+      - СКУД контроллер
+      - карта доступа
+      - брелок доступа
+      - биометрический считыватель
+      - турникет
+    signal_types:
+      - access_control
+    fact_types:
+      - access_device
+
+  - key: gate_barrier
+    canonical: Ворота / шлагбаум
+    type: device
+    aliases:
+      - ворота
+      - шлагбаум
+      - автоматика ворот
+      - привод ворот
+      - автоматизация ворот
+      - откатные ворота
+      - распашные ворота
+      - въездная группа
+      - автоматизация въездной группы
+    signal_types:
+      - gate_automation
+      - access_control
+    fact_types:
+      - automation_component
+      - access_device
+
+  - key: ups
+    canonical: ИБП
+    type: device
+    aliases:
+      - ИБП
+      - UPS
+      - бесперебойник
+      - источник бесперебойного питания
+      - бесперебойное питание
+      - комплект бесперебойного питания
+      - резервное питание
+      - АКБ
+      - аккумуляторный блок
+    signal_types:
+      - power_backup
+      - power_quality
+    fact_types:
+      - power_equipment
+      - controlled_device
+
+  - key: voltage_stabilizer
+    canonical: Стабилизатор / реле напряжения
+    type: device
+    aliases:
+      - стабилизатор
+      - стабилизатор напряжения
+      - реле напряжения
+      - контроль напряжения
+      - скачки напряжения
+      - нестабильное электроснабжение
+      - защита от перенапряжения
+      - УЗМ
+      - УЗИП
+    signal_types:
+      - power_backup
+      - power_quality
+    fact_types:
+      - power_equipment
+      - controlled_device
+
+  - key: smart_panel
+    canonical: Сенсорная панель
+    type: device
+    aliases:
+      - сенсорная панель
+      - тач панель
+      - touch panel
+      - умная панель
+      - панель управления
+      - экран управления
+      - настенная панель
+      - NSPanel
+      - NSPanel Pro
+    signal_types:
+      - smart_home_platform
+      - lighting_automation
+    fact_types:
+      - automation_component
+      - controlled_device
+
+  - key: siren
+    canonical: Сирена
+    type: device
+    aliases:
+      - сирена
+      - охранная сирена
+      - пожарная сирена
+      - звуковая сирена
+      - тревожная кнопка
+      - кнопка тревоги
+    signal_types:
+      - security_alarm
+    fact_types:
+      - automation_component
+      - controlled_device
+
+  - key: network_equipment
+    canonical: Сетевое оборудование
+    type: device
+    aliases:
+      - коммутатор
+      - PoE коммутатор
+      - роутер
+      - маршрутизатор
+      - патч-панель
+      - слаботочный щит
+      - мелкоточный щит
+      - шкаф слаботочки
+      - СКС
+      - структурированная кабельная сеть
+    signal_types:
+      - network_infrastructure
+    fact_types:
+      - network_scope
+      - controlled_device
+
+  - key: ir_remote
+    canonical: ИК-пульт
+    type: device
+    aliases:
+      - ИК пульт
+      - ИК-пульт
+      - умный ИК пульт
+      - универсальный пульт
+      - пульт для кондиционера
+      - пульт для ТВ
+      - IR blaster
+    signal_types:
+      - protocol_gateway
+      - climate_automation
+    fact_types:
+      - automation_component
+      - controlled_device

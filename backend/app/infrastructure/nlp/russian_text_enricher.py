@@ -2,18 +2,18 @@ from __future__ import annotations
 
 import warnings
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 
 from natasha import Doc, MorphVocab, NewsEmbedding, NewsMorphTagger, NewsNERTagger
 from natasha import NewsSyntaxParser, Segmenter
 from yargy import Parser, or_, rule
-from yargy.predicates import caseless, normalized
+from yargy.predicates import eq, normalized
 
 from app.domain.enrichment import DomainSignal, EnrichedEntity, EnrichedSentence, EnrichedToken
 from app.domain.enrichment import EnrichmentMetrics, ExtractedFact, PipelineTraceItem
 from app.domain.enrichment import SyntaxDependency, TextEnrichmentResult, TextRange
-from app.infrastructure.nlp.config_loader import NlpPipelineConfig, PhraseRuleConfig
+from app.infrastructure.nlp.config_loader import AliasRuleConfig, NlpPipelineConfig, PhraseRuleConfig
 from app.infrastructure.nlp.config_loader import RuleTokenConfig
 from app.infrastructure.nlp.lead_scorer import LeadScorer
 
@@ -26,6 +26,12 @@ class CompiledPhraseRule:
     parser: Any
 
 
+@dataclass(frozen=True)
+class CompiledAliasRule:
+    config: AliasRuleConfig
+    parser: Any
+
+
 class RussianTextEnricher:
     def __init__(self, config: NlpPipelineConfig) -> None:
         self._config = config
@@ -35,8 +41,10 @@ class RussianTextEnricher:
         self._morph_tagger: NewsMorphTagger | None = None
         self._syntax_parser: NewsSyntaxParser | None = None
         self._ner_tagger: NewsNERTagger | None = None
+        self._signal_rules_by_type = {rule.type: rule for rule in config.signals}
         self._compiled_signal_rules = self._compile_phrase_rules(config.signals)
         self._compiled_fact_rules = self._compile_phrase_rules(config.facts)
+        self._compiled_alias_rules = self._compile_alias_rules(config.aliases)
 
     def enrich(
         self,
@@ -199,7 +207,21 @@ class RussianTextEnricher:
                     compiled_rule.parser,
                 )
             )
-        return signals
+        for compiled_alias in self._compiled_alias_rules:
+            alias_config = compiled_alias.config
+            for start, stop, match_text in self._find_phrase_matches(text, compiled_alias.parser):
+                signals.extend(
+                    self._signal_from_alias(
+                        alias_config=alias_config,
+                        signal_type=signal_type,
+                        match_text=match_text,
+                        start=start,
+                        stop=stop,
+                        index=len(signals) + offset + 1,
+                    )
+                    for offset, signal_type in enumerate(alias_config.signal_types)
+                )
+        return _dedupe_signals(signals)
 
     def _extract_facts(self, text: str) -> list[ExtractedFact]:
         facts: list[ExtractedFact] = []
@@ -220,7 +242,44 @@ class RussianTextEnricher:
                     compiled_rule.parser,
                 )
             )
-        return facts
+        for compiled_alias in self._compiled_alias_rules:
+            alias_config = compiled_alias.config
+            for start, stop, match_text in self._find_phrase_matches(text, compiled_alias.parser):
+                facts.extend(
+                    ExtractedFact(
+                        id=f"fact-{len(facts) + offset + 1}",
+                        text=match_text,
+                        type=fact_type,
+                        label=_alias_fact_label(alias_config, fact_type),
+                        range=TextRange(start=start, stop=stop),
+                        source="alias_catalog",
+                        confidence=alias_config.confidence,
+                    )
+                    for offset, fact_type in enumerate(alias_config.fact_types)
+                )
+        return _dedupe_facts(facts)
+
+    def _signal_from_alias(
+        self,
+        *,
+        alias_config: AliasRuleConfig,
+        signal_type: str,
+        match_text: str,
+        start: int,
+        stop: int,
+        index: int,
+    ) -> DomainSignal:
+        signal_config = self._signal_rules_by_type.get(signal_type)
+        return DomainSignal(
+            id=f"signal-{index}",
+            text=match_text,
+            type=signal_type,
+            label=signal_config.label if signal_config else alias_config.canonical,
+            range=TextRange(start=start, stop=stop),
+            source="alias_catalog",
+            confidence=signal_config.confidence if signal_config else alias_config.confidence,
+            color=signal_config.color if signal_config else alias_config.color,
+        )
 
     def _compile_phrase_rules(
         self,
@@ -231,16 +290,30 @@ class RussianTextEnricher:
             for rule_config in rule_configs
         )
 
+    def _compile_alias_rules(
+        self,
+        alias_configs: tuple[AliasRuleConfig, ...],
+    ) -> tuple[CompiledAliasRule, ...]:
+        return tuple(
+            CompiledAliasRule(config=alias_config, parser=self._build_alias_parser(alias_config))
+            for alias_config in alias_configs
+        )
+
     def _build_parser(self, rule_config: PhraseRuleConfig) -> Any:
-        yargy_rules = [rule(*[caseless(word) for word in phrase]) for phrase in rule_config.phrases]
+        yargy_rules = [rule(*[eq(word.lower()) for word in phrase]) for phrase in rule_config.phrases]
         yargy_rules.extend(
             rule(*[self._token_predicate(token) for token in pattern.tokens])
             for pattern in rule_config.patterns
         )
-        with warnings.catch_warnings():
-            warnings.filterwarnings("ignore", category=UserWarning, module="pymorphy2.analyzer")
-            warnings.filterwarnings("ignore", message="pkg_resources is deprecated.*")
-            return Parser(or_(*yargy_rules))
+        return _parser_from_rules(yargy_rules)
+
+    def _build_alias_parser(self, alias_config: AliasRuleConfig) -> Any:
+        yargy_rules = [
+            rule(*[eq(word.lower()) for word in alias.strip().split()])
+            for alias in alias_config.aliases
+            if alias.strip()
+        ]
+        return _parser_from_rules(yargy_rules)
 
     def _find_phrase_matches(
         self,
@@ -248,10 +321,11 @@ class RussianTextEnricher:
         parser: Any,
     ) -> list[tuple[int, int, str]]:
         matches: list[tuple[int, int, str]] = []
+        search_text = text.lower()
         with warnings.catch_warnings():
             warnings.filterwarnings("ignore", category=UserWarning, module="pymorphy2.analyzer")
             warnings.filterwarnings("ignore", message="pkg_resources is deprecated.*")
-            for match in parser.findall(text):
+            for match in parser.findall(search_text):
                 matches.append((match.span.start, match.span.stop, text[match.span.start:match.span.stop]))
         return matches
 
@@ -259,5 +333,47 @@ class RussianTextEnricher:
         if token.predicate == "normalized":
             return normalized(token.value)
         if token.predicate == "caseless":
-            return caseless(token.value)
+            return eq(token.value.lower())
         raise ValueError(f"unsupported Yargy token predicate: {token.predicate}")
+
+
+def _parser_from_rules(yargy_rules: list[Any]) -> Any:
+    with warnings.catch_warnings():
+        warnings.filterwarnings("ignore", category=UserWarning, module="pymorphy2.analyzer")
+        warnings.filterwarnings("ignore", message="pkg_resources is deprecated.*")
+        return Parser(or_(*yargy_rules))
+
+
+def _alias_fact_label(alias_config: AliasRuleConfig, fact_type: str) -> str:
+    prefix = {
+        "vendor": "Вендор",
+        "protocol": "Протокол",
+        "device": "Устройство",
+        "software": "ПО",
+        "model": "Модель",
+    }.get(fact_type, alias_config.kind)
+    return f"{prefix}: {alias_config.canonical}"
+
+
+def _dedupe_signals(signals: list[DomainSignal]) -> list[DomainSignal]:
+    deduped: list[DomainSignal] = []
+    seen: set[tuple[str, int, int, str]] = set()
+    for signal in signals:
+        key = (signal.type, signal.range.start, signal.range.stop, signal.text.lower())
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(replace(signal, id=f"signal-{len(deduped) + 1}"))
+    return deduped
+
+
+def _dedupe_facts(facts: list[ExtractedFact]) -> list[ExtractedFact]:
+    deduped: list[ExtractedFact] = []
+    seen: set[tuple[str, int, int, str]] = set()
+    for fact in facts:
+        key = (fact.type, fact.range.start, fact.range.stop, fact.text.lower())
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(replace(fact, id=f"fact-{len(deduped) + 1}"))
+    return deduped

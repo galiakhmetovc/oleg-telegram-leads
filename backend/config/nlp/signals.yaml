@@ -131,6 +131,54 @@ signals:
           - normalized: "умный"
           - normalized: "функционал"
 
+  - type: smart_home_platform
+    label: Платформа / экосистема умного дома
+    color: "#006c9c"
+    confidence: 0.78
+    patterns:
+      - source_text: "экосистема умного дома"
+        tokens:
+          - normalized: "экосистема"
+          - normalized: "умный"
+          - normalized: "дом"
+      - source_text: "платформа умного дома"
+        tokens:
+          - normalized: "платформа"
+          - normalized: "умный"
+          - normalized: "дом"
+      - source_text: "голосовой помощник"
+        tokens:
+          - normalized: "голосовой"
+          - normalized: "помощник"
+      - source_text: "управление через приложение"
+        tokens:
+          - normalized: "управление"
+          - normalized: "через"
+          - normalized: "приложение"
+
+  - type: protocol_gateway
+    label: Протоколы / шлюзы / интеграции
+    color: "#3949ab"
+    confidence: 0.76
+    patterns:
+      - source_text: "zigbee шлюз"
+        tokens:
+          - caseless: "zigbee"
+          - normalized: "шлюз"
+      - source_text: "умный хаб"
+        tokens:
+          - normalized: "умный"
+          - normalized: "хаб"
+      - source_text: "контроллер автоматизации"
+        tokens:
+          - normalized: "контроллер"
+          - normalized: "автоматизация"
+      - source_text: "протокол умного дома"
+        tokens:
+          - normalized: "протокол"
+          - normalized: "умный"
+          - normalized: "дом"
+
   - type: video_surveillance
     label: Видеонаблюдение
     color: "#455a64"
@@ -314,6 +362,26 @@ signals:
           - normalized: "информация"
           - normalized: "на"
           - normalized: "смартфон"
+
+  - type: leak_protection
+    label: Защита от протечек / контроль воды
+    color: "#00796b"
+    confidence: 0.82
+    patterns:
+      - source_text: "защита от протечек"
+        tokens:
+          - normalized: "защита"
+          - normalized: "от"
+          - normalized: "протечка"
+      - source_text: "контроль протечки воды"
+        tokens:
+          - normalized: "контроль"
+          - normalized: "протечка"
+          - normalized: "вода"
+      - source_text: "перекрывает воду"
+        tokens:
+          - normalized: "перекрывать"
+          - normalized: "вода"
 
   - type: implementation_intent
     label: Намерение реализовать
@@ -557,6 +625,26 @@ signals:
           - normalized: "скачок"
           - normalized: "напряжение"
 
+  - type: power_backup
+    label: Резервное питание / защита электросети
+    color: "#f9a825"
+    confidence: 0.78
+    patterns:
+      - source_text: "резервное питание"
+        tokens:
+          - normalized: "резервный"
+          - normalized: "питание"
+      - source_text: "комплект бесперебойного питания"
+        tokens:
+          - normalized: "комплект"
+          - normalized: "бесперебойный"
+          - normalized: "питание"
+      - source_text: "защита от перенапряжения"
+        tokens:
+          - normalized: "защита"
+          - normalized: "от"
+          - normalized: "перенапряжение"
+
   - type: climate_control
     label: Управление климатом
     color: "#0277bd"
@@ -581,6 +669,24 @@ signals:
       - tokens:
           - normalized: "потолочный"
           - normalized: "карниз"
+
+  - type: climate_automation
+    label: Автоматизация климата
+    color: "#0288d1"
+    confidence: 0.78
+    patterns:
+      - source_text: "автоматизация климата"
+        tokens:
+          - normalized: "автоматизация"
+          - normalized: "климат"
+      - source_text: "управление кондиционером"
+        tokens:
+          - normalized: "управление"
+          - normalized: "кондиционер"
+      - source_text: "управление отоплением"
+        tokens:
+          - normalized: "управление"
+          - normalized: "отопление"
 
   - type: lighting_control
     label: Управление освещением
@@ -609,6 +715,28 @@ signals:
           - normalized: "бра"
       - tokens:
           - normalized: "трек"
+
+  - type: lighting_automation
+    label: Автоматизация освещения
+    color: "#9e9d24"
+    confidence: 0.78
+    patterns:
+      - source_text: "автоматизация освещения"
+        tokens:
+          - normalized: "автоматизация"
+          - normalized: "освещение"
+      - source_text: "сценарий освещения"
+        tokens:
+          - normalized: "сценарий"
+          - normalized: "освещение"
+      - source_text: "умный выключатель"
+        tokens:
+          - normalized: "умный"
+          - normalized: "выключатель"
+      - source_text: "умное реле"
+        tokens:
+          - normalized: "умный"
+          - normalized: "реле"
 
   - type: motion_lighting_automation
     label: Автоматизация света по движению

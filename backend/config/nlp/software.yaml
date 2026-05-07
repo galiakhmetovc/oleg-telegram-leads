@@ -1,0 +1,338 @@
+software:
+  - key: alice
+    canonical: Алиса
+    type: software
+    aliases:
+      - Алиса
+      - Алису
+      - Алисой
+      - Alice
+      - голосовой помощник Алиса
+      - Дом с Алисой
+      - Умный дом с Алисой
+      - Яндекс Дом
+      - Yandex Home
+      - Яндекс с Алисой
+      - приложение Дом с Алисой
+    signal_types:
+      - smart_home_platform
+    fact_types:
+      - software
+
+  - key: sber_salut
+    canonical: Салют
+    type: software
+    aliases:
+      - Салют
+      - Sber Salut
+      - Сбер Салют
+      - приложение Салют
+      - ассистент Салют
+      - Salute
+    signal_types:
+      - smart_home_platform
+    fact_types:
+      - software
+
+  - key: home_assistant
+    canonical: Home Assistant
+    type: software
+    aliases:
+      - Home Assistant
+      - Хоум Ассистант
+      - Хоум Асистант
+      - HA
+      - HomeAssistant
+      - Hass
+      - hassio
+      - HAOS
+    signal_types:
+      - smart_home_platform
+      - protocol_gateway
+    fact_types:
+      - software
+
+  - key: apple_home
+    canonical: Apple Home / HomeKit
+    type: software
+    aliases:
+      - Apple Home
+      - Apple Дом
+      - Эпл Дом
+      - HomeKit
+      - ХоумКит
+      - Хоум Кит
+      - Apple HomeKit
+      - Siri
+      - Сири
+    signal_types:
+      - smart_home_platform
+    fact_types:
+      - software
+
+  - key: google_home
+    canonical: Google Home
+    type: software
+    aliases:
+      - Google Home
+      - Гугл Хоум
+      - Google Assistant
+      - Гугл Ассистент
+      - Google Nest
+      - Nest
+    signal_types:
+      - smart_home_platform
+    fact_types:
+      - software
+
+  - key: tuya_smart_life
+    canonical: Tuya / Smart Life
+    type: software
+    aliases:
+      - Tuya
+      - Tuya Smart
+      - Туя
+      - Smart Life
+      - Смарт Лайф
+      - приложение Tuya
+      - приложение Smart Life
+      - Tuya Smart Life
+    signal_types:
+      - smart_home_platform
+    fact_types:
+      - software
+
+  - key: aqara_home
+    canonical: Aqara Home
+    type: software
+    aliases:
+      - Aqara Home
+      - Акара Хоум
+      - Аккара Хоум
+      - приложение Aqara
+      - приложение Акара
+    signal_types:
+      - smart_home_platform
+    fact_types:
+      - software
+
+  - key: mi_home
+    canonical: Mi Home
+    type: software
+    aliases:
+      - Mi Home
+      - Xiaomi Home
+      - MiHome
+      - Ми Хоум
+      - Сяоми Хоум
+      - Mijia
+      - Миджиа
+      - приложение Xiaomi
+    signal_types:
+      - smart_home_platform
+    fact_types:
+      - software
+
+  - key: ewelink
+    canonical: eWeLink
+    type: software
+    aliases:
+      - eWeLink
+      - Ewelink
+      - ивелинк
+      - и-велинк
+      - eWeLink app
+      - eWeLink CUBE
+      - CUBE OS
+    signal_types:
+      - smart_home_platform
+      - protocol_gateway
+    fact_types:
+      - software
+
+  - key: zigbee2mqtt
+    canonical: Zigbee2MQTT
+    type: software
+    aliases:
+      - Zigbee2MQTT
+      - Zigbee 2 MQTT
+      - Зигби2MQTT
+      - Зигби ту MQTT
+      - z2m
+      - Z2M
+    signal_types:
+      - protocol_gateway
+      - smart_home_platform
+    fact_types:
+      - software
+
+  - key: node_red
+    canonical: Node-RED
+    type: software
+    aliases:
+      - Node-RED
+      - Node RED
+      - Нод Ред
+      - NodeRed
+    signal_types:
+      - smart_home_platform
+      - protocol_gateway
+    fact_types:
+      - software
+
+  - key: iobroker
+    canonical: ioBroker
+    type: software
+    aliases:
+      - ioBroker
+      - iobroker
+      - айоброкер
+      - ио брокер
+    signal_types:
+      - smart_home_platform
+      - protocol_gateway
+    fact_types:
+      - software
+
+  - key: majordomo
+    canonical: MajorDoMo
+    type: software
+    aliases:
+      - MajorDoMo
+      - Majordomo
+      - Мажордомо
+      - МажорДоМо
+    signal_types:
+      - smart_home_platform
+    fact_types:
+      - software
+
+  - key: domoticz
+    canonical: Domoticz
+    type: software
+    aliases:
+      - Domoticz
+      - Домотикз
+      - Домотикс
+    signal_types:
+      - smart_home_platform
+    fact_types:
+      - software
+
+  - key: iridium
+    canonical: iRidium
+    type: software
+    aliases:
+      - iRidium
+      - Iridium
+      - Айридиум
+      - iRidium mobile
+      - iRidium server
+    signal_types:
+      - smart_home_platform
+    fact_types:
+      - software
+
+  - key: wiren_board_software
+    canonical: Wiren Board software
+    type: software
+    aliases:
+      - Wiren Board web
+      - Wiren Board rules
+      - WB Rules
+      - wb-rules
+      - MQTT broker Wiren Board
+      - веб-интерфейс Wiren Board
+    signal_types:
+      - smart_home_platform
+      - protocol_gateway
+    fact_types:
+      - software
+
+  - key: sprut_home
+    canonical: Sprut.home
+    type: software
+    aliases:
+      - Sprut.home
+      - Sprut Home
+      - Спрут Хоум
+      - СпрутХоум
+      - SprutHub app
+    signal_types:
+      - smart_home_platform
+    fact_types:
+      - software
+
+  - key: ekf_connect_home
+    canonical: EKF Connect Home
+    type: software
+    aliases:
+      - EKF Connect Home
+      - EKF Connect
+      - ЕКФ Коннект
+      - приложение EKF
+    signal_types:
+      - smart_home_platform
+    fact_types:
+      - software
+
+  - key: hiper_iot
+    canonical: HIPER IoT
+    type: software
+    aliases:
+      - HIPER IoT
+      - HIPER IOT
+      - Hiper IoT
+      - приложение HIPER
+      - HIPER IOT app
+    signal_types:
+      - smart_home_platform
+    fact_types:
+      - software
+
+  - key: rubetek_app
+    canonical: Rubetek app
+    type: software
+    aliases:
+      - приложение Rubetek
+      - Rubetek app
+      - Rubetek IoT
+      - мобильное приложение Rubetek
+    signal_types:
+      - smart_home_platform
+    fact_types:
+      - software
+
+  - key: livicom_app
+    canonical: Livicom app
+    type: software
+    aliases:
+      - приложение Livicom
+      - Livicom app
+      - Livi app
+      - приложение Livi
+    signal_types:
+      - smart_home_platform
+      - security_alarm
+    fact_types:
+      - software
+
+  - key: video_security_apps
+    canonical: ПО видеонаблюдения
+    type: software
+    aliases:
+      - Ivideon
+      - Ивидеон
+      - TRASSIR
+      - Трассир
+      - Hik-Connect
+      - Hik Connect
+      - EZVIZ
+      - Эзвиз
+      - DMSS
+      - Imou Life
+      - Dahua DMSS
+    signal_types:
+      - video_surveillance
+    fact_types:
+      - software
