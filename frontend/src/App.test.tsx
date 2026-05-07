@@ -39,6 +39,14 @@ test("renders text enrichment workspace", () => {
   expect(screen.getByRole("button", { name: /запустить обогащение/i })).toBeInTheDocument();
 });
 
+test("uses scrollable top navigation for narrow screens", () => {
+  render(<App />);
+
+  const tabList = screen.getByRole("tablist", { name: "Основная навигация" });
+
+  expect(tabList.closest(".MuiTabs-scroller")).toHaveClass("MuiTabs-scrollableX");
+});
+
 test("starts enrichment job and subscribes to SSE progress", async () => {
   const fetchMock = vi.fn().mockResolvedValue({
     ok: true,

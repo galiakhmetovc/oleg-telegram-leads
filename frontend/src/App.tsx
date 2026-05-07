@@ -46,7 +46,8 @@ import {
   Toolbar,
   Tooltip,
   Typography,
-  createTheme
+  createTheme,
+  useMediaQuery
 } from "@mui/material";
 import { FormEvent, SyntheticEvent, useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
@@ -284,6 +285,7 @@ export function App() {
 
   const result = job?.result ?? null;
   const isProcessing = isSubmitting || job?.status === "queued" || job?.status === "running";
+  const isNarrowScreen = useMediaQuery(theme.breakpoints.down("sm"));
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -392,12 +394,20 @@ export function App() {
       <CssBaseline />
       <Box className="app-shell">
         <AppBar position="static" color="default" elevation={0} className="top-bar">
-          <Toolbar variant="dense">
+          <Toolbar variant="dense" className="top-toolbar">
             <AutoAwesomeIcon color="primary" fontSize="small" />
-            <Typography variant="subtitle1" component="h1" sx={{ ml: 1, fontWeight: 700 }}>
+            <Typography variant="subtitle1" component="h1" className="app-title" sx={{ ml: 1, fontWeight: 700 }}>
               PUR Leads v2 - обогащение текста
             </Typography>
-            <Tabs value={activePage} onChange={handlePageChange} className="main-nav">
+            <Tabs
+              value={activePage}
+              onChange={handlePageChange}
+              className="main-nav"
+              variant="scrollable"
+              scrollButtons="auto"
+              allowScrollButtonsMobile
+              aria-label="Основная навигация"
+            >
               <Tab label="Обогащение" />
               <Tab icon={<SettingsIcon fontSize="small" />} iconPosition="start" label="Настройки" />
               <Tab icon={<HelpOutlineIcon fontSize="small" />} iconPosition="start" label="Справка" />
@@ -415,12 +425,13 @@ export function App() {
                     value={inputText}
                     onChange={(event) => setInputText(event.target.value)}
                     multiline
-                    minRows={16}
+                    minRows={isNarrowScreen ? 8 : 16}
                     fullWidth
                     label="Произвольный текст"
                     slotProps={{ htmlInput: { "aria-label": "Текст для обогащения" } }}
                   />
                   <Button
+                    className="primary-action"
                     type="submit"
                     variant="contained"
                     startIcon={isProcessing ? <CircularProgress size={18} color="inherit" /> : <PlayArrowIcon />}
@@ -440,7 +451,15 @@ export function App() {
                 <StatusPanel job={job} events={events} isSubmitting={isSubmitting} />
                 {result ? (
                   <Paper variant="outlined" className="result-card">
-                    <Tabs value={activeTab} onChange={handleTabChange} variant="scrollable">
+                    <Tabs
+                      value={activeTab}
+                      onChange={handleTabChange}
+                      variant="scrollable"
+                      scrollButtons="auto"
+                      allowScrollButtonsMobile
+                      className="result-tabs"
+                      aria-label="Разделы результата"
+                    >
                       <Tab label="Обзор" />
                       <Tab label="Сущности" />
                       <Tab label="Факты" />
@@ -716,7 +735,7 @@ function SettingsCenter() {
               NLP/domain правила редактируются здесь; runtime-настройки показаны только для контроля.
             </Typography>
           </Box>
-          <Stack direction="row" spacing={1}>
+          <Stack direction="row" spacing={1} className="settings-actions">
             {dirty && <Chip label="Есть изменения" color="warning" size="small" />}
             <Button
               variant="contained"
