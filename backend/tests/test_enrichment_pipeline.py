@@ -228,6 +228,41 @@ def test_default_config_marks_smart_home_solution_selection_learning_lead_text()
     assert "research_project" in {item.type for item in result.lead_assessment.customer_segments}
 
 
+def test_default_config_marks_smart_home_value_evaluation_family_apartment_lead_text() -> None:
+    config = load_nlp_config(Path("config/nlp"))
+    enricher = RussianTextEnricher(config)
+    text = (
+        "Вопрос от заказчиков: а посоветуйте, надо ли нам умный дом? В квартиру. "
+        "Родители и двое детей. У меня как-то до этого все сами знали, надо им "
+        "или не надо. Радиаторы не меняем. Кондиционеры - обычный один на "
+        "солнечной стороне. На технику с вай фай, вероятно, бюджета не хватит. "
+        "В общем, КОМУ и ЗАЧЕМ нужен умный дом. Какие плюшки? Моими сложными "
+        "и многочисленными сценариями освещения управлять?"
+    )
+
+    result = enricher.enrich(text)
+
+    signal_types = {signal.type for signal in result.domain_signals}
+    fact_types = {fact.type for fact in result.facts}
+
+    assert "smart_home_automation" in signal_types
+    assert "smart_home_value_question" in signal_types
+    assert "budget_constraint" in signal_types
+    assert "family_apartment_context" in signal_types
+    assert "lighting_control" in signal_types
+    assert "solution_area" in fact_types
+    assert "property_type" in fact_types
+    assert "controlled_device" in fact_types
+    assert result.lead_assessment is not None
+    assert result.lead_assessment.is_lead is True
+    assert result.lead_assessment.temperature in {"warm", "hot"}
+    assert "smart_home" in {item.type for item in result.lead_assessment.solution_areas}
+    segment_types = {item.type for item in result.lead_assessment.customer_segments}
+    assert "family_residential" in segment_types
+    assert "research_project" in segment_types
+    assert "renovation_project" not in segment_types
+
+
 def test_default_config_does_not_mark_diy_equipment_sale_as_lead() -> None:
     config = load_nlp_config(Path("config/nlp"))
     enricher = RussianTextEnricher(config)

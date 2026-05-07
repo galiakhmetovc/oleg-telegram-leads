@@ -190,6 +190,34 @@ signals:
           - normalized: "не"
           - normalized: "сталкиваться"
 
+  - type: smart_home_value_question
+    label: Вопрос о ценности умного дома
+    color: "#ef6c00"
+    confidence: 0.82
+    phrases:
+      - ["кому", "и", "зачем"]
+    patterns:
+      - tokens:
+          - caseless: "надо"
+          - caseless: "ли"
+      - tokens:
+          - normalized: "какой"
+          - normalized: "плюшка"
+      - tokens:
+          - normalized: "нужный"
+          - normalized: "умный"
+          - normalized: "дом"
+
+  - type: budget_constraint
+    label: Бюджетное ограничение
+    color: "#795548"
+    confidence: 0.72
+    patterns:
+      - tokens:
+          - normalized: "бюджет"
+          - normalized: "не"
+          - normalized: "хватить"
+
   - type: installation_context
     label: Монтажный контекст
     color: "#6d4c41"
@@ -482,6 +510,17 @@ signals:
     patterns:
       - tokens:
           - normalized: "квартира"
+
+  - type: family_apartment_context
+    label: Семейная квартира
+    color: "#2e7d32"
+    confidence: 0.68
+    patterns:
+      - tokens:
+          - normalized: "родитель"
+      - tokens:
+          - normalized: "двое"
+          - normalized: "ребенок"
 
   - type: diy_or_equipment_only
     label: DIY / только оборудование

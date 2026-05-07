@@ -32,8 +32,16 @@
 - Default NLP config recognizes early research/design leads where the author asks
   which useful smart-home systems to implement in a project and where to study
   the topic.
-- Dev PostgreSQL active NLP config was refreshed to revision 8 from the current
+- Default NLP config recognizes value-evaluation smart-home leads where customers
+  ask whether they need a smart home, who it is for, what benefits it gives, and
+  mention family apartment context, budget constraints, climate, or lighting
+  scenarios.
+- Dev PostgreSQL active NLP config was refreshed to revision 11 from the current
   bootstrap config so worker jobs use the new PUR scoring settings.
+- Agent verification should avoid Caddy smoke checks unless explicitly requested;
+  use backend tests and direct service/container checks by default.
+- Full `tests/test_enrichment_pipeline.py` can peak around 6.1 GB RSS. Stop the
+  dev worker before running that full file locally, then start the worker again.
 
 ## Blockers
 
@@ -43,7 +51,7 @@
 
 ## Next Steps
 
-1. Review the lead assessment UI through Caddy.
+1. Review the lead assessment UI manually in the browser.
 2. Start curating a versioned eval dataset of positive leads, non-leads, and
    borderline cases.
 3. Keep an eye on host disk usage before larger dependency/model downloads.

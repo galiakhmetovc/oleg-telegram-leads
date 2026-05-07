@@ -14,6 +14,8 @@ lead_scoring:
       consultation_request: 20
       solution_selection_request: 25
       education_request: 15
+      smart_home_value_question: 25
+      budget_constraint: 5
       installation_context: 12
       water_leak_protection: 25
       implementation_intent: 25
@@ -33,6 +35,7 @@ lead_scoring:
       commercial_object: 20
       country_house: 20
       apartment_context: 8
+      family_apartment_context: 15
       supply: -30
       diy_or_equipment_only: -50
       irrelevant_or_sale: -40
@@ -59,6 +62,7 @@ lead_scoring:
         - developer_smart_home_context
         - renovation_modification_context
         - solution_selection_request
+        - smart_home_value_question
         - lighting_control
         - climate_control
         - water_leak_protection
@@ -131,16 +135,20 @@ lead_scoring:
       signal_types:
         - renovation_modification_context
         - warranty_risk
-      fact_types:
-        - design_scope
-        - controlled_device
+      fact_types: []
     research_project:
       label: Подбор решений для проекта
       signal_types:
         - solution_selection_request
         - education_request
+        - smart_home_value_question
       fact_types:
         - work_type
+    family_residential:
+      label: Семья в квартире / доме
+      signal_types:
+        - family_apartment_context
+      fact_types: []
   intent_signal_types:
     - need
     - customer_intent
@@ -149,6 +157,8 @@ lead_scoring:
     - consultation_request
     - solution_selection_request
     - education_request
+    - smart_home_value_question
+    - budget_constraint
     - implementation_intent
     - hot_lead_intent
     - developer_smart_home_context
