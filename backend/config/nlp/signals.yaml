@@ -72,6 +72,10 @@ signals:
           - normalized: "к"
           - normalized: "кто"
           - normalized: "идти"
+      - tokens:
+          - normalized: "где"
+          - normalized: "можно"
+          - normalized: "заказать"
 
   - type: installation_request
     label: Запрос на установку / подключение
@@ -107,6 +111,42 @@ signals:
           - normalized: "защита"
           - normalized: "от"
           - normalized: "протечка"
+
+  - type: video_surveillance
+    label: Видеонаблюдение
+    color: "#455a64"
+    confidence: 0.84
+    patterns:
+      - tokens:
+          - normalized: "система"
+          - normalized: "видеонаблюдение"
+      - tokens:
+          - normalized: "видеонаблюдение"
+      - tokens:
+          - normalized: "камера"
+
+  - type: consultation_request
+    label: Нужна консультация
+    color: "#7b1fa2"
+    confidence: 0.78
+    patterns:
+      - tokens:
+          - normalized: "проконсультироваться"
+      - tokens:
+          - normalized: "нужно"
+          - normalized: "проконсультироваться"
+
+  - type: installation_context
+    label: Монтажный контекст
+    color: "#6d4c41"
+    confidence: 0.72
+    patterns:
+      - tokens:
+          - normalized: "камера"
+          - normalized: "на"
+          - normalized: "стена"
+      - tokens:
+          - normalized: "вывод"
 
   - type: hot_lead_intent
     label: Горячий лид

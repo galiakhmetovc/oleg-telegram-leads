@@ -30,6 +30,18 @@ facts:
           - normalized: "дом"
       - tokens:
           - normalized: "автоматизация"
+      - tokens:
+          - normalized: "система"
+          - normalized: "видеонаблюдение"
+      - tokens:
+          - normalized: "видеонаблюдение"
+
+  - type: property_type
+    label: Тип объекта
+    confidence: 0.68
+    patterns:
+      - tokens:
+          - normalized: "квартира"
 
   - type: vendor
     label: Вендор
@@ -72,6 +84,12 @@ facts:
           - normalized: "управление"
           - normalized: "через"
           - normalized: "приложение"
+      - tokens:
+          - normalized: "заказать"
+          - normalized: "система"
+          - normalized: "видеонаблюдение"
+      - tokens:
+          - normalized: "проконсультироваться"
 
   - type: automation_component
     label: Компонент автоматизации
@@ -84,6 +102,30 @@ facts:
           - normalized: "приложение"
       - tokens:
           - normalized: "алиса"
+      - tokens:
+          - normalized: "камера"
+
+  - type: installation_surface
+    label: Место монтажа
+    confidence: 0.62
+    patterns:
+      - tokens:
+          - normalized: "камера"
+          - normalized: "на"
+          - normalized: "стена"
+      - tokens:
+          - normalized: "стена"
+
+  - type: wiring_output
+    label: Выводы / подключение
+    confidence: 0.66
+    patterns:
+      - tokens:
+          - normalized: "проконсультироваться"
+          - normalized: "по"
+          - normalized: "вывод"
+      - tokens:
+          - normalized: "вывод"
 
   - type: controlled_device
     label: Управляемое устройство

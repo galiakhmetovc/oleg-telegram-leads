@@ -96,3 +96,28 @@ def test_default_config_marks_hot_zigbee_installation_lead_text() -> None:
     assert "work_type" in fact_types
     assert "automation_component" in fact_types
     assert "controlled_device" in fact_types
+
+
+def test_default_config_marks_video_surveillance_apartment_lead_text() -> None:
+    config = load_nlp_config(Path("config/nlp"))
+    enricher = RussianTextEnricher(config)
+    text = (
+        "Подскажите, пожалуйста, где можно заказать систему видеонаблюдения "
+        "для квартиры: это просто камера на стену, нужно проконсультироваться "
+        "по выводам для нее. Спасибо"
+    )
+
+    result = enricher.enrich(text)
+
+    signal_types = {signal.type for signal in result.domain_signals}
+    fact_types = {fact.type for fact in result.facts}
+
+    assert "provider_search" in signal_types
+    assert "consultation_request" in signal_types
+    assert "video_surveillance" in signal_types
+    assert "installation_context" in signal_types
+    assert "solution_area" in fact_types
+    assert "property_type" in fact_types
+    assert "automation_component" in fact_types
+    assert "installation_surface" in fact_types
+    assert "wiring_output" in fact_types

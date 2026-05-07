@@ -15,6 +15,8 @@
   customer intent, vendor, solution area, and electrical design context signals.
 - Default NLP config also recognizes hot Zigbee installation requests with
   provider search, service location, automation components, and controlled devices.
+- Default NLP config recognizes apartment video surveillance requests with
+  provider search, consultation need, camera, wall mounting, and wiring outputs.
 
 ## Blockers
 
