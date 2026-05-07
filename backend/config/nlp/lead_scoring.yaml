@@ -17,6 +17,9 @@ lead_scoring:
       implementation_intent: 25
       hot_lead_intent: 35
       electrical_design_context: 15
+      developer_smart_home_context: 30
+      renovation_modification_context: 25
+      warranty_risk: 20
       designer_context: 15
       access_control: 35
       intercom: 30
@@ -27,6 +30,7 @@ lead_scoring:
       network_infrastructure: 25
       commercial_object: 20
       country_house: 20
+      apartment_context: 8
       supply: -30
       diy_or_equipment_only: -50
       irrelevant_or_sale: -40
@@ -50,6 +54,8 @@ lead_scoring:
       label: Умный дом / автоматизация
       signal_types:
         - smart_home_automation
+        - developer_smart_home_context
+        - renovation_modification_context
         - lighting_control
         - climate_control
         - water_leak_protection
@@ -101,14 +107,13 @@ lead_scoring:
       label: Частное жилье
       signal_types:
         - country_house
-      fact_types:
-        - property_type
+        - apartment_context
+      fact_types: []
     commercial_client:
       label: Коммерческий объект
       signal_types:
         - commercial_object
-      fact_types:
-        - property_type
+      fact_types: []
     active_request:
       label: Активный запрос на подрядчика
       signal_types:
@@ -118,6 +123,14 @@ lead_scoring:
         - hot_lead_intent
       fact_types:
         - work_type
+    renovation_project:
+      label: Ремонт / изменение проекта
+      signal_types:
+        - renovation_modification_context
+        - warranty_risk
+      fact_types:
+        - design_scope
+        - controlled_device
   intent_signal_types:
     - need
     - customer_intent
@@ -126,6 +139,9 @@ lead_scoring:
     - consultation_request
     - implementation_intent
     - hot_lead_intent
+    - developer_smart_home_context
+    - renovation_modification_context
+    - warranty_risk
   noise_signal_types:
     - supply
     - diy_or_equipment_only

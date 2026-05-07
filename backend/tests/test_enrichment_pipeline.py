@@ -166,6 +166,41 @@ def test_default_config_marks_water_leak_sensor_design_lead_from_artifact() -> N
     assert "smart_home" in {item.type for item in result.lead_assessment.solution_areas}
 
 
+def test_default_config_marks_developer_smart_home_modification_lead_text() -> None:
+    config = load_nlp_config(Path("config/nlp"))
+    enricher = RussianTextEnricher(config)
+    text = (
+        "Добрый день! Коллеги, подскажите, работал ли кто-нибудь с квартирами "
+        "с системой умный дом от застройщика? Электрики не хотят брать в работу "
+        "такие проекты с добавлением розеток , выключателей, опасаются проблем "
+        "с системой ; а застройщик говорит- если что-то в схему добавить, "
+        "слетает гарантия. Выход только хоронить умный дом и делать все с нуля?😬"
+    )
+
+    result = enricher.enrich(text)
+
+    signal_types = {signal.type for signal in result.domain_signals}
+    fact_types = {fact.type for fact in result.facts}
+
+    assert "smart_home_automation" in signal_types
+    assert "developer_smart_home_context" in signal_types
+    assert "renovation_modification_context" in signal_types
+    assert "warranty_risk" in signal_types
+    assert "apartment_context" in signal_types
+    assert "solution_area" in fact_types
+    assert "property_type" in fact_types
+    assert "design_scope" in fact_types
+    assert "controlled_device" in fact_types
+    assert result.lead_assessment is not None
+    assert result.lead_assessment.is_lead is True
+    assert result.lead_assessment.temperature in {"warm", "hot"}
+    assert "smart_home" in {item.type for item in result.lead_assessment.solution_areas}
+    segment_types = {item.type for item in result.lead_assessment.customer_segments}
+    assert "renovation_project" in segment_types
+    assert "private_residential" in segment_types
+    assert "commercial_client" not in segment_types
+
+
 def test_default_config_does_not_mark_diy_equipment_sale_as_lead() -> None:
     config = load_nlp_config(Path("config/nlp"))
     enricher = RussianTextEnricher(config)

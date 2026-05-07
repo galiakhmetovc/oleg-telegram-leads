@@ -26,7 +26,10 @@
   score, temperature, solution areas, customer segments, reasons, and noise
   signals. Lead scoring thresholds, weights, and mappings are editable in the
   Settings Center and stored in PostgreSQL config revisions.
-- Dev PostgreSQL active NLP config was refreshed to revision 5 from the current
+- Default NLP config recognizes the developer-provided smart-home apartment
+  modification lead: apartments with smart home from a developer, socket/switch
+  changes, electrical scheme changes, and warranty risk.
+- Dev PostgreSQL active NLP config was refreshed to revision 7 from the current
   bootstrap config so worker jobs use the new PUR scoring settings.
 
 ## Blockers

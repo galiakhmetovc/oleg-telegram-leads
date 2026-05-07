@@ -215,6 +215,63 @@ signals:
       - tokens:
           - normalized: "освещение"
 
+  - type: developer_smart_home_context
+    label: Умный дом от застройщика
+    color: "#00695c"
+    confidence: 0.82
+    patterns:
+      - tokens:
+          - normalized: "умный"
+          - normalized: "дом"
+          - normalized: "от"
+          - normalized: "застройщик"
+      - tokens:
+          - normalized: "от"
+          - normalized: "застройщик"
+      - tokens:
+          - normalized: "застройщик"
+          - normalized: "говорить"
+
+  - type: renovation_modification_context
+    label: Изменения в проекте / ремонте
+    color: "#ad1457"
+    confidence: 0.78
+    patterns:
+      - tokens:
+          - normalized: "добавление"
+          - normalized: "розетка"
+      - tokens:
+          - normalized: "розетка"
+          - normalized: "выключатель"
+      - tokens:
+          - normalized: "в"
+          - normalized: "схема"
+          - normalized: "добавить"
+      - tokens:
+          - normalized: "брать"
+          - normalized: "в"
+          - normalized: "работа"
+      - tokens:
+          - normalized: "делать"
+          - normalized: "с"
+          - normalized: "нуль"
+
+  - type: warranty_risk
+    label: Риск гарантии / проблем с системой
+    color: "#c62828"
+    confidence: 0.8
+    patterns:
+      - tokens:
+          - normalized: "слетать"
+          - normalized: "гарантия"
+      - tokens:
+          - normalized: "опасаться"
+          - normalized: "проблема"
+      - tokens:
+          - normalized: "проблема"
+          - normalized: "с"
+          - normalized: "система"
+
   - type: designer_context
     label: Дизайнер / проектировщик
     color: "#3949ab"
@@ -372,6 +429,14 @@ signals:
       - tokens:
           - normalized: "коттеджный"
           - normalized: "поселок"
+
+  - type: apartment_context
+    label: Квартира
+    color: "#00838f"
+    confidence: 0.68
+    patterns:
+      - tokens:
+          - normalized: "квартира"
 
   - type: diy_or_equipment_only
     label: DIY / только оборудование

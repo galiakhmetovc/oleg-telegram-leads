@@ -114,6 +114,8 @@ facts:
           - normalized: "схема"
       - tokens:
           - normalized: "примечание"
+      - tokens:
+          - normalized: "схема"
 
   - type: service_location
     label: Локация работ
@@ -149,6 +151,17 @@ facts:
       - tokens:
           - normalized: "под"
           - normalized: "ключ"
+      - tokens:
+          - normalized: "добавление"
+          - normalized: "розетка"
+      - tokens:
+          - normalized: "в"
+          - normalized: "схема"
+          - normalized: "добавить"
+      - tokens:
+          - normalized: "делать"
+          - normalized: "с"
+          - normalized: "нуль"
 
   - type: automation_component
     label: Компонент автоматизации
@@ -210,6 +223,8 @@ facts:
           - normalized: "свет"
       - tokens:
           - normalized: "розетка"
+      - tokens:
+          - normalized: "выключатель"
       - tokens:
           - normalized: "входной"
           - normalized: "замок"
