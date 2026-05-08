@@ -32,6 +32,7 @@ import {
   FormControlLabel,
   IconButton,
   LinearProgress,
+  Link as MuiLink,
   Paper,
   Stack,
   Switch,
@@ -71,6 +72,15 @@ type SpanItem = {
   confidence?: number | null;
   color?: string | null;
   explanation?: string | null;
+  settings_refs?: SettingReference[];
+};
+
+type SettingReference = {
+  section: string;
+  key: string;
+  label: string;
+  kind: string;
+  catalog?: string | null;
 };
 
 type EnrichedToken = {
@@ -322,6 +332,16 @@ type AliasCatalogName = "vendors" | "protocols" | "devices" | "software";
 
 type SettingsSection = "pipeline" | "signals" | "facts" | "aliases" | "lead_scoring" | "system";
 
+type SettingsTarget =
+  | { kind: "signal"; key: string }
+  | { kind: "fact"; key: string }
+  | { kind: "alias"; catalog: AliasCatalogName; key: string }
+  | { kind: "lead_signal_weight"; key: string }
+  | { kind: "lead_fact_weight"; key: string }
+  | { kind: "solution_area"; key: string }
+  | { kind: "customer_segment"; key: string }
+  | { kind: "review_lane"; key: string };
+
 const apiBaseUrl = import.meta.env.VITE_API_BASE_URL ?? "";
 
 const theme = createTheme({
@@ -354,11 +374,23 @@ export function App() {
   const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState(0);
   const [settingsSection, setSettingsSection] = useState<SettingsSection>("signals");
+  const [settingsTarget, setSettingsTarget] = useState<SettingsTarget | null>(() =>
+    parseSettingsTargetHash(window.location.hash)
+  );
   const eventSourceRef = useRef<EventSource | null>(null);
 
   const result = job?.result ?? null;
   const isProcessing = isSubmitting || job?.status === "queued" || job?.status === "running";
   const isNarrowScreen = useMediaQuery(theme.breakpoints.down("sm"));
+  const displayedPage = settingsTarget ? 2 : activePage;
+
+  useEffect(() => {
+    function handleHashChange() {
+      setSettingsTarget(parseSettingsTargetHash(window.location.hash));
+    }
+    window.addEventListener("hashchange", handleHashChange);
+    return () => window.removeEventListener("hashchange", handleHashChange);
+  }, []);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -459,12 +491,22 @@ export function App() {
   }
 
   function handlePageChange(_: SyntheticEvent, value: number) {
+    clearSettingsHash();
+    setSettingsTarget(null);
     setActivePage(value);
   }
 
   function openSettingsSection(section: SettingsSection) {
+    clearSettingsHash();
+    setSettingsTarget(null);
     setSettingsSection(section);
     setActivePage(2);
+  }
+
+  function returnToEnrichment() {
+    clearSettingsHash();
+    setSettingsTarget(null);
+    setActivePage(0);
   }
 
   return (
@@ -478,7 +520,7 @@ export function App() {
               PUR Leads v2 - обогащение текста
             </Typography>
             <Tabs
-              value={activePage}
+              value={displayedPage}
               onChange={handlePageChange}
               className="main-nav"
               variant="scrollable"
@@ -495,7 +537,9 @@ export function App() {
         </AppBar>
 
         <Container maxWidth={false} className="workspace">
-          {activePage === 0 ? (
+          {settingsTarget ? (
+            <SettingsTargetPage target={settingsTarget} onBack={returnToEnrichment} onOpenSettings={openSettingsSection} />
+          ) : activePage === 0 ? (
             <Box className="workspace-grid">
               <Paper component="form" onSubmit={handleSubmit} className="input-panel" variant="outlined">
                 <Stack spacing={2}>
@@ -959,6 +1003,316 @@ function SettingsCenter({
         )}
       </Stack>
     </Box>
+  );
+}
+
+function SettingsTargetPage({
+  target,
+  onBack,
+  onOpenSettings
+}: {
+  target: SettingsTarget;
+  onBack: () => void;
+  onOpenSettings: (section: SettingsSection) => void;
+}) {
+  const [settings, setSettings] = useState<SettingsSnapshot | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    async function loadSettings() {
+      setLoading(true);
+      setError(null);
+      try {
+        const response = await fetch(`${apiBaseUrl}/api/v1/settings`);
+        if (!response.ok) {
+          throw new Error(`Backend вернул ${response.status}`);
+        }
+        const snapshot = (await response.json()) as SettingsSnapshot;
+        if (active) {
+          setSettings(snapshot);
+        }
+      } catch (caught) {
+        if (active) {
+          setError(caught instanceof Error ? caught.message : "Не удалось загрузить настройки");
+        }
+      } finally {
+        if (active) {
+          setLoading(false);
+        }
+      }
+    }
+    void loadSettings();
+    return () => {
+      active = false;
+    };
+  }, [target]);
+
+  return (
+    <Box className="settings-shell">
+      <Paper variant="outlined" className="settings-panel">
+        <Stack spacing={2}>
+          <Box sx={{ alignItems: "center", display: "flex", flexWrap: "wrap", gap: 1, justifyContent: "space-between" }}>
+            <Box>
+              <Typography variant="overline" color="text.secondary">
+                Deeplink настройки
+              </Typography>
+              <Typography variant="h5" component="h2" sx={{ fontWeight: 800 }}>
+                {settings ? settingsTargetTitle(target, settings.nlp) : "Настройка"}
+              </Typography>
+            </Box>
+            <Stack direction="row" spacing={1}>
+              <Button variant="outlined" onClick={onBack}>
+                Вернуться к обогащению
+              </Button>
+              <Button variant="contained" startIcon={<SettingsIcon />} onClick={() => onOpenSettings(settingsSectionForTarget(target))}>
+                Открыть в центре настроек
+              </Button>
+            </Stack>
+          </Box>
+          {loading && <LinearProgress />}
+          {error && <Alert severity="error">{error}</Alert>}
+          {settings && <SettingsTargetDetails target={target} settings={settings.nlp} />}
+        </Stack>
+      </Paper>
+    </Box>
+  );
+}
+
+function SettingsTargetDetails({ target, settings }: { target: SettingsTarget; settings: NlpSettings }) {
+  if (target.kind === "signal") {
+    const rule = settings.signals.find((item) => item.type === target.key);
+    return rule ? <RuleSettingsDetails rule={rule} settings={settings} collection="signals" /> : <MissingSetting target={target} />;
+  }
+  if (target.kind === "fact") {
+    const rule = settings.facts.find((item) => item.type === target.key);
+    return rule ? <RuleSettingsDetails rule={rule} settings={settings} collection="facts" /> : <MissingSetting target={target} />;
+  }
+  if (target.kind === "alias") {
+    const alias = settings[target.catalog].find((item) => item.key === target.key);
+    return alias ? <AliasSettingsDetails alias={alias} catalog={target.catalog} /> : <MissingSetting target={target} />;
+  }
+  return <LeadScoringTargetDetails target={target} settings={settings} />;
+}
+
+function MissingSetting({ target }: { target: SettingsTarget }) {
+  return (
+    <Alert severity="warning">
+      Настройка по ссылке не найдена в активной ревизии: {settingsTargetHash(target)}
+    </Alert>
+  );
+}
+
+function RuleSettingsDetails({
+  rule,
+  settings,
+  collection
+}: {
+  rule: RuleSetting;
+  settings: NlpSettings;
+  collection: "signals" | "facts";
+}) {
+  return (
+    <Stack spacing={2}>
+      <SettingsRows
+        rows={[
+          ["Раздел", collection === "signals" ? "Доменные сигналы" : "Факты"],
+          ["type", rule.type],
+          ["label", rule.label],
+          ["group", rule.group || "Без папки"],
+          ["confidence", rule.confidence ?? "не задано"]
+        ]}
+      />
+      <SettingsListBlock title="Точные фразы" items={rule.phrases.map((phrase) => phrase.join(" "))} />
+      <SettingsListBlock
+        title="Лемматические фразы"
+        items={rule.patterns.map((pattern) => `${patternSourceText(pattern)} -> ${patternLemmaText(pattern)}`)}
+      />
+      {collection === "signals" && (
+        <Stack spacing={1}>
+          <Typography variant="subtitle2">Зависимости</Typography>
+          <TableContainer>
+            <Table size="small">
+              <TableHead>
+                <TableRow>
+                  <TableCell>Тип</TableCell>
+                  <TableCell>Значения</TableCell>
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                {(rule.match?.aliases ?? []).map((dependency, index) => {
+                  const catalog = aliasCatalogFromDependency(dependency);
+                  return (
+                    <TableRow key={`alias-${index}`}>
+                      <TableCell>Словарь: {catalog}</TableCell>
+                      <TableCell>
+                        <InlineSettingsLinks
+                          links={(dependency.keys ?? []).map((key) => ({
+                            label: aliasLabel(settings, catalog, key),
+                            target: { kind: "alias", catalog, key }
+                          }))}
+                        />
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
+                {(rule.match?.facts ?? []).map((dependency, index) => (
+                  <TableRow key={`fact-${index}`}>
+                    <TableCell>Факты</TableCell>
+                    <TableCell>
+                      <InlineSettingsLinks
+                        links={dependency.types.map((type) => ({
+                          label: settingsTypeLabel(settings, type),
+                          target: settingsTargetForType(settings, type)
+                        }))}
+                      />
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </TableContainer>
+        </Stack>
+      )}
+    </Stack>
+  );
+}
+
+function AliasSettingsDetails({ alias, catalog }: { alias: AliasSetting; catalog: AliasCatalogName }) {
+  return (
+    <Stack spacing={2}>
+      <Typography variant="body2" color="text.secondary">
+        Каталог: {catalog}
+      </Typography>
+      <SettingsRows
+        rows={[
+          ["Каталог", catalog],
+          ["key", alias.key],
+          ["canonical", alias.canonical],
+          ["type", alias.type],
+          ["confidence", alias.confidence ?? "не задано"]
+        ]}
+      />
+      <SettingsListBlock title="Варианты написания" items={alias.aliases} />
+      <SettingsListBlock title="fact_types" items={alias.fact_types} />
+    </Stack>
+  );
+}
+
+function LeadScoringTargetDetails({ target, settings }: { target: SettingsTarget; settings: NlpSettings }) {
+  const scoring = settings.lead_scoring;
+  if (target.kind === "lead_signal_weight") {
+    return (
+      <Stack spacing={2}>
+        <SettingsRows rows={[["Ключ", `signal_weights.${target.key}`], ["Вес", scoring.signal_weights[target.key] ?? "не задан"]]} />
+        <InlineSettingsLinks links={[{ label: settingsTypeLabel(settings, target.key), target: settingsTargetForType(settings, target.key) }]} />
+      </Stack>
+    );
+  }
+  if (target.kind === "lead_fact_weight") {
+    return (
+      <Stack spacing={2}>
+        <SettingsRows rows={[["Ключ", `fact_weights.${target.key}`], ["Вес", scoring.fact_weights[target.key] ?? "не задан"]]} />
+        <InlineSettingsLinks links={[{ label: settingsTypeLabel(settings, target.key), target: settingsTargetForType(settings, target.key) }]} />
+      </Stack>
+    );
+  }
+  if (target.kind === "solution_area" || target.kind === "customer_segment") {
+    const mappings = target.kind === "solution_area" ? scoring.solution_areas : scoring.customer_segments;
+    const mapping = mappings[target.key];
+    if (!mapping) {
+      return <MissingSetting target={target} />;
+    }
+    return (
+      <Stack spacing={2}>
+        <SettingsRows rows={[["key", target.key], ["label", mapping.label]]} />
+        <SettingsLinkedTypes title="signal_types" types={mapping.signal_types} settings={settings} />
+        <SettingsLinkedTypes title="fact_types" types={mapping.fact_types} settings={settings} />
+      </Stack>
+    );
+  }
+  if (target.kind === "review_lane") {
+    const lane = scoring.review_lanes.find((item) => item.key === target.key);
+    if (!lane) {
+      return <MissingSetting target={target} />;
+    }
+    return (
+      <Stack spacing={2}>
+        <SettingsRows
+          rows={[
+            ["key", lane.key],
+            ["label", lane.label],
+            ["priority", lane.priority],
+            ["description", lane.description || "не задано"],
+            ["temperatures", lane.temperatures.join(", ") || "любые"],
+            ["min_score", lane.min_score ?? "не задан"],
+            ["max_score", lane.max_score ?? "не задан"]
+          ]}
+        />
+        {lane.match_groups.map((group, index) => (
+          <Paper key={index} variant="outlined" sx={{ p: 1.5 }}>
+            <Stack spacing={1}>
+              <Typography variant="subtitle2">match group {index + 1}</Typography>
+              <SettingsLinkedTypes title="signal_types" types={group.signal_types} settings={settings} />
+              <SettingsLinkedTypes title="fact_types" types={group.fact_types} settings={settings} />
+              <SettingsLinkedTypes title="reason_keys" types={group.reason_keys} settings={settings} />
+              <SettingsLinkedTypes title="solution_area_types" types={group.solution_area_types} settings={settings} />
+              <SettingsLinkedTypes title="customer_segment_types" types={group.customer_segment_types} settings={settings} />
+            </Stack>
+          </Paper>
+        ))}
+      </Stack>
+    );
+  }
+  return <MissingSetting target={target} />;
+}
+
+function SettingsLinkedTypes({ title, types, settings }: { title: string; types: string[]; settings: NlpSettings }) {
+  return (
+    <Stack spacing={0.5}>
+      <Typography variant="subtitle2">{title}</Typography>
+      <InlineSettingsLinks
+        links={types.map((type) => ({
+          label: settingsTypeLabel(settings, type),
+          target: settingsTargetForType(settings, type)
+        }))}
+      />
+    </Stack>
+  );
+}
+
+function SettingsRows({ rows }: { rows: Array<[string, ReactNode]> }) {
+  return (
+    <TableContainer>
+      <Table size="small">
+        <TableBody>
+          {rows.map(([key, value]) => (
+            <TableRow key={key}>
+              <TableCell sx={{ width: 220, fontWeight: 700 }}>{key}</TableCell>
+              <TableCell>{value}</TableCell>
+            </TableRow>
+          ))}
+        </TableBody>
+      </Table>
+    </TableContainer>
+  );
+}
+
+function SettingsListBlock({ title, items }: { title: string; items: string[] }) {
+  return (
+    <Stack spacing={0.75}>
+      <Typography variant="subtitle2">{title}</Typography>
+      {items.length === 0 ? (
+        <Typography variant="body2" color="text.secondary">Не задано.</Typography>
+      ) : (
+        <Box sx={{ display: "flex", flexWrap: "wrap", gap: 1 }}>
+          {items.map((item) => (
+            <Chip key={item} label={item} size="small" variant="outlined" />
+          ))}
+        </Box>
+      )}
+    </Stack>
   );
 }
 
@@ -2931,6 +3285,155 @@ function uniqueStrings(items: string[]): string[] {
   return result;
 }
 
+function settingsTargetHash(target: SettingsTarget | null): string {
+  if (!target) {
+    return "";
+  }
+  if (target.kind === "signal") {
+    return `#/settings/signals/${encodeURIComponent(target.key)}`;
+  }
+  if (target.kind === "fact") {
+    return `#/settings/facts/${encodeURIComponent(target.key)}`;
+  }
+  if (target.kind === "alias") {
+    return `#/settings/aliases/${target.catalog}/${encodeURIComponent(target.key)}`;
+  }
+  if (target.kind === "lead_signal_weight") {
+    return `#/settings/lead-scoring/signal-weight/${encodeURIComponent(target.key)}`;
+  }
+  if (target.kind === "lead_fact_weight") {
+    return `#/settings/lead-scoring/fact-weight/${encodeURIComponent(target.key)}`;
+  }
+  if (target.kind === "solution_area") {
+    return `#/settings/lead-scoring/solution-area/${encodeURIComponent(target.key)}`;
+  }
+  if (target.kind === "customer_segment") {
+    return `#/settings/lead-scoring/customer-segment/${encodeURIComponent(target.key)}`;
+  }
+  return `#/settings/lead-scoring/review-lane/${encodeURIComponent(target.key)}`;
+}
+
+function parseSettingsTargetHash(hash: string): SettingsTarget | null {
+  const parts = hash.replace(/^#\/?/, "").split("/").filter(Boolean).map(decodeURIComponent);
+  if (parts[0] !== "settings") {
+    return null;
+  }
+  if (parts[1] === "signals" && parts[2]) {
+    return { kind: "signal", key: parts[2] };
+  }
+  if (parts[1] === "facts" && parts[2]) {
+    return { kind: "fact", key: parts[2] };
+  }
+  if (parts[1] === "aliases" && isAliasCatalogName(parts[2]) && parts[3]) {
+    return { kind: "alias", catalog: parts[2], key: parts[3] };
+  }
+  if (parts[1] === "lead-scoring" && parts[3]) {
+    if (parts[2] === "signal-weight") {
+      return { kind: "lead_signal_weight", key: parts[3] };
+    }
+    if (parts[2] === "fact-weight") {
+      return { kind: "lead_fact_weight", key: parts[3] };
+    }
+    if (parts[2] === "solution-area") {
+      return { kind: "solution_area", key: parts[3] };
+    }
+    if (parts[2] === "customer-segment") {
+      return { kind: "customer_segment", key: parts[3] };
+    }
+    if (parts[2] === "review-lane") {
+      return { kind: "review_lane", key: parts[3] };
+    }
+  }
+  return null;
+}
+
+function navigateToSettingsTarget(target: SettingsTarget) {
+  const hash = settingsTargetHash(target);
+  if (window.location.hash === hash) {
+    window.dispatchEvent(new Event("hashchange"));
+    return;
+  }
+  window.location.hash = hash;
+}
+
+function clearSettingsHash() {
+  if (window.location.hash.startsWith("#/settings/")) {
+    window.history.pushState(null, "", `${window.location.pathname}${window.location.search}`);
+  }
+}
+
+function settingsSectionForTarget(target: SettingsTarget): SettingsSection {
+  if (target.kind === "signal") {
+    return "signals";
+  }
+  if (target.kind === "fact") {
+    return "facts";
+  }
+  if (target.kind === "alias") {
+    return "aliases";
+  }
+  return "lead_scoring";
+}
+
+function settingsTargetTitle(target: SettingsTarget, settings: NlpSettings): string {
+  if (target.kind === "signal") {
+    return `Настройка: ${settings.signals.find((item) => item.type === target.key)?.label ?? target.key}`;
+  }
+  if (target.kind === "fact") {
+    return `Настройка: ${settings.facts.find((item) => item.type === target.key)?.label ?? target.key}`;
+  }
+  if (target.kind === "alias") {
+    return `Настройка: ${settings[target.catalog].find((item) => item.key === target.key)?.canonical ?? target.key}`;
+  }
+  if (target.kind === "lead_signal_weight" || target.kind === "lead_fact_weight") {
+    return `Настройка веса: ${settingsTypeLabel(settings, target.key)}`;
+  }
+  if (target.kind === "solution_area") {
+    return `Настройка: ${settings.lead_scoring.solution_areas[target.key]?.label ?? target.key}`;
+  }
+  if (target.kind === "customer_segment") {
+    return `Настройка: ${settings.lead_scoring.customer_segments[target.key]?.label ?? target.key}`;
+  }
+  return `Настройка: ${settings.lead_scoring.review_lanes.find((item) => item.key === target.key)?.label ?? target.key}`;
+}
+
+function settingsTargetForType(settings: NlpSettings, type: string): SettingsTarget | null {
+  if (settings.signals.some((signal) => signal.type === type)) {
+    return { kind: "signal", key: type };
+  }
+  if (settings.facts.some((fact) => fact.type === type)) {
+    return { kind: "fact", key: type };
+  }
+  if (Object.hasOwn(settings.lead_scoring.signal_weights, type)) {
+    return { kind: "lead_signal_weight", key: type };
+  }
+  if (Object.hasOwn(settings.lead_scoring.fact_weights, type)) {
+    return { kind: "lead_fact_weight", key: type };
+  }
+  if (Object.hasOwn(settings.lead_scoring.solution_areas, type)) {
+    return { kind: "solution_area", key: type };
+  }
+  if (Object.hasOwn(settings.lead_scoring.customer_segments, type)) {
+    return { kind: "customer_segment", key: type };
+  }
+  return null;
+}
+
+function settingsTypeLabel(settings: NlpSettings, type: string): string {
+  return (
+    settings.signals.find((signal) => signal.type === type)?.label ??
+    settings.facts.find((fact) => fact.type === type)?.label ??
+    settings.lead_scoring.solution_areas[type]?.label ??
+    settings.lead_scoring.customer_segments[type]?.label ??
+    type
+  );
+}
+
+function aliasLabel(settings: NlpSettings, catalog: AliasCatalogName, key: string): string {
+  const alias = settings[catalog].find((item) => item.key === key);
+  return alias ? `${alias.key} — ${alias.canonical}` : key;
+}
+
 function aliasTypeForCatalog(catalog: AliasCatalogName): AliasSetting["type"] {
   if (catalog === "vendors") {
     return "vendor";
@@ -3131,6 +3634,7 @@ function Overview({
     <Stack spacing={2}>
       {result.lead_assessment && (
         <LeadAssessmentPanel
+          result={result}
           assessment={result.lead_assessment}
           typeLabels={typeLabels}
           onOpenSettings={() => onOpenSettings("lead_scoring")}
@@ -3139,6 +3643,7 @@ function Overview({
       <AnnotatedText result={result} />
       <EvidenceTable
         title="Словарные сущности"
+        kind="dictionary"
         items={dictionaryItems}
         emptyText="Словарные alias не найдены."
         settingsLabel="Открыть словари"
@@ -3146,6 +3651,7 @@ function Overview({
       />
       <EvidenceTable
         title="Факты"
+        kind="facts"
         items={result.facts}
         emptyText="Факты не найдены."
         settingsLabel="Открыть факты"
@@ -3153,6 +3659,7 @@ function Overview({
       />
       <EvidenceTable
         title="Доменные сигналы"
+        kind="signals"
         items={result.domain_signals}
         emptyText="Доменные сигналы не найдены."
         settingsLabel="Открыть сигналы"
@@ -3168,10 +3675,12 @@ function Overview({
 }
 
 function LeadAssessmentPanel({
+  result,
   assessment,
   typeLabels,
   onOpenSettings
 }: {
+  result: TextEnrichmentResult;
   assessment: LeadAssessment;
   typeLabels: Map<string, string>;
   onOpenSettings: () => void;
@@ -3185,39 +3694,35 @@ function LeadAssessmentPanel({
             Настройки оценки
           </Button>
         </Box>
-        <ScoreFormula assessment={assessment} />
-        <CategoryCalculationGroup title="Расчет направления решения" items={assessment.solution_areas} typeLabels={typeLabels} />
-        <CategoryCalculationGroup title="Расчет сегмента клиентов" items={assessment.customer_segments} typeLabels={typeLabels} />
+        <ScoreFormula assessment={assessment} result={result} />
+        <CategoryCalculationGroup
+          title="Расчет направления решения"
+          targetKind="solution_area"
+          items={assessment.solution_areas}
+          typeLabels={typeLabels}
+          result={result}
+        />
+        <CategoryCalculationGroup
+          title="Расчет сегмента клиентов"
+          targetKind="customer_segment"
+          items={assessment.customer_segments}
+          typeLabels={typeLabels}
+          result={result}
+        />
         <ReviewLaneCalculation assessment={assessment} />
         <ChipGroup title="Шум" items={assessment.noise_signals.map((item) => item.label)} color="warning" />
-        {assessment.reasons.length > 0 && (
-          <TableContainer>
-            <Table size="small">
-              <TableHead>
-                <TableRow>
-                  <TableCell>Причина</TableCell>
-                  <TableCell>Вес</TableCell>
-                  <TableCell>Совпадения</TableCell>
-                </TableRow>
-              </TableHead>
-              <TableBody>
-                {assessment.reasons.map((reason) => (
-                  <TableRow key={`${reason.source}-${reason.key}`}>
-                    <TableCell>{reason.label}</TableCell>
-                    <TableCell>{reason.weight}</TableCell>
-                    <TableCell>{reason.matched_texts.join(", ")}</TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </TableContainer>
-        )}
       </Stack>
     </Paper>
   );
 }
 
-function ScoreFormula({ assessment }: { assessment: LeadAssessment }) {
+function ScoreFormula({
+  assessment,
+  result
+}: {
+  assessment: LeadAssessment;
+  result: TextEnrichmentResult;
+}) {
   if (assessment.reasons.length === 0) {
     return (
       <Typography variant="body2" color="text.secondary">
@@ -3226,16 +3731,56 @@ function ScoreFormula({ assessment }: { assessment: LeadAssessment }) {
     );
   }
   const rawScore = assessment.reasons.reduce((sum, reason) => sum + reason.weight, 0);
-  const formula = assessment.reasons
-    .map((reason) => `${formatSignedWeight(reason.weight)} ${reason.label}`)
-    .join(" ");
 
   return (
-    <Stack spacing={0.75}>
+    <Stack spacing={1}>
       <Typography variant="subtitle2">Точный расчет оценки лида</Typography>
-      <Typography variant="body2">
-        score = max(0, {formula}) = max(0, {rawScore}) = {assessment.score}
-      </Typography>
+      <TableContainer>
+        <Table size="small" aria-label="Точный расчет оценки лида">
+          <TableHead>
+            <TableRow>
+              <TableCell>Причина</TableCell>
+              <TableCell>Источник</TableCell>
+              <TableCell>Вес</TableCell>
+              <TableCell>Совпадения</TableCell>
+              <TableCell>Настройки</TableCell>
+            </TableRow>
+          </TableHead>
+          <TableBody>
+            {assessment.reasons.map((reason) => (
+              <TableRow key={`${reason.source}-${reason.key}`}>
+                <TableCell>
+                  <SettingLink target={reasonTypeTarget(reason, result)}>
+                    {reason.label}
+                  </SettingLink>
+                </TableCell>
+                <TableCell>{sourceLabel(reason.source)}</TableCell>
+                <TableCell>
+                  <SettingLink target={reasonWeightTarget(reason)}>
+                    {formatSignedWeight(reason.weight)}
+                  </SettingLink>
+                </TableCell>
+                <TableCell>{reason.matched_texts.join(", ")}</TableCell>
+                <TableCell>
+                  <InlineSettingsLinks
+                    links={[
+                      { label: "тип", target: reasonTypeTarget(reason, result) },
+                      { label: "вес", target: reasonWeightTarget(reason) }
+                    ]}
+                  />
+                </TableCell>
+              </TableRow>
+            ))}
+            <TableRow>
+              <TableCell colSpan={2} sx={{ fontWeight: 700 }}>
+                Итого
+              </TableCell>
+              <TableCell sx={{ fontWeight: 700 }}>{rawScore}</TableCell>
+              <TableCell colSpan={2}>score = max(0, {rawScore}) = {assessment.score}</TableCell>
+            </TableRow>
+          </TableBody>
+        </Table>
+      </TableContainer>
       <Typography variant="caption" color="text.secondary">
         Порог лида применяется на backend; температура определяется по настроенным порогам lead/warm/hot.
       </Typography>
@@ -3245,33 +3790,56 @@ function ScoreFormula({ assessment }: { assessment: LeadAssessment }) {
 
 function CategoryCalculationGroup({
   title,
+  targetKind,
   items,
-  typeLabels
+  typeLabels,
+  result
 }: {
   title: string;
+  targetKind: "solution_area" | "customer_segment";
   items: LeadCategory[];
   typeLabels: Map<string, string>;
+  result: TextEnrichmentResult;
 }) {
   return (
-    <Stack spacing={0.75}>
+    <Stack spacing={1}>
       <Typography variant="subtitle2">{title}</Typography>
       {items.length === 0 ? (
         <Typography variant="body2" color="text.secondary">
           Совпадений по настроенным типам нет.
         </Typography>
       ) : (
-        <Stack spacing={0.75}>
-          {items.map((item) => (
-            <Box key={item.type}>
-              <Typography variant="body2" sx={{ fontWeight: 700 }}>
-                {item.label}
-              </Typography>
-              <Typography variant="caption" color="text.secondary">
-                Сработало, потому что найдены типы: {item.matched_types.map((type) => typeLabels.get(type) ?? type).join(", ")}
-              </Typography>
-            </Box>
-          ))}
-        </Stack>
+        <TableContainer>
+          <Table size="small" aria-label={title}>
+            <TableHead>
+              <TableRow>
+                <TableCell>Категория</TableCell>
+                <TableCell>Найденные типы</TableCell>
+                <TableCell>Почему</TableCell>
+              </TableRow>
+            </TableHead>
+            <TableBody>
+              {items.map((item) => (
+                <TableRow key={item.type}>
+                  <TableCell>
+                    <SettingLink target={categoryTarget(targetKind, item.type)}>
+                      {item.label}
+                    </SettingLink>
+                  </TableCell>
+                  <TableCell>
+                    <InlineSettingsLinks
+                      links={item.matched_types.map((type) => ({
+                        label: typeLabels.get(type) ?? type,
+                        target: matchedTypeTarget(type, result)
+                      }))}
+                    />
+                  </TableCell>
+                  <TableCell>Сработало, потому что найдены указанные типы.</TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </TableContainer>
       )}
     </Stack>
   );
@@ -3283,19 +3851,41 @@ function ReviewLaneCalculation({ assessment }: { assessment: LeadAssessment }) {
     <Stack spacing={0.75}>
       <Typography variant="subtitle2">Расчет очереди разбора</Typography>
       {lane ? (
-        <>
-          <Box sx={{ display: "flex", flexWrap: "wrap", gap: 1 }}>
-            <Chip label={lane.label} size="small" variant="outlined" />
-            {lane.matched_group_indexes.map((index) => (
-              <Chip key={index} label={`match group ${index + 1}`} size="small" />
-            ))}
-          </Box>
-          <Typography variant="caption" color="text.secondary">
-            Очередь выбрана первым подходящим правилом `review_lanes` по priority: score/temperature прошли ограничения,
-            excluded-условия не сработали, все обязательные match groups совпали.
-            {lane.description ? ` ${lane.description}` : ""}
-          </Typography>
-        </>
+        <TableContainer>
+          <Table size="small" aria-label="Расчет очереди разбора">
+            <TableHead>
+              <TableRow>
+                <TableCell>Очередь</TableCell>
+                <TableCell>Совпавшие группы</TableCell>
+                <TableCell>Почему</TableCell>
+              </TableRow>
+            </TableHead>
+            <TableBody>
+              <TableRow>
+                <TableCell>
+                  <SettingLink target={{ kind: "review_lane", key: lane.key }}>
+                    {lane.label}
+                  </SettingLink>
+                </TableCell>
+                <TableCell>
+                  <Box sx={{ display: "flex", flexWrap: "wrap", gap: 1 }}>
+                    {lane.matched_group_indexes.map((index) => (
+                      <SettingLink key={index} target={{ kind: "review_lane", key: lane.key }}>
+                        match group {index + 1}
+                      </SettingLink>
+                    ))}
+                  </Box>
+                </TableCell>
+                <TableCell>
+                  Очередь выбрана первым подходящим правилом `review_lanes` по priority:
+                  score/temperature прошли ограничения, excluded-условия не сработали,
+                  все обязательные match groups совпали.
+                  {lane.description ? ` ${lane.description}` : ""}
+                </TableCell>
+              </TableRow>
+            </TableBody>
+          </Table>
+        </TableContainer>
       ) : (
         <Typography variant="body2" color="text.secondary">
           Очереди разбора в активной конфигурации не заданы.
@@ -3419,12 +4009,14 @@ function AnnotatedText({ result }: { result: TextEnrichmentResult }) {
 
 function EvidenceTable({
   title,
+  kind,
   items,
   emptyText,
   settingsLabel,
   onOpenSettings
 }: {
   title: string;
+  kind: "dictionary" | "facts" | "signals";
   items: SpanItem[];
   emptyText: string;
   settingsLabel: string;
@@ -3451,23 +4043,166 @@ function EvidenceTable({
                 <TableCell>Тип</TableCell>
                 <TableCell>Источник</TableCell>
                 <TableCell>Почему</TableCell>
+                <TableCell>Настройки</TableCell>
               </TableRow>
             </TableHead>
             <TableBody>
-              {items.map((item) => (
-                <TableRow key={`${title}-${item.id}`}>
-                  <TableCell>{item.text}</TableCell>
-                  <TableCell>{item.label ?? item.type}</TableCell>
-                  <TableCell>{sourceLabel(item.source)}</TableCell>
-                  <TableCell>{item.explanation ?? fallbackExplanation(item)}</TableCell>
-                </TableRow>
-              ))}
+              {items.map((item) => {
+                const primaryTarget = spanPrimaryTarget(item, kind);
+                const settingLinks = spanSettingLinks(item, kind);
+                return (
+                  <TableRow key={`${title}-${item.id}`}>
+                    <TableCell>{item.text}</TableCell>
+                    <TableCell>
+                      <SettingLink target={primaryTarget}>
+                        {item.label ?? item.type}
+                      </SettingLink>
+                    </TableCell>
+                    <TableCell>{sourceLabel(item.source)}</TableCell>
+                    <TableCell>{item.explanation ?? fallbackExplanation(item)}</TableCell>
+                    <TableCell>
+                      <InlineSettingsLinks links={settingLinks} />
+                    </TableCell>
+                  </TableRow>
+                );
+              })}
             </TableBody>
           </Table>
         </TableContainer>
       )}
     </Stack>
   );
+}
+
+type InlineSettingsLink = {
+  label: ReactNode;
+  target: SettingsTarget | null;
+};
+
+function InlineSettingsLinks({ links }: { links: InlineSettingsLink[] }) {
+  const visibleLinks = links.filter((link) => link.label !== "");
+  if (visibleLinks.length === 0) {
+    return <Typography variant="caption" color="text.secondary">Нет ссылки</Typography>;
+  }
+  return (
+    <Box sx={{ display: "flex", flexWrap: "wrap", gap: 1 }}>
+      {visibleLinks.map((link, index) => (
+        <SettingLink key={`${settingsTargetHash(link.target)}-${String(link.label)}-${index}`} target={link.target}>
+          {link.label}
+        </SettingLink>
+      ))}
+    </Box>
+  );
+}
+
+function SettingLink({
+  target,
+  children
+}: {
+  target: SettingsTarget | null;
+  children: ReactNode;
+}) {
+  if (!target) {
+    return <>{children}</>;
+  }
+  const href = settingsTargetHash(target);
+  return (
+    <MuiLink
+      href={href}
+      underline="hover"
+      onClick={(event) => {
+        if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || event.button !== 0) {
+          return;
+        }
+        event.preventDefault();
+        navigateToSettingsTarget(target);
+      }}
+    >
+      {children}
+    </MuiLink>
+  );
+}
+
+function spanPrimaryTarget(item: SpanItem, kind: "dictionary" | "facts" | "signals"): SettingsTarget | null {
+  const aliasTarget = settingsTargetFromRef(item.settings_refs?.find((ref) => ref.section === "aliases"));
+  const signalTarget = settingsTargetFromRef(item.settings_refs?.find((ref) => ref.section === "signals"));
+  const factTarget = settingsTargetFromRef(item.settings_refs?.find((ref) => ref.section === "facts"));
+  if (kind === "dictionary") {
+    return aliasTarget;
+  }
+  if (kind === "signals") {
+    return signalTarget ?? { kind: "signal", key: item.type };
+  }
+  if (item.source === "alias_catalog") {
+    return aliasTarget ?? { kind: "lead_fact_weight", key: item.type };
+  }
+  return factTarget ?? { kind: "fact", key: item.type };
+}
+
+function spanSettingLinks(item: SpanItem, kind: "dictionary" | "facts" | "signals"): InlineSettingsLink[] {
+  const links = (item.settings_refs ?? [])
+    .map((ref) => ({
+      label: ref.label,
+      target: settingsTargetFromRef(ref)
+    }))
+    .filter((link) => link.target);
+  const primaryTarget = spanPrimaryTarget(item, kind);
+  if (links.length === 0 && primaryTarget) {
+    return [{ label: item.label ?? item.type, target: primaryTarget }];
+  }
+  return links;
+}
+
+function settingsTargetFromRef(ref: SettingReference | undefined): SettingsTarget | null {
+  if (!ref) {
+    return null;
+  }
+  if (ref.section === "signals") {
+    return { kind: "signal", key: ref.key };
+  }
+  if (ref.section === "facts") {
+    return { kind: "fact", key: ref.key };
+  }
+  if (ref.section === "aliases" && isAliasCatalogName(ref.catalog)) {
+    return { kind: "alias", catalog: ref.catalog, key: ref.key };
+  }
+  return null;
+}
+
+function reasonTypeTarget(reason: LeadReason, result: TextEnrichmentResult): SettingsTarget | null {
+  if (reason.source === "domain_signal") {
+    return { kind: "signal", key: reason.key };
+  }
+  if (reason.source === "fact") {
+    const hasFactRuleMatch = result.facts.some((fact) => fact.type === reason.key && fact.source === "yargy");
+    return hasFactRuleMatch ? { kind: "fact", key: reason.key } : { kind: "lead_fact_weight", key: reason.key };
+  }
+  return null;
+}
+
+function reasonWeightTarget(reason: LeadReason): SettingsTarget {
+  return reason.source === "domain_signal"
+    ? { kind: "lead_signal_weight", key: reason.key }
+    : { kind: "lead_fact_weight", key: reason.key };
+}
+
+function categoryTarget(kind: "solution_area" | "customer_segment", key: string): SettingsTarget {
+  return kind === "solution_area"
+    ? { kind: "solution_area", key }
+    : { kind: "customer_segment", key };
+}
+
+function matchedTypeTarget(type: string, result: TextEnrichmentResult): SettingsTarget | null {
+  if (result.domain_signals.some((signal) => signal.type === type)) {
+    return { kind: "signal", key: type };
+  }
+  if (result.facts.some((fact) => fact.type === type && fact.source === "yargy")) {
+    return { kind: "fact", key: type };
+  }
+  if (result.lead_assessment?.reasons.some((reason) => reason.source === "fact" && reason.key === type)) {
+    return { kind: "lead_fact_weight", key: type };
+  }
+  return null;
 }
 
 function collectNonOverlappingSpans(result: TextEnrichmentResult): SpanItem[] {
@@ -3521,6 +4256,12 @@ function codePointOffsetToCodeUnit(codePointOffset: number, offsets: number[]): 
 }
 
 function sourceLabel(source: string): string {
+  if (source === "domain_signal") {
+    return "Доменный сигнал";
+  }
+  if (source === "fact") {
+    return "Факт";
+  }
   if (source === "alias_catalog") {
     return "Словарь";
   }

@@ -397,3 +397,21 @@ Rationale:
 - Backend ranges are Python Unicode code point offsets. Frontend highlighting
   must convert them to JavaScript UTF-16 offsets so emoji and similar characters
   do not shift highlighted source fragments.
+
+## 2026-05-08: Enrichment Evidence Links To Settings Deeplinks
+
+Whenever an enrichment result can identify which editable setting produced a
+fact or signal, the backend includes a structured `settings_refs` entry. The
+frontend renders those references as hash deeplinks to separate settings detail
+pages, for example `#/settings/signals/smart_home_automation`,
+`#/settings/aliases/devices/electric_curtain`, and
+`#/settings/lead-scoring/review-lane/direct_pur_lead`.
+
+Rationale:
+
+- Operators need to verify a score reason or evidence row from the result
+  itself, without manually searching through long settings lists.
+- Links should be ordinary browser-addressable links, not only local buttons, so
+  they support copy/paste, browser back/forward, and direct page opening.
+- The route stays inside the React SPA so the current input text and enrichment
+  result remain in memory when the operator returns to `Обогащение`.

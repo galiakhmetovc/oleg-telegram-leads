@@ -191,6 +191,13 @@ dependency. The UI should present these explanations together with human labels
 from the active config. Stable keys remain available for API filters and
 debugging, but operator-facing summaries should prefer labels.
 
+Extracted `facts` and `domain_signals` also include `settings_refs` when the
+pipeline can identify the responsible editable setting. A reference points to a
+rule (`signals` or `facts`) or an alias catalog row (`aliases` with `catalog`
+and `key`). The frontend turns these references into stable hash deeplinks such
+as `#/settings/signals/smart_home_automation` and
+`#/settings/aliases/devices/electric_curtain`.
+
 ## Batch Analytics
 
 Batch enrichment produces local JSONL artifacts under `artifacts/`. The
@@ -283,10 +290,15 @@ The first operator screen provides:
   solution areas, customer segments, review lane calculation, and noise signals;
 - overview evidence tables for dictionary entities, facts, and domain signals
   with matched text, human type label, source, and explanation;
-- shortcuts from overview sections to the matching Settings Center section
-  (lead scoring, alias catalogs, facts, or domain signals);
+- linked calculation/evidence tables. Whenever the result can be traced to a
+  setting, the UI renders a link to a separate settings detail page for that
+  signal, fact, alias, weight, solution area, customer segment, or review lane;
 - structured result tabs for overview, entities, facts, domain signals, tokens,
   syntax, and pipeline trace.
+
+Settings deeplinks are hash routes inside the SPA. Navigating to a settings
+detail page does not reload the application, so the current enrichment input,
+job result, and browser back/forward context remain available.
 
 Backend span ranges are Unicode code point offsets, because Python strings use
 code point indexing. Browser rendering uses UTF-16 code units. The frontend must

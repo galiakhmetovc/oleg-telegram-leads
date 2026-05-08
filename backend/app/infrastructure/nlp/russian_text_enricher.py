@@ -14,6 +14,7 @@ from yargy.tokenizer import MorphTokenizer
 
 from app.domain.enrichment import DomainSignal, EnrichedEntity, EnrichedSentence, EnrichedToken
 from app.domain.enrichment import EnrichmentMetrics, ExtractedFact, PipelineTraceItem
+from app.domain.enrichment import SettingsReference
 from app.domain.enrichment import SyntaxDependency, TextEnrichmentResult, TextRange
 from app.infrastructure.nlp.config_loader import AliasMatchingConfig, AliasRuleConfig, NlpPipelineConfig
 from app.infrastructure.nlp.config_loader import PhraseRuleConfig
@@ -253,6 +254,7 @@ class RussianTextEnricher:
                         f"Сработало правило доменного сигнала «{rule_config.label}» "
                         f"({rule_config.type}) через точную или лемматическую фразу."
                     ),
+                    settings_refs=[_rule_settings_ref("signals", rule_config.type, rule_config.label)],
                 )
                 for start, stop, match_text in self._find_phrase_matches(
                     text,
@@ -278,6 +280,10 @@ class RussianTextEnricher:
                             f"«{alias_match.config.canonical}» из каталога "
                             f"{alias_match.config.catalog} ({alias_match.config.key})."
                         ),
+                        settings_refs=[
+                            _rule_settings_ref("signals", rule_config.type, rule_config.label),
+                            _alias_settings_ref(alias_match.config),
+                        ],
                     )
                 )
             for fact in facts:
@@ -297,6 +303,13 @@ class RussianTextEnricher:
                             f"Сигнал «{rule_config.label}» зависит от найденного факта "
                             f"«{fact.label}»: «{fact.text}»."
                         ),
+                        settings_refs=[
+                            _rule_settings_ref("signals", rule_config.type, rule_config.label),
+                            *(
+                                fact.settings_refs
+                                or [_rule_settings_ref("facts", fact.type, fact.label)]
+                            ),
+                        ],
                     )
                 )
         return _dedupe_signals(signals)
@@ -322,6 +335,7 @@ class RussianTextEnricher:
                         f"Сработало правило факта «{rule_config.label}» "
                         f"({rule_config.type}) через точную или лемматическую фразу."
                     ),
+                    settings_refs=[_rule_settings_ref("facts", rule_config.type, rule_config.label)],
                 )
                 for start, stop, match_text in self._find_phrase_matches(
                     text,
@@ -345,6 +359,7 @@ class RussianTextEnricher:
                         f"{alias_config.catalog} ({alias_config.key}); он выпускает "
                         f"fact_type «{fact_type}»."
                     ),
+                    settings_refs=[_alias_settings_ref(alias_config)],
                 )
                 for offset, fact_type in enumerate(alias_config.fact_types)
             )
@@ -782,6 +797,36 @@ def _alias_fact_label(alias_config: AliasRuleConfig, fact_type: str) -> str:
         "software": "ПО",
         "model": "Модель",
     }.get(fact_type, alias_config.kind)
+    return f"{prefix}: {alias_config.canonical}"
+
+
+def _rule_settings_ref(section: str, key: str, label: str) -> SettingsReference:
+    return SettingsReference(
+        section=section,
+        key=key,
+        label=label,
+        kind="rule",
+    )
+
+
+def _alias_settings_ref(alias_config: AliasRuleConfig) -> SettingsReference:
+    return SettingsReference(
+        section="aliases",
+        catalog=alias_config.catalog,
+        key=alias_config.key,
+        label=_alias_ref_label(alias_config),
+        kind="alias",
+    )
+
+
+def _alias_ref_label(alias_config: AliasRuleConfig) -> str:
+    prefix = {
+        "vendor": "Вендор",
+        "protocol": "Протокол",
+        "device": "Устройство",
+        "software": "ПО",
+        "model": "Модель",
+    }.get(alias_config.kind, alias_config.kind)
     return f"{prefix}: {alias_config.canonical}"
 
 

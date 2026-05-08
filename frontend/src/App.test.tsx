@@ -29,6 +29,7 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
+  window.history.replaceState(null, "", "/");
 });
 
 test("renders text enrichment workspace", () => {
@@ -253,6 +254,80 @@ test("opens settings sections from enrichment overview shortcuts", async () => {
 
   await waitFor(() => expect(fetchMock).toHaveBeenCalledWith("/api/v1/settings"));
   expect(await screen.findByText("Alias-словари")).toBeInTheDocument();
+});
+
+test("opens linked setting detail pages from enrichment overview and keeps input context", async () => {
+  const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+    const url = String(input);
+    if (url === "/api/v1/enrichments") {
+      return jsonResponse({
+        id: "1e310b02-48b9-4652-ab32-e0d2a370d1f9",
+        status: "queued",
+        progress_percent: 0,
+        current_stage: null,
+        stage_index: 0,
+        stage_count: 0,
+        stage_progress_percent: 0,
+        message: "Задача поставлена в очередь",
+        result: null,
+        error: null
+      });
+    }
+    if (url === "/api/v1/enrichments/1e310b02-48b9-4652-ab32-e0d2a370d1f9") {
+      return jsonResponse({
+        id: "1e310b02-48b9-4652-ab32-e0d2a370d1f9",
+        status: "completed",
+        progress_percent: 100,
+        current_stage: "metrics",
+        stage_index: 1,
+        stage_count: 1,
+        stage_progress_percent: 100,
+        message: "Готово",
+        result: sampleResult(),
+        error: null
+      });
+    }
+    if (url === "/api/v1/settings") {
+      return jsonResponse(sampleSettingsSnapshot());
+    }
+    throw new Error(`Unhandled fetch: ${url}`);
+  });
+  vi.stubGlobal("fetch", fetchMock);
+  render(<App />);
+
+  fireEvent.change(screen.getByLabelText("Произвольный текст"), {
+    target: { value: "Контекст входного текста должен сохраниться" }
+  });
+  fireEvent.click(screen.getAllByRole("button", { name: /запустить обогащение/i })[0]);
+  await waitFor(() => expect(FakeEventSource.instances.length).toBe(1));
+  FakeEventSource.instances[0].listeners.get("job_completed")?.(
+    new MessageEvent("job_completed", {
+      data: JSON.stringify({
+        event_type: "job_completed",
+        progress_percent: 100,
+        current_stage: "metrics",
+        stage_index: 1,
+        stage_count: 1,
+        stage_progress_percent: 100,
+        message: "Готово",
+        payload: { result: sampleResult() }
+      })
+    })
+  );
+
+  expect(await screen.findByRole("table", { name: "Точный расчет оценки лида" })).toBeInTheDocument();
+  const aliasLink = screen.getAllByRole("link", { name: "Устройство: Хаб умного дома" })[0];
+  expect(aliasLink).toHaveAttribute("href", "#/settings/aliases/devices/smart_home_hub");
+
+  fireEvent.click(aliasLink);
+
+  expect(await screen.findByRole("heading", { name: "Настройка: Хаб умного дома" })).toBeInTheDocument();
+  expect(screen.getByText("Каталог: devices")).toBeInTheDocument();
+  expect(screen.queryByRole("table", { name: "Точный расчет оценки лида" })).not.toBeInTheDocument();
+
+  fireEvent.click(screen.getByRole("tab", { name: "Обогащение" }));
+
+  expect(screen.getByLabelText("Произвольный текст")).toHaveValue("Контекст входного текста должен сохраниться");
 });
 
 test("loads settings center on demand", async () => {
@@ -818,8 +893,30 @@ function sampleSettingsSnapshot() {
         fuzzy_long_max_distance: 2,
         fuzzy_excluded_aliases: []
       },
-      signals: [],
-      facts: [],
+      signals: [
+        {
+          type: "smart_home_automation",
+          label: "Умный дом / автоматизация",
+          group: "Умный дом",
+          color: "#0b57d0",
+          confidence: 0.9,
+          phrases: [],
+          patterns: [],
+          match: { aliases: [{ catalog: "devices", keys: ["smart_home_hub"], kinds: [] }], facts: [] }
+        }
+      ],
+      facts: [
+        {
+          type: "controlled_device",
+          label: "Управляемое устройство",
+          group: "Устройства",
+          color: null,
+          confidence: 0.8,
+          phrases: [],
+          patterns: [],
+          match: { aliases: [], facts: [] }
+        }
+      ],
       vendors: [
         {
           key: "aqara",
@@ -830,7 +927,15 @@ function sampleSettingsSnapshot() {
         }
       ],
       protocols: [],
-      devices: [],
+      devices: [
+        {
+          key: "smart_home_hub",
+          canonical: "Хаб умного дома",
+          type: "device",
+          aliases: ["zigbee шлюз"],
+          fact_types: ["controlled_device"]
+        }
+      ],
       software: [],
       lead_scoring: sampleLeadScoringSettings(),
       source: {
@@ -880,8 +985,52 @@ function sampleResult() {
     original_text: "Нужен умный дом",
     normalized_text: "Нужен умный дом",
     entities: [],
-    facts: [],
-    domain_signals: [],
+    facts: [
+      {
+        id: "fact-smart-home-hub",
+        text: "zigbee шлюз",
+        type: "controlled_device",
+        label: "Устройство: Хаб умного дома",
+        source: "alias_catalog",
+        range: { start: 0, stop: 0 },
+        explanation: "Найден alias «Хаб умного дома» в каталоге devices (smart_home_hub).",
+        settings_refs: [
+          {
+            section: "aliases",
+            catalog: "devices",
+            key: "smart_home_hub",
+            label: "Устройство: Хаб умного дома",
+            kind: "alias"
+          }
+        ]
+      }
+    ],
+    domain_signals: [
+      {
+        id: "signal-smart-home",
+        text: "zigbee шлюз",
+        type: "smart_home_automation",
+        label: "Умный дом / автоматизация",
+        source: "alias_catalog",
+        range: { start: 0, stop: 0 },
+        explanation: "Сигнал «Умный дом / автоматизация» зависит от alias «Хаб умного дома».",
+        settings_refs: [
+          {
+            section: "signals",
+            key: "smart_home_automation",
+            label: "Умный дом / автоматизация",
+            kind: "rule"
+          },
+          {
+            section: "aliases",
+            catalog: "devices",
+            key: "smart_home_hub",
+            label: "Устройство: Хаб умного дома",
+            kind: "alias"
+          }
+        ]
+      }
+    ],
     tokens: [],
     syntax: [],
     metrics: {

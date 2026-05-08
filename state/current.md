@@ -80,8 +80,13 @@
 - Enrichment overview now explains the deterministic result in operator terms:
   dictionary entities, facts, and domain signals include source and why text;
   lead score shows the arithmetic formula; solution areas, customer segments,
-  and review lanes show the configured matched labels/groups. Overview sections
-  include shortcuts to the relevant Settings Center sections.
+  and review lanes show the configured matched labels/groups. Score, category,
+  review-lane, dictionary, fact, and signal tables use links wherever a setting
+  can be identified.
+- Enrichment facts/signals now carry structured `settings_refs` for the rule or
+  alias row that produced them. The frontend turns these into separate settings
+  detail pages such as `#/settings/aliases/devices/electric_curtain`; navigation
+  stays inside the SPA, so the current input text/result context is preserved.
 - Annotated source text converts backend Unicode code point ranges into browser
   UTF-16 ranges before slicing, so matches after emoji are highlighted on the
   intended fragment.

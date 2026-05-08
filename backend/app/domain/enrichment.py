@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from enum import StrEnum
 from typing import Any
@@ -47,6 +47,15 @@ class EnrichedEntity:
 
 
 @dataclass(frozen=True)
+class SettingsReference:
+    section: str
+    key: str
+    label: str
+    kind: str
+    catalog: str | None = None
+
+
+@dataclass(frozen=True)
 class ExtractedFact:
     id: str
     text: str
@@ -56,6 +65,7 @@ class ExtractedFact:
     source: str
     confidence: float | None = None
     explanation: str | None = None
+    settings_refs: list[SettingsReference] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -69,6 +79,7 @@ class DomainSignal:
     confidence: float | None = None
     color: str | None = None
     explanation: str | None = None
+    settings_refs: list[SettingsReference] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -194,6 +205,10 @@ class TextEnrichmentResult:
                     source=str(item["source"]),
                     confidence=item.get("confidence"),
                     explanation=item.get("explanation"),
+                    settings_refs=[
+                        _settings_reference_from_dict(ref)
+                        for ref in item.get("settings_refs", [])
+                    ],
                 )
                 for item in data.get("facts", [])
             ],
@@ -208,6 +223,10 @@ class TextEnrichmentResult:
                     confidence=item.get("confidence"),
                     color=item.get("color"),
                     explanation=item.get("explanation"),
+                    settings_refs=[
+                        _settings_reference_from_dict(ref)
+                        for ref in item.get("settings_refs", [])
+                    ],
                 )
                 for item in data.get("domain_signals", [])
             ],
@@ -308,6 +327,16 @@ def _lead_assessment_from_dict(data: Any) -> LeadAssessment | None:
             for item in data.get("reasons", [])
         ],
         review_lane=_lead_review_lane_from_dict(data.get("review_lane")),
+    )
+
+
+def _settings_reference_from_dict(data: Any) -> SettingsReference:
+    return SettingsReference(
+        section=str(data["section"]),
+        key=str(data["key"]),
+        label=str(data["label"]),
+        kind=str(data["kind"]),
+        catalog=data.get("catalog"),
     )
 
 

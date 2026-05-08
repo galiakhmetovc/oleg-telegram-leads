@@ -367,6 +367,21 @@ software:
     assert {"vendor", "protocol", "automation_component", "software"} <= fact_types
     assert any(signal.source == "alias_catalog" for signal in result.domain_signals)
     assert any(fact.text == "Aqara" and fact.source == "alias_catalog" for fact in result.facts)
+    aqara_fact = next(fact for fact in result.facts if fact.text == "Aqara" and fact.source == "alias_catalog")
+    assert any(
+        ref.section == "aliases" and ref.catalog == "vendors" and ref.key == "aqara"
+        for ref in aqara_fact.settings_refs
+    )
+    platform_signal = next(
+        signal
+        for signal in result.domain_signals
+        if signal.type == "smart_home_platform" and signal.text == "Aqara"
+    )
+    assert any(ref.section == "signals" and ref.key == "smart_home_platform" for ref in platform_signal.settings_refs)
+    assert any(
+        ref.section == "aliases" and ref.catalog == "vendors" and ref.key == "aqara"
+        for ref in platform_signal.settings_refs
+    )
     assert result.lead_assessment is not None
     assert result.lead_assessment.is_lead is True
     assert "smart_home" in {item.type for item in result.lead_assessment.solution_areas}

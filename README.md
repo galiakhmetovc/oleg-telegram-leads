@@ -68,7 +68,10 @@ The enrichment result now includes `lead_assessment`: an explainable PUR lead
 verdict with score, temperature, solution areas, customer segments, review lane,
 positive reasons, and noise signals. The Overview tab shows dictionary entities,
 facts, domain signals, the exact score arithmetic, and category/lane matches in
-operator-facing labels. Scoring thresholds, weights, review lanes, and taxonomy
+operator-facing labels. Evidence rows and calculation rows link to separate
+settings detail pages through hash deeplinks like
+`#/settings/aliases/devices/electric_curtain`, while keeping the current input
+text in the SPA context. Scoring thresholds, weights, review lanes, and taxonomy
 mappings are edited through the same PostgreSQL-backed Settings Center.
 
 ## Batch Enrichment
