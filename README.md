@@ -99,6 +99,10 @@ unreviewed messages and verdicts, and review links preserve the current run,
 filters, and page offset when returning from the dedicated Review page. The
 default queue is unreviewed messages. Review saves support structured reason
 tags, hotkeys `1/2/3/4`, `Ctrl+Enter`, and "Сохранить и следующий".
+Expanded Analytics rows reuse the same explainability links as Testing:
+facts, signals, score reasons, taxonomy categories, alias dependencies, weights,
+and review lanes link to Settings detail targets. Left click opens the quick
+settings preview modal; Ctrl/Cmd or middle click follows the full hash deeplink.
 
 The Settings Center also exposes Telegram runtime settings:
 

@@ -67,6 +67,7 @@ test("opens analytics by default and renders text testing workspace", async () =
   render(<App />);
 
   expect(await screen.findByRole("heading", { name: "Аналитика лидов" })).toBeInTheDocument();
+  expect(screen.getByText("Нет данных аналитики. Подключите Telegram-источники или импортируйте тестовый batch.")).toBeInTheDocument();
   fireEvent.click(screen.getByRole("tab", { name: "Тестирование" }));
 
   expect(screen.getByLabelText("Произвольный текст")).toBeInTheDocument();
@@ -1289,6 +1290,134 @@ test("opens analytics deeplink by expanding and scrolling to candidate row", asy
   await waitFor(() => expect(scrollIntoView).toHaveBeenCalled());
 });
 
+test("links expanded analytics evidence to settings targets", async () => {
+  const run = sampleAnalyticsRun();
+  const candidate = {
+    message_id: "linked-1",
+    text: "Нужно установить zigbee шлюз и электрокарниз.",
+    score: 95,
+    temperature: "hot",
+    review_lane: "direct_pur_lead",
+    solution_areas: [
+      { type: "smart_home", label: "Умный дом / автоматизация", matched_types: ["smart_home_automation"] }
+    ],
+    customer_segments: [
+      { type: "provider_request", label: "Активный запрос", matched_types: ["installation_request"] }
+    ],
+    intent_signals: [{ type: "installation_request", label: "Запрос на установку" }],
+    noise_signals: [],
+    reasons: [
+      {
+        source: "domain_signal",
+        key: "smart_home_automation",
+        label: "Умный дом / автоматизация",
+        weight: 35,
+        matched_texts: ["zigbee шлюз"]
+      },
+      {
+        source: "fact",
+        key: "automation_component",
+        label: "Компонент автоматизации",
+        weight: 12,
+        matched_texts: ["электрокарниз"]
+      }
+    ],
+    domain_signals: [
+      {
+        type: "smart_home_automation",
+        label: "Умный дом / автоматизация",
+        text: "zigbee шлюз",
+        source: "alias_catalog",
+        range: { start: 18, stop: 29 },
+        settings_refs: [
+          {
+            section: "signals",
+            key: "smart_home_automation",
+            label: "Умный дом / автоматизация",
+            kind: "rule"
+          },
+          {
+            section: "aliases",
+            catalog: "devices",
+            key: "smart_home_hub",
+            label: "Устройство: Хаб умного дома",
+            kind: "alias"
+          }
+        ]
+      }
+    ],
+    facts: [
+      {
+        type: "automation_component",
+        label: "Компонент автоматизации",
+        text: "электрокарниз",
+        source: "alias_catalog",
+        range: { start: 32, stop: 45 },
+        settings_refs: [
+          {
+            section: "aliases",
+            catalog: "devices",
+            key: "electric_curtain",
+            label: "Устройство: Электрокарниз",
+            kind: "alias"
+          }
+        ]
+      }
+    ],
+    review: null
+  };
+  const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+    const url = String(input);
+    if (url === "/api/v1/auth/me") {
+      return jsonResponse({ authenticated: true, username: "admin" });
+    }
+    if (url === "/api/v1/settings") {
+      return jsonResponse(sampleSettingsSnapshot());
+    }
+    if (url === "/api/v1/analytics/runs") {
+      return jsonResponse({ runs: [run] });
+    }
+    if (url === `/api/v1/analytics/runs/${run.id}/summary`) {
+      return jsonResponse({
+        run,
+        aggregates: {
+          score_bucket: [],
+          signal: [],
+          reason: [],
+          solution_area: [],
+          customer_segment: [],
+          source_chat: [],
+          review_lane: []
+        }
+      });
+    }
+    if (url.startsWith(`/api/v1/analytics/runs/${run.id}/candidates`)) {
+      return jsonResponse({ total: 1, limit: 50, offset: 0, items: [candidate] });
+    }
+    throw new Error(`Unhandled fetch: ${url}`);
+  });
+  vi.stubGlobal("fetch", fetchMock);
+
+  render(<App />);
+
+  expect(await screen.findByText("Нужно установить zigbee шлюз и электрокарниз.")).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Показать разбор сообщения linked-1" }));
+
+  await screen.findByText("Раскрашенное сообщение");
+  expect(settingsLinkHrefs()).toEqual(
+    expect.arrayContaining([
+      expect.stringContaining("#/settings/signals/smart_home_automation"),
+      expect.stringContaining("#/settings/aliases/devices/smart_home_hub"),
+      expect.stringContaining("#/settings/aliases/devices/electric_curtain"),
+      expect.stringContaining("#/settings/lead-scoring/signal-weight/smart_home_automation"),
+      expect.stringContaining("#/settings/lead-scoring/fact-weight/automation_component"),
+      expect.stringContaining("#/settings/lead-scoring/solution-area/smart_home"),
+      expect.stringContaining("#/settings/lead-scoring/customer-segment/provider_request"),
+      expect.stringContaining("#/settings/lead-scoring/review-lane/direct_pur_lead")
+    ])
+  );
+});
+
 test("opens analytics review page and saves verdict comment", async () => {
   window.history.replaceState(null, "", "/#/analytics/review/focus-1");
   const candidate = {
@@ -1962,6 +2091,13 @@ function jsonResponse(payload: unknown) {
 function chooseMuiOption(comboboxName: string, optionName: RegExp) {
   fireEvent.mouseDown(screen.getByRole("combobox", { name: comboboxName }));
   fireEvent.click(screen.getByRole("option", { name: optionName }));
+}
+
+function settingsLinkHrefs() {
+  return screen
+    .getAllByRole("link")
+    .map((link) => link.getAttribute("href") ?? "")
+    .filter((href) => href.includes("#/settings/"));
 }
 
 function sampleResult() {

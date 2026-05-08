@@ -2,8 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from app.application.review_lanes import DEFAULT_REVIEW_LANE_KEY, DEFAULT_REVIEW_LANE_LABEL
-from app.application.review_lanes import ReviewLaneConfig, ReviewLaneMatchGroup
+from app.application.review_lanes import assign_review_lane_from_fields
 from app.domain.enrichment import DomainSignal, ExtractedFact, LeadAssessment, LeadCategory, LeadReason
 from app.domain.enrichment import LeadReviewLane
 from app.infrastructure.nlp.config_loader import LeadScoringConfig
@@ -183,27 +182,17 @@ class LeadScorer:
             "intent_signal_types": {item.type for item in intent_signals},
             "noise_signal_types": {item.type for item in noise_signals},
         }
-        for lane in sorted(self._config.review_lanes, key=lambda item: (-item.priority, item.key)):
-            matched_group_indexes = _matched_review_lane_groups(fields, lane)
-            if _review_lane_matches(
-                lane=lane,
-                score=score,
-                temperature=temperature,
-                fields=fields,
-                matched_group_indexes=matched_group_indexes,
-            ):
-                return LeadReviewLane(
-                    key=lane.key,
-                    label=lane.label,
-                    description=lane.description,
-                    matched_group_indexes=matched_group_indexes,
-                )
-
+        lane = assign_review_lane_from_fields(
+            score=score,
+            temperature=temperature,
+            fields=fields,
+            lanes=self._config.review_lanes,
+        )
         return LeadReviewLane(
-            key=DEFAULT_REVIEW_LANE_KEY,
-            label=DEFAULT_REVIEW_LANE_LABEL,
-            description=None,
-            matched_group_indexes=[],
+            key=lane.key,
+            label=lane.label,
+            description=lane.description,
+            matched_group_indexes=lane.matched_group_indexes,
         )
 
 
@@ -214,63 +203,3 @@ def _group_matches(items: list[DomainSignal] | list[ExtractedFact]) -> dict[str,
         if item.text not in grouped[item.type]:
             grouped[item.type].append(item.text)
     return grouped
-
-
-def _review_lane_matches(
-    *,
-    lane: ReviewLaneConfig,
-    score: int,
-    temperature: str,
-    fields: dict[str, set[str]],
-    matched_group_indexes: list[int],
-) -> bool:
-    if lane.min_score is not None and score < lane.min_score:
-        return False
-    if lane.max_score is not None and score > lane.max_score:
-        return False
-    if lane.temperatures and temperature not in lane.temperatures:
-        return False
-    if _has_excluded_review_lane_value(fields, lane):
-        return False
-    return len(matched_group_indexes) == len(lane.match_groups)
-
-
-def _matched_review_lane_groups(fields: dict[str, set[str]], lane: ReviewLaneConfig) -> list[int]:
-    return [
-        index
-        for index, group in enumerate(lane.match_groups)
-        if _review_lane_match_group_matches(fields, group)
-    ]
-
-
-def _review_lane_match_group_matches(fields: dict[str, set[str]], group: ReviewLaneMatchGroup) -> bool:
-    requested = {
-        "signal_types": set(group.signal_types),
-        "fact_types": set(group.fact_types),
-        "reason_keys": set(group.reason_keys),
-        "solution_area_types": set(group.solution_area_types),
-        "customer_segment_types": set(group.customer_segment_types),
-        "intent_signal_types": set(group.intent_signal_types),
-        "noise_signal_types": set(group.noise_signal_types),
-    }
-    active = {
-        field_name: values
-        for field_name, values in requested.items()
-        if values
-    }
-    if not active:
-        return True
-    return any(values & fields[field_name] for field_name, values in active.items())
-
-
-def _has_excluded_review_lane_value(fields: dict[str, set[str]], lane: ReviewLaneConfig) -> bool:
-    exclusions = {
-        "signal_types": lane.excluded_signal_types,
-        "fact_types": lane.excluded_fact_types,
-        "reason_keys": lane.excluded_reason_keys,
-        "solution_area_types": lane.excluded_solution_area_types,
-        "customer_segment_types": lane.excluded_customer_segment_types,
-        "intent_signal_types": lane.excluded_intent_signal_types,
-        "noise_signal_types": lane.excluded_noise_signal_types,
-    }
-    return any(set(values) & fields[field_name] for field_name, values in exclusions.items() if values)

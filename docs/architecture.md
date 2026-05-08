@@ -216,6 +216,11 @@ The Analytics tab opens by default after login and uses a virtual run
   the current verdict and then load the next candidate from the same return
   hash, which keeps the review flow sequential without creating a separate
   backend queue table.
+- Expanded candidate rows reuse the same settings-link model as the Testing
+  overview. Facts, domain signals, score reasons, taxonomy categories, alias
+  dependencies, weights, and review lanes link to their Settings detail target.
+  A normal left click opens the quick preview modal; Ctrl/Cmd or middle click
+  follows the full hash deeplink.
 
 Migration `0008_runtime_analytics_cleanup` deletes old batch analytics rows so
 the operator screen starts from connected Telegram channels. Batch imports can
@@ -384,6 +389,11 @@ enabled:
 - `review_lane`: the first configured review lane that matches the same
   extracted arrays, score, and temperature; it includes the lane label,
   description, and matched match-group indexes.
+
+Review lane matching lives in `app.application.review_lanes`, not separately in
+the scorer and analytics import paths. The shared matcher applies priority,
+score/temperature bounds, excluded types, and all match groups, then returns the
+same matched group indexes used for operator explanations.
 
 Bootstrap review lanes distinguish direct PUR leads from research/value
 questions. `direct_pur_lead` requires a PUR domain plus active order/provider/

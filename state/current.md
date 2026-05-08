@@ -191,9 +191,16 @@
   highlighted message fragments, lead temperature/score, review lane, solution
   areas, customer segments, intent/noise signals, score reasons, domain signals,
   and facts.
+- Expanded Analytics evidence now uses the same settings-link model as the
+  Testing overview: facts, domain signals, score reasons, taxonomy categories,
+  alias dependencies, weights, and review lanes link to the corresponding
+  Settings detail target. Left click opens the quick settings preview modal;
+  Ctrl/Cmd or middle click follows the full settings deeplink.
 - Analytics highlighting now prefers backend span ranges and converts Python
   Unicode code point offsets into browser UTF-16 offsets before slicing. Text
   search remains only as a fallback for old/live rows that do not carry ranges.
+- Empty Analytics copy is Telegram-live aware and no longer tells the operator
+  that only a batch-runner import can populate the screen.
 - Default NLP config recognizes the developer-provided smart-home apartment
   modification lead: apartments with smart home from a developer, socket/switch
   changes, electrical scheme changes, and warranty risk.
@@ -222,6 +229,10 @@
   `is_lead=false` and `temperature=none` for explicit supply/sale/DIY/price-only
   or ordinary household noise. Research/value smart-home questions now route to
   `research_warm` instead of `direct_pur_lead`.
+- Review lane matching is centralized in `app.application.review_lanes`. The
+  deterministic scorer and analytics import/list code use the same priority,
+  exclusion, score/temperature, and match-group logic, including matched group
+  indexes for explanations.
 - Dev PostgreSQL active NLP config has been refreshed through revision 27. The `need`
   signal no longer stores Russian forms such as `нужно`, `нужна`, `нужен` as
   exact phrases; they are represented as lemmatized phrase rules with preserved

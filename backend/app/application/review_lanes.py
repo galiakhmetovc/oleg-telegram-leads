@@ -43,23 +43,47 @@ class ReviewLaneAssignment:
     key: str
     label: str
     description: str | None = None
+    matched_group_indexes: list[int] = field(default_factory=list)
 
 
 def assign_review_lane(
     candidate: AnalyticsCandidate,
     lanes: list[ReviewLaneConfig],
 ) -> ReviewLaneAssignment:
-    fields = _candidate_fields(candidate)
+    return assign_review_lane_from_fields(
+        score=candidate.score,
+        temperature=candidate.temperature,
+        fields=_candidate_fields(candidate),
+        lanes=lanes,
+    )
+
+
+def assign_review_lane_from_fields(
+    *,
+    score: int,
+    temperature: str,
+    fields: dict[str, set[str]],
+    lanes: list[ReviewLaneConfig],
+) -> ReviewLaneAssignment:
     for lane in sorted(lanes, key=lambda item: (-item.priority, item.key)):
-        if _lane_matches(candidate, fields, lane):
+        matched_group_indexes = _matched_groups(fields, lane)
+        if _lane_matches(
+            score=score,
+            temperature=temperature,
+            fields=fields,
+            lane=lane,
+            matched_group_indexes=matched_group_indexes,
+        ):
             return ReviewLaneAssignment(
                 key=lane.key,
                 label=lane.label,
                 description=lane.description,
+                matched_group_indexes=matched_group_indexes,
             )
     return ReviewLaneAssignment(
         key=DEFAULT_REVIEW_LANE_KEY,
         label=DEFAULT_REVIEW_LANE_LABEL,
+        matched_group_indexes=[],
     )
 
 
@@ -80,19 +104,30 @@ def review_lane_labels(lanes: list[ReviewLaneConfig]) -> dict[str, ReviewLaneAss
 
 
 def _lane_matches(
-    candidate: AnalyticsCandidate,
+    *,
+    score: int,
+    temperature: str,
     fields: dict[str, set[str]],
     lane: ReviewLaneConfig,
+    matched_group_indexes: list[int],
 ) -> bool:
-    if lane.min_score is not None and candidate.score < lane.min_score:
+    if lane.min_score is not None and score < lane.min_score:
         return False
-    if lane.max_score is not None and candidate.score > lane.max_score:
+    if lane.max_score is not None and score > lane.max_score:
         return False
-    if lane.temperatures and candidate.temperature not in lane.temperatures:
+    if lane.temperatures and temperature not in lane.temperatures:
         return False
     if _has_excluded_value(fields, lane):
         return False
-    return all(_match_group(fields, group) for group in lane.match_groups)
+    return len(matched_group_indexes) == len(lane.match_groups)
+
+
+def _matched_groups(fields: dict[str, set[str]], lane: ReviewLaneConfig) -> list[int]:
+    return [
+        index
+        for index, group in enumerate(lane.match_groups)
+        if _match_group(fields, group)
+    ]
 
 
 def _match_group(fields: dict[str, set[str]], group: ReviewLaneMatchGroup) -> bool:

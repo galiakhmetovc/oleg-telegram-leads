@@ -16,6 +16,7 @@ import {
   Divider,
   IconButton,
   LinearProgress,
+  Link as MuiLink,
   MenuItem,
   Paper,
   Stack,
@@ -125,6 +126,15 @@ type AnalyticsSpan = {
   source?: string;
   color?: string | null;
   confidence?: number | null;
+  settings_refs?: SettingReference[];
+};
+
+type SettingReference = {
+  section: string;
+  key: string;
+  label: string;
+  catalog?: string | null;
+  kind?: string;
 };
 
 type TextRange = {
@@ -156,6 +166,20 @@ type CandidateFilters = {
 };
 
 type AnalyticsSummaryBlockKey = "score" | "signals" | "reasons" | "segments" | "lanes";
+type AliasCatalogName = "vendors" | "protocols" | "devices" | "software";
+type AnalyticsSettingsTarget =
+  | { kind: "signal"; key: string }
+  | { kind: "fact"; key: string }
+  | { kind: "alias"; catalog: AliasCatalogName; key: string }
+  | { kind: "lead_signal_weight"; key: string }
+  | { kind: "lead_fact_weight"; key: string }
+  | { kind: "solution_area"; key: string }
+  | { kind: "customer_segment"; key: string }
+  | { kind: "review_lane"; key: string };
+type AnalyticsSettingsLink = {
+  label: ReactNode;
+  target: AnalyticsSettingsTarget | null;
+};
 
 type AnalyticsPageProps = {
   apiBaseUrl: string;
@@ -173,6 +197,7 @@ type AnalyticsReviewPageProps = {
 
 const numberFormatter = new Intl.NumberFormat("ru-RU");
 const candidatePageSize = 50;
+const openSettingsTargetEvent = "pur-open-settings-target";
 const reviewVerdictOptions: Array<{
   value: AnalyticsReviewVerdict;
   label: string;
@@ -510,7 +535,7 @@ export function AnalyticsPage({ apiBaseUrl, focusMessageId, onTestMessage }: Ana
               Аналитика лидов
             </Typography>
             <Typography variant="body2" color="text.secondary" noWrap>
-              {runForKpi?.name ?? "Загрузки batch-runner еще не импортированы"}
+              {runForKpi?.name ?? "Нет активного источника аналитики"}
             </Typography>
           </Box>
           <Stack direction={{ xs: "column", sm: "row" }} spacing={1.5} sx={{ minWidth: { md: 420 } }}>
@@ -548,7 +573,7 @@ export function AnalyticsPage({ apiBaseUrl, focusMessageId, onTestMessage }: Ana
       ) : runs.length === 0 ? (
         <Paper variant="outlined" className="analytics-section">
           <Typography variant="body2" color="text.secondary">
-            Нет импортированных запусков. Импорт выполняется CLI-командой backend.
+            Нет данных аналитики. Подключите Telegram-источники или импортируйте тестовый batch.
           </Typography>
         </Paper>
       ) : (
@@ -1523,7 +1548,9 @@ function CandidateDetails({ candidate }: { candidate: AnalyticsCandidate }) {
         <Stack direction="row" spacing={1} useFlexGap sx={{ alignItems: "center", flexWrap: "wrap" }}>
           <Chip label={candidateTemperatureLabel(candidate)} color={candidateTemperatureColor(candidate)} />
           <Chip label={`${candidate.score} баллов`} variant="outlined" />
-          <Chip label={reviewLaneLabel(candidate.review_lane)} variant="outlined" />
+          <AnalyticsSettingLink target={{ kind: "review_lane", key: candidate.review_lane }}>
+            <Chip label={reviewLaneLabel(candidate.review_lane)} variant="outlined" />
+          </AnalyticsSettingLink>
           <ReviewStatusChip review={candidate.review ?? null} />
           <Typography variant="body2" color="text.secondary">
             {candidate.source_chat_title ? `${candidate.source_chat_title}, ` : ""}
@@ -1539,18 +1566,28 @@ function CandidateDetails({ candidate }: { candidate: AnalyticsCandidate }) {
 
         <Box className="candidate-detail-grid">
           <Stack spacing={1.25}>
-            <CandidateCategoryGroup title="Направления" items={candidate.solution_areas} />
-            <CandidateCategoryGroup title="Сегменты" items={candidate.customer_segments} />
-            <CandidateCategoryGroup title="Намерения" items={candidate.intent_signals} />
-            <CandidateCategoryGroup title="Шум" items={candidate.noise_signals} color="warning" />
+            <CandidateCategoryGroup
+              title="Направления"
+              items={candidate.solution_areas}
+              targetKind="solution_area"
+              candidate={candidate}
+            />
+            <CandidateCategoryGroup
+              title="Сегменты"
+              items={candidate.customer_segments}
+              targetKind="customer_segment"
+              candidate={candidate}
+            />
+            <CandidateCategoryGroup title="Намерения" items={candidate.intent_signals} candidate={candidate} />
+            <CandidateCategoryGroup title="Шум" items={candidate.noise_signals} color="warning" candidate={candidate} />
           </Stack>
           <Stack spacing={1.25}>
-            <CandidateSpanGroup title="Доменные сигналы" items={candidate.domain_signals} />
-            <CandidateSpanGroup title="Факты" items={candidate.facts} />
+            <CandidateSpanGroup title="Доменные сигналы" items={candidate.domain_signals} kind="signals" />
+            <CandidateSpanGroup title="Факты" items={candidate.facts} kind="facts" />
           </Stack>
         </Box>
 
-        <CandidateReasonTable reasons={candidate.reasons} />
+        <CandidateReasonTable candidate={candidate} />
       </Stack>
     </Box>
   );
@@ -1734,11 +1771,15 @@ function codePointOffsetToCodeUnit(codePointOffset: number, offsets: number[]): 
 function CandidateCategoryGroup({
   title,
   items,
-  color = "default"
+  color = "default",
+  targetKind,
+  candidate
 }: {
   title: string;
   items: AnalyticsCategory[];
   color?: "default" | "primary" | "secondary" | "error" | "info" | "success" | "warning";
+  targetKind?: "solution_area" | "customer_segment";
+  candidate: AnalyticsCandidate;
 }) {
   if (items.length === 0) {
     return null;
@@ -1747,21 +1788,52 @@ function CandidateCategoryGroup({
     <Stack spacing={0.75}>
       <Typography variant="subtitle2">{title}</Typography>
       <Stack direction="row" spacing={0.75} useFlexGap sx={{ flexWrap: "wrap" }}>
-        {items.map((item) => (
-          <Chip
-            key={`${title}-${item.type}`}
-            label={item.label || item.type}
-            size="small"
-            color={color}
-            variant={color === "default" ? "outlined" : "filled"}
-          />
-        ))}
+        {items.map((item) => {
+          const target = targetKind ? categoryTarget(targetKind, item.type) : matchedTypeTarget(item.type, candidate);
+          return (
+            <AnalyticsSettingLink key={`${title}-${item.type}`} target={target}>
+              <Chip
+                label={item.label || item.type}
+                size="small"
+                color={color}
+                variant={color === "default" ? "outlined" : "filled"}
+              />
+            </AnalyticsSettingLink>
+          );
+        })}
       </Stack>
+      {items.some((item) => (item.matched_types ?? []).length > 0) && (
+        <Stack spacing={0.5}>
+          {items.map((item) =>
+            (item.matched_types ?? []).length > 0 ? (
+              <Box key={`${title}-${item.type}-matched`} sx={{ display: "flex", flexWrap: "wrap", gap: 0.75 }}>
+                <Typography variant="caption" color="text.secondary">
+                  {item.label || item.type}:
+                </Typography>
+                <AnalyticsInlineSettingsLinks
+                  links={(item.matched_types ?? []).map((type) => ({
+                    label: typeLabelFromCandidate(type, candidate),
+                    target: matchedTypeTarget(type, candidate)
+                  }))}
+                />
+              </Box>
+            ) : null
+          )}
+        </Stack>
+      )}
     </Stack>
   );
 }
 
-function CandidateSpanGroup({ title, items }: { title: string; items: AnalyticsSpan[] }) {
+function CandidateSpanGroup({
+  title,
+  items,
+  kind
+}: {
+  title: string;
+  items: AnalyticsSpan[];
+  kind: "facts" | "signals";
+}) {
   return (
     <Stack spacing={0.75}>
       <Typography variant="subtitle2">{title}</Typography>
@@ -1770,13 +1842,25 @@ function CandidateSpanGroup({ title, items }: { title: string; items: AnalyticsS
           Не найдено.
         </Typography>
       ) : (
-        <Stack direction="row" spacing={0.75} useFlexGap sx={{ flexWrap: "wrap" }}>
+        <Stack spacing={0.75}>
+          <Stack direction="row" spacing={0.75} useFlexGap sx={{ flexWrap: "wrap" }}>
+            {items.map((item, index) => (
+              <AnalyticsSettingLink
+                key={`${title}-${item.type}-${item.text ?? ""}-${index}`}
+                target={spanPrimaryTarget(item, kind)}
+              >
+                <Chip
+                  label={`${item.label || item.type}${item.text ? `: ${item.text}` : ""}`}
+                  size="small"
+                  variant="outlined"
+                />
+              </AnalyticsSettingLink>
+            ))}
+          </Stack>
           {items.map((item, index) => (
-            <Chip
-              key={`${title}-${item.type}-${item.text ?? ""}-${index}`}
-              label={`${item.label || item.type}${item.text ? `: ${item.text}` : ""}`}
-              size="small"
-              variant="outlined"
+            <AnalyticsInlineSettingsLinks
+              key={`${title}-${item.type}-${item.text ?? ""}-${index}-settings`}
+              links={spanSettingLinks(item, kind)}
             />
           ))}
         </Stack>
@@ -1785,7 +1869,8 @@ function CandidateSpanGroup({ title, items }: { title: string; items: AnalyticsS
   );
 }
 
-function CandidateReasonTable({ reasons }: { reasons: AnalyticsReason[] }) {
+function CandidateReasonTable({ candidate }: { candidate: AnalyticsCandidate }) {
+  const reasons = candidate.reasons;
   return (
     <Stack spacing={1}>
       <Typography variant="subtitle2">Причины score</Typography>
@@ -1802,15 +1887,32 @@ function CandidateReasonTable({ reasons }: { reasons: AnalyticsReason[] }) {
                 <TableCell>Источник</TableCell>
                 <TableCell>Вес</TableCell>
                 <TableCell>Совпадения</TableCell>
+                <TableCell>Настройки</TableCell>
               </TableRow>
             </TableHead>
             <TableBody>
               {reasons.map((reason) => (
                 <TableRow key={`${reason.source}-${reason.key}`}>
-                  <TableCell>{reason.label || reason.key}</TableCell>
+                  <TableCell>
+                    <AnalyticsSettingLink target={reasonTypeTarget(reason, candidate)}>
+                      {reason.label || reason.key}
+                    </AnalyticsSettingLink>
+                  </TableCell>
                   <TableCell>{reason.source}</TableCell>
-                  <TableCell>{formatWeight(reason.weight)}</TableCell>
+                  <TableCell>
+                    <AnalyticsSettingLink target={reasonWeightTarget(reason)}>
+                      {formatWeight(reason.weight)}
+                    </AnalyticsSettingLink>
+                  </TableCell>
                   <TableCell>{reason.matched_texts.join(", ")}</TableCell>
+                  <TableCell>
+                    <AnalyticsInlineSettingsLinks
+                      links={[
+                        { label: "тип", target: reasonTypeTarget(reason, candidate) },
+                        { label: "вес", target: reasonWeightTarget(reason) }
+                      ]}
+                    />
+                  </TableCell>
                 </TableRow>
               ))}
             </TableBody>
@@ -1819,6 +1921,174 @@ function CandidateReasonTable({ reasons }: { reasons: AnalyticsReason[] }) {
       )}
     </Stack>
   );
+}
+
+function AnalyticsInlineSettingsLinks({ links }: { links: AnalyticsSettingsLink[] }) {
+  const visibleLinks = links.filter((link) => link.label !== "");
+  if (visibleLinks.length === 0) {
+    return null;
+  }
+  return (
+    <Box sx={{ display: "flex", flexWrap: "wrap", gap: 0.75 }}>
+      {visibleLinks.map((link, index) => (
+        <AnalyticsSettingLink key={`${analyticsSettingsTargetHash(link.target)}-${String(link.label)}-${index}`} target={link.target}>
+          <Typography component="span" variant="caption">
+            {link.label}
+          </Typography>
+        </AnalyticsSettingLink>
+      ))}
+    </Box>
+  );
+}
+
+function AnalyticsSettingLink({ target, children }: { target: AnalyticsSettingsTarget | null; children: ReactNode }) {
+  if (!target) {
+    return <>{children}</>;
+  }
+  const href = analyticsSettingsTargetHash(target);
+  return (
+    <MuiLink
+      href={href}
+      underline="hover"
+      title="ЛКМ - быстрый просмотр, Ctrl/Cmd или средняя кнопка - открыть страницу настройки"
+      onClick={(event) => {
+        if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || event.button !== 0) {
+          return;
+        }
+        event.preventDefault();
+        window.dispatchEvent(new CustomEvent(openSettingsTargetEvent, { detail: target }));
+      }}
+    >
+      {children}
+    </MuiLink>
+  );
+}
+
+function spanPrimaryTarget(item: AnalyticsSpan, kind: "facts" | "signals"): AnalyticsSettingsTarget | null {
+  const aliasTarget = analyticsSettingsTargetFromRef(item.settings_refs?.find((ref) => ref.section === "aliases"));
+  const signalTarget = analyticsSettingsTargetFromRef(item.settings_refs?.find((ref) => ref.section === "signals"));
+  const factTarget = analyticsSettingsTargetFromRef(item.settings_refs?.find((ref) => ref.section === "facts"));
+  if (kind === "signals") {
+    return signalTarget ?? { kind: "signal", key: item.type };
+  }
+  if (item.source === "alias_catalog") {
+    return aliasTarget ?? { kind: "lead_fact_weight", key: item.type };
+  }
+  return factTarget ?? { kind: "fact", key: item.type };
+}
+
+function spanSettingLinks(item: AnalyticsSpan, kind: "facts" | "signals"): AnalyticsSettingsLink[] {
+  const links = (item.settings_refs ?? [])
+    .map((ref) => ({
+      label: ref.label,
+      target: analyticsSettingsTargetFromRef(ref)
+    }))
+    .filter((link) => link.target);
+  const primaryTarget = spanPrimaryTarget(item, kind);
+  if (links.length === 0 && primaryTarget) {
+    return [{ label: item.label ?? item.type, target: primaryTarget }];
+  }
+  return links;
+}
+
+function analyticsSettingsTargetFromRef(ref: SettingReference | undefined): AnalyticsSettingsTarget | null {
+  if (!ref) {
+    return null;
+  }
+  if (ref.section === "signals") {
+    return { kind: "signal", key: ref.key };
+  }
+  if (ref.section === "facts") {
+    return { kind: "fact", key: ref.key };
+  }
+  if (ref.section === "aliases" && isAliasCatalogName(ref.catalog)) {
+    return { kind: "alias", catalog: ref.catalog, key: ref.key };
+  }
+  return null;
+}
+
+function reasonTypeTarget(reason: AnalyticsReason, candidate: AnalyticsCandidate): AnalyticsSettingsTarget | null {
+  if (reason.source === "domain_signal") {
+    return { kind: "signal", key: reason.key };
+  }
+  if (reason.source === "fact") {
+    const hasFactRuleMatch = candidate.facts.some((fact) => fact.type === reason.key && fact.source === "yargy");
+    return hasFactRuleMatch ? { kind: "fact", key: reason.key } : { kind: "lead_fact_weight", key: reason.key };
+  }
+  return null;
+}
+
+function reasonWeightTarget(reason: AnalyticsReason): AnalyticsSettingsTarget {
+  return reason.source === "domain_signal"
+    ? { kind: "lead_signal_weight", key: reason.key }
+    : { kind: "lead_fact_weight", key: reason.key };
+}
+
+function categoryTarget(kind: "solution_area" | "customer_segment", key: string): AnalyticsSettingsTarget {
+  return kind === "solution_area"
+    ? { kind: "solution_area", key }
+    : { kind: "customer_segment", key };
+}
+
+function matchedTypeTarget(type: string, candidate: AnalyticsCandidate): AnalyticsSettingsTarget | null {
+  if (candidate.domain_signals.some((signal) => signal.type === type)) {
+    return { kind: "signal", key: type };
+  }
+  if (candidate.facts.some((fact) => fact.type === type && fact.source === "yargy")) {
+    return { kind: "fact", key: type };
+  }
+  if (candidate.reasons.some((reason) => reason.source === "fact" && reason.key === type)) {
+    return { kind: "lead_fact_weight", key: type };
+  }
+  if (candidate.reasons.some((reason) => reason.source === "domain_signal" && reason.key === type)) {
+    return { kind: "lead_signal_weight", key: type };
+  }
+  return null;
+}
+
+function typeLabelFromCandidate(type: string, candidate: AnalyticsCandidate): string {
+  const signal = candidate.domain_signals.find((item) => item.type === type);
+  if (signal) {
+    return signal.label || signal.type;
+  }
+  const fact = candidate.facts.find((item) => item.type === type);
+  if (fact) {
+    return fact.label || fact.type;
+  }
+  const reason = candidate.reasons.find((item) => item.key === type);
+  return reason?.label || type;
+}
+
+function analyticsSettingsTargetHash(target: AnalyticsSettingsTarget | null): string {
+  if (!target) {
+    return "";
+  }
+  if (target.kind === "signal") {
+    return `#/settings/signals/${encodeURIComponent(target.key)}`;
+  }
+  if (target.kind === "fact") {
+    return `#/settings/facts/${encodeURIComponent(target.key)}`;
+  }
+  if (target.kind === "alias") {
+    return `#/settings/aliases/${target.catalog}/${encodeURIComponent(target.key)}`;
+  }
+  if (target.kind === "lead_signal_weight") {
+    return `#/settings/lead-scoring/signal-weight/${encodeURIComponent(target.key)}`;
+  }
+  if (target.kind === "lead_fact_weight") {
+    return `#/settings/lead-scoring/fact-weight/${encodeURIComponent(target.key)}`;
+  }
+  if (target.kind === "solution_area") {
+    return `#/settings/lead-scoring/solution-area/${encodeURIComponent(target.key)}`;
+  }
+  if (target.kind === "customer_segment") {
+    return `#/settings/lead-scoring/customer-segment/${encodeURIComponent(target.key)}`;
+  }
+  return `#/settings/lead-scoring/review-lane/${encodeURIComponent(target.key)}`;
+}
+
+function isAliasCatalogName(value: string | null | undefined): value is AliasCatalogName {
+  return value === "vendors" || value === "protocols" || value === "devices" || value === "software";
 }
 
 function candidateTemperatureLabel(candidate: AnalyticsCandidate) {

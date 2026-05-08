@@ -38,6 +38,7 @@ def test_assigns_first_matching_review_lane_by_priority() -> None:
 
     assert assignment.key == "direct_pur_lead"
     assert assignment.label == "Прямой лид ПУР"
+    assert assignment.matched_group_indexes == [0, 1]
 
 
 def test_review_lane_excludes_noise_even_when_positive_groups_match() -> None:
