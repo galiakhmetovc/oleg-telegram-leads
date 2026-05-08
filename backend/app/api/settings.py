@@ -76,6 +76,40 @@ class LeadCategorySettings(BaseModel):
     fact_types: list[str] = Field(default_factory=list)
 
 
+class ReviewLaneMatchGroupSettings(BaseModel):
+    signal_types: list[str] = Field(default_factory=list)
+    fact_types: list[str] = Field(default_factory=list)
+    reason_keys: list[str] = Field(default_factory=list)
+    solution_area_types: list[str] = Field(default_factory=list)
+    customer_segment_types: list[str] = Field(default_factory=list)
+    intent_signal_types: list[str] = Field(default_factory=list)
+    noise_signal_types: list[str] = Field(default_factory=list)
+
+
+class ReviewLaneSettings(BaseModel):
+    key: str = Field(min_length=1)
+    label: str = Field(min_length=1)
+    description: str | None = None
+    priority: int = 0
+    min_score: int | None = Field(default=None, ge=0)
+    max_score: int | None = Field(default=None, ge=0)
+    temperatures: list[str] = Field(default_factory=list)
+    match_groups: list[ReviewLaneMatchGroupSettings] = Field(default_factory=list)
+    excluded_signal_types: list[str] = Field(default_factory=list)
+    excluded_fact_types: list[str] = Field(default_factory=list)
+    excluded_reason_keys: list[str] = Field(default_factory=list)
+    excluded_solution_area_types: list[str] = Field(default_factory=list)
+    excluded_customer_segment_types: list[str] = Field(default_factory=list)
+    excluded_intent_signal_types: list[str] = Field(default_factory=list)
+    excluded_noise_signal_types: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def validate_score_bounds(self) -> ReviewLaneSettings:
+        if self.min_score is not None and self.max_score is not None and self.min_score > self.max_score:
+            raise ValueError("review lane min_score must be <= max_score")
+        return self
+
+
 class LeadScoringSettings(BaseModel):
     lead_threshold: int = Field(ge=0)
     warm_threshold: int = Field(ge=0)
@@ -86,6 +120,7 @@ class LeadScoringSettings(BaseModel):
     customer_segments: dict[str, LeadCategorySettings] = Field(default_factory=dict)
     intent_signal_types: list[str] = Field(default_factory=list)
     noise_signal_types: list[str] = Field(default_factory=list)
+    review_lanes: list[ReviewLaneSettings] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def validate_threshold_order(self) -> LeadScoringSettings:
@@ -347,6 +382,7 @@ def _lead_scoring_to_document(settings: LeadScoringSettings) -> dict[str, Any]:
             },
             "intent_signal_types": settings.intent_signal_types,
             "noise_signal_types": settings.noise_signal_types,
+            "review_lanes": [lane.model_dump(exclude_none=True) for lane in settings.review_lanes],
         }
     }
 
@@ -371,6 +407,10 @@ def _lead_scoring_from_document(raw_document: dict[str, Any]) -> LeadScoringSett
         },
         intent_signal_types=[str(value) for value in raw.get("intent_signal_types", [])],
         noise_signal_types=[str(value) for value in raw.get("noise_signal_types", [])],
+        review_lanes=[
+            ReviewLaneSettings.model_validate(value)
+            for value in raw.get("review_lanes", [])
+        ],
     )
 
 

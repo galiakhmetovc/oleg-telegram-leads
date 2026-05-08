@@ -252,3 +252,23 @@ Rationale:
   page load.
 - A later ClickHouse slice should receive stable export/import contracts from
   this boundary instead of becoming another active source of truth too early.
+
+## 2026-05-08: Analytics Review Lanes Are Configured
+
+Add review lanes as a configurable product layer over imported analytics
+candidates. A lane is not a hardcoded Python heuristic: it lives in
+`lead_scoring.review_lanes` inside the PostgreSQL-backed NLP config revision and
+matches already extracted signal, fact, reason, solution-area, customer-segment,
+intent, and noise arrays.
+
+Rationale:
+
+- The current candidate set is intentionally broad, so operators need review
+  queues such as direct PUR leads, project context, domain interest, generic
+  demand, and noise.
+- Threshold-only filtering loses confirmed positives and does not explain why a
+  candidate should be reviewed first.
+- Keeping lane definitions in config preserves the project rule that domain
+  logic remains externalized and editable.
+- Persisting the assigned lane during analytics import makes the UI filters and
+  aggregates cheap in PostgreSQL.

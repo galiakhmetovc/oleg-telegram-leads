@@ -9,9 +9,13 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
+from app.application.review_lanes import ReviewLaneConfig, assign_review_lane, review_lane_labels
+from app.core.config import Settings
 from app.db.session import create_sessionmaker
 from app.domain.analytics import AnalyticsAggregate, AnalyticsCandidate, AnalyticsRun
+from app.infrastructure.nlp.config_loader import load_nlp_config_from_documents, read_nlp_config_documents
 from app.infrastructure.persistence.analytics_repository import PostgresAnalyticsRepository
+from app.infrastructure.persistence.nlp_config_repository import PostgresNlpConfigRepository
 
 SCORE_BUCKETS: tuple[tuple[str, str, int, int | None], ...] = (
     ("35-59", "35-59", 35, 59),
@@ -28,7 +32,8 @@ async def import_analytics_run(
     name: str | None,
 ) -> AnalyticsRun:
     summary = json.loads(summary_path.read_text(encoding="utf-8"))
-    candidates = _read_candidates(lead_candidates_path)
+    review_lanes = await _load_active_review_lanes()
+    candidates = _read_candidates(lead_candidates_path, review_lanes=review_lanes)
     run_id = uuid4()
     run = AnalyticsRun(
         id=run_id,
@@ -45,40 +50,66 @@ async def import_analytics_run(
         imported_at=datetime.now(UTC),
         summary=summary,
     )
-    aggregates = _build_aggregates(candidates)
+    aggregates = _build_aggregates(candidates, review_lanes=review_lanes)
     repository = PostgresAnalyticsRepository(create_sessionmaker())
     return await repository.replace_import(run, candidates, aggregates)
 
 
-def _read_candidates(path: Path) -> list[AnalyticsCandidate]:
+def _read_candidates(
+    path: Path,
+    *,
+    review_lanes: list[ReviewLaneConfig] | None = None,
+) -> list[AnalyticsCandidate]:
     candidates: list[AnalyticsCandidate] = []
     for line in path.read_text(encoding="utf-8").splitlines():
         if not line.strip():
             continue
         raw = json.loads(line)
         assessment = raw.get("lead_assessment") or {}
-        candidates.append(
-            AnalyticsCandidate(
-                run_id=uuid4(),
-                message_id=str(raw.get("message_id")),
-                text=str(raw.get("text", "")),
-                score=int(assessment.get("score", 0)),
-                temperature=str(assessment.get("temperature", "unknown")),
-                solution_areas=list(assessment.get("solution_areas", [])),
-                customer_segments=list(assessment.get("customer_segments", [])),
-                intent_signals=list(assessment.get("intent_signals", [])),
-                noise_signals=list(assessment.get("noise_signals", [])),
-                reasons=list(assessment.get("reasons", [])),
-                domain_signals=list(raw.get("domain_signals", [])),
-                facts=list(raw.get("facts", [])),
-            )
+        candidate = AnalyticsCandidate(
+            run_id=uuid4(),
+            message_id=str(raw.get("message_id")),
+            text=str(raw.get("text", "")),
+            score=int(assessment.get("score", 0)),
+            temperature=str(assessment.get("temperature", "unknown")),
+            review_lane="other_candidate",
+            solution_areas=list(assessment.get("solution_areas", [])),
+            customer_segments=list(assessment.get("customer_segments", [])),
+            intent_signals=list(assessment.get("intent_signals", [])),
+            noise_signals=list(assessment.get("noise_signals", [])),
+            reasons=list(assessment.get("reasons", [])),
+            domain_signals=list(raw.get("domain_signals", [])),
+            facts=list(raw.get("facts", [])),
         )
+        if review_lanes:
+            assignment = assign_review_lane(candidate, review_lanes)
+            candidate = AnalyticsCandidate(
+                run_id=candidate.run_id,
+                message_id=candidate.message_id,
+                text=candidate.text,
+                score=candidate.score,
+                temperature=candidate.temperature,
+                review_lane=assignment.key,
+                solution_areas=candidate.solution_areas,
+                customer_segments=candidate.customer_segments,
+                intent_signals=candidate.intent_signals,
+                noise_signals=candidate.noise_signals,
+                reasons=candidate.reasons,
+                domain_signals=candidate.domain_signals,
+                facts=candidate.facts,
+            )
+        candidates.append(candidate)
     return candidates
 
 
-def _build_aggregates(candidates: list[AnalyticsCandidate]) -> list[AnalyticsAggregate]:
+def _build_aggregates(
+    candidates: list[AnalyticsCandidate],
+    *,
+    review_lanes: list[ReviewLaneConfig] | None = None,
+) -> list[AnalyticsAggregate]:
     aggregates: list[AnalyticsAggregate] = []
     aggregates.extend(_score_bucket_aggregates(candidates))
+    aggregates.extend(_review_lane_aggregates(candidates, review_lanes or []))
     aggregates.extend(_counter_aggregates("temperature", _temperature_counts(candidates)))
     aggregates.extend(_counter_aggregates("signal", _typed_item_counts(candidates, "domain_signals")))
     aggregates.extend(_counter_aggregates("fact", _typed_item_counts(candidates, "facts")))
@@ -88,6 +119,14 @@ def _build_aggregates(candidates: list[AnalyticsCandidate]) -> list[AnalyticsAgg
     aggregates.extend(_counter_aggregates("intent_signal", _category_counts(candidates, "intent_signals")))
     aggregates.extend(_counter_aggregates("noise_signal", _category_counts(candidates, "noise_signals")))
     return aggregates
+
+
+async def _load_active_review_lanes() -> list[ReviewLaneConfig]:
+    settings = Settings()
+    defaults = read_nlp_config_documents(settings.nlp_config_dir)
+    revision = await PostgresNlpConfigRepository(create_sessionmaker()).get_active_or_seed(defaults)
+    config = load_nlp_config_from_documents(revision.documents)
+    return config.lead_scoring.review_lanes
 
 
 def _score_bucket_aggregates(candidates: list[AnalyticsCandidate]) -> list[AnalyticsAggregate]:
@@ -116,6 +155,27 @@ def _temperature_counts(candidates: list[AnalyticsCandidate]) -> dict[str, tuple
         key: (key, count, {})
         for key, count in counter.items()
     }
+
+
+def _review_lane_aggregates(
+    candidates: list[AnalyticsCandidate],
+    review_lanes: list[ReviewLaneConfig],
+) -> list[AnalyticsAggregate]:
+    counter = Counter(candidate.review_lane for candidate in candidates)
+    labels = review_lane_labels(review_lanes)
+    aggregates: list[AnalyticsAggregate] = []
+    for key, count in sorted(counter.items(), key=lambda item: (-item[1], item[0])):
+        label = labels.get(key)
+        aggregates.append(
+            AnalyticsAggregate(
+                kind="review_lane",
+                key=key,
+                label=label.label if label else key,
+                count=count,
+                payload={"description": label.description} if label and label.description else {},
+            )
+        )
+    return aggregates
 
 
 def _typed_item_counts(

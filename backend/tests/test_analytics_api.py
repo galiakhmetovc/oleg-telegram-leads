@@ -46,6 +46,13 @@ class ApiInMemoryAnalyticsRepository:
                 count=3200,
                 payload={"examples": ["нужно"]},
             ),
+            AnalyticsAggregate(
+                kind="review_lane",
+                key="direct_pur_lead",
+                label="Прямой лид ПУР",
+                count=1,
+                payload={"description": "Высокий приоритет для ручной проверки"},
+            ),
         ]
         self.candidates = [
             AnalyticsCandidate(
@@ -54,6 +61,7 @@ class ApiInMemoryAnalyticsRepository:
                 text="Подскажите на счет умного дома Яндекс",
                 score=247,
                 temperature="hot",
+                review_lane="direct_pur_lead",
                 solution_areas=[
                     {
                         "type": "smart_home",
@@ -107,6 +115,7 @@ class ApiInMemoryAnalyticsRepository:
         reason: str | None = None,
         solution_area: str | None = None,
         customer_segment: str | None = None,
+        lane: str | None = None,
         q: str | None,
     ) -> AnalyticsCandidatePage:
         items = self.candidates
@@ -120,6 +129,8 @@ class ApiInMemoryAnalyticsRepository:
             items = [item for item in items if any(area["type"] == solution_area for area in item.solution_areas)]
         if customer_segment is not None:
             items = [item for item in items if any(segment["type"] == customer_segment for segment in item.customer_segments)]
+        if lane is not None:
+            items = [item for item in items if item.review_lane == lane]
         return AnalyticsCandidatePage(total=len(items), items=items[offset : offset + limit])
 
 
@@ -152,6 +163,7 @@ def test_returns_analytics_summary_with_grouped_aggregates() -> None:
     assert payload["run"]["id"] == str(repository.run_id)
     assert payload["aggregates"]["score_bucket"][0]["key"] == "35-59"
     assert payload["aggregates"]["signal"][0]["count"] == 3200
+    assert payload["aggregates"]["review_lane"][0]["key"] == "direct_pur_lead"
 
 
 def test_lists_analytics_candidates_with_filters() -> None:
@@ -170,6 +182,7 @@ def test_lists_analytics_candidates_with_filters() -> None:
     assert payload["total"] == 1
     assert payload["items"][0]["message_id"] == "488906"
     assert payload["items"][0]["score"] == 247
+    assert payload["items"][0]["review_lane"] == "direct_pur_lead"
     assert payload["items"][0]["reasons"][0]["matched_texts"] == ["умный дом"]
 
 
@@ -182,6 +195,7 @@ def test_filters_analytics_candidates_by_reason_key() -> None:
             text="Нерелевантная причина",
             score=90,
             temperature="hot",
+            review_lane="domain_interest",
             solution_areas=[],
             customer_segments=[],
             intent_signals=[],
@@ -223,6 +237,7 @@ def test_filters_analytics_candidates_by_segments() -> None:
             text="Другой сегмент",
             score=110,
             temperature="hot",
+            review_lane="domain_interest",
             solution_areas=[
                 {
                     "type": "security",
@@ -251,6 +266,40 @@ def test_filters_analytics_candidates_by_segments() -> None:
     response = client.get(
         f"/api/v1/analytics/runs/{repository.run_id}/candidates",
         params={"solution_area": "smart_home", "customer_segment": "designers"},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["total"] == 1
+    assert payload["items"][0]["message_id"] == "488906"
+
+
+def test_filters_analytics_candidates_by_review_lane() -> None:
+    repository = ApiInMemoryAnalyticsRepository()
+    repository.candidates.append(
+        AnalyticsCandidate(
+            run_id=repository.run_id,
+            message_id="488909",
+            text="Похоже на доменный интерес, но не прямой лид",
+            score=70,
+            temperature="warm",
+            review_lane="domain_interest",
+            solution_areas=[],
+            customer_segments=[],
+            intent_signals=[],
+            noise_signals=[],
+            reasons=[],
+            domain_signals=[],
+            facts=[],
+        )
+    )
+    app = create_app()
+    app.dependency_overrides[get_analytics_repository] = lambda: repository
+    client = TestClient(app)
+
+    response = client.get(
+        f"/api/v1/analytics/runs/{repository.run_id}/candidates",
+        params={"lane": "direct_pur_lead"},
     )
 
     assert response.status_code == 200

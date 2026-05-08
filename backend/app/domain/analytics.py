@@ -45,6 +45,7 @@ class AnalyticsCandidate:
     text: str
     score: int
     temperature: str
+    review_lane: str
     solution_areas: list[dict[str, Any]]
     customer_segments: list[dict[str, Any]]
     intent_signals: list[dict[str, Any]]

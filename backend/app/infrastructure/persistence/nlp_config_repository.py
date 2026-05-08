@@ -150,6 +150,12 @@ def merge_missing_default_documents(
             merged["pipeline"],
         )
 
+    if "lead_scoring" in default_documents and "lead_scoring" in merged:
+        merged["lead_scoring"] = _merge_lead_scoring_sections(
+            default_documents["lead_scoring"],
+            merged["lead_scoring"],
+        )
+
     return merged
 
 
@@ -177,3 +183,20 @@ def _merge_pipeline_stages(
             active_stage_names.add(str(stage_name))
     merged_pipeline["stages"] = active_stages
     return merged_pipeline
+
+
+def _merge_lead_scoring_sections(
+    default_document: dict[str, Any],
+    active_document: dict[str, Any],
+) -> dict[str, Any]:
+    merged_document = deepcopy(active_document)
+    default_scoring = default_document.get("lead_scoring", {})
+    active_scoring = merged_document.get("lead_scoring", {})
+    if not isinstance(default_scoring, dict) or not isinstance(active_scoring, dict):
+        return merged_document
+
+    for key, value in default_scoring.items():
+        if key not in active_scoring:
+            active_scoring[key] = deepcopy(value)
+    merged_document["lead_scoring"] = active_scoring
+    return merged_document

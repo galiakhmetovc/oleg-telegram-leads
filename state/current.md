@@ -47,6 +47,12 @@
   score, temperature, solution areas, customer segments, reasons, and noise
   signals. Lead scoring thresholds, weights, and mappings are editable in the
   Settings Center and stored in PostgreSQL config revisions.
+- Batch analytics candidates now include configurable review lanes. Lane rules
+  live under `lead_scoring.review_lanes`, are visible/editable with lead scoring
+  settings, are assigned during analytics import, and can be viewed/filtered in
+  the analytics UI. Current bootstrap lanes split candidates into noise, direct
+  PUR leads, project context, domain interest, off-domain demand, generic
+  context, and other candidates.
 - Default NLP config recognizes the developer-provided smart-home apartment
   modification lead: apartments with smart home from a developer, socket/switch
   changes, electrical scheme changes, and warranty risk.
@@ -102,6 +108,7 @@
 ## Next Steps
 
 1. Review the lead assessment UI manually in the browser.
-2. Start curating a versioned eval dataset of positive leads, non-leads, and
-   borderline cases.
+2. Promote the 9 production-confirmed leads into a curated eval/golden dataset
+   after deciding what production text can be committed versus kept in ignored
+   artifacts.
 3. Keep an eye on host disk usage before larger dependency/model downloads.

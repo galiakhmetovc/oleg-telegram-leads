@@ -1,10 +1,12 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 import yaml
+
+from app.application.review_lanes import ReviewLaneConfig, ReviewLaneMatchGroup
 
 
 @dataclass(frozen=True)
@@ -57,6 +59,7 @@ class LeadScoringConfig:
     customer_segments: dict[str, dict[str, Any]]
     intent_signal_types: list[str]
     noise_signal_types: list[str]
+    review_lanes: list[ReviewLaneConfig] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -253,7 +256,97 @@ def _parse_lead_scoring(raw: Any) -> LeadScoringConfig:
         customer_segments=_parse_category_mapping(raw.get("customer_segments", {}), "customer_segments"),
         intent_signal_types=_parse_string_list(raw.get("intent_signal_types", []), "intent_signal_types"),
         noise_signal_types=_parse_string_list(raw.get("noise_signal_types", []), "noise_signal_types"),
+        review_lanes=_parse_review_lanes(raw.get("review_lanes", [])),
     )
+
+
+def _parse_review_lanes(raw: Any) -> list[ReviewLaneConfig]:
+    if raw is None:
+        return []
+    if not isinstance(raw, list):
+        raise ValueError("lead_scoring review_lanes must be a list")
+
+    lanes: list[ReviewLaneConfig] = []
+    for item in raw:
+        if not isinstance(item, dict):
+            raise ValueError("lead_scoring review_lanes item must be a mapping")
+        lanes.append(
+            ReviewLaneConfig(
+                key=str(item["key"]),
+                label=str(item.get("label", item["key"])),
+                description=str(item["description"]) if item.get("description") is not None else None,
+                priority=int(item.get("priority", 0)),
+                min_score=int(item["min_score"]) if item.get("min_score") is not None else None,
+                max_score=int(item["max_score"]) if item.get("max_score") is not None else None,
+                temperatures=_parse_string_list(item.get("temperatures", []), "review_lanes.temperatures"),
+                match_groups=_parse_review_lane_match_groups(item.get("match_groups", [])),
+                excluded_signal_types=_parse_string_list(
+                    item.get("excluded_signal_types", []),
+                    "review_lanes.excluded_signal_types",
+                ),
+                excluded_fact_types=_parse_string_list(
+                    item.get("excluded_fact_types", []),
+                    "review_lanes.excluded_fact_types",
+                ),
+                excluded_reason_keys=_parse_string_list(
+                    item.get("excluded_reason_keys", []),
+                    "review_lanes.excluded_reason_keys",
+                ),
+                excluded_solution_area_types=_parse_string_list(
+                    item.get("excluded_solution_area_types", []),
+                    "review_lanes.excluded_solution_area_types",
+                ),
+                excluded_customer_segment_types=_parse_string_list(
+                    item.get("excluded_customer_segment_types", []),
+                    "review_lanes.excluded_customer_segment_types",
+                ),
+                excluded_intent_signal_types=_parse_string_list(
+                    item.get("excluded_intent_signal_types", []),
+                    "review_lanes.excluded_intent_signal_types",
+                ),
+                excluded_noise_signal_types=_parse_string_list(
+                    item.get("excluded_noise_signal_types", []),
+                    "review_lanes.excluded_noise_signal_types",
+                ),
+            )
+        )
+    return lanes
+
+
+def _parse_review_lane_match_groups(raw: Any) -> list[ReviewLaneMatchGroup]:
+    if raw is None:
+        return []
+    if not isinstance(raw, list):
+        raise ValueError("lead_scoring review_lanes match_groups must be a list")
+
+    groups: list[ReviewLaneMatchGroup] = []
+    for item in raw:
+        if not isinstance(item, dict):
+            raise ValueError("lead_scoring review_lanes match_group must be a mapping")
+        groups.append(
+            ReviewLaneMatchGroup(
+                signal_types=_parse_string_list(item.get("signal_types", []), "match_group.signal_types"),
+                fact_types=_parse_string_list(item.get("fact_types", []), "match_group.fact_types"),
+                reason_keys=_parse_string_list(item.get("reason_keys", []), "match_group.reason_keys"),
+                solution_area_types=_parse_string_list(
+                    item.get("solution_area_types", []),
+                    "match_group.solution_area_types",
+                ),
+                customer_segment_types=_parse_string_list(
+                    item.get("customer_segment_types", []),
+                    "match_group.customer_segment_types",
+                ),
+                intent_signal_types=_parse_string_list(
+                    item.get("intent_signal_types", []),
+                    "match_group.intent_signal_types",
+                ),
+                noise_signal_types=_parse_string_list(
+                    item.get("noise_signal_types", []),
+                    "match_group.noise_signal_types",
+                ),
+            )
+        )
+    return groups
 
 
 def _parse_weight_mapping(raw: Any, name: str) -> dict[str, int]:

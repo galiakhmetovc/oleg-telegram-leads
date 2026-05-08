@@ -86,6 +86,7 @@ analytics_candidates = sa.Table(
     sa.Column("text", sa.Text(), nullable=False),
     sa.Column("score", sa.Integer(), nullable=False),
     sa.Column("temperature", sa.Text(), nullable=False),
+    sa.Column("review_lane", sa.Text(), nullable=False),
     sa.Column("solution_areas", JSONB(), nullable=False),
     sa.Column("customer_segments", JSONB(), nullable=False),
     sa.Column("intent_signals", JSONB(), nullable=False),

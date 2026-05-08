@@ -199,6 +199,8 @@ test("loads settings center on demand", async () => {
   expect(screen.queryByText(/normalized:/)).not.toBeInTheDocument();
   fireEvent.click(screen.getByRole("button", { name: "Оценка лида" }));
   expect(screen.getByText("Пороги оценки")).toBeInTheDocument();
+  expect(screen.getByText("Очереди разбора")).toBeInTheDocument();
+  expect(screen.getByText("Прямой лид ПУР")).toBeInTheDocument();
   fireEvent.click(screen.getByRole("button", { name: "Словари" }));
   expect(screen.getByText("Alias-словари")).toBeInTheDocument();
   expect(screen.getAllByText("Aqara").length).toBeGreaterThan(0);
@@ -248,6 +250,15 @@ test("loads analytics dashboard on demand", async () => {
           ],
           customer_segment: [
             { kind: "customer_segment", key: "designers", label: "Дизайнеры", count: 1800, payload: {} }
+          ],
+          review_lane: [
+            {
+              kind: "review_lane",
+              key: "direct_pur_lead",
+              label: "Прямой лид ПУР",
+              count: 339,
+              payload: { description: "Сначала смотреть руками" }
+            }
           ]
         }
       });
@@ -263,6 +274,7 @@ test("loads analytics dashboard on demand", async () => {
             text: "Подскажите на счет умного дома Яндекс, как подключить свет к Алисе?",
             score: 454,
             temperature: "hot",
+            review_lane: "direct_pur_lead",
             solution_areas: [{ type: "automation", label: "Автоматизация", matched_types: ["smart_home_platform"] }],
             customer_segments: [],
             intent_signals: [],
@@ -295,6 +307,7 @@ test("loads analytics dashboard on demand", async () => {
   expect(screen.getByText((content) => content.replace(/\s/g, "") === "16001")).toBeInTheDocument();
   expect(screen.getByText("3.03%")).toBeInTheDocument();
   expect(screen.getByText("designer_context")).toBeInTheDocument();
+  expect(screen.getByText("Прямой лид ПУР")).toBeInTheDocument();
   expect(screen.getByText(/Подскажите на счет умного дома Яндекс/i)).toBeInTheDocument();
 });
 
@@ -313,7 +326,8 @@ test("pages analytics candidates with backend limit and offset", async () => {
           signal: [],
           reason: [],
           solution_area: [],
-          customer_segment: []
+          customer_segment: [],
+          review_lane: []
         }
       });
     }
@@ -330,6 +344,7 @@ test("pages analytics candidates with backend limit and offset", async () => {
             text: offset === 0 ? "Первая страница кандидатов" : "Вторая страница кандидатов",
             score: offset === 0 ? 90 : 80,
             temperature: "warm",
+            review_lane: "domain_interest",
             solution_areas: [],
             customer_segments: [],
             intent_signals: [],
@@ -394,6 +409,9 @@ test("selects analytics filters from summary aggregates", async () => {
           ],
           customer_segment: [
             { kind: "customer_segment", key: "designers", label: "Дизайнеры", count: 1800, payload: {} }
+          ],
+          review_lane: [
+            { kind: "review_lane", key: "direct_pur_lead", label: "Прямой лид ПУР", count: 339, payload: {} }
           ]
         }
       });
@@ -409,6 +427,7 @@ test("selects analytics filters from summary aggregates", async () => {
             text: "Отфильтрованный кандидат",
             score: 140,
             temperature: "hot",
+            review_lane: "direct_pur_lead",
             solution_areas: [],
             customer_segments: [],
             intent_signals: [],
@@ -432,14 +451,14 @@ test("selects analytics filters from summary aggregates", async () => {
   chooseMuiOption("Причина score", /smart_home_platform/);
   chooseMuiOption("Зона решения", /Автоматизация/);
   chooseMuiOption("Сегмент клиента", /Дизайнеры/);
-  fireEvent.click(screen.getByRole("button", { name: "Применить" }));
+  chooseMuiOption("Очередь", /Прямой лид ПУР/);
 
   await waitFor(() =>
     expect(
       fetchMock.mock.calls.some(
         ([calledUrl]) =>
           String(calledUrl) ===
-          `/api/v1/analytics/runs/${run.id}/candidates?limit=50&offset=0&signal=designer_context&reason=smart_home_platform&solution_area=automation&customer_segment=designers`
+          `/api/v1/analytics/runs/${run.id}/candidates?limit=50&offset=0&signal=designer_context&reason=smart_home_platform&solution_area=automation&customer_segment=designers&lane=direct_pur_lead`
       )
     ).toBe(true)
   );
@@ -545,7 +564,21 @@ function sampleLeadScoringSettings() {
     },
     customer_segments: {},
     intent_signal_types: ["provider_search"],
-    noise_signal_types: ["diy_or_equipment_only"]
+    noise_signal_types: ["diy_or_equipment_only"],
+    review_lanes: [
+      {
+        key: "direct_pur_lead",
+        label: "Прямой лид ПУР",
+        description: "Сначала смотреть руками",
+        priority: 200,
+        match_groups: [
+          { solution_area_types: ["security"], reason_keys: [] },
+          { reason_keys: ["provider_search"], solution_area_types: [] }
+        ],
+        excluded_signal_types: [],
+        excluded_noise_signal_types: ["diy_or_equipment_only"]
+      }
+    ]
   };
 }
 

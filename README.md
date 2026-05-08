@@ -101,8 +101,10 @@ uv run python -m app.cli.import_analytics \
 ```
 
 The UI tab `Аналитика` shows imported runs, high-level KPIs, score buckets, top
-signals/reasons/segments, and a candidate table filtered by score, temperature,
-signal, reason, solution area, customer segment, and text.
+signals/reasons/segments, review lanes, and a candidate table filtered by score,
+temperature, signal, reason, solution area, customer segment, review lane, and
+text. Review lanes are configured in `lead_scoring.review_lanes` and stored in
+PostgreSQL NLP config revisions; YAML is only the bootstrap default.
 
 Checks:
 

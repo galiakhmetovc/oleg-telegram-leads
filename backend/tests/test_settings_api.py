@@ -77,6 +77,17 @@ lead_scoring:
   intent_signal_types:
     - demand
   noise_signal_types: []
+  review_lanes:
+    - key: direct_pur_lead
+      label: Прямой лид ПУР
+      description: Высокий приоритет ручной проверки
+      priority: 200
+      match_groups:
+        - solution_area_types:
+            - supply
+        - reason_keys:
+            - demand
+      excluded_noise_signal_types: []
 """,
         encoding="utf-8",
     )
@@ -220,6 +231,8 @@ def test_get_settings_returns_editable_nlp_and_readonly_system_settings(tmp_path
     assert payload["nlp"]["lead_scoring"]["lead_threshold"] == 35
     assert payload["nlp"]["lead_scoring"]["signal_weights"]["demand"] == 20
     assert payload["nlp"]["lead_scoring"]["solution_areas"]["supply"]["label"] == "Снабжение"
+    assert payload["nlp"]["lead_scoring"]["review_lanes"][0]["key"] == "direct_pur_lead"
+    assert payload["nlp"]["lead_scoring"]["review_lanes"][0]["match_groups"][0]["solution_area_types"] == ["supply"]
     assert any(item["key"] == "environment" and item["editable"] is False for item in payload["system"])
     assert repository.active is not None
 
@@ -260,6 +273,7 @@ def test_get_settings_rejects_unsupported_rule_predicates(tmp_path: Path) -> Non
                 "customer_segments": {},
                 "intent_signal_types": [],
                 "noise_signal_types": [],
+                "review_lanes": [],
             }
         },
     }
@@ -315,6 +329,7 @@ def test_update_nlp_settings_validates_and_writes_database_revision_not_yaml(tmp
         }
     )
     updated["lead_scoring"]["signal_weights"]["demand"] = 25
+    updated["lead_scoring"]["review_lanes"][0]["priority"] = 250
     updated["vendors"][0]["aliases"].append("Аккара")
 
     response = client.put("/api/v1/settings/nlp", json=updated)
@@ -327,6 +342,7 @@ def test_update_nlp_settings_validates_and_writes_database_revision_not_yaml(tmp
     assert repository.active is not None
     assert repository.active["signals"]["signals"][0]["patterns"][1]["source_text"] == "Нужна консультация"
     assert repository.active["lead_scoring"]["lead_scoring"]["weights"]["signals"]["demand"] == 25
+    assert repository.active["lead_scoring"]["lead_scoring"]["review_lanes"][0]["priority"] == 250
     assert repository.active["vendors"]["vendors"][0]["aliases"] == ["Aqara", "Акара", "Аккара"]
     assert "консультация" not in (config_dir / "signals.yaml").read_text(encoding="utf-8")
     assert "Аккара" not in (config_dir / "vendors.yaml").read_text(encoding="utf-8")

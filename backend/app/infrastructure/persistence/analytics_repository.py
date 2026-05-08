@@ -56,6 +56,7 @@ class PostgresAnalyticsRepository:
         reason: str | None,
         solution_area: str | None,
         customer_segment: str | None,
+        lane: str | None,
         q: str | None,
     ) -> AnalyticsCandidatePage:
         predicates = [analytics_candidates.c.run_id == run_id]
@@ -71,6 +72,8 @@ class PostgresAnalyticsRepository:
             predicates.append(sa.literal(solution_area) == sa.any_(analytics_candidates.c.solution_area_types))
         if customer_segment:
             predicates.append(sa.literal(customer_segment) == sa.any_(analytics_candidates.c.customer_segment_types))
+        if lane:
+            predicates.append(analytics_candidates.c.review_lane == lane)
         if q:
             predicates.append(analytics_candidates.c.text.ilike(f"%{q}%"))
 
@@ -123,15 +126,15 @@ class PostgresAnalyticsRepository:
                 )
             )
 
-            for chunk in _chunks(candidates, 500):
+            for candidate_chunk in _chunks(candidates, 500):
                 await session.execute(
                     analytics_candidates.insert(),
-                    [_candidate_to_values(candidate, run_id) for candidate in chunk],
+                    [_candidate_to_values(candidate, run_id) for candidate in candidate_chunk],
                 )
-            for chunk in _chunks(aggregates, 500):
+            for aggregate_chunk in _chunks(aggregates, 500):
                 await session.execute(
                     analytics_aggregates.insert(),
-                    [_aggregate_to_values(aggregate, run_id) for aggregate in chunk],
+                    [_aggregate_to_values(aggregate, run_id) for aggregate in aggregate_chunk],
                 )
 
             await session.commit()
@@ -172,6 +175,7 @@ def _candidate_to_values(candidate: AnalyticsCandidate, run_id: UUID) -> dict[st
         "text": candidate.text,
         "score": candidate.score,
         "temperature": candidate.temperature,
+        "review_lane": candidate.review_lane,
         "solution_areas": candidate.solution_areas,
         "customer_segments": candidate.customer_segments,
         "intent_signals": candidate.intent_signals,
@@ -245,6 +249,7 @@ def _candidate_from_row(row: Any) -> AnalyticsCandidate:
         text=str(row["text"]),
         score=int(row["score"]),
         temperature=str(row["temperature"]),
+        review_lane=str(row["review_lane"]),
         solution_areas=list(row["solution_areas"] or []),
         customer_segments=list(row["customer_segments"] or []),
         intent_signals=list(row["intent_signals"] or []),

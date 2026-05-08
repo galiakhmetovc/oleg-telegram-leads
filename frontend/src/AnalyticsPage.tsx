@@ -63,6 +63,7 @@ type AnalyticsCandidate = {
   text: string;
   score: number;
   temperature: string;
+  review_lane: string;
   solution_areas: AnalyticsCategory[];
   customer_segments: AnalyticsCategory[];
   intent_signals: AnalyticsCategory[];
@@ -106,6 +107,7 @@ type CandidateFilters = {
   reason: string;
   solutionArea: string;
   customerSegment: string;
+  lane: string;
   q: string;
 };
 
@@ -122,6 +124,7 @@ const defaultFilters: CandidateFilters = {
   reason: "",
   solutionArea: "",
   customerSegment: "",
+  lane: "",
   q: ""
 };
 
@@ -290,6 +293,15 @@ export function AnalyticsPage({ apiBaseUrl }: AnalyticsPageProps) {
     setAppliedFilters(filters);
   }
 
+  function updateSelectFilter(key: keyof CandidateFilters, value: string) {
+    setCandidateOffset(0);
+    setFilters((current) => {
+      const next = { ...current, [key]: value };
+      setAppliedFilters(next);
+      return next;
+    });
+  }
+
   function handleSelectedRunChange(nextRunId: string) {
     setCandidateOffset(0);
     setSelectedRunId(nextRunId);
@@ -306,10 +318,12 @@ export function AnalyticsPage({ apiBaseUrl }: AnalyticsPageProps) {
   const topReasons = (summary?.aggregates.reason ?? []).slice(0, 8);
   const solutionAreas = (summary?.aggregates.solution_area ?? []).slice(0, 6);
   const customerSegments = (summary?.aggregates.customer_segment ?? []).slice(0, 6);
+  const reviewLanes = summary?.aggregates.review_lane ?? [];
   const signalOptions = summary?.aggregates.signal ?? [];
   const reasonOptions = summary?.aggregates.reason ?? [];
   const solutionAreaOptions = summary?.aggregates.solution_area ?? [];
   const customerSegmentOptions = summary?.aggregates.customer_segment ?? [];
+  const laneOptions = summary?.aggregates.review_lane ?? [];
 
   return (
     <Box className="analytics-shell">
@@ -393,6 +407,10 @@ export function AnalyticsPage({ apiBaseUrl }: AnalyticsPageProps) {
                 <AggregateChips items={customerSegments} />
               </Stack>
             </Paper>
+            <Paper variant="outlined" className="analytics-section">
+              <SectionTitle title="Очереди разбора" subtitle="Очереди ручной проверки кандидатов" />
+              <AggregateList items={reviewLanes} />
+            </Paper>
           </Box>
 
           <Paper variant="outlined" className="analytics-section">
@@ -421,7 +439,7 @@ export function AnalyticsPage({ apiBaseUrl }: AnalyticsPageProps) {
                     size="small"
                     label="Температура"
                     value={filters.temperature}
-                    onChange={(event) => setFilters((current) => ({ ...current, temperature: event.target.value }))}
+                    onChange={(event) => updateSelectFilter("temperature", event.target.value)}
                     sx={{ width: { sm: 150 } }}
                   >
                     <MenuItem value="">Любая</MenuItem>
@@ -433,25 +451,31 @@ export function AnalyticsPage({ apiBaseUrl }: AnalyticsPageProps) {
                     label="Сигнал"
                     value={filters.signal}
                     options={signalOptions}
-                    onChange={(value) => setFilters((current) => ({ ...current, signal: value }))}
+                    onChange={(value) => updateSelectFilter("signal", value)}
                   />
                   <AggregateFilterSelect
                     label="Причина score"
                     value={filters.reason}
                     options={reasonOptions}
-                    onChange={(value) => setFilters((current) => ({ ...current, reason: value }))}
+                    onChange={(value) => updateSelectFilter("reason", value)}
                   />
                   <AggregateFilterSelect
                     label="Зона решения"
                     value={filters.solutionArea}
                     options={solutionAreaOptions}
-                    onChange={(value) => setFilters((current) => ({ ...current, solutionArea: value }))}
+                    onChange={(value) => updateSelectFilter("solutionArea", value)}
                   />
                   <AggregateFilterSelect
                     label="Сегмент клиента"
                     value={filters.customerSegment}
                     options={customerSegmentOptions}
-                    onChange={(value) => setFilters((current) => ({ ...current, customerSegment: value }))}
+                    onChange={(value) => updateSelectFilter("customerSegment", value)}
+                  />
+                  <AggregateFilterSelect
+                    label="Очередь"
+                    value={filters.lane}
+                    options={laneOptions}
+                    onChange={(value) => updateSelectFilter("lane", value)}
                   />
                   <TextField
                     size="small"
@@ -653,6 +677,7 @@ function CandidateTable({
               <TableCell>ID</TableCell>
               <TableCell>Score</TableCell>
               <TableCell>Температура</TableCell>
+              <TableCell>Очередь</TableCell>
               <TableCell>Текст</TableCell>
               <TableCell>Причины</TableCell>
             </TableRow>
@@ -663,6 +688,9 @@ function CandidateTable({
                 <TableCell>{candidate.message_id}</TableCell>
                 <TableCell>{candidate.score}</TableCell>
                 <TableCell>{candidate.temperature}</TableCell>
+                <TableCell>
+                  <Chip size="small" label={candidate.review_lane} variant="outlined" />
+                </TableCell>
                 <TableCell className="candidate-text">{candidate.text}</TableCell>
                 <TableCell className="candidate-reasons">
                   <Stack direction="row" spacing={0.5} useFlexGap sx={{ flexWrap: "wrap" }}>
@@ -730,6 +758,9 @@ function candidateQuery(filters: CandidateFilters, limit: number, offset: number
   }
   if (filters.customerSegment.trim()) {
     params.set("customer_segment", filters.customerSegment.trim());
+  }
+  if (filters.lane.trim()) {
+    params.set("lane", filters.lane.trim());
   }
   if (filters.q.trim()) {
     params.set("q", filters.q.trim());

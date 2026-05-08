@@ -143,18 +143,26 @@ analytics import CLI turns a completed batch run into PostgreSQL records:
 - `analytics_runs` stores run metadata, source paths, totals, timing, and raw
   summary JSON.
 - `analytics_candidates` stores only candidate lead messages with message id,
-  source text, score, temperature, assessment arrays, matched signals, and facts.
+  source text, score, temperature, review lane, assessment arrays, matched signals,
+  and facts.
 - `analytics_aggregates` stores precomputed counts for score buckets,
-  temperatures, domain signals, facts, reasons, solution areas, customer
-  segments, intent signals, and noise signals.
+  review lanes, temperatures, domain signals, facts, reasons, solution areas,
+  customer segments, intent signals, and noise signals.
 
 FastAPI exposes this slice through:
 
 - `GET /api/v1/analytics/runs`
 - `GET /api/v1/analytics/runs/{run_id}/summary`
 - `GET /api/v1/analytics/runs/{run_id}/candidates`, with filters for score,
-  temperature, domain signal, reason key, solution area, customer segment, and
-  text search.
+  temperature, domain signal, reason key, solution area, customer segment, review
+  lane, and text search.
+
+Review lanes are not hardcoded analytics heuristics. They are configured under
+`lead_scoring.review_lanes` in the PostgreSQL-backed NLP config revision. Each
+lane defines priority, match groups over already extracted signal/fact/reason/
+segment arrays, optional score/temperature bounds, and exclusion lists. The
+analytics import assigns a lane to each candidate and precomputes lane aggregates
+so the UI can filter review queues without scanning raw JSONL artifacts.
 
 The repository currently uses PostgreSQL because the UI needs imported run
 review, filters, and aggregates over tens of thousands of candidates, not raw
@@ -196,7 +204,9 @@ from natural operator input through the backend semantic-pattern endpoint so the
 UI can show both the original text and the generated lemmas. The UI also has a
 Help page that explains these matching modes. The Settings Center also exposes
 the alias catalogs as editable lists for vended platforms, protocols, devices,
-and software.
+and software. Lead scoring settings include review lanes, so review queue logic
+is visible and editable together with thresholds, weights, taxonomy mappings,
+intent signals, and noise signals.
 
 ## Frontend
 

@@ -205,6 +205,34 @@ type LeadCategorySetting = {
   fact_types: string[];
 };
 
+type ReviewLaneMatchGroupSetting = {
+  signal_types: string[];
+  fact_types: string[];
+  reason_keys: string[];
+  solution_area_types: string[];
+  customer_segment_types: string[];
+  intent_signal_types: string[];
+  noise_signal_types: string[];
+};
+
+type ReviewLaneSetting = {
+  key: string;
+  label: string;
+  description?: string | null;
+  priority: number;
+  min_score?: number | null;
+  max_score?: number | null;
+  temperatures: string[];
+  match_groups: ReviewLaneMatchGroupSetting[];
+  excluded_signal_types: string[];
+  excluded_fact_types: string[];
+  excluded_reason_keys: string[];
+  excluded_solution_area_types: string[];
+  excluded_customer_segment_types: string[];
+  excluded_intent_signal_types: string[];
+  excluded_noise_signal_types: string[];
+};
+
 type LeadScoringSettings = {
   lead_threshold: number;
   warm_threshold: number;
@@ -215,6 +243,7 @@ type LeadScoringSettings = {
   customer_segments: Record<string, LeadCategorySetting>;
   intent_signal_types: string[];
   noise_signal_types: string[];
+  review_lanes: ReviewLaneSetting[];
 };
 
 type NlpSettings = {
@@ -1161,6 +1190,46 @@ function LeadScoringSettingsEditor({
   settings: LeadScoringSettings;
   onUpdate: (settings: LeadScoringSettings) => void;
 }) {
+  function updateLane(index: number, lane: ReviewLaneSetting) {
+    onUpdate({
+      ...settings,
+      review_lanes: settings.review_lanes.map((item, itemIndex) => (itemIndex === index ? lane : item))
+    });
+  }
+
+  function addLane() {
+    onUpdate({
+      ...settings,
+      review_lanes: [
+        ...settings.review_lanes,
+        {
+          key: "new_review_lane",
+          label: "Новая lane",
+          description: "",
+          priority: 0,
+          min_score: null,
+          max_score: null,
+          temperatures: [],
+          match_groups: [],
+          excluded_signal_types: [],
+          excluded_fact_types: [],
+          excluded_reason_keys: [],
+          excluded_solution_area_types: [],
+          excluded_customer_segment_types: [],
+          excluded_intent_signal_types: [],
+          excluded_noise_signal_types: []
+        }
+      ]
+    });
+  }
+
+  function removeLane(index: number) {
+    onUpdate({
+      ...settings,
+      review_lanes: settings.review_lanes.filter((_, itemIndex) => itemIndex !== index)
+    });
+  }
+
   return (
     <Stack spacing={2}>
       <Typography variant="h6">Оценка лида</Typography>
@@ -1235,7 +1304,154 @@ function LeadScoringSettingsEditor({
           fullWidth
         />
       </Box>
+      <ReviewLaneSettingsEditor
+        lanes={settings.review_lanes}
+        onAdd={addLane}
+        onRemove={removeLane}
+        onUpdate={updateLane}
+      />
     </Stack>
+  );
+}
+
+function ReviewLaneSettingsEditor({
+  lanes,
+  onAdd,
+  onRemove,
+  onUpdate
+}: {
+  lanes: ReviewLaneSetting[];
+  onAdd: () => void;
+  onRemove: (index: number) => void;
+  onUpdate: (index: number, lane: ReviewLaneSetting) => void;
+}) {
+  return (
+    <Stack spacing={1}>
+      <Box className="rule-list-header">
+        <Box sx={{ minWidth: 0 }}>
+          <Typography variant="subtitle1" sx={{ fontWeight: 700 }}>
+            Очереди разбора
+          </Typography>
+          <Typography variant="body2" color="text.secondary">
+            Очереди ручной проверки строятся из причин, сигналов, сегментов и направлений решений.
+          </Typography>
+        </Box>
+        <Button startIcon={<AddIcon />} variant="outlined" onClick={onAdd}>
+          Добавить lane
+        </Button>
+      </Box>
+      {lanes.map((lane, index) => (
+        <ReviewLaneEditor
+          key={`${lane.key}-${index}`}
+          lane={lane}
+          onRemove={() => onRemove(index)}
+          onUpdate={(nextLane) => onUpdate(index, nextLane)}
+        />
+      ))}
+    </Stack>
+  );
+}
+
+function ReviewLaneEditor({
+  lane,
+  onRemove,
+  onUpdate
+}: {
+  lane: ReviewLaneSetting;
+  onRemove: () => void;
+  onUpdate: (lane: ReviewLaneSetting) => void;
+}) {
+  return (
+    <Accordion variant="outlined" disableGutters>
+      <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+        <Box sx={{ alignItems: "center", display: "flex", gap: 1, minWidth: 0, width: "100%" }}>
+          <Typography sx={{ flex: 1, fontWeight: 700 }} noWrap>
+            {lane.label}
+          </Typography>
+          <Chip label={lane.key} size="small" variant="outlined" />
+          <Chip label={`priority ${lane.priority}`} size="small" variant="outlined" />
+        </Box>
+      </AccordionSummary>
+      <AccordionDetails>
+        <Stack spacing={2}>
+          <Box className="rule-grid">
+            <TextField label="key" value={lane.key} onChange={(event) => onUpdate({ ...lane, key: event.target.value })} />
+            <TextField
+              label="label"
+              value={lane.label}
+              onChange={(event) => onUpdate({ ...lane, label: event.target.value })}
+            />
+            <TextField
+              label="priority"
+              type="number"
+              value={lane.priority}
+              onChange={(event) => onUpdate({ ...lane, priority: numberInput(event.target.value) })}
+            />
+            <TextField
+              label="temperatures"
+              helperText="Одна температура в строке"
+              value={stringListToText(lane.temperatures)}
+              onChange={(event) => onUpdate({ ...lane, temperatures: textToStringList(event.target.value) })}
+            />
+          </Box>
+          <TextField
+            label="description"
+            value={lane.description ?? ""}
+            onChange={(event) => onUpdate({ ...lane, description: event.target.value || null })}
+            fullWidth
+          />
+          <Box className="settings-two-column">
+            <TextField
+              label="match_groups JSON"
+              helperText="Каждый объект - группа OR; группы между собой работают как AND."
+              value={reviewLaneMatchGroupsToText(lane.match_groups)}
+              onChange={(event) =>
+                onUpdate({ ...lane, match_groups: textToReviewLaneMatchGroups(event.target.value, lane.match_groups) })
+              }
+              multiline
+              minRows={8}
+              fullWidth
+            />
+            <Stack spacing={2}>
+              <TextField
+                label="excluded_signal_types"
+                value={stringListToText(lane.excluded_signal_types)}
+                onChange={(event) =>
+                  onUpdate({ ...lane, excluded_signal_types: textToStringList(event.target.value) })
+                }
+                multiline
+                minRows={2}
+              />
+              <TextField
+                label="excluded_noise_signal_types"
+                value={stringListToText(lane.excluded_noise_signal_types)}
+                onChange={(event) =>
+                  onUpdate({ ...lane, excluded_noise_signal_types: textToStringList(event.target.value) })
+                }
+                multiline
+                minRows={2}
+              />
+              <TextField
+                label="excluded_solution_area_types"
+                value={stringListToText(lane.excluded_solution_area_types)}
+                onChange={(event) =>
+                  onUpdate({ ...lane, excluded_solution_area_types: textToStringList(event.target.value) })
+                }
+                multiline
+                minRows={2}
+              />
+            </Stack>
+          </Box>
+          <Box>
+            <Tooltip title="Удалить">
+              <IconButton aria-label={`Удалить lane: ${lane.label}`} color="error" onClick={onRemove}>
+                <DeleteIcon />
+              </IconButton>
+            </Tooltip>
+          </Box>
+        </Stack>
+      </AccordionDetails>
+    </Accordion>
   );
 }
 
@@ -1797,8 +2013,8 @@ function textToNumberRecord(value: string): Record<string, number> {
   );
 }
 
-function stringListToText(items: string[]) {
-  return items.join("\n");
+function stringListToText(items?: string[]) {
+  return (items ?? []).join("\n");
 }
 
 function textToStringList(value: string): string[] {
@@ -1806,6 +2022,45 @@ function textToStringList(value: string): string[] {
     .split("\n")
     .map((line) => line.trim())
     .filter(Boolean);
+}
+
+function reviewLaneMatchGroupsToText(groups?: ReviewLaneMatchGroupSetting[]) {
+  return JSON.stringify(groups ?? [], null, 2);
+}
+
+function textToReviewLaneMatchGroups(
+  value: string,
+  fallback: ReviewLaneMatchGroupSetting[]
+): ReviewLaneMatchGroupSetting[] {
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    if (!Array.isArray(parsed)) {
+      return fallback;
+    }
+    return parsed.map(reviewLaneMatchGroupFromUnknown);
+  } catch {
+    return fallback;
+  }
+}
+
+function reviewLaneMatchGroupFromUnknown(value: unknown): ReviewLaneMatchGroupSetting {
+  const source = typeof value === "object" && value !== null ? value as Record<string, unknown> : {};
+  return {
+    signal_types: stringArrayFromUnknown(source.signal_types),
+    fact_types: stringArrayFromUnknown(source.fact_types),
+    reason_keys: stringArrayFromUnknown(source.reason_keys),
+    solution_area_types: stringArrayFromUnknown(source.solution_area_types),
+    customer_segment_types: stringArrayFromUnknown(source.customer_segment_types),
+    intent_signal_types: stringArrayFromUnknown(source.intent_signal_types),
+    noise_signal_types: stringArrayFromUnknown(source.noise_signal_types)
+  };
+}
+
+function stringArrayFromUnknown(value: unknown): string[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value.map((item) => String(item)).filter(Boolean);
 }
 
 function StatusPanel({

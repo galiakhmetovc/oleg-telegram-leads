@@ -54,6 +54,7 @@ class AnalyticsCandidateResponse(BaseModel):
     text: str
     score: int
     temperature: str
+    review_lane: str
     solution_areas: list[dict[str, Any]]
     customer_segments: list[dict[str, Any]]
     intent_signals: list[dict[str, Any]]
@@ -110,6 +111,7 @@ async def list_analytics_candidates(
     reason: str | None = None,
     solution_area: str | None = None,
     customer_segment: str | None = None,
+    lane: str | None = None,
     q: str | None = Query(default=None, min_length=1),
     repository: PostgresAnalyticsRepository = Depends(get_analytics_repository),
 ) -> AnalyticsCandidatePageResponse:
@@ -127,6 +129,7 @@ async def list_analytics_candidates(
         reason=reason,
         solution_area=solution_area,
         customer_segment=customer_segment,
+        lane=lane,
         q=q,
     )
     return AnalyticsCandidatePageResponse(
@@ -172,6 +175,7 @@ def _candidate_response(candidate: AnalyticsCandidate) -> AnalyticsCandidateResp
         text=candidate.text,
         score=candidate.score,
         temperature=candidate.temperature,
+        review_lane=candidate.review_lane,
         solution_areas=candidate.solution_areas,
         customer_segments=candidate.customer_segments,
         intent_signals=candidate.intent_signals,
