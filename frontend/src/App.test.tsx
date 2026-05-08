@@ -162,6 +162,17 @@ test("loads settings center on demand", async () => {
           }
         ],
         facts: [],
+        alias_matching: {
+          normalize_separators: true,
+          normalize_yo: true,
+          normalize_latin_confusables: true,
+          fuzzy_enabled: true,
+          fuzzy_min_length: 5,
+          fuzzy_max_distance: 1,
+          fuzzy_long_min_length: 10,
+          fuzzy_long_max_distance: 2,
+          fuzzy_excluded_aliases: ["sst", "knx"]
+        },
         vendors: [
           {
             key: "aqara",
@@ -223,6 +234,11 @@ test("loads settings center on demand", async () => {
   expect(screen.getAllByText("Aqara").length).toBeGreaterThan(0);
   expect(screen.getByText("Акара")).toBeInTheDocument();
   expect(screen.getByLabelText("Добавить alias в Вендоры")).toBeInTheDocument();
+  fireEvent.click(screen.getByText("Pipeline"));
+  expect(screen.getByText("Alias matching")).toBeInTheDocument();
+  expect(screen.getByLabelText("Fuzzy alias matching")).toBeChecked();
+  expect(screen.getByLabelText("Минимальная длина fuzzy")).toHaveValue(5);
+  expect(screen.getByLabelText("Исключения fuzzy")).toHaveValue("sst\nknx");
   fireEvent.click(screen.getByText("Runtime"));
   expect(screen.getByText("environment")).toBeInTheDocument();
 });
@@ -604,6 +620,7 @@ test("renders expanded settings help page for all editable NLP settings", () => 
   expect(screen.getByRole("heading", { name: "Доменные сигналы" })).toBeInTheDocument();
   expect(screen.getByRole("heading", { name: "Факты" })).toBeInTheDocument();
   expect(screen.getByRole("heading", { name: "Словари" })).toBeInTheDocument();
+  expect(screen.getByRole("heading", { name: "Alias matching" })).toBeInTheDocument();
   expect(screen.getByRole("heading", { name: "Оценка лида" })).toBeInTheDocument();
   expect(screen.getAllByText("Точное совпадение").length).toBeGreaterThan(0);
   expect(screen.getAllByText("Лемматическое совпадение").length).toBeGreaterThan(0);
@@ -613,6 +630,9 @@ test("renders expanded settings help page for all editable NLP settings", () => 
   expect(screen.getByText(/group - папка/i)).toBeInTheDocument();
   expect(screen.getByText(/Связь сигналов и словарей/i)).toBeInTheDocument();
   expect(screen.getByText(/каталог `vendors` и alias `neptun`/i)).toBeInTheDocument();
+  expect(screen.getByText(/casefold/i)).toBeInTheDocument();
+  expect(screen.getByText(/fuzzy_min_length/i)).toBeInTheDocument();
+  expect(screen.getAllByText(/короткие alias/i).length).toBeGreaterThan(0);
   expect(screen.getAllByText(/match.aliases/i).length).toBeGreaterThan(0);
   expect(screen.getByText(/source=alias_catalog/i)).toBeInTheDocument();
   expect(screen.getAllByText(/weights.signals/i).length).toBeGreaterThan(0);

@@ -328,6 +328,8 @@ def test_update_nlp_settings_validates_and_writes_database_revision_not_yaml(tmp
     updated["lead_scoring"]["signal_weights"]["demand"] = 25
     updated["lead_scoring"]["review_lanes"][0]["priority"] = 250
     updated["vendors"][0]["aliases"].append("Аккара")
+    updated["alias_matching"]["fuzzy_enabled"] = True
+    updated["alias_matching"]["fuzzy_max_distance"] = 1
 
     response = client.put("/api/v1/settings/nlp", json=updated)
 
@@ -343,6 +345,8 @@ def test_update_nlp_settings_validates_and_writes_database_revision_not_yaml(tmp
     assert repository.active["lead_scoring"]["lead_scoring"]["weights"]["signals"]["demand"] == 25
     assert repository.active["lead_scoring"]["lead_scoring"]["review_lanes"][0]["priority"] == 250
     assert repository.active["vendors"]["vendors"][0]["aliases"] == ["Aqara", "Акара", "Аккара"]
+    assert repository.active["pipeline"]["alias_matching"]["fuzzy_enabled"] is True
+    assert repository.active["pipeline"]["alias_matching"]["fuzzy_max_distance"] == 1
     assert "консультация" not in (config_dir / "signals.yaml").read_text(encoding="utf-8")
     assert "Аккара" not in (config_dir / "vendors.yaml").read_text(encoding="utf-8")
 

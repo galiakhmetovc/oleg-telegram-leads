@@ -28,6 +28,24 @@ class PipelineSettings(BaseModel):
     stages: list[PipelineStageSettings]
 
 
+class AliasMatchingSettings(BaseModel):
+    normalize_separators: bool = True
+    normalize_yo: bool = True
+    normalize_latin_confusables: bool = True
+    fuzzy_enabled: bool = True
+    fuzzy_min_length: int = Field(default=5, ge=1)
+    fuzzy_max_distance: int = Field(default=1, ge=0, le=3)
+    fuzzy_long_min_length: int = Field(default=10, ge=1)
+    fuzzy_long_max_distance: int = Field(default=2, ge=0, le=3)
+    fuzzy_excluded_aliases: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def validate_fuzzy_lengths(self) -> AliasMatchingSettings:
+        if self.fuzzy_long_min_length < self.fuzzy_min_length:
+            raise ValueError("fuzzy_long_min_length must be >= fuzzy_min_length")
+        return self
+
+
 class PatternTokenSettings(BaseModel):
     predicate: Literal["normalized"]
     value: str = Field(min_length=1)
@@ -152,6 +170,7 @@ class LeadScoringSettings(BaseModel):
 
 class NlpSettings(BaseModel):
     pipeline: PipelineSettings
+    alias_matching: AliasMatchingSettings = Field(default_factory=AliasMatchingSettings)
     signals: list[RuleSettings]
     facts: list[RuleSettings]
     vendors: list[AliasSettings] = Field(default_factory=list)
@@ -282,6 +301,7 @@ def _nlp_snapshot_from_revision(revision: NlpConfigRevision) -> NlpSettingsSnaps
     documents = revision.documents
     return NlpSettingsSnapshot(
         pipeline=PipelineSettings.model_validate(documents["pipeline"]),
+        alias_matching=_alias_matching_from_document(documents["pipeline"]),
         signals=[_rule_from_document(item) for item in documents["signals"].get("signals", [])],
         facts=[_rule_from_document(item) for item in documents["facts"].get("facts", [])],
         vendors=[_alias_from_document(item) for item in documents.get("vendors", {}).get("vendors", [])],
@@ -301,8 +321,10 @@ def _nlp_snapshot_from_revision(revision: NlpConfigRevision) -> NlpSettingsSnaps
 
 
 def _nlp_settings_to_documents(payload: NlpSettings) -> dict[str, dict[str, Any]]:
+    pipeline = payload.pipeline.model_dump()
+    pipeline["alias_matching"] = payload.alias_matching.model_dump()
     return {
-        "pipeline": payload.pipeline.model_dump(),
+        "pipeline": pipeline,
         "signals": {"signals": [_rule_to_document(rule) for rule in payload.signals]},
         "facts": {"facts": [_rule_to_document(rule) for rule in payload.facts]},
         "vendors": {"vendors": [_alias_to_document(alias) for alias in payload.vendors]},
@@ -311,6 +333,10 @@ def _nlp_settings_to_documents(payload: NlpSettings) -> dict[str, dict[str, Any]
         "software": {"software": [_alias_to_document(alias) for alias in payload.software]},
         "lead_scoring": _lead_scoring_to_document(payload.lead_scoring),
     }
+
+
+def _alias_matching_from_document(raw_pipeline: dict[str, Any]) -> AliasMatchingSettings:
+    return AliasMatchingSettings.model_validate(raw_pipeline.get("alias_matching", {}))
 
 
 def _rule_to_document(rule: RuleSettings) -> dict[str, Any]:

@@ -15,7 +15,8 @@ from yargy.tokenizer import MorphTokenizer
 from app.domain.enrichment import DomainSignal, EnrichedEntity, EnrichedSentence, EnrichedToken
 from app.domain.enrichment import EnrichmentMetrics, ExtractedFact, PipelineTraceItem
 from app.domain.enrichment import SyntaxDependency, TextEnrichmentResult, TextRange
-from app.infrastructure.nlp.config_loader import AliasRuleConfig, NlpPipelineConfig, PhraseRuleConfig
+from app.infrastructure.nlp.config_loader import AliasMatchingConfig, AliasRuleConfig, NlpPipelineConfig
+from app.infrastructure.nlp.config_loader import PhraseRuleConfig
 from app.infrastructure.nlp.config_loader import RuleTokenConfig
 from app.infrastructure.nlp.lead_scorer import LeadScorer
 
@@ -33,11 +34,28 @@ class CompiledPhraseRule:
 class CompiledAliasRule:
     config: AliasRuleConfig
     exact_phrases: tuple[CompiledExactPhrase, ...]
+    normalized_aliases: tuple[CompiledAliasText, ...]
 
 
 @dataclass(frozen=True)
 class CompiledExactPhrase:
     pattern: re.Pattern[str]
+
+
+@dataclass(frozen=True)
+class CompiledAliasText:
+    compact: str
+    fuzzy_distance: int
+    max_word_span: int
+    script: str | None
+
+
+@dataclass(frozen=True)
+class AliasCompactDocument:
+    text: str
+    indexes: tuple[int, ...]
+    word_ranges: tuple[tuple[int, int], ...]
+    word_scripts: tuple[str | None, ...]
 
 
 @dataclass(frozen=True)
@@ -332,6 +350,10 @@ class RussianTextEnricher:
                         if alias.strip()
                     )
                 ),
+                normalized_aliases=_compile_normalized_aliases(
+                    alias_config.aliases,
+                    self._config.alias_matching,
+                ),
             )
             for alias_config in alias_configs
         )
@@ -347,18 +369,42 @@ class RussianTextEnricher:
 
     def _find_alias_matches(self, text: str) -> list[AliasTextMatch]:
         matches: list[AliasTextMatch] = []
+        seen: set[tuple[str, int, int]] = set()
+        compact_text = _alias_compact_document(text, self._config.alias_matching)
         for compiled_alias in self._compiled_alias_rules:
             for start, stop, match_text in self._find_phrase_matches(
                 text,
                 compiled_alias.exact_phrases,
                 None,
             ):
+                key = (compiled_alias.config.key, start, stop)
+                if key in seen:
+                    continue
+                seen.add(key)
                 matches.append(
                     AliasTextMatch(
                         config=compiled_alias.config,
                         start=start,
                         stop=stop,
                         text=match_text,
+                    )
+                )
+            for start, stop in _find_normalized_alias_matches(
+                text,
+                compact_text,
+                compiled_alias.normalized_aliases,
+                self._config.alias_matching,
+            ):
+                key = (compiled_alias.config.key, start, stop)
+                if key in seen:
+                    continue
+                seen.add(key)
+                matches.append(
+                    AliasTextMatch(
+                        config=compiled_alias.config,
+                        start=start,
+                        stop=stop,
+                        text=text[start:stop],
                     )
                 )
         return sorted(matches, key=lambda item: (item.start, item.stop, item.text.lower()))
@@ -395,6 +441,30 @@ def _compile_exact_phrases(phrases: tuple[tuple[str, ...], ...]) -> tuple[Compil
     )
 
 
+def _compile_normalized_aliases(
+    aliases: tuple[str, ...],
+    settings: AliasMatchingConfig,
+) -> tuple[CompiledAliasText, ...]:
+    compiled: list[CompiledAliasText] = []
+    seen: set[str] = set()
+    for alias in aliases:
+        compact_document = _alias_compact_document(alias, settings)
+        compact = compact_document.text
+        if not compact or compact in seen:
+            continue
+        seen.add(compact)
+        word_count = len(compact_document.word_ranges)
+        compiled.append(
+            CompiledAliasText(
+                compact=compact,
+                fuzzy_distance=_alias_fuzzy_distance(alias, compact, settings),
+                max_word_span=word_count if word_count <= 1 else word_count + 1,
+                script=_single_script(compact_document.word_scripts),
+            )
+        )
+    return tuple(compiled)
+
+
 def _exact_phrase_pattern(phrase: tuple[str, ...]) -> re.Pattern[str]:
     body = r"\s+".join(re.escape(token) for token in _clean_phrase_tokens(phrase))
     return re.compile(rf"(?<![\w]){body}(?![\w])", flags=re.UNICODE)
@@ -416,11 +486,241 @@ def _find_exact_matches(
     ]
 
 
+def _find_normalized_alias_matches(
+    original_text: str,
+    compact_text: AliasCompactDocument,
+    aliases: tuple[CompiledAliasText, ...],
+    settings: AliasMatchingConfig,
+) -> list[tuple[int, int]]:
+    if not compact_text.text:
+        return []
+    matches: list[tuple[int, int]] = []
+    seen: set[tuple[int, int]] = set()
+    for alias in aliases:
+        for start, stop in _find_compact_exact_matches(original_text, compact_text, alias.compact):
+            if (start, stop) not in seen:
+                seen.add((start, stop))
+                matches.append((start, stop))
+        if settings.fuzzy_enabled and alias.fuzzy_distance > 0:
+            for start, stop in _find_compact_fuzzy_matches(
+                original_text,
+                compact_text,
+                alias.compact,
+                alias.fuzzy_distance,
+                alias.max_word_span,
+                alias.script,
+            ):
+                if (start, stop) not in seen:
+                    seen.add((start, stop))
+                    matches.append((start, stop))
+    return matches
+
+
+def _find_compact_exact_matches(
+    original_text: str,
+    compact_text: AliasCompactDocument,
+    alias: str,
+) -> list[tuple[int, int]]:
+    matches: list[tuple[int, int]] = []
+    start = compact_text.text.find(alias)
+    while start >= 0:
+        stop = start + len(alias)
+        original_start = compact_text.indexes[start]
+        original_stop = compact_text.indexes[stop - 1] + 1
+        if _has_original_boundaries(original_text, original_start, original_stop):
+            matches.append((original_start, original_stop))
+        start = compact_text.text.find(alias, start + 1)
+    return matches
+
+
+def _find_compact_fuzzy_matches(
+    original_text: str,
+    compact_text: AliasCompactDocument,
+    alias: str,
+    max_distance: int,
+    max_word_span: int,
+    alias_script: str | None,
+) -> list[tuple[int, int]]:
+    matches: list[tuple[int, int]] = []
+    alias_length = len(alias)
+    min_length = max(1, alias_length - max_distance)
+    max_length = alias_length + max_distance
+    for range_index, (start, _word_stop) in enumerate(compact_text.word_ranges):
+        for _next_index, (_next_start, stop) in enumerate(
+            compact_text.word_ranges[range_index:],
+            start=range_index,
+        ):
+            if _next_index - range_index + 1 > max_word_span:
+                break
+            window_length = stop - start
+            if window_length < min_length:
+                continue
+            if window_length > max_length:
+                break
+            window = compact_text.text[start:stop]
+            if _bounded_levenshtein(window, alias, max_distance) > max_distance:
+                continue
+            if not _candidate_scripts_match(
+                compact_text.word_scripts[range_index : _next_index + 1],
+                alias_script,
+            ):
+                continue
+            original_start = compact_text.indexes[start]
+            original_stop = compact_text.indexes[stop - 1] + 1
+            if _has_original_boundaries(original_text, original_start, original_stop):
+                matches.append((original_start, original_stop))
+    return matches
+
+
+def _alias_compact_document(text: str, settings: AliasMatchingConfig) -> AliasCompactDocument:
+    chars: list[str] = []
+    indexes: list[int] = []
+    word_ranges: list[tuple[int, int]] = []
+    word_scripts: list[str | None] = []
+    for match in re.finditer(r"\w+|\W+", text, flags=re.UNICODE):
+        token = match.group(0)
+        if not any(char.isalnum() for char in token):
+            if not settings.normalize_separators:
+                for offset, char in enumerate(token):
+                    normalized_char = char.casefold()
+                    if settings.normalize_yo:
+                        normalized_char = normalized_char.replace("ё", "е")
+                    for item in normalized_char:
+                        chars.append(item)
+                        indexes.append(match.start() + offset)
+            continue
+        word_start = len(chars)
+        target_script = _dominant_script(token) if settings.normalize_latin_confusables else None
+        for offset, char in enumerate(token):
+            for normalized_char in _normalize_alias_char(char, settings, target_script):
+                if normalized_char.isalnum():
+                    chars.append(normalized_char)
+                    indexes.append(match.start() + offset)
+        if len(chars) > word_start:
+            word_ranges.append((word_start, len(chars)))
+            word_scripts.append(target_script)
+    return AliasCompactDocument(
+        text="".join(chars),
+        indexes=tuple(indexes),
+        word_ranges=tuple(word_ranges),
+        word_scripts=tuple(word_scripts),
+    )
+
+
+def _normalize_alias_char(
+    char: str,
+    settings: AliasMatchingConfig,
+    target_script: str | None,
+) -> str:
+    value = char.casefold()
+    if settings.normalize_yo:
+        value = value.replace("ё", "е")
+    if target_script == "cyrillic":
+        value = "".join(_LATIN_TO_CYRILLIC_CONFUSABLES.get(item, item) for item in value)
+    elif target_script == "latin":
+        value = "".join(_CYRILLIC_TO_LATIN_CONFUSABLES.get(item, item) for item in value)
+    return value
+
+
+def _dominant_script(token: str) -> str | None:
+    latin_count = sum(1 for char in token.casefold() if "a" <= char <= "z")
+    cyrillic_count = sum(1 for char in token.casefold() if "а" <= char <= "я" or char == "ё")
+    if cyrillic_count > 0 and cyrillic_count >= latin_count:
+        return "cyrillic"
+    if latin_count > 0:
+        return "latin"
+    return None
+
+
+def _alias_fuzzy_distance(alias: str, compact: str, settings: AliasMatchingConfig) -> int:
+    if not settings.fuzzy_enabled:
+        return 0
+    if compact.casefold() in settings.fuzzy_excluded_aliases or alias.casefold() in settings.fuzzy_excluded_aliases:
+        return 0
+    if len(compact) < settings.fuzzy_min_length:
+        return 0
+    if len(compact) >= settings.fuzzy_long_min_length:
+        return settings.fuzzy_long_max_distance
+    return settings.fuzzy_max_distance
+
+
+def _single_script(scripts: tuple[str | None, ...]) -> str | None:
+    concrete_scripts = {script for script in scripts if script is not None}
+    if len(concrete_scripts) == 1:
+        return next(iter(concrete_scripts))
+    return None
+
+
+def _candidate_scripts_match(candidate_scripts: tuple[str | None, ...], alias_script: str | None) -> bool:
+    if alias_script is None:
+        return True
+    return all(script is None or script == alias_script for script in candidate_scripts)
+
+
+def _bounded_levenshtein(left: str, right: str, max_distance: int) -> int:
+    if abs(len(left) - len(right)) > max_distance:
+        return max_distance + 1
+    previous = list(range(len(right) + 1))
+    for left_index, left_char in enumerate(left, start=1):
+        current = [left_index]
+        row_min = current[0]
+        for right_index, right_char in enumerate(right, start=1):
+            cost = 0 if left_char == right_char else 1
+            current_value = min(
+                previous[right_index] + 1,
+                current[right_index - 1] + 1,
+                previous[right_index - 1] + cost,
+            )
+            current.append(current_value)
+            row_min = min(row_min, current_value)
+        if row_min > max_distance:
+            return max_distance + 1
+        previous = current
+    return previous[-1]
+
+
+def _has_original_boundaries(text: str, start: int, stop: int) -> bool:
+    return (start <= 0 or not text[start - 1].isalnum()) and (
+        stop >= len(text) or not text[stop].isalnum()
+    )
+
+
 def _parser_from_rules(yargy_rules: list[Any], tokenizer: Any | None = None) -> Any:
     with warnings.catch_warnings():
         warnings.filterwarnings("ignore", category=UserWarning, module="pymorphy2.analyzer")
         warnings.filterwarnings("ignore", message="pkg_resources is deprecated.*")
         return Parser(or_(*yargy_rules), tokenizer=tokenizer)
+
+
+_LATIN_TO_CYRILLIC_CONFUSABLES = {
+    "a": "а",
+    "b": "в",
+    "c": "с",
+    "e": "е",
+    "h": "н",
+    "k": "к",
+    "m": "м",
+    "o": "о",
+    "p": "р",
+    "t": "т",
+    "x": "х",
+    "y": "у",
+}
+
+_CYRILLIC_TO_LATIN_CONFUSABLES = {
+    "а": "a",
+    "в": "b",
+    "с": "c",
+    "е": "e",
+    "н": "h",
+    "к": "k",
+    "м": "m",
+    "о": "o",
+    "р": "p",
+    "т": "t",
+    "х": "x",
+    "у": "y",
+}
 
 
 def _alias_fact_label(alias_config: AliasRuleConfig, fact_type: str) -> str:

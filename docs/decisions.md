@@ -289,6 +289,25 @@ Rationale:
   a fresh PostgreSQL config revision or reseeded from current bootstrap YAML
   instead of hidden compatibility code.
 
+## 2026-05-08: Alias Matching Has Configurable Normalization And Limited Fuzzy
+
+Alias catalogs remain curated dictionaries, but matching is no longer only a
+plain lowercased phrase search. The alias layer now applies configurable
+normalization from `pipeline.alias_matching`: casefold, optional `ё/е`
+normalization, separator folding for variants such as `Profi Wi-Fi` versus
+`Profi-WiFi`, mixed Latin/Cyrillic confusable characters, and bounded fuzzy edit
+distance.
+
+Rationale:
+
+- Market spellings are noisy: users write `Нептyн` with a Latin `y`,
+  `neptun pro w`, `Profi-WiFi`, and similar variants.
+- Exact aliases remain the source of truth; fuzzy only expands matching around
+  configured aliases and returns the original text span.
+- Fuzzy must be conservative. It is disabled for aliases shorter than
+  `fuzzy_min_length`, capped by distance settings, and can be explicitly blocked
+  with `fuzzy_excluded_aliases` for abbreviations or risky short model names.
+
 ## 2026-05-07: Analytics Starts In PostgreSQL
 
 Store imported batch analytics in PostgreSQL first: runs, candidate lead

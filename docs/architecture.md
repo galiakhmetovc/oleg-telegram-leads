@@ -78,6 +78,8 @@ when the database is empty.
 - `facts` defines structured fact extraction.
 - `vendors`, `protocols`, `devices`, and `software` define alias catalogs for
   exact written variants of market terms.
+- `pipeline.alias_matching` controls alias normalization and limited fuzzy
+  matching for dictionary spellings.
 - `lead_scoring` defines PUR lead thresholds, signal/fact weights, solution area
   mappings, customer segment mappings, intent signals, and noise signals.
 
@@ -115,9 +117,15 @@ current bootstrap YAML.
 Alias catalogs are separate from domain signals. Alias catalogs store written
 variants: canonical name, alias type (`vendor`, `protocol`, `device`,
 `software`, or `model`), Latin/Cyrillic/transliterated/mistyped spellings, and
-`fact_types` emitted when the alias matches. Exact alias matching lowercases the
-input text before matching and returns the original span text in enrichment
-output.
+`fact_types` emitted when the alias matches. Alias matching uses casefold, so
+registry/case is ignored. The configurable `alias_matching` layer can also
+normalize `ё/е`, separator variants such as `Wi-Fi`/`WiFi`, mixed
+Latin/Cyrillic confusable letters such as `Нептyн`, and a bounded fuzzy edit
+distance. Fuzzy is deliberately limited by `fuzzy_min_length`,
+`fuzzy_max_distance`, `fuzzy_long_min_length`, `fuzzy_long_max_distance`, and
+`fuzzy_excluded_aliases` so short aliases such as `sst`, `knx`, or `dvr` do not
+start matching random words. Enrichment output still returns the original span
+text from the input message.
 
 Domain signals are the inference layer over semantic phrases, alias catalogs,
 and facts. They remain semantic categories such as `smart_home_platform`,

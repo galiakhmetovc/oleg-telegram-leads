@@ -16,6 +16,19 @@ class PipelineStageConfig:
 
 
 @dataclass(frozen=True)
+class AliasMatchingConfig:
+    normalize_separators: bool = True
+    normalize_yo: bool = True
+    normalize_latin_confusables: bool = True
+    fuzzy_enabled: bool = True
+    fuzzy_min_length: int = 5
+    fuzzy_max_distance: int = 1
+    fuzzy_long_min_length: int = 10
+    fuzzy_long_max_distance: int = 2
+    fuzzy_excluded_aliases: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
 class RuleTokenConfig:
     predicate: str
     value: str
@@ -101,6 +114,7 @@ class NlpPipelineConfig:
     facts: tuple[PhraseRuleConfig, ...]
     aliases: tuple[AliasRuleConfig, ...]
     lead_scoring: LeadScoringConfig
+    alias_matching: AliasMatchingConfig = field(default_factory=AliasMatchingConfig)
 
     @property
     def enabled_stages(self) -> tuple[PipelineStageConfig, ...]:
@@ -152,6 +166,7 @@ def load_nlp_config_from_documents(documents: dict[str, dict[str, Any]]) -> NlpP
             )
         ),
         lead_scoring=_parse_lead_scoring(lead_scoring.get("lead_scoring", {})),
+        alias_matching=_parse_alias_matching(pipeline.get("alias_matching", {})),
     )
 
 
@@ -168,6 +183,50 @@ def _parse_stage(raw: Any) -> PipelineStageConfig:
     if not isinstance(raw, dict):
         raise ValueError("pipeline stage must be a mapping")
     return PipelineStageConfig(name=str(raw["name"]), enabled=bool(raw.get("enabled", True)))
+
+
+def _parse_alias_matching(raw: Any) -> AliasMatchingConfig:
+    if raw is None:
+        return AliasMatchingConfig()
+    if not isinstance(raw, dict):
+        raise ValueError("pipeline alias_matching must be a mapping")
+    min_length = _parse_int(raw.get("fuzzy_min_length", 5), "alias_matching.fuzzy_min_length")
+    max_distance = _parse_int(raw.get("fuzzy_max_distance", 1), "alias_matching.fuzzy_max_distance")
+    long_min_length = _parse_int(raw.get("fuzzy_long_min_length", 10), "alias_matching.fuzzy_long_min_length")
+    long_max_distance = _parse_int(
+        raw.get("fuzzy_long_max_distance", 2),
+        "alias_matching.fuzzy_long_max_distance",
+    )
+    if min_length < 1:
+        raise ValueError("alias_matching.fuzzy_min_length must be >= 1")
+    if max_distance < 0 or long_max_distance < 0:
+        raise ValueError("alias_matching fuzzy distance must be >= 0")
+    if long_min_length < min_length:
+        raise ValueError("alias_matching.fuzzy_long_min_length must be >= fuzzy_min_length")
+    return AliasMatchingConfig(
+        normalize_separators=bool(raw.get("normalize_separators", True)),
+        normalize_yo=bool(raw.get("normalize_yo", True)),
+        normalize_latin_confusables=bool(raw.get("normalize_latin_confusables", True)),
+        fuzzy_enabled=bool(raw.get("fuzzy_enabled", True)),
+        fuzzy_min_length=min_length,
+        fuzzy_max_distance=max_distance,
+        fuzzy_long_min_length=long_min_length,
+        fuzzy_long_max_distance=long_max_distance,
+        fuzzy_excluded_aliases=tuple(
+            item.casefold()
+            for item in _parse_string_list(
+                raw.get("fuzzy_excluded_aliases", []),
+                "alias_matching.fuzzy_excluded_aliases",
+            )
+        ),
+    )
+
+
+def _parse_int(raw: Any, name: str) -> int:
+    try:
+        return int(raw)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must be an integer") from exc
 
 
 def _parse_phrase_rule(raw: Any, collection_name: str) -> PhraseRuleConfig:

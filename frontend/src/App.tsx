@@ -264,10 +264,23 @@ type LeadScoringSettings = {
   review_lanes: ReviewLaneSetting[];
 };
 
+type AliasMatchingSettings = {
+  normalize_separators: boolean;
+  normalize_yo: boolean;
+  normalize_latin_confusables: boolean;
+  fuzzy_enabled: boolean;
+  fuzzy_min_length: number;
+  fuzzy_max_distance: number;
+  fuzzy_long_min_length: number;
+  fuzzy_long_max_distance: number;
+  fuzzy_excluded_aliases: string[];
+};
+
 type NlpSettings = {
   pipeline: {
     stages: PipelineStageSetting[];
   };
+  alias_matching?: AliasMatchingSettings;
   signals: RuleSetting[];
   facts: RuleSetting[];
   vendors: AliasSetting[];
@@ -667,6 +680,13 @@ function SettingsCenter() {
     });
   }
 
+  function updateAliasMatching(aliasMatching: AliasMatchingSettings) {
+    if (!draft) {
+      return;
+    }
+    updateDraft({ ...draft, alias_matching: aliasMatching });
+  }
+
   function updateRule(collection: "signals" | "facts", index: number, rule: RuleSetting) {
     if (!draft) {
       return;
@@ -816,7 +836,13 @@ function SettingsCenter() {
         {draft && !loading && (
           <Box className="settings-content-grid">
             <Paper variant="outlined" className="settings-panel">
-              {section === "pipeline" && <PipelineSettingsEditor draft={draft} onStageChange={updateStage} />}
+              {section === "pipeline" && (
+                <PipelineSettingsEditor
+                  draft={draft}
+                  onStageChange={updateStage}
+                  onAliasMatchingChange={updateAliasMatching}
+                />
+              )}
               {section === "signals" && (
                 <RuleCollectionEditor
                   title="Доменные сигналы"
@@ -1184,6 +1210,59 @@ function SettingsHelpPage() {
           </Paper>
 
           <Paper variant="outlined" className="help-section">
+            <Typography variant="h6">Alias matching</Typography>
+            <Typography variant="body2" color="text.secondary">
+              Alias-словари всегда сравниваются через casefold, поэтому регистр не важен:
+              `Neptun`, `neptun`, `НЕПТУН` и `Нептун` обрабатываются без отдельного
+              перечисления регистра. Дополнительно можно включить нормализацию `ё/е`,
+              похожих латинских/кириллических букв и небольшой fuzzy-допуск.
+            </Typography>
+            <TableContainer>
+              <Table size="small">
+                <TableHead>
+                  <TableRow>
+                    <TableCell>Настройка</TableCell>
+                    <TableCell>Что делает</TableCell>
+                    <TableCell>Риск</TableCell>
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  <TableRow>
+                    <TableCell>normalize_separators</TableCell>
+                    <TableCell>считает `Profi Wi-Fi`, `Profi-WiFi`, `profi wifi` близкими написаниями</TableCell>
+                    <TableCell>низкий, потому что alias всё равно должен совпасть целиком</TableCell>
+                  </TableRow>
+                  <TableRow>
+                    <TableCell>normalize_yo</TableCell>
+                    <TableCell>считает `ё` и `е` одной буквой</TableCell>
+                    <TableCell>низкий для русских технических названий</TableCell>
+                  </TableRow>
+                  <TableRow>
+                    <TableCell>normalize_latin_confusables</TableCell>
+                    <TableCell>ловит смешанные буквы вроде `Нептyн`, где `y` латинская</TableCell>
+                    <TableCell>средний, поэтому применяется только к похожим буквам внутри слова</TableCell>
+                  </TableRow>
+                  <TableRow>
+                    <TableCell>fuzzy_enabled</TableCell>
+                    <TableCell>разрешает небольшую редакционную дистанцию для alias</TableCell>
+                    <TableCell>может дать шум, если включить слишком большой distance</TableCell>
+                  </TableRow>
+                  <TableRow>
+                    <TableCell>fuzzy_min_length</TableCell>
+                    <TableCell>короткие alias не проходят fuzzy; например `sst`, `knx`, `dvr` не должны ловить случайные слова</TableCell>
+                    <TableCell>если поставить слишком низко, короткие alias начнут шуметь</TableCell>
+                  </TableRow>
+                  <TableRow>
+                    <TableCell>fuzzy_excluded_aliases</TableCell>
+                    <TableCell>ручной стоп-лист alias, для которых fuzzy запрещён даже при достаточной длине</TableCell>
+                    <TableCell>используется для спорных брендов, аббревиатур и коротких моделей</TableCell>
+                  </TableRow>
+                </TableBody>
+              </Table>
+            </TableContainer>
+          </Paper>
+
+          <Paper variant="outlined" className="help-section">
             <Typography variant="h6">Связь сигналов и словарей</Typography>
             <Typography variant="body2" color="text.secondary">
               Доменный сигнал и словарь не заменяют друг друга. Они являются разными источниками
@@ -1418,11 +1497,19 @@ function SettingsHelpPage() {
 
 function PipelineSettingsEditor({
   draft,
-  onStageChange
+  onStageChange,
+  onAliasMatchingChange
 }: {
   draft: NlpSettings;
   onStageChange: (index: number, enabled: boolean) => void;
+  onAliasMatchingChange: (settings: AliasMatchingSettings) => void;
 }) {
+  const aliasMatching = normalizedAliasMatchingSettings(draft.alias_matching);
+
+  function updateAliasMatching(patch: Partial<AliasMatchingSettings>) {
+    onAliasMatchingChange({ ...aliasMatching, ...patch });
+  }
+
   return (
     <Stack spacing={1.5}>
       <Typography variant="h6">Pipeline</Typography>
@@ -1433,6 +1520,92 @@ function PipelineSettingsEditor({
           label={`${stage.name} ${stage.enabled ? "включен" : "выключен"}`}
         />
       ))}
+      <Divider />
+      <Stack spacing={1.5}>
+        <Box>
+          <Typography variant="h6">Alias matching</Typography>
+          <Typography variant="body2" color="text.secondary">
+            Настройки нормализации и небольшого fuzzy-допуска для alias-словарей.
+          </Typography>
+        </Box>
+        <Box className="settings-two-column">
+          <FormControlLabel
+            control={
+              <Switch
+                checked={aliasMatching.normalize_separators}
+                onChange={(event) => updateAliasMatching({ normalize_separators: event.target.checked })}
+              />
+            }
+            label="Нормализовать пробелы и дефисы"
+          />
+          <FormControlLabel
+            control={
+              <Switch
+                checked={aliasMatching.normalize_yo}
+                onChange={(event) => updateAliasMatching({ normalize_yo: event.target.checked })}
+              />
+            }
+            label="ё = е"
+          />
+          <FormControlLabel
+            control={
+              <Switch
+                checked={aliasMatching.normalize_latin_confusables}
+                onChange={(event) => updateAliasMatching({ normalize_latin_confusables: event.target.checked })}
+              />
+            }
+            label="Латиница/кириллица в похожих буквах"
+          />
+          <FormControlLabel
+            control={
+              <Switch
+                checked={aliasMatching.fuzzy_enabled}
+                onChange={(event) => updateAliasMatching({ fuzzy_enabled: event.target.checked })}
+              />
+            }
+            label="Fuzzy alias matching"
+          />
+        </Box>
+        <Box className="rule-grid">
+          <TextField
+            label="Минимальная длина fuzzy"
+            type="number"
+            value={aliasMatching.fuzzy_min_length}
+            onChange={(event) => updateAliasMatching({ fuzzy_min_length: numberInput(event.target.value) })}
+            slotProps={{ htmlInput: { min: 1, step: 1 } }}
+          />
+          <TextField
+            label="Макс. distance"
+            type="number"
+            value={aliasMatching.fuzzy_max_distance}
+            onChange={(event) => updateAliasMatching({ fuzzy_max_distance: numberInput(event.target.value) })}
+            slotProps={{ htmlInput: { min: 0, max: 3, step: 1 } }}
+          />
+          <TextField
+            label="Длинный alias от"
+            type="number"
+            value={aliasMatching.fuzzy_long_min_length}
+            onChange={(event) => updateAliasMatching({ fuzzy_long_min_length: numberInput(event.target.value) })}
+            slotProps={{ htmlInput: { min: 1, step: 1 } }}
+          />
+          <TextField
+            label="Distance для длинных"
+            type="number"
+            value={aliasMatching.fuzzy_long_max_distance}
+            onChange={(event) => updateAliasMatching({ fuzzy_long_max_distance: numberInput(event.target.value) })}
+            slotProps={{ htmlInput: { min: 0, max: 3, step: 1 } }}
+          />
+        </Box>
+        <TextField
+          label="Исключения fuzzy"
+          helperText="Один alias в строке. Используй для коротких или рискованных написаний, где fuzzy может дать шум."
+          value={stringListToText(aliasMatching.fuzzy_excluded_aliases)}
+          onChange={(event) => updateAliasMatching({ fuzzy_excluded_aliases: textToStringList(event.target.value) })}
+          multiline
+          minRows={3}
+          fullWidth
+        />
+      </Stack>
     </Stack>
   );
 }
@@ -2627,6 +2800,26 @@ const aliasCatalogDefinitions: AliasCatalogDefinition[] = [
   { name: "devices", label: "Устройства" },
   { name: "software", label: "ПО" }
 ];
+
+const defaultAliasMatchingSettings: AliasMatchingSettings = {
+  normalize_separators: true,
+  normalize_yo: true,
+  normalize_latin_confusables: true,
+  fuzzy_enabled: true,
+  fuzzy_min_length: 5,
+  fuzzy_max_distance: 1,
+  fuzzy_long_min_length: 10,
+  fuzzy_long_max_distance: 2,
+  fuzzy_excluded_aliases: []
+};
+
+function normalizedAliasMatchingSettings(settings?: AliasMatchingSettings): AliasMatchingSettings {
+  return {
+    ...defaultAliasMatchingSettings,
+    ...(settings ?? {}),
+    fuzzy_excluded_aliases: settings?.fuzzy_excluded_aliases ?? []
+  };
+}
 
 type AliasOption = {
   key: string;

@@ -40,6 +40,39 @@ signals:
     assert config.signals[0].phrases == (("нужна",), ("ищем", "поставщика"))
 
 
+def test_loads_alias_matching_settings_from_pipeline_yaml(tmp_path: Path) -> None:
+    config_dir = tmp_path / "nlp"
+    config_dir.mkdir()
+    (config_dir / "pipeline.yaml").write_text(
+        """
+stages: []
+alias_matching:
+  normalize_separators: true
+  normalize_yo: true
+  normalize_latin_confusables: true
+  fuzzy_enabled: true
+  fuzzy_min_length: 5
+  fuzzy_max_distance: 1
+  fuzzy_long_min_length: 10
+  fuzzy_long_max_distance: 2
+  fuzzy_excluded_aliases:
+    - knx
+    - sst
+""",
+        encoding="utf-8",
+    )
+    (config_dir / "signals.yaml").write_text("signals: []\n", encoding="utf-8")
+
+    config = load_nlp_config(config_dir)
+
+    assert config.alias_matching.normalize_separators is True
+    assert config.alias_matching.normalize_latin_confusables is True
+    assert config.alias_matching.fuzzy_enabled is True
+    assert config.alias_matching.fuzzy_min_length == 5
+    assert config.alias_matching.fuzzy_long_max_distance == 2
+    assert config.alias_matching.fuzzy_excluded_aliases == ("knx", "sst")
+
+
 def test_loads_normalized_yargy_patterns_from_yaml(tmp_path: Path) -> None:
     config_dir = tmp_path / "nlp"
     config_dir.mkdir()

@@ -48,6 +48,10 @@
   Latin/Cyrillic/transliterated/mistyped aliases, alias type, and fact type
   links. Domain signal dictionary dependencies are edited on the signal rule
   itself.
+- Alias matching is configurable in Settings Center under Pipeline. It ignores
+  register via casefold and can normalize separators, `ё/е`, mixed
+  Latin/Cyrillic confusable letters, and limited fuzzy edit distance with
+  minimum alias length, long-alias distance, and explicit fuzzy exclusions.
 - Domain signal dependencies in Settings Center are no longer edited through
   mini-language text such as `vendors:neptun`. Operators add/remove dependency
   rows with buttons, select the alias catalog, choose concrete alias entries,

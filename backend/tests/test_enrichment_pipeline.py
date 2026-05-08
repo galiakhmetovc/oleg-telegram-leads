@@ -372,6 +372,95 @@ software:
     assert "smart_home" in {item.type for item in result.lead_assessment.solution_areas}
 
 
+def test_alias_matching_normalizes_spellings_and_uses_limited_fuzzy(tmp_path: Path) -> None:
+    config_dir = tmp_path / "nlp"
+    config_dir.mkdir()
+    (config_dir / "pipeline.yaml").write_text(
+        """
+stages:
+  - name: facts
+    enabled: true
+alias_matching:
+  normalize_separators: true
+  normalize_yo: true
+  normalize_latin_confusables: true
+  fuzzy_enabled: true
+  fuzzy_min_length: 5
+  fuzzy_max_distance: 1
+  fuzzy_long_min_length: 10
+  fuzzy_long_max_distance: 2
+""",
+        encoding="utf-8",
+    )
+    (config_dir / "signals.yaml").write_text("signals: []\n", encoding="utf-8")
+    (config_dir / "facts.yaml").write_text("facts: []\n", encoding="utf-8")
+    (config_dir / "lead_scoring.yaml").write_text("lead_scoring: {}\n", encoding="utf-8")
+    (config_dir / "vendors.yaml").write_text(
+        """
+vendors:
+  - key: neptun
+    canonical: Neptun
+    type: vendor
+    aliases:
+      - Neptun
+      - Нептун
+      - Neptun ProW
+      - Profi Wi-Fi
+      - SST
+    fact_types:
+      - vendor
+""",
+        encoding="utf-8",
+    )
+
+    enricher = RussianTextEnricher(load_nlp_config(config_dir))
+    result = enricher.enrich(
+        "Смотрим НЕПТYН, neptun pro w, Profi-WiFi и Neptunx. А вот ast не должен быть SST."
+    )
+
+    matched_texts = {fact.text for fact in result.facts if fact.source == "alias_catalog"}
+    assert {"НЕПТYН", "neptun pro w", "Profi-WiFi", "Neptunx"} <= matched_texts
+    assert "neptun pro w и" not in matched_texts
+    assert "и Profi-WiFi" not in matched_texts
+    assert "ast" not in matched_texts
+
+
+def test_alias_separator_normalization_can_be_disabled(tmp_path: Path) -> None:
+    config_dir = tmp_path / "nlp"
+    config_dir.mkdir()
+    (config_dir / "pipeline.yaml").write_text(
+        """
+stages:
+  - name: facts
+    enabled: true
+alias_matching:
+  normalize_separators: false
+  fuzzy_enabled: false
+""",
+        encoding="utf-8",
+    )
+    (config_dir / "signals.yaml").write_text("signals: []\n", encoding="utf-8")
+    (config_dir / "facts.yaml").write_text("facts: []\n", encoding="utf-8")
+    (config_dir / "lead_scoring.yaml").write_text("lead_scoring: {}\n", encoding="utf-8")
+    (config_dir / "vendors.yaml").write_text(
+        """
+vendors:
+  - key: neptun
+    canonical: Neptun
+    type: vendor
+    aliases:
+      - Profi Wi-Fi
+    fact_types:
+      - vendor
+""",
+        encoding="utf-8",
+    )
+
+    result = RussianTextEnricher(load_nlp_config(config_dir)).enrich("Пишут Profi-WiFi без пробела.")
+
+    assert all(fact.source != "alias_catalog" for fact in result.facts)
+
+
 def test_exact_phrases_match_technical_punctuation_and_digits(tmp_path: Path) -> None:
     config_dir = tmp_path / "nlp"
     config_dir.mkdir()
