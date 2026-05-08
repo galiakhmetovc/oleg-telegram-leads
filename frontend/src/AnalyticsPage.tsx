@@ -13,10 +13,6 @@ import {
   Chip,
   CircularProgress,
   Collapse,
-  Dialog,
-  DialogActions,
-  DialogContent,
-  DialogTitle,
   Divider,
   IconButton,
   LinearProgress,
@@ -36,157 +32,31 @@ import {
 } from "@mui/material";
 import { Fragment, FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
-
-type AnalyticsRun = {
-  id: string;
-  name: string;
-  source: string;
-  input_path: string;
-  run_dir: string;
-  processed: number;
-  skipped: number;
-  failed: number;
-  leads: number;
-  candidate_rate: number;
-  started_at?: string | null;
-  finished_at?: string | null;
-  imported_at: string;
-  summary: Record<string, unknown>;
-};
-
-type AnalyticsAggregate = {
-  kind: string;
-  key: string;
-  label: string;
-  count: number;
-  payload: {
-    examples?: string[];
-    matched_types?: string[];
-    weight?: number;
-    [key: string]: unknown;
-  };
-};
-
-type AnalyticsSummary = {
-  run: AnalyticsRun;
-  aggregates: Record<string, AnalyticsAggregate[]>;
-};
-
-type AnalyticsCandidate = {
-  message_id: string;
-  text: string;
-  score: number;
-  temperature: string;
-  review_lane: string;
-  solution_areas: AnalyticsCategory[];
-  customer_segments: AnalyticsCategory[];
-  intent_signals: AnalyticsCategory[];
-  noise_signals: AnalyticsCategory[];
-  reasons: AnalyticsReason[];
-  domain_signals: AnalyticsSpan[];
-  facts: AnalyticsSpan[];
-  is_lead?: boolean;
-  auto_is_lead?: boolean;
-  effective_is_lead?: boolean;
-  lead_status_source?: "auto" | "review";
-  received_at?: string | null;
-  source_chat_id?: string | null;
-  source_chat_title?: string | null;
-  telegram_message_id?: number | null;
-  telegram_message_url?: string | null;
-  app_message_url?: string | null;
-  testing_url?: string | null;
-  enrichment_job_id?: string | null;
-  review?: AnalyticsMessageReview | null;
-};
-
-type AnalyticsReviewVerdict = "lead" | "not_lead" | "uncertain" | "noise";
-
-type AnalyticsMessageReview = {
-  source_message_id: string;
-  verdict: AnalyticsReviewVerdict | null;
-  comment: string;
-  tags: string[];
-  created_at: string;
-  updated_at: string;
-};
-
-type AnalyticsCategory = {
-  type: string;
-  label?: string;
-  matched_types?: string[];
-};
-
-type AnalyticsReason = {
-  source: string;
-  key: string;
-  label?: string;
-  weight: number;
-  matched_texts: string[];
-};
-
-type AnalyticsSpan = {
-  type: string;
-  label?: string;
-  text?: string;
-  range?: TextRange | null;
-  source?: string;
-  color?: string | null;
-  confidence?: number | null;
-  settings_refs?: SettingReference[];
-};
-
-type SettingReference = {
-  section: string;
-  key: string;
-  label: string;
-  catalog?: string | null;
-  kind?: string;
-};
-
-type TextRange = {
-  start: number;
-  stop: number;
-};
-
-type CandidatePage = {
-  total: number;
-  limit: number;
-  offset: number;
-  items: AnalyticsCandidate[];
-};
-
-type CandidateFilters = {
-  scoreMin: string;
-  temperature: string;
-  signal: string;
-  reason: string;
-  solutionArea: string;
-  customerSegment: string;
-  lane: string;
-  sourceChatId: string;
-  receivedFrom: string;
-  receivedTo: string;
-  reviewStatus: string;
-  verdict: string;
-  q: string;
-};
-
-type AnalyticsSummaryBlockKey = "score" | "signals" | "reasons" | "segments" | "lanes";
-type AliasCatalogName = "vendors" | "protocols" | "devices" | "software";
-type AnalyticsSettingsTarget =
-  | { kind: "signal"; key: string }
-  | { kind: "fact"; key: string }
-  | { kind: "alias"; catalog: AliasCatalogName; key: string }
-  | { kind: "lead_signal_weight"; key: string }
-  | { kind: "lead_fact_weight"; key: string }
-  | { kind: "solution_area"; key: string }
-  | { kind: "customer_segment"; key: string }
-  | { kind: "review_lane"; key: string };
-type AnalyticsSettingsLink = {
-  label: ReactNode;
-  target: AnalyticsSettingsTarget | null;
-};
+import {
+  ConstructorDialog,
+  createConstructorDialog,
+  saveConstructorDialogRequest,
+  saveNoiseConstructorRequest
+} from "./analytics/ReviewConstructor";
+import type { ConstructorDialogState, ReviewNlpSettings } from "./analytics/ReviewConstructor";
+import type {
+  AliasCatalogName,
+  AnalyticsAggregate,
+  AnalyticsCandidate,
+  AnalyticsCategory,
+  AnalyticsMessageReview,
+  AnalyticsReason,
+  AnalyticsReviewVerdict,
+  AnalyticsRun,
+  AnalyticsSettingsLink,
+  AnalyticsSettingsTarget,
+  AnalyticsSpan,
+  AnalyticsSummary,
+  AnalyticsSummaryBlockKey,
+  CandidateFilters,
+  CandidatePage,
+  SettingReference
+} from "./analytics/types";
 
 type AnalyticsPageProps = {
   apiBaseUrl: string;
@@ -203,93 +73,6 @@ type AnalyticsReviewPageProps = {
   onTestMessage?: (candidate: AnalyticsCandidate) => void;
   onNlpSettingsChange?: (nlpSettings: unknown) => void;
 };
-
-type ConstructorNoiseResponse = {
-  text: string;
-  signal_type: string;
-  signal_label: string;
-  phrase: string[];
-  created_rule: boolean;
-  created_phrase: boolean;
-  nlp: unknown;
-};
-
-type ConstructorSettingsRef = {
-  section: string;
-  key: string;
-  label: string;
-  catalog?: AliasCatalogName | null;
-};
-
-type ConstructorAliasResponse = {
-  text: string;
-  catalog: AliasCatalogName;
-  key: string;
-  canonical: string;
-  created_target: boolean;
-  created_entry: boolean;
-  settings_ref: ConstructorSettingsRef;
-  nlp: unknown;
-};
-
-type ConstructorRuleResponse = {
-  text: string;
-  collection: "signals" | "facts";
-  rule_type: string;
-  rule_label: string;
-  phrase_kind: ConstructorPhraseKind;
-  created_target: boolean;
-  created_entry: boolean;
-  settings_ref: ConstructorSettingsRef;
-  nlp: unknown;
-  exact_phrase?: string[] | null;
-  semantic_pattern?: { source_text?: string; tokens?: Array<Record<string, string>> } | null;
-};
-
-type ReviewNlpRule = {
-  type: string;
-  label: string;
-};
-
-type ReviewNlpAlias = {
-  key: string;
-  canonical: string;
-  type: "vendor" | "protocol" | "device" | "software" | "model";
-  fact_types: string[];
-};
-
-type ReviewNlpSettings = {
-  signals: ReviewNlpRule[];
-  facts: ReviewNlpRule[];
-  vendors: ReviewNlpAlias[];
-  protocols: ReviewNlpAlias[];
-  devices: ReviewNlpAlias[];
-  software: ReviewNlpAlias[];
-};
-
-type ConstructorPhraseKind = "exact" | "semantic";
-
-type ConstructorDialogState =
-  | {
-      kind: "alias";
-      text: string;
-      catalog: AliasCatalogName;
-      key: string;
-      canonical: string;
-      alias_type: "vendor" | "protocol" | "device" | "software" | "model";
-      fact_types: string;
-      confidence: string;
-    }
-  | {
-      kind: "fact" | "signal";
-      text: string;
-      target_type: string;
-      target_label: string;
-      group: string;
-      phrase_kind: ConstructorPhraseKind;
-      color: string;
-      confidence: string;
-    };
 
 const numberFormatter = new Intl.NumberFormat("ru-RU");
 const candidatePageSize = 50;
@@ -314,19 +97,6 @@ const reviewTagOptions = [
   { value: "false_alias", label: "Ложный alias" },
   { value: "needs_alias", label: "Нужен alias" },
   { value: "needs_rule", label: "Нужно правило" }
-];
-const aliasCatalogChoices: Array<{ value: AliasCatalogName; label: string }> = [
-  { value: "vendors", label: "Вендоры" },
-  { value: "protocols", label: "Протоколы" },
-  { value: "devices", label: "Устройства" },
-  { value: "software", label: "ПО" }
-];
-const constructorAliasTypeChoices: Array<"vendor" | "protocol" | "device" | "software" | "model"> = [
-  "vendor",
-  "protocol",
-  "device",
-  "software",
-  "model"
 ];
 const defaultFilters: CandidateFilters = {
   scoreMin: "",
@@ -1094,30 +864,7 @@ export function AnalyticsReviewPage({
     setConstructorDraft(null);
     setConstructorMessage(null);
     setConstructorError(null);
-    if (kind === "alias") {
-      const catalog: AliasCatalogName = "vendors";
-      setConstructorDialog({
-        kind,
-        text: selectedText,
-        catalog,
-        key: constructorKeyFromText(selectedText),
-        canonical: selectedText,
-        alias_type: aliasTypeForCatalog(catalog),
-        fact_types: aliasTypeForCatalog(catalog),
-        confidence: "0.7"
-      });
-      return;
-    }
-    setConstructorDialog({
-      kind,
-      text: selectedText,
-      target_type: constructorKeyFromText(selectedText),
-      target_label: selectedText,
-      group: kind === "signal" ? "Операторские сигналы" : "Операторские факты",
-      phrase_kind: "exact",
-      color: "#0b57d0",
-      confidence: "0.5"
-    });
+    setConstructorDialog(createConstructorDialog(kind, selectedText));
   }
 
   async function saveConstructorDialog() {
@@ -1128,56 +875,14 @@ export function AnalyticsReviewPage({
     setConstructorError(null);
     setConstructorMessage(null);
     try {
-      if (constructorDialog.kind === "alias") {
-        const response = await fetch(`${apiBaseUrl}/api/v1/settings/nlp/constructor/alias`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            text: constructorDialog.text,
-            source_message_id: messageId,
-            catalog: constructorDialog.catalog,
-            key: constructorDialog.key,
-            canonical: constructorDialog.canonical,
-            alias_type: constructorDialog.alias_type,
-            fact_types: stringListFromMultiline(constructorDialog.fact_types),
-            confidence: numberOrNull(constructorDialog.confidence)
-          })
-        });
-        if (!response.ok) {
-          throw new Error(`Backend вернул ${response.status}`);
-        }
-        const payload = (await response.json()) as ConstructorAliasResponse;
-        onNlpSettingsChange?.(payload.nlp);
-        setConstructorDraft(`${payload.catalog}:${payload.key} <- ${payload.text}`);
-        setConstructorMessage(`Добавлено в словарь «${payload.canonical}»: ${payload.text}`);
-        setConstructorDialog(null);
-        return;
-      }
-
-      const endpoint = constructorDialog.kind === "signal" ? "signal" : "fact";
-      const response = await fetch(`${apiBaseUrl}/api/v1/settings/nlp/constructor/${endpoint}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          text: constructorDialog.text,
-          source_message_id: messageId,
-          target_type: constructorDialog.target_type,
-          target_label: constructorDialog.target_label,
-          group: constructorDialog.group,
-          phrase_kind: constructorDialog.phrase_kind,
-          ...(constructorDialog.kind === "signal" ? { color: constructorDialog.color } : {}),
-          confidence: numberOrNull(constructorDialog.confidence)
-        })
+      const payload = await saveConstructorDialogRequest({
+        apiBaseUrl,
+        messageId,
+        dialog: constructorDialog
       });
-      if (!response.ok) {
-        throw new Error(`Backend вернул ${response.status}`);
-      }
-      const payload = (await response.json()) as ConstructorRuleResponse;
       onNlpSettingsChange?.(payload.nlp);
-      setConstructorDraft(`${payload.collection}:${payload.rule_type} <- ${payload.text}`);
-      setConstructorMessage(
-        `Добавлено в ${constructorDialog.kind === "signal" ? "доменный сигнал" : "факт"} «${payload.rule_label}»: ${payload.text}`
-      );
+      setConstructorDraft(payload.draft);
+      setConstructorMessage(payload.message);
       setConstructorDialog(null);
     } catch (caught) {
       setConstructorError(caught instanceof Error ? caught.message : "Не удалось сохранить настройку конструктора");
@@ -1194,26 +899,14 @@ export function AnalyticsReviewPage({
     setConstructorError(null);
     setConstructorMessage(null);
     try {
-      const response = await fetch(`${apiBaseUrl}/api/v1/settings/nlp/constructor/noise`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          text: selectedText,
-          source_message_id: messageId
-        })
+      const payload = await saveNoiseConstructorRequest({
+        apiBaseUrl,
+        messageId,
+        text: selectedText
       });
-      if (!response.ok) {
-        throw new Error(`Backend вернул ${response.status}`);
-      }
-      const payload = (await response.json()) as ConstructorNoiseResponse;
       onNlpSettingsChange?.(payload.nlp);
-      const phraseText = payload.phrase.join(" ");
-      setConstructorDraft(`${payload.signal_type}: ${phraseText}`);
-      setConstructorMessage(
-        payload.created_phrase
-          ? `Добавлено в шумовой сигнал «${payload.signal_label}»: ${phraseText}`
-          : `Шумовой сигнал «${payload.signal_label}» уже содержит: ${phraseText}`
-      );
+      setConstructorDraft(payload.draft);
+      setConstructorMessage(payload.message);
     } catch (caught) {
       setConstructorError(caught instanceof Error ? caught.message : "Не удалось добавить шумовое правило");
     } finally {
@@ -1423,306 +1116,6 @@ export function AnalyticsReviewPage({
       />
     </Box>
   );
-}
-
-function ConstructorDialog({
-  dialog,
-  nlpSettings,
-  saving,
-  onChange,
-  onClose,
-  onSave
-}: {
-  dialog: ConstructorDialogState | null;
-  nlpSettings?: ReviewNlpSettings | null;
-  saving: boolean;
-  onChange: (dialog: ConstructorDialogState) => void;
-  onClose: () => void;
-  onSave: () => void;
-}) {
-  if (!dialog) {
-    return null;
-  }
-
-  const title =
-    dialog.kind === "alias"
-      ? "Добавить в словарь"
-      : dialog.kind === "fact"
-        ? "Добавить в факт"
-        : "Добавить в доменный сигнал";
-  const saveLabel =
-    dialog.kind === "alias"
-      ? "Сохранить в словарь"
-      : dialog.kind === "fact"
-        ? "Сохранить факт"
-        : "Сохранить сигнал";
-
-  return (
-    <Dialog open onClose={onClose} fullWidth maxWidth="sm" aria-labelledby="constructor-dialog-title">
-      <DialogTitle id="constructor-dialog-title">{title}</DialogTitle>
-      <DialogContent>
-        <Stack spacing={2} sx={{ pt: 1 }}>
-          <Alert severity="info">
-            Выделено: <strong>{dialog.text}</strong>
-          </Alert>
-          {dialog.kind === "alias" ? (
-            <AliasConstructorFields dialog={dialog} nlpSettings={nlpSettings} onChange={onChange} />
-          ) : (
-            <RuleConstructorFields dialog={dialog} nlpSettings={nlpSettings} onChange={onChange} />
-          )}
-        </Stack>
-      </DialogContent>
-      <DialogActions>
-        <Button onClick={onClose} disabled={saving}>
-          Отмена
-        </Button>
-        <Button
-          variant="contained"
-          onClick={onSave}
-          disabled={saving}
-          startIcon={saving ? <CircularProgress size={18} color="inherit" /> : <SaveIcon />}
-        >
-          {saveLabel}
-        </Button>
-      </DialogActions>
-    </Dialog>
-  );
-}
-
-function AliasConstructorFields({
-  dialog,
-  nlpSettings,
-  onChange
-}: {
-  dialog: Extract<ConstructorDialogState, { kind: "alias" }>;
-  nlpSettings?: ReviewNlpSettings | null;
-  onChange: (dialog: ConstructorDialogState) => void;
-}) {
-  const aliases = nlpSettings?.[dialog.catalog] ?? [];
-  return (
-    <>
-      <TextField
-        label="Каталог"
-        select
-        value={dialog.catalog}
-        onChange={(event) => {
-          const catalog = aliasCatalogNameFromText(event.target.value);
-          onChange({
-            ...dialog,
-            catalog,
-            alias_type: aliasTypeForCatalog(catalog),
-            fact_types: aliasTypeForCatalog(catalog)
-          });
-        }}
-        slotProps={{ select: { native: true } }}
-        fullWidth
-      >
-        {aliasCatalogChoices.map((choice) => (
-          <option key={choice.value} value={choice.value}>
-            {choice.label}
-          </option>
-        ))}
-      </TextField>
-      <TextField
-        label="Существующая запись"
-        select
-        value=""
-        onChange={(event) => {
-          const selected = aliases.find((item) => item.key === event.target.value);
-          if (!selected) {
-            return;
-          }
-          onChange({
-            ...dialog,
-            key: selected.key,
-            canonical: selected.canonical,
-            alias_type: selected.type,
-            fact_types: selected.fact_types.join("\n")
-          });
-        }}
-        slotProps={{ select: { native: true } }}
-        fullWidth
-      >
-        <option value="">Новая или ручной ввод</option>
-        {aliases.map((alias) => (
-          <option key={alias.key} value={alias.key}>
-            {alias.key} — {alias.canonical}
-          </option>
-        ))}
-      </TextField>
-      <TextField label="key" value={dialog.key} onChange={(event) => onChange({ ...dialog, key: event.target.value })} fullWidth />
-      <TextField
-        label="canonical"
-        value={dialog.canonical}
-        onChange={(event) => onChange({ ...dialog, canonical: event.target.value })}
-        fullWidth
-      />
-      <TextField
-        label="alias_type"
-        select
-        value={dialog.alias_type}
-        onChange={(event) => onChange({ ...dialog, alias_type: aliasTypeFromText(event.target.value) })}
-        slotProps={{ select: { native: true } }}
-        fullWidth
-      >
-        {constructorAliasTypeChoices.map((value) => (
-          <option key={value} value={value}>
-            {value}
-          </option>
-        ))}
-      </TextField>
-      <TextField
-        label="fact_types"
-        value={dialog.fact_types}
-        onChange={(event) => onChange({ ...dialog, fact_types: event.target.value })}
-        helperText="По одному fact_type на строку."
-        multiline
-        minRows={2}
-        fullWidth
-      />
-      <TextField
-        label="confidence"
-        type="number"
-        value={dialog.confidence}
-        onChange={(event) => onChange({ ...dialog, confidence: event.target.value })}
-        slotProps={{ htmlInput: { min: 0, max: 1, step: 0.01 } }}
-        fullWidth
-      />
-    </>
-  );
-}
-
-function RuleConstructorFields({
-  dialog,
-  nlpSettings,
-  onChange
-}: {
-  dialog: Extract<ConstructorDialogState, { kind: "fact" | "signal" }>;
-  nlpSettings?: ReviewNlpSettings | null;
-  onChange: (dialog: ConstructorDialogState) => void;
-}) {
-  const rules = dialog.kind === "signal" ? (nlpSettings?.signals ?? []) : (nlpSettings?.facts ?? []);
-  return (
-    <>
-      <TextField
-        label="Существующее правило"
-        select
-        value=""
-        onChange={(event) => {
-          const selected = rules.find((item) => item.type === event.target.value);
-          if (!selected) {
-            return;
-          }
-          onChange({
-            ...dialog,
-            target_type: selected.type,
-            target_label: selected.label
-          });
-        }}
-        slotProps={{ select: { native: true } }}
-        fullWidth
-      >
-        <option value="">Новое или ручной ввод</option>
-        {rules.map((rule) => (
-          <option key={rule.type} value={rule.type}>
-            {rule.type} — {rule.label}
-          </option>
-        ))}
-      </TextField>
-      <TextField
-        label="type"
-        value={dialog.target_type}
-        onChange={(event) => onChange({ ...dialog, target_type: event.target.value })}
-        fullWidth
-      />
-      <TextField
-        label="label"
-        value={dialog.target_label}
-        onChange={(event) => onChange({ ...dialog, target_label: event.target.value })}
-        fullWidth
-      />
-      <TextField
-        label="Папка"
-        value={dialog.group}
-        onChange={(event) => onChange({ ...dialog, group: event.target.value })}
-        fullWidth
-      />
-      <TextField
-        label="Тип совпадения"
-        select
-        value={dialog.phrase_kind}
-        onChange={(event) => onChange({ ...dialog, phrase_kind: phraseKindFromText(event.target.value) })}
-        slotProps={{ select: { native: true } }}
-        fullWidth
-      >
-        <option value="exact">Точная фраза</option>
-        <option value="semantic">Лемматическая фраза</option>
-      </TextField>
-      {dialog.kind === "signal" && (
-        <TextField
-          label="color"
-          type="color"
-          value={dialog.color}
-          onChange={(event) => onChange({ ...dialog, color: event.target.value })}
-          fullWidth
-        />
-      )}
-      <TextField
-        label="confidence"
-        type="number"
-        value={dialog.confidence}
-        onChange={(event) => onChange({ ...dialog, confidence: event.target.value })}
-        slotProps={{ htmlInput: { min: 0, max: 1, step: 0.01 } }}
-        fullWidth
-      />
-    </>
-  );
-}
-
-function constructorKeyFromText(text: string) {
-  const normalized = text
-    .trim()
-    .toLocaleLowerCase("ru-RU")
-    .replace(/[^\p{L}\p{N}]+/gu, "_")
-    .replace(/^_+|_+$/g, "");
-  return normalized || "operator_rule";
-}
-
-function aliasCatalogNameFromText(value: string): AliasCatalogName {
-  return aliasCatalogChoices.some((choice) => choice.value === value) ? (value as AliasCatalogName) : "vendors";
-}
-
-function aliasTypeForCatalog(catalog: AliasCatalogName): "vendor" | "protocol" | "device" | "software" {
-  if (catalog === "protocols") {
-    return "protocol";
-  }
-  if (catalog === "devices") {
-    return "device";
-  }
-  if (catalog === "software") {
-    return "software";
-  }
-  return "vendor";
-}
-
-function aliasTypeFromText(value: string): "vendor" | "protocol" | "device" | "software" | "model" {
-  return constructorAliasTypeChoices.includes(value as "vendor") ? (value as "vendor" | "protocol" | "device" | "software" | "model") : "device";
-}
-
-function phraseKindFromText(value: string): ConstructorPhraseKind {
-  return value === "semantic" ? "semantic" : "exact";
-}
-
-function stringListFromMultiline(value: string): string[] {
-  return value
-    .split("\n")
-    .map((item) => item.trim())
-    .filter(Boolean);
-}
-
-function numberOrNull(value: string): number | null {
-  const parsed = Number(value);
-  return Number.isFinite(parsed) ? parsed : null;
 }
 
 function Kpi({ label, value }: { label: string; value: string }) {

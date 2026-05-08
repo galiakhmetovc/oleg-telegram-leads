@@ -578,6 +578,12 @@ then this dispatcher will use the completed result.
 The frontend package lives in `frontend/src`.
 
 - `App.tsx` is the first operator workspace shell.
+- `AnalyticsPage.tsx` owns live analytics, candidate tables, and the dedicated
+  message review page.
+- `analytics/types.ts` contains shared analytics/review UI contracts used by
+  feature modules.
+- `analytics/ReviewConstructor.tsx` owns the Review-page settings constructor:
+  target dialogs, selected-fragment payload shaping, and constructor API calls.
 - `main.tsx` mounts React.
 - `styles.css` holds application-level layout styles.
 

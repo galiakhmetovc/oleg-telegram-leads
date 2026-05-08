@@ -45,6 +45,12 @@
   revisions. Fact/signal constructors support exact and lemmatized phrases.
   Newly created domain signals get score weight `0` until scoring is tuned
   explicitly.
+- Frontend review-constructor UI code now lives in
+  `frontend/src/analytics/ReviewConstructor.tsx`, separate from the main
+  Analytics page. `AnalyticsPage.tsx` keeps page state, review flow, and
+  candidate tables; constructor dialogs and constructor API payloads are owned
+  by the feature module. Shared analytics/review UI contracts live in
+  `frontend/src/analytics/types.ts`.
 - Analytics candidate lists now include saved review state, show a review chip
   (`Без ревью`, `Лид`, `Не лид`, `Сомнительно`, `Шум`), and can filter by
   `review_status` and `verdict`. Review links carry a return URL with the
