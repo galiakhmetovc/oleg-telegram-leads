@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from app.domain.telegram_ingestion import TelegramIngestionSettings, TelegramIncomingMessage
 from app.domain.telegram_ingestion import TelegramSourceChat, TelegramSourceMessage
 from app.domain.telegram_ingestion import TelegramUserbotAccount
+from app.infrastructure.persistence.tables import enrichment_task_outbox
 from app.infrastructure.persistence.tables import telegram_source_chats, telegram_source_messages
 from app.infrastructure.persistence.tables import telegram_userbot_accounts
 
@@ -127,6 +128,12 @@ class PostgresTelegramIngestionRepository:
             result = await session.execute(statement)
             row = result.mappings().first()
             if row is not None:
+                await session.execute(
+                    enrichment_task_outbox.update()
+                    .where(enrichment_task_outbox.c.job_id == enrichment_job_id)
+                    .where(enrichment_task_outbox.c.status != "published")
+                    .values(status="pending", claimed_at=None, updated_at=now)
+                )
                 await session.execute(
                     telegram_source_chats.update()
                     .where(telegram_source_chats.c.id == message.source_chat_id)

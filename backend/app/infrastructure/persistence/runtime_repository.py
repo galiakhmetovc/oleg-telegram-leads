@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any, cast
 
 import redis.asyncio as redis
@@ -12,6 +12,7 @@ from app.infrastructure.persistence.runtime_retention import trim_enrichment_eve
 from app.infrastructure.persistence.runtime_retention import trim_notification_outbox
 from app.infrastructure.persistence.tables import enrichment_events, enrichment_jobs
 from app.infrastructure.persistence.tables import enrichment_results
+from app.infrastructure.persistence.tables import enrichment_task_outbox
 from app.infrastructure.persistence.tables import notification_outbox
 from app.infrastructure.persistence.tables import telegram_userbot_accounts
 from app.infrastructure.persistence.tables import telegram_source_chats, telegram_source_messages
@@ -125,6 +126,31 @@ class PostgresRuntimeRepository:
                 0,
             )
             latest_job_error = await _latest_failed_job_error(session)
+            task_outbox_counts = await _counts_by_status(
+                session,
+                enrichment_task_outbox.c.status,
+                enrichment_task_outbox,
+            )
+            task_outbox_total = await _count_rows(session, enrichment_task_outbox)
+            latest_task_published_at = await _max_value(
+                session,
+                enrichment_task_outbox,
+                enrichment_task_outbox.c.published_at,
+            )
+            oldest_task_pending_at = await _min_value(
+                session,
+                enrichment_task_outbox,
+                enrichment_task_outbox.c.created_at,
+                enrichment_task_outbox.c.status == "pending",
+            )
+            stale_task_sending = await _count_rows(
+                session,
+                enrichment_task_outbox,
+                enrichment_task_outbox.c.status == "sending",
+                enrichment_task_outbox.c.claimed_at < checked_at - timedelta(minutes=5),
+            )
+            pending_task_publish_errors = await _task_outbox_pending_with_errors(session)
+            latest_task_publish_error = await _latest_task_publish_error(session)
 
             outbox_total = await _count_rows(session, notification_outbox)
             latest_notification_at = await _max_value(
@@ -195,6 +221,21 @@ class PostgresRuntimeRepository:
                     "telegram_messages_waiting_enrichment": telegram_messages_waiting_enrichment,
                     "telegram_messages_failed_enrichment": telegram_messages_failed_enrichment,
                     "failed_latest_error": latest_job_error,
+                },
+            },
+            {
+                "service": "enrichment-dispatcher",
+                "status": _enrichment_dispatcher_status(
+                    pending_with_errors=pending_task_publish_errors,
+                    stale_sending=stale_task_sending,
+                ),
+                "details": {
+                    "task_outbox_total": task_outbox_total,
+                    "task_outbox_by_status": task_outbox_counts,
+                    "latest_task_published_at": latest_task_published_at,
+                    "oldest_task_pending_at": oldest_task_pending_at,
+                    "stale_task_sending": stale_task_sending,
+                    "task_publish_latest_error": latest_task_publish_error,
                 },
             },
             {
@@ -294,6 +335,25 @@ async def _latest_failed_job_error(session: AsyncSession) -> Any:
     return result.scalar_one_or_none()
 
 
+async def _task_outbox_pending_with_errors(session: AsyncSession) -> int:
+    return await _count_rows(
+        session,
+        enrichment_task_outbox,
+        enrichment_task_outbox.c.status == "pending",
+        enrichment_task_outbox.c.last_error.is_not(None),
+    )
+
+
+async def _latest_task_publish_error(session: AsyncSession) -> str | None:
+    result = await session.execute(
+        sa.select(enrichment_task_outbox.c.last_error)
+        .where(enrichment_task_outbox.c.last_error.is_not(None))
+        .order_by(enrichment_task_outbox.c.updated_at.desc())
+        .limit(1)
+    )
+    return result.scalar_one_or_none()
+
+
 async def _telegram_messages_with_results(session: AsyncSession) -> int:
     result = await session.scalar(
         sa.select(sa.func.count())
@@ -334,6 +394,14 @@ def _userbot_status(
     return "ok"
 
 
+def _enrichment_dispatcher_status(*, pending_with_errors: int, stale_sending: int) -> str:
+    if stale_sending:
+        return "error"
+    if pending_with_errors:
+        return "warning"
+    return "ok"
+
+
 async def _latest_failed_notification_error(session: AsyncSession) -> str | None:
     result = await session.execute(
         sa.select(notification_outbox.c.last_error)
@@ -347,6 +415,7 @@ async def _latest_failed_notification_error(session: AsyncSession) -> str | None
 def _logs_query() -> sa.CompoundSelect[Any]:
     return sa.union_all(
         _enrichment_logs_query(),
+        _enrichment_task_dispatcher_logs_query(),
         _telegram_logs_query(),
         _notification_logs_query(),
         _account_error_logs_query(),
@@ -393,6 +462,38 @@ def _enrichment_logs_query() -> sa.Select[Any]:
             sa.cast(enrichment_events.c.job_id, sa.Text()),
             "progress_percent",
             enrichment_events.c.progress_percent,
+        ).label("payload"),
+    )
+
+
+def _enrichment_task_dispatcher_logs_query() -> sa.Select[Any]:
+    return sa.select(
+        sa.func.coalesce(
+            enrichment_task_outbox.c.published_at,
+            enrichment_task_outbox.c.updated_at,
+            enrichment_task_outbox.c.created_at,
+        ).label("created_at"),
+        sa.literal("enrichment-dispatcher").label("service"),
+        sa.case(
+            (
+                enrichment_task_outbox.c.last_error.is_not(None)
+                & (enrichment_task_outbox.c.status != "published"),
+                sa.literal("error"),
+            ),
+            else_=sa.literal("info"),
+        ).label("level"),
+        sa.func.concat(sa.literal("Публикация enrichment-задачи "), enrichment_task_outbox.c.status).label("message"),
+        sa.func.jsonb_build_object(
+            "job_id",
+            sa.cast(enrichment_task_outbox.c.job_id, sa.Text()),
+            "task_name",
+            enrichment_task_outbox.c.task_name,
+            "status",
+            enrichment_task_outbox.c.status,
+            "attempts",
+            enrichment_task_outbox.c.attempts,
+            "last_error",
+            enrichment_task_outbox.c.last_error,
         ).label("payload"),
     )
 

@@ -17,23 +17,14 @@
   persist constructor proposals from selected text, add `save + next` success
   telemetry, bulk review actions, and review verdict/tag aggregates in
   Analytics.
-- Live analytics scalability: move live candidate lookup, filters, sorting,
-  pagination, and high-cardinality aggregates into SQL instead of loading all
-  completed Telegram enrichments into Python.
 - Scoring quality calibration from review labels: add hard veto/caps for clear
   noise such as sale/equipment-only/DIY, reduce vendor-only overheating,
   separate direct PUR leads from research/value questions, and add negative
   eval cases for vendor sale, ordinary HVAC, ordinary intercom, PoE/UPS purchase,
   and equipment-only requests.
-- Telegram ingestion idempotency follow-up: make source-message insert/claim and
-  enrichment job creation one transactional operation so duplicate Telegram
-  deliveries cannot leave orphan queued jobs.
-- Notification outbox batching follow-up: claim only sendable rows or release
-  non-due rows back to pending in the same flush cycle, so partial batches do
-  not sit in `sending` until stale-claim timeout.
-- Source cursor safety: update source `last_message_id` with monotonic
-  `greatest(existing, incoming)` semantics and regression-test out-of-order live
-  message callbacks.
+- Telegram ingestion transactional completeness: close the remaining rare crash
+  window between creating a blocked enrichment job and saving the source message,
+  either with a combined repository unit of work or stale blocked-task cleanup.
 - Frontend modularization: split the large app shell/settings/analytics/runtime
   surfaces into feature modules and shared evidence/highlight components.
 

@@ -9,6 +9,7 @@ from app.application.notifications.use_cases import QueueNotificationsForEnrichm
 from app.application.notifications.routing import NotificationMessageContext
 from app.core.config import get_settings
 from app.db.session import create_sessionmaker
+from app.domain.enrichment import EnrichmentStatus
 from app.infrastructure.nlp.config_loader import load_nlp_config_from_documents
 from app.infrastructure.nlp.config_loader import read_nlp_config_documents
 from app.infrastructure.nlp.russian_text_enricher import RussianTextEnricher
@@ -38,7 +39,7 @@ async def _run_enrichment_job(job_id: UUID) -> None:
     session_factory = create_sessionmaker()
     repository = PostgresEnrichmentJobRepository(session_factory)
     snapshot = await repository.get_job(job_id)
-    if snapshot is None:
+    if snapshot is None or snapshot.status != EnrichmentStatus.QUEUED:
         return
 
     config_repository = PostgresNlpConfigRepository(session_factory)
@@ -50,7 +51,9 @@ async def _run_enrichment_job(job_id: UUID) -> None:
     stage_count = len(stage_names)
     stage_index_by_name = {stage_name: index for index, stage_name in enumerate(stage_names, start=1)}
 
-    await repository.mark_running(job_id, stage_count=stage_count)
+    snapshot = await repository.claim_queued_job(job_id, stage_count=stage_count)
+    if snapshot is None:
+        return
 
     try:
         enricher = RussianTextEnricher(config)

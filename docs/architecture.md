@@ -19,6 +19,8 @@ Everything currently runs in development mode.
 
 - PostgreSQL is the only operational database.
 - FastAPI owns the backend HTTP API and database access.
+- Enrichment dispatcher publishes durable PostgreSQL task outbox rows into the
+  Celery queue.
 - Celery workers execute background NLP enrichment jobs.
 - Redis is the local Celery broker.
 - Telegram userbot listener receives configured source chat messages.
@@ -81,6 +83,11 @@ The first product slice uses a persisted enrichment job model:
 
 - FastAPI creates enrichment jobs, serves job snapshots, and streams progress
   through Server-Sent Events.
+- PostgreSQL stores enrichment task publication state in
+  `enrichment_task_outbox`.
+- `enrichment-dispatcher` claims pending task outbox rows and publishes Celery
+  tasks. Failed broker publishes remain retryable in PostgreSQL instead of
+  leaving queued jobs invisible to workers.
 - Celery workers execute the configured NLP pipeline outside the API process.
 - PostgreSQL stores jobs, progress events, and final enrichment results.
 - Redis is only the Celery broker; durable business state stays in PostgreSQL.
@@ -95,22 +102,29 @@ existing enrichment worker:
 1. `userbot` listens to configured source chats with Telethon `StringSession`
    and `NewMessage` updates.
 2. It persists each accepted source message in `telegram_source_messages`.
-3. It creates a normal enrichment job and publishes the existing Celery task
-   only after the source message row is saved, so the worker can always resolve
-   Telegram context for notification routing. If a parallel worker loses the
-   unique source-message insert race, it discards its unpublished enrichment
-   job and returns the already persisted source row.
-4. The Celery `worker` enriches the text and writes the result.
-5. For Telegram-originated jobs, notification routing writes pending messages
+3. It creates a normal enrichment job with a blocked task outbox row, then the
+   source-message insert activates that `enrichment_task_outbox` row to
+   `pending` in the same transaction. If a parallel worker loses the unique
+   source-message insert race, it discards its unpublished enrichment job and
+   returns the already persisted source row.
+4. `enrichment-dispatcher` claims pending task outbox rows with
+   `FOR UPDATE SKIP LOCKED` and publishes the existing Celery task to
+   Redis/Celery. If publishing fails, the row returns to `pending` with
+   `last_error`; stale `sending` rows become claimable again after timeout.
+5. The Celery `worker` atomically claims only queued jobs, enriches the text,
+   and writes the result. Task redelivery or duplicate publication cannot rerun
+   completed/failed jobs.
+6. For Telegram-originated jobs, notification routing writes pending messages
    to `notification_outbox`. Each Telegram source message can enqueue at most
    one outbox row per route through `(source_message_id, route_id)` uniqueness.
-6. `notification-dispatcher` atomically claims pending outbox rows with
+7. `notification-dispatcher` atomically claims pending outbox rows with
    `FOR UPDATE SKIP LOCKED`, then sends Telegram bot messages from the outbox.
 
 Redis/Celery is the execution queue for NLP work. PostgreSQL is the source of
-truth for Telegram source messages, enrichment state, and outgoing notification
-outbox items. This makes deduplication, replay, audit, and operator analytics
-possible even if a process restarts.
+truth for Telegram source messages, enrichment state, enrichment task
+publication state, and outgoing notification outbox items. This makes
+deduplication, retry, replay, audit, and operator analytics possible even if a
+process restarts.
 
 The userbot service is deliberately not connected to batch-runner output.
 Batch-runner remains a local/offline test and calibration tool.
@@ -227,10 +241,11 @@ the operator screen starts from connected Telegram channels. Batch imports can
 still be used later for calibration/evaluation, but they are not the default
 operator analytics source.
 
-The Logs tab reads durable events from enrichment events, Telegram source
-messages, userbot account/source errors, and notification outbox rows. The
-System Status tab checks backend, PostgreSQL, Redis, userbot account cooldowns,
-source-chat status counts, enrichment job counters, Telegram messages with
+The Logs tab reads durable events from enrichment events, enrichment task
+outbox rows, Telegram source messages, userbot account/source errors, and
+notification outbox rows. The System Status tab checks backend, PostgreSQL,
+Redis, userbot account cooldowns, source-chat status counts, enrichment job
+counters, enrichment task publication counters, Telegram messages with
 completed enrichment results, Telegram messages still waiting for enrichment,
 and notification outbox counters.
 
@@ -247,6 +262,8 @@ Disk growth is controlled at the log-like table boundary:
 - `notification_outbox` keeps the newest
   `PUR_RUNTIME_NOTIFICATION_OUTBOX_RETENTION_ROWS` non-pending rows, default
   `10000`; pending rows are never removed by retention.
+- `enrichment_task_outbox` is the durable task publication queue and is not
+  deleted by runtime log retention.
 - `telegram_source_messages` is source business data for analytics/review and
   is not deleted by runtime log retention.
 
@@ -484,7 +501,7 @@ The settings UI exposes the active NLP configuration through FastAPI:
   verdict/comment into `message_reviews`.
 - `GET /api/v1/runtime/logs` returns recent durable runtime events.
 - `GET /api/v1/runtime/status` returns backend/database/Redis/userbot/worker/
-  notification-dispatcher status summaries.
+  enrichment-dispatcher/notification-dispatcher status summaries.
 
 PostgreSQL table `nlp_config_revisions` is the active source of truth for
 editable NLP settings. `backend/config/nlp/*.yaml` is only a bootstrap default:

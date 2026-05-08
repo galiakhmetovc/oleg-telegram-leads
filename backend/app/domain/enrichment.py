@@ -263,6 +263,19 @@ class EnrichmentJobSnapshot:
 
 
 @dataclass(frozen=True)
+class EnrichmentTaskOutboxItem:
+    job_id: UUID
+    task_name: str
+    status: str
+    attempts: int
+    last_error: str | None
+    claimed_at: datetime | None
+    created_at: datetime
+    updated_at: datetime
+    published_at: datetime | None
+
+
+@dataclass(frozen=True)
 class EnrichmentEvent:
     sequence: int
     job_id: UUID

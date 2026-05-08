@@ -81,6 +81,7 @@ async def _run(
         job_creator=CreateEnrichmentJob(
             repository=enrichment_repository,
             task_publisher=CeleryEnrichmentTaskPublisher(),
+            task_outbox_repository=enrichment_repository,
         ),
     )
     history_client_factory = TelethonUserbotHistoryClientFactory()

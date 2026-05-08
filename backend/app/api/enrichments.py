@@ -41,6 +41,7 @@ async def create_enrichment(
         job = await CreateEnrichmentJob(
             repository=repository,
             task_publisher=task_publisher,
+            task_outbox_repository=repository,
         ).execute(request.text)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc

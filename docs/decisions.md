@@ -265,8 +265,11 @@ Telegram output, but keep both production handoff points durable in PostgreSQL.
 Runtime flow:
 
 - `userbot` receives/polls source chats and persists source messages.
-- It creates normal enrichment jobs and publishes them to the existing
-  Celery/Redis worker queue.
+- It creates normal enrichment jobs and records task publication in
+  `enrichment_task_outbox`.
+- `enrichment-dispatcher` publishes pending task outbox rows to the existing
+  Celery/Redis worker queue and retries broker publication failures from
+  PostgreSQL.
 - The enrichment worker stores results and enqueues matched notifications in
   `notification_outbox` instead of sending immediately.
 - `notification-dispatcher` batches outbox items by bot+chat and sends Telegram
@@ -282,6 +285,9 @@ Rationale:
   real requirement, it can be introduced behind the same ports later.
 - Batch-runner must remain offline/testing tooling and must not dispatch
   production notifications.
+- Celery remains an execution queue, not the source of truth. If the API or
+  userbot process dies after committing an enrichment job but before broker
+  publication succeeds, PostgreSQL must still contain a retryable task handoff.
 - Telegram has message size and frequency limits, so output must batch leads:
   pack up to the Bot API text limit and flush non-full batches when the oldest
   item waits 5 minutes.
@@ -632,12 +638,19 @@ resolved chat ids, source cursors, last errors, authorization metadata, and
 FloodWait cooldowns for unchanged sources/accounts. Changing a source identity
 resets the cursor deliberately.
 
-The userbot creates an enrichment job before saving a source message, but it
-publishes the Celery task only after `telegram_source_messages` is persisted.
-That ordering prevents the worker from completing before Telegram source
-context exists. If a concurrent ingester loses the unique source-message insert,
-it discards the unpublished enrichment job instead of leaving a queued job that
-will never be published.
+The userbot creates an enrichment job before saving a source message, but that
+job starts with a blocked `enrichment_task_outbox` row. The
+`telegram_source_messages` insert activates the task outbox row to `pending` in
+the same transaction, then the app may publish immediately through the
+dispatcher path. That ordering prevents the worker from completing before
+Telegram source context exists and keeps publish failures retryable. If a
+concurrent ingester loses the unique source-message insert, it discards the
+unpublished enrichment job instead of leaving a queued job that will never be
+published.
+
+The enrichment worker claims jobs with a conditional update from `queued` to
+`running`. Celery redelivery or duplicate task publication cannot rerun a job
+that is already running, completed, or failed.
 
 Notification outbox rows created from Telegram source messages carry
 `source_message_id` and `enrichment_job_id`. `(source_message_id, route_id)` is

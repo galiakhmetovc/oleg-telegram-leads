@@ -103,6 +103,24 @@ services:
       redis:
         condition: service_healthy
 
+  enrichment-dispatcher:
+    build:
+      context: ./backend
+    logging: *default-logging
+    command: python -m app.cli.enrichment_task_dispatcher --interval 5 --limit 100
+    environment:
+      PUR_DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-pur_leads}:${POSTGRES_PASSWORD:-pur_leads_dev_password}@postgres:5432/${POSTGRES_DB:-pur_leads_v2}
+      PUR_ENVIRONMENT: development
+      PUR_REDIS_URL: redis://redis:6379/0
+      PUR_NLP_CONFIG_DIR: /app/config/nlp
+    volumes:
+      - ./backend:/app
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+
   userbot:
     build:
       context: ./backend

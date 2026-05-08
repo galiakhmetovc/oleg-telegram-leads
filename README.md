@@ -8,7 +8,8 @@ in this repository layout:
 - `backend/` - FastAPI service, SQLAlchemy/Alembic, PostgreSQL only.
 - `frontend/` - React + Vite + TypeScript operator UI.
 - `docker-compose.yml` - local container stack for PostgreSQL, Redis, backend,
-  worker, Telegram userbot listener, notification dispatcher, and frontend.
+  enrichment dispatcher, worker, Telegram userbot listener, notification
+  dispatcher, and frontend.
 - `docs/` - architecture and durable decisions.
 - `state/` - current work and backlog.
 - `artifacts/` - ignored local exports and evidence, including production lead examples.
@@ -26,6 +27,7 @@ Services:
 - postgres: `127.0.0.1:55433`
 - redis: `127.0.0.1:6379`
 - caddy dev access: `https://secclaw.qlbc.ru:19443`
+- enrichment-dispatcher: PostgreSQL task outbox flusher, no public port
 - worker: Celery enrichment worker
 - userbot: Telegram source listener, no public port
 - notification-dispatcher: Telegram notification outbox flusher, no public port
@@ -60,9 +62,10 @@ Caddy-конфигурация находится вне репозитория:
 - хостовый firewall должен пропускать внешний порт:
   `sudo ufw allow 19443/tcp comment 'PUR Leads v2 dev UI'`
 
-The first workflow uses the backend API to create text enrichment jobs, a Celery
-worker to run the NLP pipeline, Redis as the broker, PostgreSQL for persisted
-job state, and SSE for progress updates.
+The first workflow uses the backend API to create text enrichment jobs, a
+PostgreSQL enrichment task outbox, an enrichment dispatcher that publishes
+Celery tasks, a Celery worker to run the NLP pipeline, Redis as the broker,
+PostgreSQL for persisted job state, and SSE for progress updates.
 
 The operator UI also includes a Settings Center. It shows editable NLP/domain
 settings from PostgreSQL config revisions and read-only runtime settings from
@@ -134,10 +137,19 @@ Production runtime flow:
 1. `userbot` listens to configured Telegram source chats through Telethon live
    updates. On startup it does one bounded recovery read after the stored
    `last_message_id`.
-2. New text messages are persisted in `telegram_source_messages`.
-3. The userbot creates a normal enrichment job and publishes it through the
-   existing Celery/Redis queue only after the source message row is saved.
-4. `worker` enriches the text and stores the result in PostgreSQL.
+2. For a new text message, the userbot creates a queued enrichment job with a
+   blocked task outbox row, then persists the source row in
+   `telegram_source_messages`. The source-message insert activates the matching
+   `enrichment_task_outbox` row to `pending` in the same transaction. If another
+   process already saved the source message, the losing unpublished job/outbox
+   row is discarded.
+3. `enrichment-dispatcher` atomically claims pending `enrichment_task_outbox`
+   rows and publishes the Celery/Redis task. Testing/API jobs create pending
+   outbox rows directly. If publish fails, the row is released back to
+   `pending` with the error for retry.
+4. `worker` atomically claims only queued enrichment jobs, enriches the text,
+   and stores the result in PostgreSQL. Celery redelivery or duplicate task
+   publication is a no-op once a job is running/completed/failed.
 5. Notification routing writes matching messages to `notification_outbox`.
 6. `notification-dispatcher` atomically claims pending outbox rows, groups by
    bot+chat, packs batches under Telegram `sendMessage` 4096-character limit,
@@ -164,19 +176,22 @@ contains the first constructor panel: select a fragment in the source text to
 prepare a future dictionary/fact/signal/noise edit.
 
 The UI includes Logs and System Status tabs. These are based on durable backend
-state: enrichment events, source messages, source chat errors, notification
-outbox state, database/Redis checks, source-chat statuses, job counters, and
-outbox counters. Logs are filtered and paginated on the backend by service,
-level, text, and time range. Runtime log API limits are configurable with
+state: enrichment events, enrichment task outbox rows, source messages, source
+chat errors, notification outbox state, database/Redis checks, source-chat
+statuses, job counters, task-dispatch counters, and notification outbox
+counters. Logs are filtered and paginated on the backend by service, level,
+text, and time range. Runtime log API limits are configurable with
 `PUR_RUNTIME_LOG_DEFAULT_LIMIT` and `PUR_RUNTIME_LOG_MAX_LIMIT`. To avoid
 unbounded growth, log-like retention keeps the newest
 `PUR_RUNTIME_ENRICHMENT_EVENT_RETENTION_ROWS` enrichment events and newest
 `PUR_RUNTIME_NOTIFICATION_OUTBOX_RETENTION_ROWS` non-pending notification
 outbox rows; pending/sending notifications and Telegram source messages are not
-trimmed by this log retention policy. `enrichment_events` are worker progress journal
-rows, not analytics candidates; live Analytics shows only Telegram source
-messages that already have an enrichment result. Docker Compose also rotates
-container stdout logs with `max-size=10m` and `max-file=5` per service.
+trimmed by this log retention policy. `enrichment_task_outbox` is operational
+state for reliable task publication and is not trimmed by runtime log
+retention. `enrichment_events` are worker progress journal rows, not analytics
+candidates; live Analytics shows only Telegram source messages that already
+have an enrichment result. Docker Compose also rotates container stdout logs
+with `max-size=10m` and `max-file=5` per service.
 
 The UI also includes a Project Documentation tab. It reads repository markdown
 documents through the backend from `README.md`, `AGENTS.md`, `docs/`, `notes/`,

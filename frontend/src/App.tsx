@@ -1197,7 +1197,7 @@ function RuntimeLogsPage() {
               Логи
             </Typography>
             <Typography variant="body2" color="text.secondary">
-              Последние события backend, userbot, worker и notification dispatcher.
+              Последние события backend, userbot, worker, enrichment dispatcher и notification dispatcher.
             </Typography>
           </Box>
           <Button variant="outlined" startIcon={<RefreshIcon />} onClick={() => void loadLogs()} disabled={loading}>
@@ -1226,6 +1226,7 @@ function RuntimeLogsPage() {
             <MenuItem value="">Все</MenuItem>
             <MenuItem value="userbot">userbot</MenuItem>
             <MenuItem value="worker">worker</MenuItem>
+            <MenuItem value="enrichment-dispatcher">enrichment-dispatcher</MenuItem>
             <MenuItem value="notification-dispatcher">notification-dispatcher</MenuItem>
           </TextField>
           <TextField
@@ -1708,9 +1709,11 @@ const systemStatusDetailLabels: Record<string, string> = {
   latest_job_created_at: "Последняя задача",
   latest_message_at: "Последнее сообщение",
   latest_notification_at: "Последнее уведомление",
+  latest_task_published_at: "Последняя задача отправлена в worker",
   messages_total: "Сообщений принято",
   next_cooldown_until: "Ближайший cooldown до",
   oldest_pending_at: "Самое старое ожидающее",
+  oldest_task_pending_at: "Старая задача ждет отправки",
   outbox_by_status: "Уведомления по статусам",
   outbox_total: "Уведомлений всего",
   public_base_url: "Публичный URL",
@@ -1719,6 +1722,10 @@ const systemStatusDetailLabels: Record<string, string> = {
   source_chats_enabled: "Чатов включено",
   source_chats_total: "Чатов-источников",
   status_checked_at: "Проверено",
+  stale_task_sending: "Зависшие отправки задач",
+  task_outbox_by_status: "Задачи на отправку по статусам",
+  task_outbox_total: "Задач на отправку всего",
+  task_publish_latest_error: "Последняя ошибка отправки задач",
   telegram_messages_enriched: "Сообщений видно в аналитике",
   telegram_messages_failed_enrichment: "Сообщений с ошибкой enrichment",
   telegram_messages_waiting_enrichment: "Сообщений ждут enrichment"

@@ -48,6 +48,25 @@ enrichment_events = sa.Table(
     sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
 )
 
+enrichment_task_outbox = sa.Table(
+    "enrichment_task_outbox",
+    metadata,
+    sa.Column(
+        "job_id",
+        UUID(as_uuid=True),
+        sa.ForeignKey("enrichment_jobs.id", ondelete="CASCADE"),
+        primary_key=True,
+    ),
+    sa.Column("task_name", sa.Text(), nullable=False),
+    sa.Column("status", sa.Text(), nullable=False),
+    sa.Column("attempts", sa.Integer(), nullable=False),
+    sa.Column("last_error", sa.Text(), nullable=True),
+    sa.Column("claimed_at", sa.DateTime(timezone=True), nullable=True),
+    sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
+    sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
+    sa.Column("published_at", sa.DateTime(timezone=True), nullable=True),
+)
+
 nlp_config_revisions = sa.Table(
     "nlp_config_revisions",
     metadata,

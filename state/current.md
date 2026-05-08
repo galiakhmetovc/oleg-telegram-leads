@@ -74,6 +74,13 @@
   insert discards the losing unpublished enrichment job; and notification
   outbox rows claimed but not ready for a 5-minute partial flush are released
   back to `pending` immediately.
+- Enrichment task publication now uses a PostgreSQL outbox. API/Testing jobs
+  create pending `enrichment_task_outbox` rows; Telegram jobs create blocked
+  rows that are activated when the source message insert commits. The
+  `enrichment-dispatcher` service publishes pending rows to Celery/Redis and
+  leaves broker failures retryable in PostgreSQL. The worker atomically claims
+  only queued jobs, so Celery redelivery or duplicate task publication cannot
+  rerun completed/failed enrichments.
 - Default NLP config now recognizes the smart-home automation lead case with
   customer intent, vendor, solution area, and electrical design context signals.
 - Default NLP config also recognizes hot Zigbee installation requests with
@@ -274,10 +281,11 @@
 
 ## Next Steps
 
-1. Continue high-priority audit fixes: Telegram ingestion idempotency, outbox
-   flush timing, cursor monotonicity, and SQL-backed live analytics pagination.
-2. Review live `research_warm`, `noise`, and `direct_pur_lead` candidates after
+1. Review live `research_warm`, `noise`, and `direct_pur_lead` candidates after
    revision 27 to tune false positives with operator verdicts.
-3. Promote confirmed production examples into a curated eval/golden dataset
+2. Promote confirmed production examples into a curated eval/golden dataset
    after deciding what text can be committed versus kept in ignored artifacts.
+3. Decide whether to close the remaining rare Telegram crash window by combining
+   enrichment job creation and source-message insert into one repository unit of
+   work, or by cleaning up stale blocked `enrichment_task_outbox` rows.
 4. Keep an eye on host disk usage before larger dependency/model downloads.
