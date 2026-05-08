@@ -16,6 +16,17 @@ def test_merge_missing_default_documents_adds_new_document_and_pipeline_stage() 
     }
     defaults: dict[str, dict[str, Any]] = {
         "pipeline": {
+            "alias_matching": {
+                "normalize_separators": True,
+                "normalize_yo": True,
+                "normalize_latin_confusables": True,
+                "fuzzy_enabled": True,
+                "fuzzy_min_length": 5,
+                "fuzzy_max_distance": 1,
+                "fuzzy_long_min_length": 10,
+                "fuzzy_long_max_distance": 2,
+                "fuzzy_excluded_aliases": [],
+            },
             "stages": [
                 {"name": "segmentation", "enabled": True},
                 {"name": "domain_signals", "enabled": True},
@@ -36,6 +47,7 @@ def test_merge_missing_default_documents_adds_new_document_and_pipeline_stage() 
         "domain_signals",
         "lead_scoring",
     ]
+    assert merged["pipeline"]["alias_matching"] == defaults["pipeline"]["alias_matching"]
 
 
 def test_merge_missing_default_documents_adds_new_lead_scoring_sections_without_overwriting() -> None:

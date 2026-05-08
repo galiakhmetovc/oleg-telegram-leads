@@ -164,6 +164,9 @@ def _merge_pipeline_stages(
     active_pipeline: dict[str, Any],
 ) -> dict[str, Any]:
     merged_pipeline = deepcopy(active_pipeline)
+    if "alias_matching" not in merged_pipeline and "alias_matching" in default_pipeline:
+        merged_pipeline["alias_matching"] = deepcopy(default_pipeline["alias_matching"])
+
     active_stages = merged_pipeline.get("stages", [])
     default_stages = default_pipeline.get("stages", [])
     if not isinstance(active_stages, list) or not isinstance(default_stages, list):
