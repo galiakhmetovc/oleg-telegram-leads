@@ -96,7 +96,9 @@ are stored in `message_reviews`, separate from deterministic enrichment output,
 so operator ground truth can later drive calibration and rule edits. The
 candidate list shows saved review chips, supports filters for reviewed/
 unreviewed messages and verdicts, and review links preserve the current run,
-filters, and page offset when returning from the dedicated Review page.
+filters, and page offset when returning from the dedicated Review page. The
+default queue is unreviewed messages. Review saves support structured reason
+tags, hotkeys `1/2/3/4`, `Ctrl+Enter`, and "Сохранить и следующий".
 
 The Settings Center also exposes Telegram runtime settings:
 
@@ -153,9 +155,9 @@ message.
 The Review page is the detailed operator workspace for one message. It shows the
 source text, score/temperature/lane, reasons, facts, domain signals, and
 highlighted fragments, then lets the operator save one of `Лид`, `Не лид`,
-`Сомнительно`, or `Шум` with a comment. The page also contains the first
-constructor panel: select a fragment in the source text to prepare a future
-dictionary/fact/signal/noise edit.
+`Сомнительно`, or `Шум` with structured tags and a comment. The page also
+contains the first constructor panel: select a fragment in the source text to
+prepare a future dictionary/fact/signal/noise edit.
 
 The UI includes Logs and System Status tabs. These are based on durable backend
 state: enrichment events, source messages, source chat errors, notification

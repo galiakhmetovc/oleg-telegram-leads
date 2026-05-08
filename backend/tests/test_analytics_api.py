@@ -167,11 +167,13 @@ class ApiInMemoryAnalyticsRepository:
         message_id: str,
         verdict: AnalyticsReviewVerdict | None,
         comment: str,
+        tags: list[str] | None = None,
     ) -> AnalyticsMessageReview:
         review = AnalyticsMessageReview(
             source_message_id=message_id,
             verdict=verdict,
             comment=comment,
+            tags=tags or [],
             created_at=datetime(2026, 5, 8, 13, 0, tzinfo=UTC),
             updated_at=datetime(2026, 5, 8, 13, 5, tzinfo=UTC),
         )
@@ -406,6 +408,7 @@ def test_lists_analytics_candidates_with_review_status_and_verdict_filters() -> 
                 source_message_id="488906",
                 verdict="not_lead",
                 comment="Нет запроса на подрядчика",
+                tags=["no_provider_intent"],
                 created_at=datetime(2026, 5, 8, 13, 0, tzinfo=UTC),
                 updated_at=datetime(2026, 5, 8, 13, 5, tzinfo=UTC),
             ),
@@ -469,7 +472,11 @@ def test_gets_and_updates_analytics_message_review() -> None:
 
     update = client.put(
         "/api/v1/analytics/messages/488906/review",
-        json={"verdict": "not_lead", "comment": "Обсуждение лицензий, нет запроса на подрядчика"},
+        json={
+            "verdict": "not_lead",
+            "comment": "Обсуждение лицензий, нет запроса на подрядчика",
+            "tags": ["equipment_only", "no_provider_intent"],
+        },
     )
 
     assert update.status_code == 200
@@ -478,6 +485,7 @@ def test_gets_and_updates_analytics_message_review() -> None:
         "source_message_id": "488906",
         "verdict": "not_lead",
         "comment": "Обсуждение лицензий, нет запроса на подрядчика",
+        "tags": ["equipment_only", "no_provider_intent"],
         "created_at": "2026-05-08T13:00:00Z",
         "updated_at": "2026-05-08T13:05:00Z",
     }

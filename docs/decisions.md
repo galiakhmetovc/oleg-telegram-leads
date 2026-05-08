@@ -595,12 +595,19 @@ Rationale:
 Live Analytics must expose review state in the candidate list. The list API
 returns the saved `message_reviews` row when it exists and accepts filters for
 `review_status` (`reviewed` / `unreviewed`) and operator `verdict`. The UI shows
-review chips in the table and uses human labels for common review lanes.
+review chips in the table, defaults to the unreviewed queue, and uses human
+labels for common review lanes.
 
 Review links include a URL-encoded `return` hash containing the current
 Analytics filters, selected run, and pagination offset. Returning from
 `#/analytics/review/{source_message_id}` should bring the operator back to the
 same queue context instead of a fresh Analytics page.
+
+Review records include structured `tags` in addition to free comments. Tags
+represent repeatable calibration reasons such as equipment-only, DIY, sale,
+weak context, false alias, or missing rule. The Review page can save and then
+open the next candidate from the same return hash; this is a frontend queue
+workflow over the existing list API, not a second queue source of truth.
 
 Rationale:
 
@@ -611,6 +618,8 @@ Rationale:
   lose the working slice they were reviewing.
 - Review verdicts are ground truth for calibration, so they should be visible
   in the scan table immediately after saving.
+- Structured tags make false-positive analysis queryable later; comments alone
+  are too hard to aggregate.
 - Hash URLs are the current SPA routing contract; preserving filters in the URL
   keeps browser back/forward and copyable links useful without introducing a
   new router dependency.

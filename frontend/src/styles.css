@@ -458,6 +458,13 @@ body {
   white-space: pre-wrap;
 }
 
+.review-summary-reason {
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background: #ffffff;
+  padding: 8px 10px;
+}
+
 @media (max-width: 980px) {
   .workspace-grid {
     grid-template-columns: 1fr;

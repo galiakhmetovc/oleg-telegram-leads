@@ -185,7 +185,7 @@ The Analytics tab opens by default after login and uses a virtual run
 - `enrichment_jobs` and `enrichment_results` provide processing state and
   deterministic lead assessment.
 - `message_reviews` stores mutable operator ground truth for each source
-  message: verdict, comment, and timestamps.
+  message: verdict, structured tags, comment, and timestamps.
 - Aggregates are computed from live completed enrichments.
 - App links use `#/analytics/message/{source_message_id}`.
 - Review links use `#/analytics/review/{source_message_id}` and open the full
@@ -196,6 +196,10 @@ The Analytics tab opens by default after login and uses a virtual run
   message text before starting a fresh enrichment job.
 - Candidate list rows include saved `message_reviews` state and can be filtered
   by unreviewed/reviewed status and by operator verdict.
+- The operator default queue is unreviewed candidates. The Review page can save
+  the current verdict and then load the next candidate from the same return
+  hash, which keeps the review flow sequential without creating a separate
+  backend queue table.
 
 Migration `0008_runtime_analytics_cleanup` deletes old batch analytics rows so
 the operator screen starts from connected Telegram channels. Batch imports can
@@ -234,8 +238,10 @@ Manual review is deliberately separate from deterministic NLP output. A saved
 review does not rewrite enrichment results, score, lane, or notification state;
 it records operator feedback that can later be used for calibration and config
 changes. The Review page combines the expanded Analytics evidence view with
-four verdicts (`Лид`, `Не лид`, `Сомнительно`, `Шум`), a free comment, and a
-constructor draft panel based on text selection.
+four verdicts (`Лид`, `Не лид`, `Сомнительно`, `Шум`), structured reason tags,
+a free comment, and a constructor draft panel based on text selection. Verdict
+hotkeys `1/2/3/4`, `Ctrl+Enter` save, and `N` save-and-next are frontend
+operator shortcuts over the same review API.
 
 Container stdout/stderr logs are also bounded in Docker Compose through the
 `json-file` driver with `max-size=10m` and `max-file=5` on every service.

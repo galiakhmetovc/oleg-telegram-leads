@@ -35,6 +35,11 @@
   `review_status` and `verdict`. Review links carry a return URL with the
   current filters, run, and pagination offset, so the operator can return to the
   same queue context after opening a dedicated Review page.
+- The default Analytics queue is now `Без ревью`. Review records store
+  structured `tags` in addition to verdict/comment. The Review page supports
+  verdict hotkeys `1/2/3/4`, `Ctrl+Enter` to save, `N` to save and open the next
+  message from the same queue, quick tag chips, and a short "Почему сработало"
+  summary before the detailed evidence tables.
 - The UI now includes "Логи" and "Статус системы" tabs backed by durable
   runtime state and health counters. System Status distinguishes worker progress
   journal rows from Telegram messages visible in live Analytics.

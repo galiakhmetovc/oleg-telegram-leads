@@ -80,5 +80,6 @@ class AnalyticsMessageReview:
     source_message_id: str
     verdict: AnalyticsReviewVerdict | None
     comment: str
+    tags: list[str]
     created_at: datetime
     updated_at: datetime

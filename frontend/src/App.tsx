@@ -987,6 +987,7 @@ export function App() {
               <AnalyticsReviewPage
                 apiBaseUrl={apiBaseUrl}
                 messageId={analyticsReviewMessageId}
+                returnHash={analyticsReviewReturnHash}
                 onBack={() => {
                   window.location.hash =
                     analyticsReviewReturnHash ?? `#/analytics/message/${encodeURIComponent(analyticsReviewMessageId)}`;

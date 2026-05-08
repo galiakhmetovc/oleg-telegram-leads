@@ -98,6 +98,7 @@ type AnalyticsMessageReview = {
   source_message_id: string;
   verdict: AnalyticsReviewVerdict | null;
   comment: string;
+  tags: string[];
   created_at: string;
   updated_at: string;
 };
@@ -165,6 +166,7 @@ type AnalyticsPageProps = {
 type AnalyticsReviewPageProps = {
   apiBaseUrl: string;
   messageId: string;
+  returnHash?: string | null;
   onBack?: () => void;
   onTestMessage?: (candidate: AnalyticsCandidate) => void;
 };
@@ -181,6 +183,17 @@ const reviewVerdictOptions: Array<{
   { value: "uncertain", label: "Сомнительно", color: "warning" },
   { value: "noise", label: "Шум", color: "secondary" }
 ];
+const reviewTagOptions = [
+  { value: "no_provider_intent", label: "Нет запроса на подрядчика" },
+  { value: "diy", label: "DIY / сам делает" },
+  { value: "equipment_only", label: "Только оборудование" },
+  { value: "sale", label: "Продажа / наличие" },
+  { value: "not_pur_domain", label: "Не домен ПУР" },
+  { value: "weak_context", label: "Слабый контекст" },
+  { value: "false_alias", label: "Ложный alias" },
+  { value: "needs_alias", label: "Нужен alias" },
+  { value: "needs_rule", label: "Нужно правило" }
+];
 const defaultFilters: CandidateFilters = {
   scoreMin: "",
   temperature: "",
@@ -192,7 +205,7 @@ const defaultFilters: CandidateFilters = {
   sourceChatId: "",
   receivedFrom: "",
   receivedTo: "",
-  reviewStatus: "",
+  reviewStatus: "unreviewed",
   verdict: "",
   q: ""
 };
@@ -755,15 +768,18 @@ export function AnalyticsPage({ apiBaseUrl, focusMessageId, onTestMessage }: Ana
   );
 }
 
-export function AnalyticsReviewPage({ apiBaseUrl, messageId, onBack, onTestMessage }: AnalyticsReviewPageProps) {
+export function AnalyticsReviewPage({ apiBaseUrl, messageId, returnHash, onBack, onTestMessage }: AnalyticsReviewPageProps) {
   const [candidate, setCandidate] = useState<AnalyticsCandidate | null>(null);
   const [verdict, setVerdict] = useState<AnalyticsReviewVerdict | null>(null);
   const [comment, setComment] = useState("");
+  const [tags, setTags] = useState<string[]>([]);
   const [selectedText, setSelectedText] = useState("");
+  const [constructorDraft, setConstructorDraft] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
+  const [nextStatus, setNextStatus] = useState<string | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -783,6 +799,8 @@ export function AnalyticsReviewPage({ apiBaseUrl, messageId, onBack, onTestMessa
         setCandidate(nextCandidate);
         setVerdict(nextCandidate.review?.verdict ?? null);
         setComment(nextCandidate.review?.comment ?? "");
+        setTags(nextCandidate.review?.tags ?? []);
+        setConstructorDraft(null);
       } catch (caught) {
         if (active) {
           setError(caught instanceof Error ? caught.message : "Не удалось загрузить сообщение для ревью");
@@ -800,15 +818,48 @@ export function AnalyticsReviewPage({ apiBaseUrl, messageId, onBack, onTestMessa
     };
   }, [apiBaseUrl, messageId]);
 
-  async function saveReview() {
+  useEffect(() => {
+    function handleKeyDown(event: KeyboardEvent) {
+      const target = event.target as HTMLElement | null;
+      const editingText =
+        target instanceof HTMLElement &&
+        (target.tagName === "INPUT" ||
+          target.tagName === "TEXTAREA" ||
+          target.getAttribute("contenteditable") === "true");
+      if (event.ctrlKey && event.key === "Enter") {
+        event.preventDefault();
+        void saveReview();
+        return;
+      }
+      if (editingText || event.metaKey || event.ctrlKey || event.altKey || event.shiftKey) {
+        return;
+      }
+      const index = Number(event.key) - 1;
+      const option = reviewVerdictOptions[index];
+      if (option) {
+        event.preventDefault();
+        setVerdict(option.value);
+      }
+      if (event.key.toLocaleLowerCase("ru-RU") === "n" || event.key.toLocaleLowerCase("ru-RU") === "т") {
+        event.preventDefault();
+        void saveReview({ goNext: true });
+      }
+    }
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [apiBaseUrl, comment, messageId, returnHash, tags, verdict]);
+
+  async function saveReview(options: { goNext?: boolean } = {}) {
     setSaving(true);
     setError(null);
     setSaved(false);
+    setNextStatus(null);
     try {
       const response = await fetch(`${apiBaseUrl}/api/v1/analytics/messages/${encodeURIComponent(messageId)}/review`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ verdict, comment })
+        body: JSON.stringify({ verdict, comment, tags })
       });
       if (!response.ok) {
         throw new Error(`Backend вернул ${response.status}`);
@@ -817,7 +868,11 @@ export function AnalyticsReviewPage({ apiBaseUrl, messageId, onBack, onTestMessa
       setCandidate(nextCandidate);
       setVerdict(nextCandidate.review?.verdict ?? verdict);
       setComment(nextCandidate.review?.comment ?? comment);
+      setTags(nextCandidate.review?.tags ?? tags);
       setSaved(true);
+      if (options.goNext) {
+        await openNextCandidate();
+      }
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Не удалось сохранить ревью");
     } finally {
@@ -825,11 +880,66 @@ export function AnalyticsReviewPage({ apiBaseUrl, messageId, onBack, onTestMessa
     }
   }
 
+  async function openNextCandidate() {
+    if (!returnHash) {
+      setNextStatus("Нет сохраненного контекста очереди для перехода к следующему сообщению.");
+      return;
+    }
+    const state = parseAnalyticsUrlState(returnHash);
+    if (!state.runId) {
+      setNextStatus("В ссылке возврата нет выбранного запуска аналитики.");
+      return;
+    }
+    const page = await fetchCandidatePage(state.runId, state.filters, state.offset);
+    const currentIndex = page.items.findIndex((item) => item.message_id === messageId);
+    const nextCandidate = currentIndex >= 0 ? page.items[currentIndex + 1] : page.items[0];
+    if (nextCandidate) {
+      window.location.hash = analyticsReviewHash(nextCandidate.message_id, returnHash);
+      return;
+    }
+    if (page.total > state.offset + page.limit) {
+      const nextOffset = state.offset + page.limit;
+      const nextReturnHash = analyticsListHash(state.filters, nextOffset, state.runId);
+      const nextPage = await fetchCandidatePage(state.runId, state.filters, nextOffset);
+      if (nextPage.items[0]) {
+        window.location.hash = analyticsReviewHash(nextPage.items[0].message_id, nextReturnHash);
+        return;
+      }
+    }
+    setNextStatus("В этой очереди больше нет сообщений.");
+  }
+
+  async function fetchCandidatePage(runId: string, filters: CandidateFilters, offset: number): Promise<CandidatePage> {
+    const response = await fetch(
+      `${apiBaseUrl}/api/v1/analytics/runs/${encodeURIComponent(runId)}/candidates?${candidateQuery(
+        filters,
+        candidatePageSize,
+        offset
+      )}`
+    );
+    if (!response.ok) {
+      throw new Error(`Backend вернул ${response.status}`);
+    }
+    return (await response.json()) as CandidatePage;
+  }
+
   function rememberSelection() {
     const text = window.getSelection()?.toString().trim();
     if (text) {
       setSelectedText(text);
+      setConstructorDraft(null);
     }
+  }
+
+  function toggleTag(tag: string) {
+    setTags((current) => (current.includes(tag) ? current.filter((item) => item !== tag) : [...current, tag]));
+  }
+
+  function chooseConstructorDraft(kind: string) {
+    if (!selectedText) {
+      return;
+    }
+    setConstructorDraft(`${kind}: "${selectedText}"`);
   }
 
   return (
@@ -875,6 +985,7 @@ export function AnalyticsReviewPage({ apiBaseUrl, messageId, onBack, onTestMessa
           )}
           {error && <Alert severity="error">{error}</Alert>}
           {saved && <Alert severity="success">Ревью сохранено</Alert>}
+          {nextStatus && <Alert severity="info">{nextStatus}</Alert>}
         </Stack>
       </Paper>
 
@@ -882,8 +993,15 @@ export function AnalyticsReviewPage({ apiBaseUrl, messageId, onBack, onTestMessa
         <Box className="analytics-review-grid">
           <Stack spacing={2} sx={{ minWidth: 0 }}>
             <Paper variant="outlined" className="analytics-section">
+              <Stack spacing={1.25}>
+                <SectionTitle title="Почему сработало" subtitle="Короткая сводка автоматического разбора перед решением" />
+                <ReviewReasonSummary candidate={candidate} />
+              </Stack>
+            </Paper>
+
+            <Paper variant="outlined" className="analytics-section">
               <Stack spacing={1.5}>
-                <SectionTitle title="Разметка" subtitle="Итоговая операторская оценка сообщения" />
+                <SectionTitle title="Разметка" subtitle="1-4 выбирают вердикт, Ctrl+Enter сохраняет, N сохраняет и открывает следующее" />
                 <Stack direction="row" spacing={1} useFlexGap sx={{ flexWrap: "wrap" }}>
                   {reviewVerdictOptions.map((option) => (
                     <Button
@@ -898,6 +1016,18 @@ export function AnalyticsReviewPage({ apiBaseUrl, messageId, onBack, onTestMessa
                   <Button variant={verdict === null ? "contained" : "outlined"} onClick={() => setVerdict(null)}>
                     Без оценки
                   </Button>
+                </Stack>
+                <Stack direction="row" spacing={0.75} useFlexGap sx={{ flexWrap: "wrap" }}>
+                  {reviewTagOptions.map((option) => (
+                    <Button
+                      key={option.value}
+                      size="small"
+                      variant={tags.includes(option.value) ? "contained" : "outlined"}
+                      onClick={() => toggleTag(option.value)}
+                    >
+                      {option.label}
+                    </Button>
+                  ))}
                 </Stack>
                 <TextField
                   label="Комментарий ревью"
@@ -914,6 +1044,14 @@ export function AnalyticsReviewPage({ apiBaseUrl, messageId, onBack, onTestMessa
                   onClick={() => void saveReview()}
                 >
                   Сохранить ревью
+                </Button>
+                <Button
+                  variant="outlined"
+                  startIcon={saving ? <CircularProgress size={18} color="inherit" /> : <SaveIcon />}
+                  disabled={saving}
+                  onClick={() => void saveReview({ goNext: true })}
+                >
+                  Сохранить и следующий
                 </Button>
               </Stack>
             </Paper>
@@ -943,19 +1081,20 @@ export function AnalyticsReviewPage({ apiBaseUrl, messageId, onBack, onTestMessa
                   </Typography>
                 )}
                 <Stack direction="row" spacing={1} useFlexGap sx={{ flexWrap: "wrap" }}>
-                  <Button variant="outlined" disabled={!selectedText}>
+                  <Button variant="outlined" disabled={!selectedText} onClick={() => chooseConstructorDraft("alias")}>
                     В словарь
                   </Button>
-                  <Button variant="outlined" disabled={!selectedText}>
+                  <Button variant="outlined" disabled={!selectedText} onClick={() => chooseConstructorDraft("fact")}>
                     В факт
                   </Button>
-                  <Button variant="outlined" disabled={!selectedText}>
+                  <Button variant="outlined" disabled={!selectedText} onClick={() => chooseConstructorDraft("signal")}>
                     В доменный сигнал
                   </Button>
-                  <Button variant="outlined" disabled={!selectedText}>
+                  <Button variant="outlined" disabled={!selectedText} onClick={() => chooseConstructorDraft("noise")}>
                     В шум
                   </Button>
                 </Stack>
+                {constructorDraft && <Chip label={constructorDraft} variant="outlined" />}
               </Stack>
             </Paper>
           </Stack>
@@ -1414,6 +1553,51 @@ function CandidateDetails({ candidate }: { candidate: AnalyticsCandidate }) {
         <CandidateReasonTable reasons={candidate.reasons} />
       </Stack>
     </Box>
+  );
+}
+
+function ReviewReasonSummary({ candidate }: { candidate: AnalyticsCandidate }) {
+  const topReasons = candidate.reasons.slice(0, 5);
+  const hasNoise = candidate.noise_signals.length > 0;
+  if (topReasons.length === 0 && !hasNoise) {
+    return (
+      <Typography variant="body2" color="text.secondary">
+        Автоматический разбор не вернул причин score или шумовых сигналов.
+      </Typography>
+    );
+  }
+  return (
+    <Stack spacing={1}>
+      <Stack direction="row" spacing={0.75} useFlexGap sx={{ flexWrap: "wrap" }}>
+        <Chip label={candidateTemperatureLabel(candidate)} color={candidateTemperatureColor(candidate)} />
+        <Chip label={`${candidate.score} баллов`} variant="outlined" />
+        <Chip label={reviewLaneLabel(candidate.review_lane)} variant="outlined" />
+      </Stack>
+      {hasNoise && (
+        <Stack direction="row" spacing={0.75} useFlexGap sx={{ flexWrap: "wrap" }}>
+          {candidate.noise_signals.map((signal) => (
+            <Chip
+              key={`noise-${signal.type}`}
+              size="small"
+              color="warning"
+              label={`Шум: ${signal.label || signal.type}`}
+            />
+          ))}
+        </Stack>
+      )}
+      <Stack spacing={0.75}>
+        {topReasons.map((reason) => (
+          <Box key={`${reason.source}-${reason.key}`} className="review-summary-reason">
+            <Typography variant="body2" sx={{ fontWeight: 700 }}>
+              {formatWeight(reason.weight)} {reason.label || reason.key}
+            </Typography>
+            <Typography variant="caption" color="text.secondary">
+              {reason.matched_texts.slice(0, 3).join(", ") || reason.source}
+            </Typography>
+          </Box>
+        ))}
+      </Stack>
+    </Stack>
   );
 }
 

@@ -68,12 +68,14 @@ class PostgresAnalyticsRepository:
         message_id: str,
         verdict: AnalyticsReviewVerdict | None,
         comment: str,
+        tags: list[str],
     ) -> AnalyticsMessageReview:
         now = datetime.now(UTC)
         values = {
             "source_message_id": UUID(message_id),
             "verdict": verdict,
             "comment": comment,
+            "tags": tags,
             "created_at": now,
             "updated_at": now,
         }
@@ -85,6 +87,7 @@ class PostgresAnalyticsRepository:
                 set_={
                     "verdict": verdict,
                     "comment": comment,
+                    "tags": tags,
                     "updated_at": now,
                 },
             )
@@ -320,6 +323,7 @@ async def _live_candidates(session: AsyncSession) -> list[AnalyticsCandidate]:
             message_reviews.c.source_message_id.label("review_source_message_id"),
             message_reviews.c.verdict.label("review_verdict"),
             message_reviews.c.comment.label("review_comment"),
+            message_reviews.c.tags.label("review_tags"),
             message_reviews.c.created_at.label("review_created_at"),
             message_reviews.c.updated_at.label("review_updated_at"),
         )
@@ -662,6 +666,7 @@ def _review_from_row(row: Any) -> AnalyticsMessageReview:
         source_message_id=str(row["source_message_id"]),
         verdict=cast(AnalyticsReviewVerdict | None, row["verdict"]),
         comment=str(row["comment"] or ""),
+        tags=_list_of_strings(row["tags"] or []),
         created_at=row["created_at"],
         updated_at=row["updated_at"],
     )
@@ -675,9 +680,16 @@ def _review_from_live_row(row: Any) -> AnalyticsMessageReview | None:
         source_message_id=str(source_message_id),
         verdict=cast(AnalyticsReviewVerdict | None, row["review_verdict"]),
         comment=str(row["review_comment"] or ""),
+        tags=_list_of_strings(row["review_tags"] or []),
         created_at=row["review_created_at"],
         updated_at=row["review_updated_at"],
     )
+
+
+def _list_of_strings(values: Any) -> list[str]:
+    if not isinstance(values, list):
+        return []
+    return [str(value) for value in values if value is not None]
 
 
 def _source_chat_aggregates(candidates: Sequence[AnalyticsCandidate]) -> list[AnalyticsAggregate]:

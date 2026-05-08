@@ -82,6 +82,7 @@ class AnalyticsMessageReviewResponse(BaseModel):
     source_message_id: str
     verdict: AnalyticsReviewVerdict | None
     comment: str
+    tags: list[str]
     created_at: datetime
     updated_at: datetime
 
@@ -89,6 +90,7 @@ class AnalyticsMessageReviewResponse(BaseModel):
 class AnalyticsMessageReviewUpdate(BaseModel):
     verdict: AnalyticsReviewVerdict | None = None
     comment: str = ""
+    tags: list[str] = []
 
 
 class AnalyticsCandidatePageResponse(BaseModel):
@@ -202,6 +204,7 @@ async def update_analytics_message_review(
         message_id=message_id,
         verdict=payload.verdict,
         comment=payload.comment.strip(),
+        tags=_normalized_review_tags(payload.tags),
     )
     return _candidate_response(candidate, review=review)
 
@@ -273,6 +276,16 @@ def _review_response(review: AnalyticsMessageReview) -> AnalyticsMessageReviewRe
         source_message_id=review.source_message_id,
         verdict=review.verdict,
         comment=review.comment,
+        tags=review.tags,
         created_at=review.created_at,
         updated_at=review.updated_at,
     )
+
+
+def _normalized_review_tags(tags: list[str]) -> list[str]:
+    normalized: list[str] = []
+    for tag in tags:
+        value = tag.strip()
+        if value and value not in normalized:
+            normalized.append(value)
+    return normalized

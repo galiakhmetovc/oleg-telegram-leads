@@ -1326,6 +1326,7 @@ test("opens analytics review page and saves verdict comment", async () => {
           source_message_id: "focus-1",
           verdict: "not_lead",
           comment: "Нет запроса на подрядчика",
+          tags: [],
           created_at: "2026-05-08T13:00:00Z",
           updated_at: "2026-05-08T13:05:00Z"
         }
@@ -1343,9 +1344,100 @@ test("opens analytics review page and saves verdict comment", async () => {
   fireEvent.click(screen.getByRole("button", { name: "Сохранить ревью" }));
 
   await waitFor(() =>
-    expect(reviewPayload).toEqual({ verdict: "not_lead", comment: "Нет запроса на подрядчика" })
+    expect(reviewPayload).toEqual({ verdict: "not_lead", comment: "Нет запроса на подрядчика", tags: [] })
   );
   expect(await screen.findByText("Ревью сохранено")).toBeInTheDocument();
+});
+
+test("review page supports hotkeys, structured tags, and save next", async () => {
+  const run = sampleAnalyticsRun();
+  const returnHash = `#/analytics?limit=50&offset=0&review_status=unreviewed&run=${run.id}`;
+  window.history.replaceState(
+    null,
+    "",
+    `/#/analytics/review/focus-1?return=${encodeURIComponent(returnHash)}`
+  );
+  const firstCandidate = {
+    message_id: "focus-1",
+    text: "Продам камеру Hikvision без монтажа",
+    score: 70,
+    temperature: "warm",
+    review_lane: "noise",
+    solution_areas: [],
+    customer_segments: [],
+    intent_signals: [],
+    noise_signals: [{ type: "equipment_only", label: "Только оборудование" }],
+    reasons: [
+      {
+        source: "domain_signal",
+        key: "video_surveillance",
+        label: "Видеонаблюдение",
+        weight: 35,
+        matched_texts: ["камера Hikvision"]
+      }
+    ],
+    domain_signals: [],
+    facts: [],
+    review: null
+  };
+  const nextCandidate = {
+    ...firstCandidate,
+    message_id: "next-1",
+    text: "Следующий кандидат без ревью",
+    review_lane: "direct_pur_lead",
+    noise_signals: [],
+    review: null
+  };
+  let reviewPayload: unknown = null;
+  const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    if (url === "/api/v1/auth/me") {
+      return jsonResponse({ authenticated: true, username: "admin" });
+    }
+    if (url === "/api/v1/settings") {
+      return jsonResponse(sampleSettingsSnapshot());
+    }
+    if (url === "/api/v1/analytics/messages/focus-1" && !init) {
+      return jsonResponse(firstCandidate);
+    }
+    if (url === "/api/v1/analytics/messages/focus-1/review" && init?.method === "PUT") {
+      reviewPayload = JSON.parse(String(init.body));
+      return jsonResponse({
+        ...firstCandidate,
+        review: {
+          source_message_id: "focus-1",
+          verdict: "not_lead",
+          comment: "",
+          tags: ["equipment_only"],
+          created_at: "2026-05-08T13:00:00Z",
+          updated_at: "2026-05-08T13:05:00Z"
+        }
+      });
+    }
+    if (url.startsWith(`/api/v1/analytics/runs/${run.id}/candidates`)) {
+      const params = new URL(url, "http://localhost").searchParams;
+      expect(params.get("review_status")).toBe("unreviewed");
+      return jsonResponse({ total: 1, limit: 50, offset: 0, items: [nextCandidate] });
+    }
+    if (url === "/api/v1/analytics/messages/next-1" && !init) {
+      return jsonResponse(nextCandidate);
+    }
+    throw new Error(`Unhandled fetch: ${url}`);
+  });
+  vi.stubGlobal("fetch", fetchMock);
+
+  render(<App />);
+
+  expect(await screen.findByRole("heading", { name: "Ревью сообщения" })).toBeInTheDocument();
+  fireEvent.keyDown(window, { key: "2" });
+  expect(screen.getByRole("button", { name: "Не лид" })).toHaveClass("MuiButton-contained");
+  fireEvent.click(screen.getByRole("button", { name: "Только оборудование" }));
+  fireEvent.click(screen.getByRole("button", { name: "Сохранить и следующий" }));
+
+  await waitFor(() =>
+    expect(reviewPayload).toEqual({ verdict: "not_lead", comment: "", tags: ["equipment_only"] })
+  );
+  expect((await screen.findAllByText("Следующий кандидат без ревью")).length).toBeGreaterThan(0);
 });
 
 test("pages analytics candidates with backend limit and offset", async () => {
@@ -1572,6 +1664,7 @@ test("filters analytics candidates by review status and verdict", async () => {
               source_message_id: "reviewed",
               verdict: "not_lead",
               comment: "Нет запроса на подрядчика",
+              tags: [],
               created_at: "2026-05-08T13:00:00Z",
               updated_at: "2026-05-08T13:05:00Z"
             }

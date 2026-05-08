@@ -13,10 +13,10 @@
   1/2/4 process benchmarks with thread caps, configured anchor-based Yargy
   gating, and only then careful word/lemma caching if tests prove it does not
   reduce full enrichment quality.
-- Review workflow polish:
-  `Сохранить и следующий`, keyboard shortcuts, structured comment templates,
-  first-screen "почему сработало" summary, and constructor wizard actions for
-  alias/fact/signal/noise proposals from selected text.
+- Review workflow polish, remaining after the first queue pass:
+  persist constructor proposals from selected text, add `save + next` success
+  telemetry, bulk review actions, and review verdict/tag aggregates in
+  Analytics.
 - Live analytics scalability: move live candidate lookup, filters, sorting,
   pagination, and high-cardinality aggregates into SQL instead of loading all
   completed Telegram enrichments into Python.

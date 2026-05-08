@@ -131,6 +131,7 @@ message_reviews = sa.Table(
     ),
     sa.Column("verdict", sa.Text(), nullable=True),
     sa.Column("comment", sa.Text(), nullable=False),
+    sa.Column("tags", JSONB(), nullable=False),
     sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
     sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
 )
