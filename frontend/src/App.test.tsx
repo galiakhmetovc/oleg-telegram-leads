@@ -1552,6 +1552,163 @@ test("review constructor saves selected text as noise setting", async () => {
   expect(screen.getByText("operator_noise: dss express")).toBeInTheDocument();
 });
 
+test("review constructor saves selected text to aliases facts and signals", async () => {
+  window.history.replaceState(null, "", "/#/analytics/review/focus-1");
+  const candidate = {
+    message_id: "focus-1",
+    text: "Аккара нужна до завтра. Камера DSS важна для проекта.",
+    score: 35,
+    temperature: "cold",
+    review_lane: "domain_interest",
+    solution_areas: [],
+    customer_segments: [],
+    intent_signals: [],
+    noise_signals: [],
+    reasons: [],
+    domain_signals: [],
+    facts: [],
+    review: null
+  };
+  const updatedNlp = {
+    ...sampleSettingsSnapshot().nlp,
+    source: {
+      type: "postgres",
+      path: "nlp_config_revisions.config",
+      editable: true,
+      revision: 2
+    }
+  };
+  const constructorPayloads: Record<string, unknown> = {};
+  const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    if (url === "/api/v1/auth/me") {
+      return jsonResponse({ authenticated: true, username: "admin" });
+    }
+    if (url === "/api/v1/settings") {
+      return jsonResponse(sampleSettingsSnapshot());
+    }
+    if (url === "/api/v1/analytics/messages/focus-1" && !init) {
+      return jsonResponse(candidate);
+    }
+    if (url === "/api/v1/settings/nlp/constructor/alias" && init?.method === "POST") {
+      constructorPayloads.alias = JSON.parse(String(init.body));
+      return jsonResponse({
+        text: "Аккара",
+        catalog: "vendors",
+        key: "aqara",
+        canonical: "Aqara",
+        created_target: false,
+        created_entry: true,
+        settings_ref: { section: "aliases", catalog: "vendors", key: "aqara", label: "Aqara" },
+        nlp: updatedNlp
+      });
+    }
+    if (url === "/api/v1/settings/nlp/constructor/fact" && init?.method === "POST") {
+      constructorPayloads.fact = JSON.parse(String(init.body));
+      return jsonResponse({
+        text: "до завтра",
+        collection: "facts",
+        rule_type: "deadline",
+        rule_label: "Срок",
+        phrase_kind: "exact",
+        exact_phrase: ["до", "завтра"],
+        created_target: false,
+        created_entry: true,
+        settings_ref: { section: "facts", key: "deadline", label: "Срок" },
+        nlp: updatedNlp
+      });
+    }
+    if (url === "/api/v1/settings/nlp/constructor/signal" && init?.method === "POST") {
+      constructorPayloads.signal = JSON.parse(String(init.body));
+      return jsonResponse({
+        text: "Камера DSS",
+        collection: "signals",
+        rule_type: "operator_dss_context",
+        rule_label: "DSS контекст",
+        phrase_kind: "semantic",
+        semantic_pattern: {
+          source_text: "Камера DSS",
+          tokens: [{ normalized: "камера" }, { normalized: "dss" }]
+        },
+        created_target: true,
+        created_entry: true,
+        settings_ref: { section: "signals", key: "operator_dss_context", label: "DSS контекст" },
+        nlp: updatedNlp
+      });
+    }
+    throw new Error(`Unhandled fetch: ${url}`);
+  });
+  vi.stubGlobal("fetch", fetchMock);
+  const selectionSpy = vi.spyOn(window, "getSelection");
+
+  render(<App />);
+
+  expect(await screen.findByRole("heading", { name: "Ревью сообщения" })).toBeInTheDocument();
+  selectionSpy.mockReturnValue({ toString: () => "Аккара" } as Selection);
+  fireEvent.mouseUp(screen.getAllByText(candidate.text)[0]);
+  fireEvent.click(screen.getByRole("button", { name: "В словарь" }));
+  expect(await screen.findByRole("dialog", { name: "Добавить в словарь" })).toBeInTheDocument();
+  fireEvent.change(screen.getByLabelText("key"), { target: { value: "aqara" } });
+  fireEvent.click(screen.getByRole("button", { name: "Сохранить в словарь" }));
+
+  await waitFor(() =>
+    expect(constructorPayloads.alias).toEqual({
+      text: "Аккара",
+      source_message_id: "focus-1",
+      catalog: "vendors",
+      key: "aqara",
+      canonical: "Аккара",
+      alias_type: "vendor",
+      fact_types: ["vendor"],
+      confidence: 0.7
+    })
+  );
+  expect(await screen.findByText(/Добавлено в словарь/)).toBeInTheDocument();
+
+  selectionSpy.mockReturnValue({ toString: () => "до завтра" } as Selection);
+  fireEvent.mouseUp(screen.getAllByText(candidate.text)[0]);
+  fireEvent.click(screen.getByRole("button", { name: "В факт" }));
+  expect(await screen.findByRole("dialog", { name: "Добавить в факт" })).toBeInTheDocument();
+  fireEvent.change(screen.getByLabelText("type"), { target: { value: "deadline" } });
+  fireEvent.click(screen.getByRole("button", { name: "Сохранить факт" }));
+
+  await waitFor(() =>
+    expect(constructorPayloads.fact).toEqual({
+      text: "до завтра",
+      source_message_id: "focus-1",
+      target_type: "deadline",
+      target_label: "до завтра",
+      group: "Операторские факты",
+      phrase_kind: "exact",
+      confidence: 0.5
+    })
+  );
+  expect(await screen.findByText(/Добавлено в факт/)).toBeInTheDocument();
+
+  selectionSpy.mockReturnValue({ toString: () => "Камера DSS" } as Selection);
+  fireEvent.mouseUp(screen.getAllByText(candidate.text)[0]);
+  fireEvent.click(screen.getByRole("button", { name: "В доменный сигнал" }));
+  expect(await screen.findByRole("dialog", { name: "Добавить в доменный сигнал" })).toBeInTheDocument();
+  fireEvent.change(screen.getByLabelText("type"), { target: { value: "operator_dss_context" } });
+  fireEvent.change(screen.getByLabelText("label"), { target: { value: "DSS контекст" } });
+  fireEvent.change(screen.getByLabelText("Тип совпадения"), { target: { value: "semantic" } });
+  fireEvent.click(screen.getByRole("button", { name: "Сохранить сигнал" }));
+
+  await waitFor(() =>
+    expect(constructorPayloads.signal).toEqual({
+      text: "Камера DSS",
+      source_message_id: "focus-1",
+      target_type: "operator_dss_context",
+      target_label: "DSS контекст",
+      group: "Операторские сигналы",
+      phrase_kind: "semantic",
+      color: "#0b57d0",
+      confidence: 0.5
+    })
+  );
+  expect(await screen.findByText(/Добавлено в доменный сигнал/)).toBeInTheDocument();
+}, 20000);
+
 test("review page supports hotkeys, structured tags, and save next", async () => {
   const run = sampleAnalyticsRun();
   const returnHash = `#/analytics?limit=50&offset=0&review_status=unreviewed&run=${run.id}`;

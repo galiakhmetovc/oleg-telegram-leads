@@ -283,13 +283,22 @@ outbox rows for the same source message. The Review page combines the expanded
 Analytics evidence view with four verdicts (`Лид`, `Не лид`, `Сомнительно`,
 `Шум`), structured reason tags, a free comment, and a text-selection
 constructor. Verdict hotkeys `1/2/3/4`, `Ctrl+Enter` save, and `N`
-save-and-next are frontend operator shortcuts over the same review API. In the
-current constructor slice, only `В шум` is active: it calls
-`POST /api/v1/settings/nlp/constructor/noise`, stores the selected exact phrase
-in the operator-managed `operator_noise` signal, writes a new PostgreSQL NLP
-config revision, adds the signal to noise/veto lead-scoring lists, and updates
-review-lane exclusions. The dictionary, fact, and domain-signal constructor
-buttons remain draft UI until their target selection flows exist.
+save-and-next are frontend operator shortcuts over the same review API. The
+constructor writes active PostgreSQL NLP config revisions through dedicated
+settings endpoints:
+
+- `POST /api/v1/settings/nlp/constructor/alias` adds selected text to an alias
+  catalog item or creates a new item.
+- `POST /api/v1/settings/nlp/constructor/fact` adds selected text to an existing
+  or new fact rule as an exact or lemmatized phrase.
+- `POST /api/v1/settings/nlp/constructor/signal` adds selected text to an
+  existing or new domain signal rule as an exact or lemmatized phrase.
+- `POST /api/v1/settings/nlp/constructor/noise` stores selected text in the
+  operator-managed `operator_noise` signal and connects it to noise/veto lead
+  scoring.
+
+Newly created domain signals receive score weight `0`, so rule discovery does
+not change lead scoring until scoring is explicitly tuned.
 
 Container stdout/stderr logs are also bounded in Docker Compose through the
 `json-file` driver with `max-size=10m` and `max-file=5` on every service.
@@ -315,11 +324,10 @@ when the database is empty.
 - `lead_scoring` defines PUR lead thresholds, signal/fact weights, solution area
   mappings, customer segment mappings, intent signals, and noise signals.
 
-The reserved signal type `operator_noise` is the first operator-constructor
-target. It is still stored as normal editable config data in
-`nlp_config_revisions`; the code only defines the creation template used when
-an operator sends the first selected fragment to noise and the active config has
-no such signal yet.
+The reserved signal type `operator_noise` is the fast noise-constructor target.
+It is still stored as normal editable config data in `nlp_config_revisions`;
+the code only defines the creation template used when an operator sends the
+first selected fragment to noise and the active config has no such signal yet.
 
 Signal and fact rules may include a `group` display folder. The group is stored
 in the PostgreSQL config revision together with the rule and is used by the

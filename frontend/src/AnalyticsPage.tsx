@@ -13,6 +13,10 @@ import {
   Chip,
   CircularProgress,
   Collapse,
+  Dialog,
+  DialogActions,
+  DialogContent,
+  DialogTitle,
   Divider,
   IconButton,
   LinearProgress,
@@ -194,6 +198,7 @@ type AnalyticsReviewPageProps = {
   apiBaseUrl: string;
   messageId: string;
   returnHash?: string | null;
+  nlpSettings?: ReviewNlpSettings | null;
   onBack?: () => void;
   onTestMessage?: (candidate: AnalyticsCandidate) => void;
   onNlpSettingsChange?: (nlpSettings: unknown) => void;
@@ -208,6 +213,83 @@ type ConstructorNoiseResponse = {
   created_phrase: boolean;
   nlp: unknown;
 };
+
+type ConstructorSettingsRef = {
+  section: string;
+  key: string;
+  label: string;
+  catalog?: AliasCatalogName | null;
+};
+
+type ConstructorAliasResponse = {
+  text: string;
+  catalog: AliasCatalogName;
+  key: string;
+  canonical: string;
+  created_target: boolean;
+  created_entry: boolean;
+  settings_ref: ConstructorSettingsRef;
+  nlp: unknown;
+};
+
+type ConstructorRuleResponse = {
+  text: string;
+  collection: "signals" | "facts";
+  rule_type: string;
+  rule_label: string;
+  phrase_kind: ConstructorPhraseKind;
+  created_target: boolean;
+  created_entry: boolean;
+  settings_ref: ConstructorSettingsRef;
+  nlp: unknown;
+  exact_phrase?: string[] | null;
+  semantic_pattern?: { source_text?: string; tokens?: Array<Record<string, string>> } | null;
+};
+
+type ReviewNlpRule = {
+  type: string;
+  label: string;
+};
+
+type ReviewNlpAlias = {
+  key: string;
+  canonical: string;
+  type: "vendor" | "protocol" | "device" | "software" | "model";
+  fact_types: string[];
+};
+
+type ReviewNlpSettings = {
+  signals: ReviewNlpRule[];
+  facts: ReviewNlpRule[];
+  vendors: ReviewNlpAlias[];
+  protocols: ReviewNlpAlias[];
+  devices: ReviewNlpAlias[];
+  software: ReviewNlpAlias[];
+};
+
+type ConstructorPhraseKind = "exact" | "semantic";
+
+type ConstructorDialogState =
+  | {
+      kind: "alias";
+      text: string;
+      catalog: AliasCatalogName;
+      key: string;
+      canonical: string;
+      alias_type: "vendor" | "protocol" | "device" | "software" | "model";
+      fact_types: string;
+      confidence: string;
+    }
+  | {
+      kind: "fact" | "signal";
+      text: string;
+      target_type: string;
+      target_label: string;
+      group: string;
+      phrase_kind: ConstructorPhraseKind;
+      color: string;
+      confidence: string;
+    };
 
 const numberFormatter = new Intl.NumberFormat("ru-RU");
 const candidatePageSize = 50;
@@ -232,6 +314,19 @@ const reviewTagOptions = [
   { value: "false_alias", label: "Ложный alias" },
   { value: "needs_alias", label: "Нужен alias" },
   { value: "needs_rule", label: "Нужно правило" }
+];
+const aliasCatalogChoices: Array<{ value: AliasCatalogName; label: string }> = [
+  { value: "vendors", label: "Вендоры" },
+  { value: "protocols", label: "Протоколы" },
+  { value: "devices", label: "Устройства" },
+  { value: "software", label: "ПО" }
+];
+const constructorAliasTypeChoices: Array<"vendor" | "protocol" | "device" | "software" | "model"> = [
+  "vendor",
+  "protocol",
+  "device",
+  "software",
+  "model"
 ];
 const defaultFilters: CandidateFilters = {
   scoreMin: "",
@@ -811,6 +906,7 @@ export function AnalyticsReviewPage({
   apiBaseUrl,
   messageId,
   returnHash,
+  nlpSettings,
   onBack,
   onTestMessage,
   onNlpSettingsChange
@@ -824,6 +920,7 @@ export function AnalyticsReviewPage({
   const [constructorSaving, setConstructorSaving] = useState(false);
   const [constructorMessage, setConstructorMessage] = useState<string | null>(null);
   const [constructorError, setConstructorError] = useState<string | null>(null);
+  const [constructorDialog, setConstructorDialog] = useState<ConstructorDialogState | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -853,6 +950,7 @@ export function AnalyticsReviewPage({
         setConstructorDraft(null);
         setConstructorMessage(null);
         setConstructorError(null);
+        setConstructorDialog(null);
       } catch (caught) {
         if (active) {
           setError(caught instanceof Error ? caught.message : "Не удалось загрузить сообщение для ревью");
@@ -989,11 +1087,103 @@ export function AnalyticsReviewPage({
     setTags((current) => (current.includes(tag) ? current.filter((item) => item !== tag) : [...current, tag]));
   }
 
-  function chooseConstructorDraft(kind: string) {
+  function openConstructorDialog(kind: "alias" | "fact" | "signal") {
     if (!selectedText) {
       return;
     }
-    setConstructorDraft(`${kind}: "${selectedText}"`);
+    setConstructorDraft(null);
+    setConstructorMessage(null);
+    setConstructorError(null);
+    if (kind === "alias") {
+      const catalog: AliasCatalogName = "vendors";
+      setConstructorDialog({
+        kind,
+        text: selectedText,
+        catalog,
+        key: constructorKeyFromText(selectedText),
+        canonical: selectedText,
+        alias_type: aliasTypeForCatalog(catalog),
+        fact_types: aliasTypeForCatalog(catalog),
+        confidence: "0.7"
+      });
+      return;
+    }
+    setConstructorDialog({
+      kind,
+      text: selectedText,
+      target_type: constructorKeyFromText(selectedText),
+      target_label: selectedText,
+      group: kind === "signal" ? "Операторские сигналы" : "Операторские факты",
+      phrase_kind: "exact",
+      color: "#0b57d0",
+      confidence: "0.5"
+    });
+  }
+
+  async function saveConstructorDialog() {
+    if (!constructorDialog) {
+      return;
+    }
+    setConstructorSaving(true);
+    setConstructorError(null);
+    setConstructorMessage(null);
+    try {
+      if (constructorDialog.kind === "alias") {
+        const response = await fetch(`${apiBaseUrl}/api/v1/settings/nlp/constructor/alias`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            text: constructorDialog.text,
+            source_message_id: messageId,
+            catalog: constructorDialog.catalog,
+            key: constructorDialog.key,
+            canonical: constructorDialog.canonical,
+            alias_type: constructorDialog.alias_type,
+            fact_types: stringListFromMultiline(constructorDialog.fact_types),
+            confidence: numberOrNull(constructorDialog.confidence)
+          })
+        });
+        if (!response.ok) {
+          throw new Error(`Backend вернул ${response.status}`);
+        }
+        const payload = (await response.json()) as ConstructorAliasResponse;
+        onNlpSettingsChange?.(payload.nlp);
+        setConstructorDraft(`${payload.catalog}:${payload.key} <- ${payload.text}`);
+        setConstructorMessage(`Добавлено в словарь «${payload.canonical}»: ${payload.text}`);
+        setConstructorDialog(null);
+        return;
+      }
+
+      const endpoint = constructorDialog.kind === "signal" ? "signal" : "fact";
+      const response = await fetch(`${apiBaseUrl}/api/v1/settings/nlp/constructor/${endpoint}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          text: constructorDialog.text,
+          source_message_id: messageId,
+          target_type: constructorDialog.target_type,
+          target_label: constructorDialog.target_label,
+          group: constructorDialog.group,
+          phrase_kind: constructorDialog.phrase_kind,
+          ...(constructorDialog.kind === "signal" ? { color: constructorDialog.color } : {}),
+          confidence: numberOrNull(constructorDialog.confidence)
+        })
+      });
+      if (!response.ok) {
+        throw new Error(`Backend вернул ${response.status}`);
+      }
+      const payload = (await response.json()) as ConstructorRuleResponse;
+      onNlpSettingsChange?.(payload.nlp);
+      setConstructorDraft(`${payload.collection}:${payload.rule_type} <- ${payload.text}`);
+      setConstructorMessage(
+        `Добавлено в ${constructorDialog.kind === "signal" ? "доменный сигнал" : "факт"} «${payload.rule_label}»: ${payload.text}`
+      );
+      setConstructorDialog(null);
+    } catch (caught) {
+      setConstructorError(caught instanceof Error ? caught.message : "Не удалось сохранить настройку конструктора");
+    } finally {
+      setConstructorSaving(false);
+    }
   }
 
   async function saveSelectedTextAsNoise() {
@@ -1173,13 +1363,13 @@ export function AnalyticsReviewPage({
                   </Typography>
                 )}
                 <Stack direction="row" spacing={1} useFlexGap sx={{ flexWrap: "wrap" }}>
-                  <Button variant="outlined" disabled={!selectedText} onClick={() => chooseConstructorDraft("alias")}>
+                  <Button variant="outlined" disabled={!selectedText} onClick={() => openConstructorDialog("alias")}>
                     В словарь
                   </Button>
-                  <Button variant="outlined" disabled={!selectedText} onClick={() => chooseConstructorDraft("fact")}>
+                  <Button variant="outlined" disabled={!selectedText} onClick={() => openConstructorDialog("fact")}>
                     В факт
                   </Button>
-                  <Button variant="outlined" disabled={!selectedText} onClick={() => chooseConstructorDraft("signal")}>
+                  <Button variant="outlined" disabled={!selectedText} onClick={() => openConstructorDialog("signal")}>
                     В доменный сигнал
                   </Button>
                   <Button
@@ -1219,8 +1409,320 @@ export function AnalyticsReviewPage({
           </Stack>
         </Box>
       )}
+      <ConstructorDialog
+        dialog={constructorDialog}
+        nlpSettings={nlpSettings}
+        saving={constructorSaving}
+        onChange={setConstructorDialog}
+        onClose={() => {
+          if (!constructorSaving) {
+            setConstructorDialog(null);
+          }
+        }}
+        onSave={() => void saveConstructorDialog()}
+      />
     </Box>
   );
+}
+
+function ConstructorDialog({
+  dialog,
+  nlpSettings,
+  saving,
+  onChange,
+  onClose,
+  onSave
+}: {
+  dialog: ConstructorDialogState | null;
+  nlpSettings?: ReviewNlpSettings | null;
+  saving: boolean;
+  onChange: (dialog: ConstructorDialogState) => void;
+  onClose: () => void;
+  onSave: () => void;
+}) {
+  if (!dialog) {
+    return null;
+  }
+
+  const title =
+    dialog.kind === "alias"
+      ? "Добавить в словарь"
+      : dialog.kind === "fact"
+        ? "Добавить в факт"
+        : "Добавить в доменный сигнал";
+  const saveLabel =
+    dialog.kind === "alias"
+      ? "Сохранить в словарь"
+      : dialog.kind === "fact"
+        ? "Сохранить факт"
+        : "Сохранить сигнал";
+
+  return (
+    <Dialog open onClose={onClose} fullWidth maxWidth="sm" aria-labelledby="constructor-dialog-title">
+      <DialogTitle id="constructor-dialog-title">{title}</DialogTitle>
+      <DialogContent>
+        <Stack spacing={2} sx={{ pt: 1 }}>
+          <Alert severity="info">
+            Выделено: <strong>{dialog.text}</strong>
+          </Alert>
+          {dialog.kind === "alias" ? (
+            <AliasConstructorFields dialog={dialog} nlpSettings={nlpSettings} onChange={onChange} />
+          ) : (
+            <RuleConstructorFields dialog={dialog} nlpSettings={nlpSettings} onChange={onChange} />
+          )}
+        </Stack>
+      </DialogContent>
+      <DialogActions>
+        <Button onClick={onClose} disabled={saving}>
+          Отмена
+        </Button>
+        <Button
+          variant="contained"
+          onClick={onSave}
+          disabled={saving}
+          startIcon={saving ? <CircularProgress size={18} color="inherit" /> : <SaveIcon />}
+        >
+          {saveLabel}
+        </Button>
+      </DialogActions>
+    </Dialog>
+  );
+}
+
+function AliasConstructorFields({
+  dialog,
+  nlpSettings,
+  onChange
+}: {
+  dialog: Extract<ConstructorDialogState, { kind: "alias" }>;
+  nlpSettings?: ReviewNlpSettings | null;
+  onChange: (dialog: ConstructorDialogState) => void;
+}) {
+  const aliases = nlpSettings?.[dialog.catalog] ?? [];
+  return (
+    <>
+      <TextField
+        label="Каталог"
+        select
+        value={dialog.catalog}
+        onChange={(event) => {
+          const catalog = aliasCatalogNameFromText(event.target.value);
+          onChange({
+            ...dialog,
+            catalog,
+            alias_type: aliasTypeForCatalog(catalog),
+            fact_types: aliasTypeForCatalog(catalog)
+          });
+        }}
+        slotProps={{ select: { native: true } }}
+        fullWidth
+      >
+        {aliasCatalogChoices.map((choice) => (
+          <option key={choice.value} value={choice.value}>
+            {choice.label}
+          </option>
+        ))}
+      </TextField>
+      <TextField
+        label="Существующая запись"
+        select
+        value=""
+        onChange={(event) => {
+          const selected = aliases.find((item) => item.key === event.target.value);
+          if (!selected) {
+            return;
+          }
+          onChange({
+            ...dialog,
+            key: selected.key,
+            canonical: selected.canonical,
+            alias_type: selected.type,
+            fact_types: selected.fact_types.join("\n")
+          });
+        }}
+        slotProps={{ select: { native: true } }}
+        fullWidth
+      >
+        <option value="">Новая или ручной ввод</option>
+        {aliases.map((alias) => (
+          <option key={alias.key} value={alias.key}>
+            {alias.key} — {alias.canonical}
+          </option>
+        ))}
+      </TextField>
+      <TextField label="key" value={dialog.key} onChange={(event) => onChange({ ...dialog, key: event.target.value })} fullWidth />
+      <TextField
+        label="canonical"
+        value={dialog.canonical}
+        onChange={(event) => onChange({ ...dialog, canonical: event.target.value })}
+        fullWidth
+      />
+      <TextField
+        label="alias_type"
+        select
+        value={dialog.alias_type}
+        onChange={(event) => onChange({ ...dialog, alias_type: aliasTypeFromText(event.target.value) })}
+        slotProps={{ select: { native: true } }}
+        fullWidth
+      >
+        {constructorAliasTypeChoices.map((value) => (
+          <option key={value} value={value}>
+            {value}
+          </option>
+        ))}
+      </TextField>
+      <TextField
+        label="fact_types"
+        value={dialog.fact_types}
+        onChange={(event) => onChange({ ...dialog, fact_types: event.target.value })}
+        helperText="По одному fact_type на строку."
+        multiline
+        minRows={2}
+        fullWidth
+      />
+      <TextField
+        label="confidence"
+        type="number"
+        value={dialog.confidence}
+        onChange={(event) => onChange({ ...dialog, confidence: event.target.value })}
+        slotProps={{ htmlInput: { min: 0, max: 1, step: 0.01 } }}
+        fullWidth
+      />
+    </>
+  );
+}
+
+function RuleConstructorFields({
+  dialog,
+  nlpSettings,
+  onChange
+}: {
+  dialog: Extract<ConstructorDialogState, { kind: "fact" | "signal" }>;
+  nlpSettings?: ReviewNlpSettings | null;
+  onChange: (dialog: ConstructorDialogState) => void;
+}) {
+  const rules = dialog.kind === "signal" ? (nlpSettings?.signals ?? []) : (nlpSettings?.facts ?? []);
+  return (
+    <>
+      <TextField
+        label="Существующее правило"
+        select
+        value=""
+        onChange={(event) => {
+          const selected = rules.find((item) => item.type === event.target.value);
+          if (!selected) {
+            return;
+          }
+          onChange({
+            ...dialog,
+            target_type: selected.type,
+            target_label: selected.label
+          });
+        }}
+        slotProps={{ select: { native: true } }}
+        fullWidth
+      >
+        <option value="">Новое или ручной ввод</option>
+        {rules.map((rule) => (
+          <option key={rule.type} value={rule.type}>
+            {rule.type} — {rule.label}
+          </option>
+        ))}
+      </TextField>
+      <TextField
+        label="type"
+        value={dialog.target_type}
+        onChange={(event) => onChange({ ...dialog, target_type: event.target.value })}
+        fullWidth
+      />
+      <TextField
+        label="label"
+        value={dialog.target_label}
+        onChange={(event) => onChange({ ...dialog, target_label: event.target.value })}
+        fullWidth
+      />
+      <TextField
+        label="Папка"
+        value={dialog.group}
+        onChange={(event) => onChange({ ...dialog, group: event.target.value })}
+        fullWidth
+      />
+      <TextField
+        label="Тип совпадения"
+        select
+        value={dialog.phrase_kind}
+        onChange={(event) => onChange({ ...dialog, phrase_kind: phraseKindFromText(event.target.value) })}
+        slotProps={{ select: { native: true } }}
+        fullWidth
+      >
+        <option value="exact">Точная фраза</option>
+        <option value="semantic">Лемматическая фраза</option>
+      </TextField>
+      {dialog.kind === "signal" && (
+        <TextField
+          label="color"
+          type="color"
+          value={dialog.color}
+          onChange={(event) => onChange({ ...dialog, color: event.target.value })}
+          fullWidth
+        />
+      )}
+      <TextField
+        label="confidence"
+        type="number"
+        value={dialog.confidence}
+        onChange={(event) => onChange({ ...dialog, confidence: event.target.value })}
+        slotProps={{ htmlInput: { min: 0, max: 1, step: 0.01 } }}
+        fullWidth
+      />
+    </>
+  );
+}
+
+function constructorKeyFromText(text: string) {
+  const normalized = text
+    .trim()
+    .toLocaleLowerCase("ru-RU")
+    .replace(/[^\p{L}\p{N}]+/gu, "_")
+    .replace(/^_+|_+$/g, "");
+  return normalized || "operator_rule";
+}
+
+function aliasCatalogNameFromText(value: string): AliasCatalogName {
+  return aliasCatalogChoices.some((choice) => choice.value === value) ? (value as AliasCatalogName) : "vendors";
+}
+
+function aliasTypeForCatalog(catalog: AliasCatalogName): "vendor" | "protocol" | "device" | "software" {
+  if (catalog === "protocols") {
+    return "protocol";
+  }
+  if (catalog === "devices") {
+    return "device";
+  }
+  if (catalog === "software") {
+    return "software";
+  }
+  return "vendor";
+}
+
+function aliasTypeFromText(value: string): "vendor" | "protocol" | "device" | "software" | "model" {
+  return constructorAliasTypeChoices.includes(value as "vendor") ? (value as "vendor" | "protocol" | "device" | "software" | "model") : "device";
+}
+
+function phraseKindFromText(value: string): ConstructorPhraseKind {
+  return value === "semantic" ? "semantic" : "exact";
+}
+
+function stringListFromMultiline(value: string): string[] {
+  return value
+    .split("\n")
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function numberOrNull(value: string): number | null {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
 }
 
 function Kpi({ label, value }: { label: string; value: string }) {

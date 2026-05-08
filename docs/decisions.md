@@ -600,9 +600,36 @@ Rationale:
 - A separate page gives enough room for evidence, comments, and the future
   settings constructor without duplicating the whole Analytics table.
 
+## 2026-05-08: Review Constructor Writes NLP Settings
+
+The Review page constructor now supports all first-pass targets:
+
+- `В словарь`: selected text is added to an existing or new alias catalog item
+  under `vendors`, `protocols`, `devices`, or `software`.
+- `В факт`: selected text is added to an existing or new fact rule as either an
+  exact phrase or a lemmatized phrase.
+- `В доменный сигнал`: selected text is added to an existing or new signal rule
+  as either an exact phrase or a lemmatized phrase.
+- `В шум`: selected text is added to `operator_noise`.
+
+All actions write normal editable config data by creating a new
+`nlp_config_revisions` row. New domain signals get `weights.signals[type] = 0`
+so rule discovery is visible in evidence but does not silently inflate lead
+scores.
+
+Rationale:
+
+- The operator loop should be short: observe a false positive or missing entity,
+  select the evidence in Review, and update settings without opening the full
+  Settings Center first.
+- Constructor changes must remain auditable through the same settings UI and
+  deeplinks as manual settings edits.
+- New positive signals are risky; defaulting their score weight to zero keeps
+  matching and scoring as separate deliberate decisions.
+
 ## 2026-05-08: First Constructor Action Writes Operator Noise
 
-The first active constructor action is `В шум` on the Review page. It sends the
+The first active constructor action was `В шум` on the Review page. It sends the
 selected source-text fragment to `POST /api/v1/settings/nlp/constructor/noise`.
 The backend writes a new active PostgreSQL NLP config revision containing a
 normal editable domain signal:
@@ -615,8 +642,7 @@ normal editable domain signal:
 - inclusion in the noise review lane and exclusion from non-noise lanes.
 
 The endpoint returns the updated NLP settings snapshot so the frontend updates
-its settings cache immediately. Dictionary, fact, and positive domain-signal
-constructor actions remain draft-only until their target selection UX is built.
+its settings cache immediately.
 
 Rationale:
 

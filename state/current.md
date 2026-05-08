@@ -38,8 +38,13 @@
   fragment to `POST /api/v1/settings/nlp/constructor/noise`, creates or updates
   the editable `operator_noise` signal in the active PostgreSQL NLP config
   revision, adds it to noise/veto scoring lists and review-lane exclusions, and
-  refreshes the frontend settings cache from the response. Dictionary, fact,
-  and positive domain-signal constructor actions are still draft placeholders.
+  refreshes the frontend settings cache from the response.
+- Review constructor actions `В словарь`, `В факт`, and `В доменный сигнал` are
+  now active too. They open target-selection dialogs and write selected text to
+  alias catalogs, fact rules, or domain-signal rules through PostgreSQL NLP
+  revisions. Fact/signal constructors support exact and lemmatized phrases.
+  Newly created domain signals get score weight `0` until scoring is tuned
+  explicitly.
 - Analytics candidate lists now include saved review state, show a review chip
   (`Без ревью`, `Лид`, `Не лид`, `Сомнительно`, `Шум`), and can filter by
   `review_status` and `verdict`. Review links carry a return URL with the

@@ -8,7 +8,7 @@ dedicated message review page. The review page is the operator workplace for:
 - human lead verdict;
 - review comment;
 - detailed enrichment explanation;
-- text-selection constructor for settings edits, starting with noise.
+- text-selection constructor for settings edits.
 
 ## Data Model
 
@@ -54,13 +54,12 @@ The route `#/analytics/review/{message_id}` opens a full page:
 - enrichment-style evidence blocks already used by expanded Analytics rows;
 - review panel with `Лид`, `Не лид`, `Сомнительно`, `Шум`;
 - comment editor and save state;
-- constructor panel with active `В шум` action.
+- constructor panel with active dictionary, fact, domain-signal, and noise actions.
 
-The first implemented constructor action sends selected text to
-`POST /api/v1/settings/nlp/constructor/noise`. The backend writes a new
-PostgreSQL NLP config revision with an exact phrase under `operator_noise` and
-connects that signal to noise/veto lead scoring. Other constructor buttons are
-still draft-only placeholders.
+The constructor sends selected text to dedicated settings endpoints under
+`POST /api/v1/settings/nlp/constructor/*`. The backend writes a new PostgreSQL
+NLP config revision for alias catalogs, fact rules, domain-signal rules, or
+the `operator_noise` signal.
 
 ## Constructor Direction
 

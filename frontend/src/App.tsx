@@ -1001,6 +1001,7 @@ export function App() {
                 apiBaseUrl={apiBaseUrl}
                 messageId={analyticsReviewMessageId}
                 returnHash={analyticsReviewReturnHash}
+                nlpSettings={visibleSettingsSnapshot?.nlp ?? null}
                 onBack={() => {
                   window.location.hash =
                     analyticsReviewReturnHash ?? `#/analytics/message/${encodeURIComponent(analyticsReviewMessageId)}`;

@@ -13,8 +13,13 @@ from app.api.notifications import read_notification_settings_snapshot
 from app.api.telegram_ingestion import TelegramIngestionSettingsSnapshot
 from app.api.telegram_ingestion import get_telegram_ingestion_repository
 from app.api.telegram_ingestion import read_telegram_ingestion_settings_snapshot
+from app.application.settings.use_cases import AddAliasFromSelection
+from app.application.settings.use_cases import AddAliasFromSelectionCommand
 from app.application.settings.use_cases import AddOperatorNoisePhrase
 from app.application.settings.use_cases import AddOperatorNoisePhraseCommand
+from app.application.settings.use_cases import AddRulePhraseFromSelection
+from app.application.settings.use_cases import AddRulePhraseFromSelectionCommand
+from app.application.settings.use_cases import SettingsReferenceResult
 from app.core.config import Settings, get_settings
 from app.db.session import create_sessionmaker
 from app.domain.settings import NlpConfigRevision
@@ -251,6 +256,61 @@ class ConstructorNoiseResponse(BaseModel):
     nlp: NlpSettingsSnapshot
 
 
+class ConstructorSettingsRef(BaseModel):
+    section: str
+    key: str
+    label: str
+    catalog: str | None = None
+
+
+class ConstructorAliasRequest(BaseModel):
+    text: str = Field(min_length=1)
+    source_message_id: str | None = None
+    catalog: Literal["vendors", "protocols", "devices", "software"]
+    key: str = Field(min_length=1)
+    canonical: str | None = None
+    alias_type: Literal["vendor", "protocol", "device", "software", "model"] | None = None
+    fact_types: list[str] | None = None
+    color: str | None = None
+    confidence: float | None = Field(default=None, ge=0, le=1)
+
+
+class ConstructorAliasResponse(BaseModel):
+    text: str
+    catalog: str
+    key: str
+    canonical: str
+    created_target: bool
+    created_entry: bool
+    settings_ref: ConstructorSettingsRef
+    nlp: NlpSettingsSnapshot
+
+
+class ConstructorRuleRequest(BaseModel):
+    text: str = Field(min_length=1)
+    source_message_id: str | None = None
+    target_type: str = Field(min_length=1)
+    target_label: str | None = None
+    group: str | None = None
+    phrase_kind: Literal["exact", "semantic"]
+    color: str | None = None
+    confidence: float | None = Field(default=None, ge=0, le=1)
+
+
+class ConstructorRuleResponse(BaseModel):
+    text: str
+    collection: str
+    rule_type: str
+    rule_label: str
+    phrase_kind: str
+    created_target: bool
+    created_entry: bool
+    settings_ref: ConstructorSettingsRef
+    nlp: NlpSettingsSnapshot
+    exact_phrase: list[str] | None = None
+    semantic_pattern: dict[str, Any] | None = None
+
+
 def get_nlp_config_dir(settings: Settings = Depends(get_settings)) -> Path:
     return settings.nlp_config_dir
 
@@ -366,6 +426,151 @@ async def add_constructor_noise_phrase(
     )
 
 
+@router.post(
+    "/nlp/constructor/alias",
+    response_model=ConstructorAliasResponse,
+    response_model_exclude_none=True,
+)
+async def add_constructor_alias(
+    request: ConstructorAliasRequest,
+    config_dir: Path = Depends(get_nlp_config_dir),
+    repository: PostgresNlpConfigRepository = Depends(get_nlp_config_repository),
+) -> ConstructorAliasResponse:
+    defaults = read_nlp_config_documents(config_dir)
+
+    def validate_documents(documents: dict[str, dict[str, Any]]) -> None:
+        load_nlp_config_from_documents(documents)
+
+    use_case = AddAliasFromSelection(
+        repository=repository,
+        default_documents=defaults,
+        validate_documents=validate_documents,
+    )
+    try:
+        result = await use_case.execute(
+            AddAliasFromSelectionCommand(
+                text=request.text,
+                source_message_id=request.source_message_id,
+                catalog=request.catalog,
+                key=request.key,
+                canonical=request.canonical,
+                alias_type=request.alias_type,
+                fact_types=request.fact_types,
+                color=request.color,
+                confidence=request.confidence,
+            )
+        )
+    except (KeyError, TypeError, ValueError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return ConstructorAliasResponse(
+        text=result.text,
+        catalog=result.catalog,
+        key=result.key,
+        canonical=result.canonical,
+        created_target=result.created_target,
+        created_entry=result.created_entry,
+        settings_ref=_constructor_settings_ref(result.settings_ref),
+        nlp=_nlp_snapshot_from_revision(result.revision),
+    )
+
+
+@router.post(
+    "/nlp/constructor/fact",
+    response_model=ConstructorRuleResponse,
+    response_model_exclude_none=True,
+)
+async def add_constructor_fact(
+    request: ConstructorRuleRequest,
+    config_dir: Path = Depends(get_nlp_config_dir),
+    repository: PostgresNlpConfigRepository = Depends(get_nlp_config_repository),
+    normalizer: RussianRulePhraseNormalizer = Depends(get_rule_phrase_normalizer),
+) -> ConstructorRuleResponse:
+    return await _add_constructor_rule(
+        request=request,
+        collection="facts",
+        config_dir=config_dir,
+        repository=repository,
+        normalizer=normalizer,
+    )
+
+
+@router.post(
+    "/nlp/constructor/signal",
+    response_model=ConstructorRuleResponse,
+    response_model_exclude_none=True,
+)
+async def add_constructor_signal(
+    request: ConstructorRuleRequest,
+    config_dir: Path = Depends(get_nlp_config_dir),
+    repository: PostgresNlpConfigRepository = Depends(get_nlp_config_repository),
+    normalizer: RussianRulePhraseNormalizer = Depends(get_rule_phrase_normalizer),
+) -> ConstructorRuleResponse:
+    return await _add_constructor_rule(
+        request=request,
+        collection="signals",
+        config_dir=config_dir,
+        repository=repository,
+        normalizer=normalizer,
+    )
+
+
+async def _add_constructor_rule(
+    *,
+    request: ConstructorRuleRequest,
+    collection: Literal["signals", "facts"],
+    config_dir: Path,
+    repository: PostgresNlpConfigRepository,
+    normalizer: RussianRulePhraseNormalizer,
+) -> ConstructorRuleResponse:
+    defaults = read_nlp_config_documents(config_dir)
+
+    def validate_documents(documents: dict[str, dict[str, Any]]) -> None:
+        load_nlp_config_from_documents(documents)
+
+    def semantic_pattern_builder(text: str) -> dict[str, Any]:
+        semantic_phrase = normalizer.to_semantic_phrase(text)
+        return {
+            "source_text": semantic_phrase.source_text,
+            "tokens": [{"normalized": lemma} for lemma in semantic_phrase.lemmas],
+        }
+
+    use_case = AddRulePhraseFromSelection(
+        repository=repository,
+        default_documents=defaults,
+        validate_documents=validate_documents,
+        semantic_pattern_builder=semantic_pattern_builder,
+    )
+    try:
+        result = await use_case.execute(
+            AddRulePhraseFromSelectionCommand(
+                text=request.text,
+                source_message_id=request.source_message_id,
+                collection=collection,
+                target_type=request.target_type,
+                target_label=request.target_label,
+                group=request.group,
+                phrase_kind=request.phrase_kind,
+                color=request.color,
+                confidence=request.confidence,
+            )
+        )
+    except (KeyError, TypeError, ValueError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return ConstructorRuleResponse(
+        text=result.text,
+        collection=result.collection,
+        rule_type=result.rule_type,
+        rule_label=result.rule_label,
+        phrase_kind=result.phrase_kind,
+        exact_phrase=result.exact_phrase,
+        semantic_pattern=result.semantic_pattern,
+        created_target=result.created_target,
+        created_entry=result.created_entry,
+        settings_ref=_constructor_settings_ref(result.settings_ref),
+        nlp=_nlp_snapshot_from_revision(result.revision),
+    )
+
+
 async def _read_nlp_snapshot(
     config_dir: Path,
     repository: PostgresNlpConfigRepository,
@@ -373,6 +578,15 @@ async def _read_nlp_snapshot(
     bootstrap_documents = read_nlp_config_documents(config_dir)
     revision = await repository.get_active_or_seed(bootstrap_documents)
     return _nlp_snapshot_from_revision(revision)
+
+
+def _constructor_settings_ref(reference: SettingsReferenceResult) -> ConstructorSettingsRef:
+    return ConstructorSettingsRef(
+        section=reference.section,
+        catalog=reference.catalog,
+        key=reference.key,
+        label=reference.label,
+    )
 
 
 def _nlp_snapshot_from_revision(revision: NlpConfigRevision) -> NlpSettingsSnapshot:

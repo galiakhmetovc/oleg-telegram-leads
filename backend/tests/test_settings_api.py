@@ -427,6 +427,112 @@ def test_constructor_noise_adds_selected_text_to_postgres_nlp_revision(tmp_path:
     assert "DSS Express" not in (config_dir / "signals.yaml").read_text(encoding="utf-8")
 
 
+def test_constructor_alias_adds_selected_text_to_existing_catalog_item(tmp_path: Path) -> None:
+    config_dir = tmp_path / "nlp"
+    _write_config(config_dir)
+    repository = InMemoryNlpConfigRepository()
+    client = _app_with_settings_repo(config_dir, repository)
+
+    response = client.post(
+        "/api/v1/settings/nlp/constructor/alias",
+        json={
+            "text": "Аккара",
+            "source_message_id": "focus-1",
+            "catalog": "vendors",
+            "key": "aqara",
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["text"] == "Аккара"
+    assert payload["catalog"] == "vendors"
+    assert payload["key"] == "aqara"
+    assert payload["created_target"] is False
+    assert payload["created_entry"] is True
+    assert payload["settings_ref"] == {
+        "section": "aliases",
+        "catalog": "vendors",
+        "key": "aqara",
+        "label": "Aqara",
+    }
+    assert repository.active is not None
+    assert repository.active["vendors"]["vendors"][0]["aliases"] == ["Aqara", "Акара", "Аккара"]
+    assert "Аккара" not in (config_dir / "vendors.yaml").read_text(encoding="utf-8")
+
+
+def test_constructor_fact_adds_exact_phrase_to_existing_fact_rule(tmp_path: Path) -> None:
+    config_dir = tmp_path / "nlp"
+    _write_config(config_dir)
+    repository = InMemoryNlpConfigRepository()
+    client = _app_with_settings_repo(config_dir, repository)
+
+    response = client.post(
+        "/api/v1/settings/nlp/constructor/fact",
+        json={
+            "text": "до завтра",
+            "source_message_id": "focus-1",
+            "target_type": "deadline",
+            "phrase_kind": "exact",
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["text"] == "до завтра"
+    assert payload["rule_type"] == "deadline"
+    assert payload["rule_label"] == "Срок"
+    assert payload["phrase_kind"] == "exact"
+    assert payload["created_target"] is False
+    assert payload["created_entry"] is True
+    assert payload["exact_phrase"] == ["до", "завтра"]
+    assert repository.active is not None
+    assert repository.active["facts"]["facts"][0]["phrases"] == [["завтра"], ["до", "завтра"]]
+    assert "до завтра" not in (config_dir / "facts.yaml").read_text(encoding="utf-8")
+
+
+def test_constructor_signal_creates_semantic_rule_with_zero_weight(tmp_path: Path) -> None:
+    config_dir = tmp_path / "nlp"
+    _write_config(config_dir)
+    repository = InMemoryNlpConfigRepository()
+    client = _app_with_settings_repo(config_dir, repository)
+
+    response = client.post(
+        "/api/v1/settings/nlp/constructor/signal",
+        json={
+            "text": "камера DSS",
+            "source_message_id": "focus-1",
+            "target_type": "operator_dss_context",
+            "target_label": "DSS контекст",
+            "group": "Операторские сигналы",
+            "phrase_kind": "semantic",
+            "confidence": 0.6,
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["rule_type"] == "operator_dss_context"
+    assert payload["rule_label"] == "DSS контекст"
+    assert payload["phrase_kind"] == "semantic"
+    assert payload["created_target"] is True
+    assert payload["created_entry"] is True
+    assert payload["semantic_pattern"]["source_text"] == "камера DSS"
+    assert payload["settings_ref"] == {
+        "section": "signals",
+        "key": "operator_dss_context",
+        "label": "DSS контекст",
+    }
+    assert repository.active is not None
+    signal = repository.active["signals"]["signals"][-1]
+    assert signal["type"] == "operator_dss_context"
+    assert signal["label"] == "DSS контекст"
+    assert signal["group"] == "Операторские сигналы"
+    assert signal["patterns"][0]["source_text"] == "камера DSS"
+    assert repository.active["lead_scoring"]["lead_scoring"]["weights"]["signals"]["operator_dss_context"] == 0
+    assert "DSS контекст" not in (config_dir / "signals.yaml").read_text(encoding="utf-8")
+
+
 def test_preview_nlp_settings_uses_draft_without_saving(tmp_path: Path) -> None:
     config_dir = tmp_path / "nlp"
     _write_config(config_dir)
