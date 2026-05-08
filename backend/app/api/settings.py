@@ -171,6 +171,7 @@ class LeadScoringSettings(BaseModel):
     customer_segments: dict[str, LeadCategorySettings] = Field(default_factory=dict)
     intent_signal_types: list[str] = Field(default_factory=list)
     noise_signal_types: list[str] = Field(default_factory=list)
+    lead_veto_signal_types: list[str] = Field(default_factory=list)
     review_lanes: list[ReviewLaneSettings] = Field(default_factory=list)
 
     @model_validator(mode="after")
@@ -483,6 +484,7 @@ def _lead_scoring_to_document(settings: LeadScoringSettings) -> dict[str, Any]:
             },
             "intent_signal_types": settings.intent_signal_types,
             "noise_signal_types": settings.noise_signal_types,
+            "lead_veto_signal_types": settings.lead_veto_signal_types,
             "review_lanes": [lane.model_dump(exclude_none=True) for lane in settings.review_lanes],
         }
     }
@@ -508,6 +510,7 @@ def _lead_scoring_from_document(raw_document: dict[str, Any]) -> LeadScoringSett
         },
         intent_signal_types=[str(value) for value in raw.get("intent_signal_types", [])],
         noise_signal_types=[str(value) for value in raw.get("noise_signal_types", [])],
+        lead_veto_signal_types=[str(value) for value in raw.get("lead_veto_signal_types", [])],
         review_lanes=[
             ReviewLaneSettings.model_validate(value)
             for value in raw.get("review_lanes", [])

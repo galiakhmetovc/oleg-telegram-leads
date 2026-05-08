@@ -1193,6 +1193,33 @@ signals:
           - normalized: оборудование
       - tokens:
           - normalized: самовывоз
+  - type: ordinary_household_system
+    label: Обычная бытовая система без автоматизации
+    group: Шум и продажи
+    color: '#78909c'
+    confidence: 0.7
+    patterns:
+      - source_text: обычный кондиционер
+        tokens:
+          - normalized: обычный
+          - normalized: кондиционер
+      - source_text: обычный домофон
+        tokens:
+          - normalized: обычный
+          - normalized: домофон
+      - source_text: без умного дома
+        tokens:
+          - normalized: без
+          - normalized: умный
+          - normalized: дом
+      - source_text: для компьютера
+        tokens:
+          - normalized: для
+          - normalized: компьютер
+      - source_text: в подъезде
+        tokens:
+          - normalized: в
+          - normalized: подъезд
   - type: irrelevant_or_sale
     label: Нерелевантная продажа / объявление
     group: Шум и продажи

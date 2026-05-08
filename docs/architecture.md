@@ -344,6 +344,9 @@ The `lead_scoring` stage runs after Yargy fact and signal extraction. It does no
 contain hardcoded PUR business rules: the code sums configured signal/fact
 weights, applies configured thresholds, maps matched signal/fact types to
 solution areas and customer segments, and returns explanatory reasons.
+The only built-in scoring mechanism beyond summation is a configurable veto:
+`lead_scoring.lead_veto_signal_types` names noise signal types that preserve the
+visible score for review, but force `is_lead=false` and `temperature=none`.
 
 Generic demand signals such as `need`, `provider_search`, `consultation_request`,
 and generic `work_type` facts are intentionally low-weight. They explain intent,
@@ -355,7 +358,8 @@ climate, power backup, or engineering network context.
 `lead_assessment` is part of every new enrichment result when the stage is
 enabled:
 
-- `is_lead`: whether the score reaches the configured lead threshold.
+- `is_lead`: whether the score reaches the configured lead threshold and no
+  configured lead-veto noise signal was found.
 - `score`: non-negative deterministic score.
 - `temperature`: `none`, `cold`, `warm`, or `hot`.
 - `solution_areas` and `customer_segments`: configured taxonomy matches.
@@ -364,6 +368,12 @@ enabled:
 - `review_lane`: the first configured review lane that matches the same
   extracted arrays, score, and temperature; it includes the lane label,
   description, and matched match-group indexes.
+
+Bootstrap review lanes distinguish direct PUR leads from research/value
+questions. `direct_pur_lead` requires a PUR domain plus active order/provider/
+installation evidence. Research signals such as "что выбрать", "зачем нужен
+умный дом", or "где изучить тему" go to `research_warm` unless a stronger
+active-intent rule also matches.
 
 Older persisted results without `lead_assessment` remain readable and return the
 field as `null`.

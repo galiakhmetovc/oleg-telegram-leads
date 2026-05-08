@@ -331,6 +331,7 @@ type LeadScoringSettings = {
   customer_segments: Record<string, LeadCategorySetting>;
   intent_signal_types: string[];
   noise_signal_types: string[];
+  lead_veto_signal_types: string[];
   review_lanes: ReviewLaneSetting[];
 };
 
@@ -3918,6 +3919,11 @@ function SettingsHelpPage() {
                       <TableCell>объясняет, почему кандидат может быть слабым или нецелевым</TableCell>
                     </TableRow>
                     <TableRow>
+                      <TableCell>lead_veto_signal_types</TableCell>
+                      <TableCell>какой шум запрещает автолид</TableCell>
+                      <TableCell>если найден такой сигнал, score сохраняется для разбора, но `is_lead=false` и температура `none`</TableCell>
+                    </TableRow>
+                    <TableRow>
                       <TableCell>review_lanes</TableCell>
                       <TableCell>очереди ручного разбора кандидатов</TableCell>
                       <TableCell>после batch import кандидат получает lane: прямой лид, проектный контекст, доменный интерес, шум</TableCell>
@@ -4570,6 +4576,15 @@ function LeadScoringSettingsEditor({
           label="noise signal types"
           value={stringListToText(settings.noise_signal_types)}
           onChange={(event) => onUpdate({ ...settings, noise_signal_types: textToStringList(event.target.value) })}
+          multiline
+          minRows={4}
+          fullWidth
+        />
+        <TextField
+          label="lead veto signal types"
+          helperText="Шумовые сигналы, которые запрещают автолид: score остается видимым, но is_lead=false"
+          value={stringListToText(settings.lead_veto_signal_types)}
+          onChange={(event) => onUpdate({ ...settings, lead_veto_signal_types: textToStringList(event.target.value) })}
           multiline
           minRows={4}
           fullWidth

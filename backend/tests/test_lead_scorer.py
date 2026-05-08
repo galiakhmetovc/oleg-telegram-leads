@@ -96,6 +96,46 @@ def test_noise_can_keep_weak_domain_match_below_lead_threshold() -> None:
     assert any(reason.key == "diy_only" and reason.weight == -20 for reason in assessment.reasons)
 
 
+def test_hard_noise_signal_vetoes_positive_domain_score() -> None:
+    scorer = LeadScorer(
+        LeadScoringConfig(
+            lead_threshold=35,
+            warm_threshold=55,
+            hot_threshold=80,
+            signal_weights={
+                "video_surveillance": 35,
+                "smart_home_platform": 25,
+                "diy_or_equipment_only": -10,
+            },
+            fact_weights={},
+            solution_areas={
+                "security": {
+                    "label": "Безопасность",
+                    "signal_types": ["video_surveillance", "smart_home_platform"],
+                    "fact_types": [],
+                }
+            },
+            customer_segments={},
+            intent_signal_types=[],
+            noise_signal_types=["diy_or_equipment_only"],
+        )
+    )
+
+    assessment = scorer.assess(
+        signals=[
+            _signal("video_surveillance", "камера Hikvision"),
+            _signal("smart_home_platform", "Hikvision"),
+            _signal("diy_or_equipment_only", "самовывоз"),
+        ],
+        facts=[],
+    )
+
+    assert assessment.score == 50
+    assert assessment.is_lead is False
+    assert assessment.temperature == "none"
+    assert [item.type for item in assessment.noise_signals] == ["diy_or_equipment_only"]
+
+
 def test_uses_human_labels_and_assigns_review_lane() -> None:
     scorer = LeadScorer(
         LeadScoringConfig(

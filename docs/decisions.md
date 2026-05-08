@@ -651,3 +651,26 @@ Rationale:
   notification.
 - Telegram sends need at-least-once processing internally but at-most-once
   enqueueing per source message and route.
+
+## 2026-05-08: Lead Score And Auto-Lead Verdict Are Separate
+
+The deterministic score remains an additive explanation of matched facts and
+domain signals. The auto-lead verdict is now additionally guarded by
+`lead_scoring.lead_veto_signal_types`: when a configured veto noise signal is
+found, the system keeps the score and score reasons visible, but returns
+`is_lead=false` and `temperature=none`.
+
+The bootstrap config treats clear supply/sale/equipment-only/price-only/ordinary
+household contexts as veto signals. It also splits research/value questions into
+`research_warm` instead of `direct_pur_lead`; the direct lane now requires a PUR
+domain plus active customer/provider/installation evidence.
+
+Rationale:
+
+- A vendor or device alias can legitimately add domain evidence, but a sale,
+  self-pickup, DIY, or ordinary non-smart context should not produce automatic
+  Telegram lead notifications just because the additive score is high.
+- Operators still need the high score and reasons to calibrate rules, so the
+  system should not hide the evidence by clamping score to zero.
+- Research questions are useful warm signals, but mixing them with direct
+  contractor/order requests makes notification and review queues noisy.

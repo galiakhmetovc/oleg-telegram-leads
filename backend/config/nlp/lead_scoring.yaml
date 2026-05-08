@@ -50,6 +50,7 @@ lead_scoring:
       diy_or_equipment_only: -50
       irrelevant_or_sale: -40
       price_only: -20
+      ordinary_household_system: -50
     facts:
       solution_area: 15
       property_type: 8
@@ -206,6 +207,13 @@ lead_scoring:
     - diy_or_equipment_only
     - irrelevant_or_sale
     - price_only
+    - ordinary_household_system
+  lead_veto_signal_types:
+    - supply
+    - diy_or_equipment_only
+    - irrelevant_or_sale
+    - price_only
+    - ordinary_household_system
   review_lanes:
     - key: noise
       label: Шум / нецелевое
@@ -217,14 +225,16 @@ lead_scoring:
             - diy_or_equipment_only
             - irrelevant_or_sale
             - price_only
+            - ordinary_household_system
           signal_types:
             - supply
             - diy_or_equipment_only
             - irrelevant_or_sale
             - price_only
+            - ordinary_household_system
     - key: direct_pur_lead
       label: Прямой лид ПУР
-      description: "Есть домен ПУР и активное намерение: найти подрядчика, заказать, установить, подключить или получить консультацию."
+      description: "Есть домен ПУР и активное намерение: найти подрядчика, заказать, установить, подключить или подготовить конкретные выводы/схему."
       priority: 900
       match_groups:
         - solution_area_types:
@@ -258,23 +268,60 @@ lead_scoring:
             - customer_intent
             - provider_search
             - installation_request
-            - consultation_request
+            - hot_lead_intent
+            - wiring_output
+      excluded_noise_signal_types:
+        - supply
+        - diy_or_equipment_only
+        - irrelevant_or_sale
+        - price_only
+        - ordinary_household_system
+    - key: research_warm
+      label: Исследование / подбор решения
+      description: Есть домен ПУР и вопрос по выбору, пользе или изучению темы, но нет явного запроса на подрядчика.
+      priority: 750
+      match_groups:
+        - solution_area_types:
+            - smart_home
+            - security
+            - access_control
+            - power_stability
+            - engineering_networks
+            - climate
+          signal_types:
+            - smart_home_automation
+            - smart_home_platform
+            - protocol_gateway
+            - video_surveillance
+            - access_control
+            - intercom
+            - security_alarm
+            - gate_automation
+            - power_quality
+            - power_backup
+            - climate_control
+            - climate_automation
+            - lighting_control
+            - lighting_automation
+            - motion_lighting_automation
+            - electric_curtain_control
+            - water_leak_protection
+            - leak_protection
+            - network_infrastructure
+        - reason_keys:
             - solution_selection_request
             - smart_home_value_question
             - education_request
             - smart_relay_control
             - implementation_intent
-            - hot_lead_intent
-            - work_type
-            - wiring_output
           customer_segment_types:
-            - active_request
             - research_project
       excluded_noise_signal_types:
         - supply
         - diy_or_equipment_only
         - irrelevant_or_sale
         - price_only
+        - ordinary_household_system
     - key: pur_design_context
       label: Проектный контекст ПУР
       description: Домен ПУР в дизайне, ремонте, электрике, white box или проектной документации.
@@ -317,6 +364,7 @@ lead_scoring:
         - diy_or_equipment_only
         - irrelevant_or_sale
         - price_only
+        - ordinary_household_system
     - key: domain_interest
       label: Доменный интерес
       description: Есть релевантная область ПУР, но намерение или проектный контекст слабее.
@@ -354,6 +402,7 @@ lead_scoring:
         - diy_or_equipment_only
         - irrelevant_or_sale
         - price_only
+        - ordinary_household_system
     - key: off_domain_demand
       label: Спрос без домена ПУР
       description: Есть активный запрос или поиск подрядчика, но релевантная область ПУР не проявилась.
@@ -381,6 +430,7 @@ lead_scoring:
         - diy_or_equipment_only
         - irrelevant_or_sale
         - price_only
+        - ordinary_household_system
     - key: generic_context
       label: Общий контекст
       description: Слабые общие маркеры потребности, дизайна или консультации без уверенного домена.
@@ -406,6 +456,7 @@ lead_scoring:
         - diy_or_equipment_only
         - irrelevant_or_sale
         - price_only
+        - ordinary_household_system
     - key: other_candidate
       label: Прочий кандидат
       description: Кандидат не попал в более конкретную lane и требует отдельного анализа качества правил.

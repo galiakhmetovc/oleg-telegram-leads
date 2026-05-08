@@ -206,7 +206,12 @@
 - Default NLP config recognizes Neptun/Нептун water leak monitoring leads,
   including the typo `Нептуп`, ProW/Profi product mentions, wired leak sensors,
   sensor-trigger monitoring, and smartphone information output.
-- Dev PostgreSQL active NLP config has been refreshed through revision 26. The `need`
+- Default lead scoring now separates additive score from auto-lead verdict:
+  configured `lead_veto_signal_types` keep the score visible but force
+  `is_lead=false` and `temperature=none` for explicit supply/sale/DIY/price-only
+  or ordinary household noise. Research/value smart-home questions now route to
+  `research_warm` instead of `direct_pur_lead`.
+- Dev PostgreSQL active NLP config has been refreshed through revision 27. The `need`
   signal no longer stores Russian forms such as `нужно`, `нужна`, `нужен` as
   exact phrases; they are represented as lemmatized phrase rules with preserved
   operator source text. Revision 16 also includes the Neptun water leak
@@ -221,7 +226,8 @@
   configurable `pipeline.alias_matching` section, removes duplicated literal
   alias spellings across catalogs, lowers generic off-domain demand weights, and
   keeps PUR lead examples passing while avoiding ordinary non-PUR provider-search
-  messages.
+  messages. Revision 27 adds lead-veto noise signals, an
+  `ordinary_household_system` noise signal, and the `research_warm` review lane.
 - `RussianTextEnricher` now precompiles Yargy parsers once per enricher
   instance and shares one Yargy `MorphTokenizer` across compiled rules instead
   of creating a separate `pymorphy2` analyzer for every parser. This keeps
@@ -246,10 +252,10 @@
 
 ## Next Steps
 
-1. Configure a Telegram userbot account and source chat in the Settings Center,
-   then run the userbot service against a small live source.
-2. Review the lead assessment UI manually in the browser.
-3. Promote the 9 production-confirmed leads into a curated eval/golden dataset
-   after deciding what production text can be committed versus kept in ignored
-   artifacts.
+1. Continue high-priority audit fixes: Telegram ingestion idempotency, outbox
+   flush timing, cursor monotonicity, and SQL-backed live analytics pagination.
+2. Review live `research_warm`, `noise`, and `direct_pur_lead` candidates after
+   revision 27 to tune false positives with operator verdicts.
+3. Promote confirmed production examples into a curated eval/golden dataset
+   after deciding what text can be committed versus kept in ignored artifacts.
 4. Keep an eye on host disk usage before larger dependency/model downloads.

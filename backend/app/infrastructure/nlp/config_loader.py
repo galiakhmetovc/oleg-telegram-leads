@@ -104,6 +104,7 @@ class LeadScoringConfig:
     customer_segments: dict[str, dict[str, Any]]
     intent_signal_types: list[str]
     noise_signal_types: list[str]
+    lead_veto_signal_types: list[str] | None = None
     review_lanes: list[ReviewLaneConfig] = field(default_factory=list)
 
 
@@ -409,6 +410,11 @@ def _parse_lead_scoring(raw: Any) -> LeadScoringConfig:
         customer_segments=_parse_category_mapping(raw.get("customer_segments", {}), "customer_segments"),
         intent_signal_types=_parse_string_list(raw.get("intent_signal_types", []), "intent_signal_types"),
         noise_signal_types=_parse_string_list(raw.get("noise_signal_types", []), "noise_signal_types"),
+        lead_veto_signal_types=(
+            _parse_string_list(raw["lead_veto_signal_types"], "lead_veto_signal_types")
+            if "lead_veto_signal_types" in raw
+            else None
+        ),
         review_lanes=_parse_review_lanes(raw.get("review_lanes", [])),
     )
 

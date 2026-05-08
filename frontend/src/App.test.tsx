@@ -1826,6 +1826,7 @@ function sampleLeadScoringSettings() {
     customer_segments: {},
     intent_signal_types: ["provider_search"],
     noise_signal_types: ["diy_or_equipment_only"],
+    lead_veto_signal_types: ["diy_or_equipment_only"],
     review_lanes: [
       {
         key: "direct_pur_lead",

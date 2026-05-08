@@ -1133,6 +1133,54 @@ def test_default_config_does_not_mark_diy_equipment_sale_as_lead(
     assert "diy_or_equipment_only" in {item.type for item in result.lead_assessment.noise_signals}
 
 
+@pytest.mark.parametrize(
+    ("text", "expected_noise"),
+    [
+        (
+            "Продам камеру Hikvision, самовывоз, без монтажа.",
+            {"diy_or_equipment_only", "irrelevant_or_sale"},
+        ),
+        (
+            "Нужно установить обычный кондиционер в квартире, без умного дома.",
+            {"ordinary_household_system"},
+        ),
+        (
+            "Кто обслуживает обычный домофон в подъезде?",
+            {"ordinary_household_system"},
+        ),
+        (
+            "Подскажите, какой ИБП купить для компьютера без монтажа?",
+            {"diy_or_equipment_only"},
+        ),
+    ],
+)
+def test_default_config_does_not_mark_equipment_or_household_noise_as_lead(
+    default_lead_enricher: RussianTextEnricher,
+    text: str,
+    expected_noise: set[str],
+) -> None:
+    result = default_lead_enricher.enrich(text)
+
+    assert result.lead_assessment is not None
+    assert result.lead_assessment.is_lead is False
+    assert result.lead_assessment.temperature == "none"
+    assert expected_noise & {item.type for item in result.lead_assessment.noise_signals}
+
+
+def test_default_config_routes_research_smart_home_question_outside_direct_lead(
+    default_lead_enricher: RussianTextEnricher,
+) -> None:
+    result = default_lead_enricher.enrich(
+        "Здравствуйте друзья. Подскажите какие действительно нужные и полезные "
+        "системы умного дома можно внедрить в проект? Где можно изучить эту тему?"
+    )
+
+    assert result.lead_assessment is not None
+    assert result.lead_assessment.is_lead is True
+    assert result.lead_assessment.review_lane is not None
+    assert result.lead_assessment.review_lane.key in {"pur_design_context", "research_warm", "domain_interest"}
+
+
 def test_default_config_does_not_mark_off_domain_provider_search_as_pur_lead(
     default_lead_enricher: RussianTextEnricher,
 ) -> None:

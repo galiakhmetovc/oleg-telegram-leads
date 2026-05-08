@@ -50,11 +50,18 @@ class LeadScorer:
             self._config.noise_signal_types,
             signal_matches,
         )
+        veto_signal_types = (
+            self._config.lead_veto_signal_types
+            if self._config.lead_veto_signal_types is not None
+            else self._config.noise_signal_types
+        )
+        has_lead_veto = any(signal_type in signal_matches for signal_type in veto_signal_types)
+        effective_temperature = "none" if has_lead_veto else temperature
 
         return LeadAssessment(
-            is_lead=score >= self._config.lead_threshold,
+            is_lead=not has_lead_veto and score >= self._config.lead_threshold,
             score=score,
-            temperature=temperature,
+            temperature=effective_temperature,
             solution_areas=solution_areas,
             customer_segments=customer_segments,
             intent_signals=intent_signals,
@@ -62,7 +69,7 @@ class LeadScorer:
             reasons=reasons,
             review_lane=self._review_lane(
                 score=score,
-                temperature=temperature,
+                temperature=effective_temperature,
                 signal_matches=signal_matches,
                 fact_matches=fact_matches,
                 reasons=reasons,
