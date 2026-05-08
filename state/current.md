@@ -45,6 +45,12 @@
   verdict hotkeys `1/2/3/4`, `Ctrl+Enter` to save, `N` to save and open the next
   message from the same queue, quick tag chips, and a short "Почему сработало"
   summary before the detailed evidence tables.
+- Manual review now overlays the automatic lead status in Analytics. `Шум` and
+  `Не лид` make the API/UI expose the message as non-lead while keeping the
+  automatic score and evidence visible for audit; `Лид` can force a lead, and
+  `Сомнительно` keeps the automatic verdict. Saving `Шум` or `Не лид` cancels
+  unsent pending/sending Telegram notification outbox rows for that source
+  message.
 - The UI now includes "Логи" and "Статус системы" tabs backed by durable
   runtime state and health counters. System Status distinguishes worker progress
   journal rows from Telegram messages visible in live Analytics.

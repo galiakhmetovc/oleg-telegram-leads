@@ -578,9 +578,14 @@ manual verdicts are handled by a dedicated route:
 `#/analytics/review/{source_message_id}`.
 
 Review state is stored in `message_reviews`, keyed by the Telegram source
-message id. The row contains only operator feedback: verdict, comment, and
+message id. The row contains operator feedback: verdict, comment, tags, and
 timestamps. It does not modify the deterministic enrichment result, score,
-temperature, review lane, or notification outbox.
+temperature, or automatic review lane. The Analytics API overlays that immutable
+evidence with an effective operator lead status: `lead` forces lead,
+`not_lead`/`noise` force non-lead, and `uncertain` keeps the automatic verdict.
+Saving `not_lead` or `noise` cancels unsent pending/sending notification outbox
+rows for the same Telegram source message so a manual noise verdict cannot be
+sent later as a lead alert.
 
 The Review page combines the existing expanded Analytics evidence with manual
 actions: `Лид`, `Не лид`, `Сомнительно`, `Шум`, a comment field, and a first

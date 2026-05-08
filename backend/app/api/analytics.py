@@ -66,6 +66,9 @@ class AnalyticsCandidateResponse(BaseModel):
     domain_signals: list[dict[str, Any]]
     facts: list[dict[str, Any]]
     is_lead: bool = False
+    auto_is_lead: bool = False
+    effective_is_lead: bool = False
+    lead_status_source: Literal["auto", "review"] = "auto"
     received_at: datetime | None = None
     source_chat_id: str | None = None
     source_chat_title: str | None = None
@@ -206,6 +209,11 @@ async def update_analytics_message_review(
         comment=payload.comment.strip(),
         tags=_normalized_review_tags(payload.tags),
     )
+    if payload.verdict in {"not_lead", "noise"}:
+        await repository.cancel_unsent_notifications_for_message(
+            message_id,
+            reason=f"review:{payload.verdict}",
+        )
     return _candidate_response(candidate, review=review)
 
 
@@ -244,6 +252,7 @@ def _candidate_response(
     review: AnalyticsMessageReview | None = None,
 ) -> AnalyticsCandidateResponse:
     review_value = review if review is not None else candidate.review
+    effective_is_lead, lead_status_source = _effective_lead_status(candidate, review_value)
     return AnalyticsCandidateResponse(
         message_id=candidate.message_id,
         text=candidate.text,
@@ -257,7 +266,10 @@ def _candidate_response(
         reasons=candidate.reasons,
         domain_signals=candidate.domain_signals,
         facts=candidate.facts,
-        is_lead=candidate.is_lead,
+        is_lead=effective_is_lead,
+        auto_is_lead=candidate.is_lead,
+        effective_is_lead=effective_is_lead,
+        lead_status_source=lead_status_source,
         received_at=candidate.received_at,
         source_chat_id=candidate.source_chat_id,
         source_chat_title=candidate.source_chat_title,
@@ -269,6 +281,17 @@ def _candidate_response(
         enrichment_job_id=candidate.enrichment_job_id,
         review=_review_response(review_value) if review_value is not None else None,
     )
+
+
+def _effective_lead_status(
+    candidate: AnalyticsCandidate,
+    review: AnalyticsMessageReview | None,
+) -> tuple[bool, Literal["auto", "review"]]:
+    if review is None or review.verdict is None or review.verdict == "uncertain":
+        return candidate.is_lead, "auto"
+    if review.verdict == "lead":
+        return True, "review"
+    return False, "review"
 
 
 def _review_response(review: AnalyticsMessageReview) -> AnalyticsMessageReviewResponse:

@@ -7,7 +7,7 @@ from uuid import UUID
 
 
 NotificationMatchMode = Literal["all", "any"]
-NotificationOutboxStatus = Literal["pending", "sending", "sent", "failed"]
+NotificationOutboxStatus = Literal["pending", "sending", "sent", "failed", "cancelled"]
 
 
 @dataclass(frozen=True)

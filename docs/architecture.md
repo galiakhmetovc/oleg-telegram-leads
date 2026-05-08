@@ -273,13 +273,17 @@ from the count of rows visible in live Analytics. Live Analytics shows Telegram
 source messages only after the corresponding enrichment result exists.
 
 Manual review is deliberately separate from deterministic NLP output. A saved
-review does not rewrite enrichment results, score, lane, or notification state;
-it records operator feedback that can later be used for calibration and config
-changes. The Review page combines the expanded Analytics evidence view with
-four verdicts (`Лид`, `Не лид`, `Сомнительно`, `Шум`), structured reason tags,
-a free comment, and a constructor draft panel based on text selection. Verdict
-hotkeys `1/2/3/4`, `Ctrl+Enter` save, and `N` save-and-next are frontend
-operator shortcuts over the same review API.
+review does not rewrite enrichment results, score, or automatic lane; it records
+operator feedback that can later be used for calibration and config changes.
+Analytics still keeps automatic score evidence visible, but exposes an
+effective operator lead status: `Лид` forces lead, `Не лид` and `Шум` force
+non-lead, and `Сомнительно` leaves the automatic verdict in place. Saving
+`Не лид` or `Шум` also cancels unsent pending/sending Telegram notification
+outbox rows for the same source message. The Review page combines the expanded
+Analytics evidence view with four verdicts (`Лид`, `Не лид`, `Сомнительно`,
+`Шум`), structured reason tags, a free comment, and a constructor draft panel
+based on text selection. Verdict hotkeys `1/2/3/4`, `Ctrl+Enter` save, and `N`
+save-and-next are frontend operator shortcuts over the same review API.
 
 Container stdout/stderr logs are also bounded in Docker Compose through the
 `json-file` driver with `max-size=10m` and `max-file=5` on every service.

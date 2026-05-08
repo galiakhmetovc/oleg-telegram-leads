@@ -82,6 +82,9 @@ type AnalyticsCandidate = {
   domain_signals: AnalyticsSpan[];
   facts: AnalyticsSpan[];
   is_lead?: boolean;
+  auto_is_lead?: boolean;
+  effective_is_lead?: boolean;
+  lead_status_source?: "auto" | "review";
   received_at?: string | null;
   source_chat_id?: string | null;
   source_chat_title?: string | null;
@@ -2092,6 +2095,19 @@ function isAliasCatalogName(value: string | null | undefined): value is AliasCat
 }
 
 function candidateTemperatureLabel(candidate: AnalyticsCandidate) {
+  const verdict = candidate.review?.verdict;
+  if (verdict === "noise") {
+    return "Шум (ревью)";
+  }
+  if (verdict === "not_lead") {
+    return "Не лид (ревью)";
+  }
+  if (verdict === "lead") {
+    return "Лид (ревью)";
+  }
+  if (!candidateEffectiveIsLead(candidate)) {
+    return "Не лид";
+  }
   if (candidate.temperature === "hot") {
     return "Горячий лид";
   }
@@ -2107,6 +2123,19 @@ function candidateTemperatureLabel(candidate: AnalyticsCandidate) {
 function candidateTemperatureColor(
   candidate: AnalyticsCandidate
 ): "default" | "primary" | "secondary" | "error" | "info" | "success" | "warning" {
+  const verdict = candidate.review?.verdict;
+  if (verdict === "noise") {
+    return "secondary";
+  }
+  if (verdict === "not_lead") {
+    return "error";
+  }
+  if (verdict === "lead") {
+    return "success";
+  }
+  if (!candidateEffectiveIsLead(candidate)) {
+    return "default";
+  }
   if (candidate.temperature === "hot") {
     return "error";
   }
@@ -2117,6 +2146,20 @@ function candidateTemperatureColor(
     return "success";
   }
   return "default";
+}
+
+function candidateEffectiveIsLead(candidate: AnalyticsCandidate): boolean {
+  if (typeof candidate.effective_is_lead === "boolean") {
+    return candidate.effective_is_lead;
+  }
+  const verdict = candidate.review?.verdict;
+  if (verdict === "lead") {
+    return true;
+  }
+  if (verdict === "not_lead" || verdict === "noise") {
+    return false;
+  }
+  return candidate.is_lead ?? false;
 }
 
 type AnalyticsUrlState = {

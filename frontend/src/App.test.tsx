@@ -1476,6 +1476,8 @@ test("opens analytics review page and saves verdict comment", async () => {
     expect(reviewPayload).toEqual({ verdict: "not_lead", comment: "Нет запроса на подрядчика", tags: [] })
   );
   expect(await screen.findByText("Ревью сохранено")).toBeInTheDocument();
+  expect(await screen.findAllByText("Не лид (ревью)")).toHaveLength(2);
+  expect(screen.queryByText("Горячий лид")).not.toBeInTheDocument();
 });
 
 test("review page supports hotkeys, structured tags, and save next", async () => {

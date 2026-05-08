@@ -96,12 +96,15 @@ calibration, but does not feed the operator's default live analytics screen.
 Each row keeps quick Telegram/app/test links and has a dedicated `Ревью` action
 opening `#/analytics/review/{source_message_id}`. Review verdicts and comments
 are stored in `message_reviews`, separate from deterministic enrichment output,
-so operator ground truth can later drive calibration and rule edits. The
-candidate list shows saved review chips, supports filters for reviewed/
-unreviewed messages and verdicts, and review links preserve the current run,
-filters, and page offset when returning from the dedicated Review page. The
-default queue is unreviewed messages. Review saves support structured reason
-tags, hotkeys `1/2/3/4`, `Ctrl+Enter`, and "Сохранить и следующий".
+so operator ground truth can later drive calibration and rule edits. For
+operator workflow the review verdict becomes the effective lead status:
+`Шум`/`Не лид` hide the row from lead status even if the automatic score stays
+visible, and they cancel unsent Telegram notification outbox rows for the same
+source message. The candidate list shows saved review chips, supports filters
+for reviewed/unreviewed messages and verdicts, and review links preserve the
+current run, filters, and page offset when returning from the dedicated Review
+page. The default queue is unreviewed messages. Review saves support structured
+reason tags, hotkeys `1/2/3/4`, `Ctrl+Enter`, and "Сохранить и следующий".
 Expanded Analytics rows reuse the same explainability links as Testing:
 facts, signals, score reasons, taxonomy categories, alias dependencies, weights,
 and review lanes link to Settings detail targets. Left click opens the quick

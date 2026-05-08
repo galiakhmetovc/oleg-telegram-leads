@@ -90,12 +90,14 @@ class ApiInMemoryAnalyticsRepository:
                 ],
                 domain_signals=[],
                 facts=[],
+                is_lead=True,
                 received_at=datetime(2026, 5, 8, 12, 30, tzinfo=UTC),
                 source_chat_id="designers",
                 source_chat_title="Чат дизайнеров",
             )
         ]
         self.reviews: dict[str, AnalyticsMessageReview] = {}
+        self.cancelled_notifications: list[tuple[str, str]] = []
 
     async def list_runs(self) -> list[AnalyticsRun]:
         return self.runs
@@ -179,6 +181,10 @@ class ApiInMemoryAnalyticsRepository:
         )
         self.reviews[message_id] = review
         return review
+
+    async def cancel_unsent_notifications_for_message(self, message_id: str, *, reason: str) -> int:
+        self.cancelled_notifications.append((message_id, reason))
+        return 1
 
 
 def test_lists_analytics_runs() -> None:
@@ -444,6 +450,9 @@ def test_lists_analytics_candidates_with_review_status_and_verdict_filters() -> 
     reviewed_payload = reviewed.json()
     assert reviewed_payload["total"] == 1
     assert reviewed_payload["items"][0]["message_id"] == "488906"
+    assert reviewed_payload["items"][0]["auto_is_lead"] is True
+    assert reviewed_payload["items"][0]["is_lead"] is False
+    assert reviewed_payload["items"][0]["effective_is_lead"] is False
     assert reviewed_payload["items"][0]["review"]["verdict"] == "not_lead"
     assert reviewed_payload["items"][0]["review"]["comment"] == "Нет запроса на подрядчика"
 
@@ -489,3 +498,28 @@ def test_gets_and_updates_analytics_message_review() -> None:
         "created_at": "2026-05-08T13:00:00Z",
         "updated_at": "2026-05-08T13:05:00Z",
     }
+
+
+def test_noise_review_overrides_lead_status_and_cancels_unsent_notifications() -> None:
+    repository = ApiInMemoryAnalyticsRepository()
+    app = create_app()
+    app.dependency_overrides[get_analytics_repository] = lambda: repository
+    client = TestClient(app)
+
+    update = client.put(
+        "/api/v1/analytics/messages/488906/review",
+        json={
+            "verdict": "noise",
+            "comment": "Продажа оборудования, не лид",
+            "tags": ["sale"],
+        },
+    )
+
+    assert update.status_code == 200
+    payload = update.json()
+    assert payload["auto_is_lead"] is True
+    assert payload["is_lead"] is False
+    assert payload["effective_is_lead"] is False
+    assert payload["lead_status_source"] == "review"
+    assert payload["review"]["verdict"] == "noise"
+    assert repository.cancelled_notifications == [("488906", "review:noise")]

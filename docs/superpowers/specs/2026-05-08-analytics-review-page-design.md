@@ -21,17 +21,23 @@ Fields:
   target for the review state.
 - `verdict`: one of `lead`, `not_lead`, `uncertain`, `noise`.
 - `comment`: free-form operator note.
+- `tags`: structured reason tags for later calibration.
 - `created_at`, `updated_at`.
 
 The NLP result remains immutable evidence for a particular enrichment job.
-Operator review is mutable business feedback.
+Operator review is mutable business feedback. The API exposes an effective lead
+status on top of immutable NLP evidence: `lead` forces lead, `not_lead` and
+`noise` force non-lead, and `uncertain` keeps the automatic verdict. Saving
+`not_lead` or `noise` cancels unsent notification outbox rows for the same
+source message.
 
 ## API
 
 Extend Analytics API with review state:
 
 - `GET /api/v1/analytics/messages/{message_id}` returns the existing live
-  candidate plus `review`.
+  candidate plus `review`, `auto_is_lead`, `effective_is_lead`, and
+  `lead_status_source`.
 - `PUT /api/v1/analytics/messages/{message_id}/review` upserts verdict and
   comment.
 

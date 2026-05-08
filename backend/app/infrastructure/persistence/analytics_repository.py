@@ -20,6 +20,7 @@ from app.infrastructure.persistence.tables import analytics_aggregates, analytic
 from app.infrastructure.persistence.tables import analytics_runs
 from app.infrastructure.persistence.tables import enrichment_jobs, enrichment_results
 from app.infrastructure.persistence.tables import message_reviews
+from app.infrastructure.persistence.tables import notification_outbox
 from app.infrastructure.persistence.tables import telegram_source_chats, telegram_source_messages
 
 LIVE_TELEGRAM_RUN_ID = UUID("00000000-0000-0000-0000-000000000001")
@@ -108,6 +109,22 @@ class PostgresAnalyticsRepository:
             row = result.mappings().one()
             await session.commit()
         return _review_from_row(row)
+
+    async def cancel_unsent_notifications_for_message(self, message_id: str, *, reason: str) -> int:
+        source_message_id = UUID(message_id)
+        async with self._session_factory() as session:
+            result = await session.execute(
+                notification_outbox.update()
+                .where(notification_outbox.c.source_message_id == source_message_id)
+                .where(notification_outbox.c.status.in_(["pending", "sending"]))
+                .values(
+                    status="cancelled",
+                    last_error=reason,
+                    claimed_at=None,
+                )
+            )
+            await session.commit()
+        return int(cast(Any, result).rowcount or 0)
 
     async def list_aggregates(self, run_id: UUID) -> list[AnalyticsAggregate]:
         if run_id == LIVE_TELEGRAM_RUN_ID:
@@ -318,13 +335,8 @@ async def _live_run(session: AsyncSession) -> AnalyticsRun:
     leads = int(
         await session.scalar(
             sa.select(sa.func.count())
-            .select_from(
-                telegram_source_messages.join(
-                    enrichment_results,
-                    telegram_source_messages.c.enrichment_job_id == enrichment_results.c.job_id,
-                )
-            )
-            .where(sa.cast(_live_assessment_expr()["is_lead"].astext, sa.Boolean).is_(True))
+            .select_from(_live_candidate_from_clause())
+            .where(_live_effective_is_lead_expr().is_(True))
         )
         or 0
     )
@@ -395,6 +407,18 @@ def _live_assessment_expr() -> Any:
 
 def _live_score_expr() -> Any:
     return sa.cast(_live_assessment_expr()["score"].astext, sa.Integer)
+
+
+def _live_auto_is_lead_expr() -> Any:
+    return sa.cast(_live_assessment_expr()["is_lead"].astext, sa.Boolean).is_(True)
+
+
+def _live_effective_is_lead_expr() -> Any:
+    return sa.case(
+        (message_reviews.c.verdict == "lead", sa.true()),
+        (message_reviews.c.verdict.in_(["not_lead", "noise"]), sa.false()),
+        else_=_live_auto_is_lead_expr(),
+    )
 
 
 def _live_candidate_filter_predicates(
