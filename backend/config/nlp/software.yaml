@@ -4,6 +4,7 @@ software:
     type: software
     aliases:
       - Алиса
+      - Алисы
       - Алису
       - Алисой
       - Alice
@@ -14,11 +15,8 @@ software:
       - Yandex Home
       - Яндекс с Алисой
       - приложение Дом с Алисой
-    signal_types:
-      - smart_home_platform
     fact_types:
       - software
-
   - key: sber_salut
     canonical: Салют
     type: software
@@ -29,11 +27,8 @@ software:
       - приложение Салют
       - ассистент Салют
       - Salute
-    signal_types:
-      - smart_home_platform
     fact_types:
       - software
-
   - key: home_assistant
     canonical: Home Assistant
     type: software
@@ -46,12 +41,8 @@ software:
       - Hass
       - hassio
       - HAOS
-    signal_types:
-      - smart_home_platform
-      - protocol_gateway
     fact_types:
       - software
-
   - key: apple_home
     canonical: Apple Home / HomeKit
     type: software
@@ -65,11 +56,8 @@ software:
       - Apple HomeKit
       - Siri
       - Сири
-    signal_types:
-      - smart_home_platform
     fact_types:
       - software
-
   - key: google_home
     canonical: Google Home
     type: software
@@ -80,11 +68,8 @@ software:
       - Гугл Ассистент
       - Google Nest
       - Nest
-    signal_types:
-      - smart_home_platform
     fact_types:
       - software
-
   - key: tuya_smart_life
     canonical: Tuya / Smart Life
     type: software
@@ -97,11 +82,8 @@ software:
       - приложение Tuya
       - приложение Smart Life
       - Tuya Smart Life
-    signal_types:
-      - smart_home_platform
     fact_types:
       - software
-
   - key: aqara_home
     canonical: Aqara Home
     type: software
@@ -111,11 +93,8 @@ software:
       - Аккара Хоум
       - приложение Aqara
       - приложение Акара
-    signal_types:
-      - smart_home_platform
     fact_types:
       - software
-
   - key: mi_home
     canonical: Mi Home
     type: software
@@ -128,11 +107,8 @@ software:
       - Mijia
       - Миджиа
       - приложение Xiaomi
-    signal_types:
-      - smart_home_platform
     fact_types:
       - software
-
   - key: ewelink
     canonical: eWeLink
     type: software
@@ -144,12 +120,8 @@ software:
       - eWeLink app
       - eWeLink CUBE
       - CUBE OS
-    signal_types:
-      - smart_home_platform
-      - protocol_gateway
     fact_types:
       - software
-
   - key: zigbee2mqtt
     canonical: Zigbee2MQTT
     type: software
@@ -160,12 +132,8 @@ software:
       - Зигби ту MQTT
       - z2m
       - Z2M
-    signal_types:
-      - protocol_gateway
-      - smart_home_platform
     fact_types:
       - software
-
   - key: node_red
     canonical: Node-RED
     type: software
@@ -174,12 +142,8 @@ software:
       - Node RED
       - Нод Ред
       - NodeRed
-    signal_types:
-      - smart_home_platform
-      - protocol_gateway
     fact_types:
       - software
-
   - key: iobroker
     canonical: ioBroker
     type: software
@@ -188,12 +152,8 @@ software:
       - iobroker
       - айоброкер
       - ио брокер
-    signal_types:
-      - smart_home_platform
-      - protocol_gateway
     fact_types:
       - software
-
   - key: majordomo
     canonical: MajorDoMo
     type: software
@@ -202,11 +162,8 @@ software:
       - Majordomo
       - Мажордомо
       - МажорДоМо
-    signal_types:
-      - smart_home_platform
     fact_types:
       - software
-
   - key: domoticz
     canonical: Domoticz
     type: software
@@ -214,11 +171,8 @@ software:
       - Domoticz
       - Домотикз
       - Домотикс
-    signal_types:
-      - smart_home_platform
     fact_types:
       - software
-
   - key: iridium
     canonical: iRidium
     type: software
@@ -228,11 +182,8 @@ software:
       - Айридиум
       - iRidium mobile
       - iRidium server
-    signal_types:
-      - smart_home_platform
     fact_types:
       - software
-
   - key: wiren_board_software
     canonical: Wiren Board software
     type: software
@@ -243,12 +194,8 @@ software:
       - wb-rules
       - MQTT broker Wiren Board
       - веб-интерфейс Wiren Board
-    signal_types:
-      - smart_home_platform
-      - protocol_gateway
     fact_types:
       - software
-
   - key: sprut_home
     canonical: Sprut.home
     type: software
@@ -258,11 +205,8 @@ software:
       - Спрут Хоум
       - СпрутХоум
       - SprutHub app
-    signal_types:
-      - smart_home_platform
     fact_types:
       - software
-
   - key: ekf_connect_home
     canonical: EKF Connect Home
     type: software
@@ -271,11 +215,8 @@ software:
       - EKF Connect
       - ЕКФ Коннект
       - приложение EKF
-    signal_types:
-      - smart_home_platform
     fact_types:
       - software
-
   - key: hiper_iot
     canonical: HIPER IoT
     type: software
@@ -285,11 +226,8 @@ software:
       - Hiper IoT
       - приложение HIPER
       - HIPER IOT app
-    signal_types:
-      - smart_home_platform
     fact_types:
       - software
-
   - key: rubetek_app
     canonical: Rubetek app
     type: software
@@ -298,11 +236,8 @@ software:
       - Rubetek app
       - Rubetek IoT
       - мобильное приложение Rubetek
-    signal_types:
-      - smart_home_platform
     fact_types:
       - software
-
   - key: livicom_app
     canonical: Livicom app
     type: software
@@ -311,12 +246,8 @@ software:
       - Livicom app
       - Livi app
       - приложение Livi
-    signal_types:
-      - smart_home_platform
-      - security_alarm
     fact_types:
       - software
-
   - key: video_security_apps
     canonical: ПО видеонаблюдения
     type: software
@@ -332,7 +263,5 @@ software:
       - DMSS
       - Imou Life
       - Dahua DMSS
-    signal_types:
-      - video_surveillance
     fact_types:
       - software

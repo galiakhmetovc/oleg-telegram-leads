@@ -64,6 +64,40 @@ signals:
     assert config.signals[0].patterns[0].tokens[1].value == "дом"
 
 
+def test_loads_signal_dictionary_dependencies_from_yaml(tmp_path: Path) -> None:
+    config_dir = tmp_path / "nlp"
+    config_dir.mkdir()
+    (config_dir / "pipeline.yaml").write_text("stages: []\n", encoding="utf-8")
+    (config_dir / "signals.yaml").write_text(
+        """
+signals:
+  - type: smart_home
+    label: Умный дом
+    match:
+      aliases:
+        - catalog: vendors
+          keys:
+            - yandex
+            - aqara
+        - catalog: software
+          keys:
+            - alice
+      facts:
+        - types:
+            - automation_component
+""",
+        encoding="utf-8",
+    )
+
+    config = load_nlp_config(config_dir)
+
+    assert config.signals[0].match.aliases[0].catalogs == ("vendors",)
+    assert config.signals[0].match.aliases[0].keys == ("yandex", "aqara")
+    assert config.signals[0].match.aliases[1].catalogs == ("software",)
+    assert config.signals[0].match.aliases[1].keys == ("alice",)
+    assert config.signals[0].match.facts[0].types == ("automation_component",)
+
+
 def test_rejects_unsupported_pattern_predicates(tmp_path: Path) -> None:
     config_dir = tmp_path / "nlp"
     config_dir.mkdir()
@@ -105,8 +139,6 @@ vendors:
       - Aqara
       - Акара
       - Аккара
-    signal_types:
-      - smart_home_platform
     fact_types:
       - vendor
 """,
@@ -121,8 +153,6 @@ protocols:
     aliases:
       - Zigbee
       - Зигби
-    signal_types:
-      - protocol_gateway
     fact_types:
       - protocol
 """,
@@ -135,11 +165,11 @@ protocols:
     assert config.aliases[0].canonical == "Aqara"
     assert config.aliases[0].kind == "vendor"
     assert config.aliases[0].aliases == ("Aqara", "Акара", "Аккара")
-    assert config.aliases[0].signal_types == ("smart_home_platform",)
+    assert config.aliases[0].catalog == "vendors"
     assert config.aliases[1].fact_types == ("protocol",)
 
 
-def test_rejects_signal_without_phrases(tmp_path: Path) -> None:
+def test_rejects_signal_without_any_match_source(tmp_path: Path) -> None:
     config_dir = tmp_path / "nlp"
     config_dir.mkdir()
     (config_dir / "pipeline.yaml").write_text("stages: []\n", encoding="utf-8")
@@ -153,5 +183,5 @@ signals:
         encoding="utf-8",
     )
 
-    with pytest.raises(ValueError, match="phrases"):
+    with pytest.raises(ValueError, match="phrases, patterns, or match"):
         load_nlp_config(config_dir)

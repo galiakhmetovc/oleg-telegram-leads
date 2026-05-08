@@ -13,13 +13,9 @@ devices:
       - контроллер умного дома
       - zigbee шлюз
       - зигби шлюз
-    signal_types:
-      - protocol_gateway
-      - smart_home_platform
     fact_types:
       - automation_component
       - controlled_device
-
   - key: controller
     canonical: Контроллер
     type: device
@@ -31,13 +27,9 @@ devices:
       - контроллер на DIN рейку
       - контроллер автоматизации
       - центральный контроллер
-    signal_types:
-      - smart_home_platform
-      - protocol_gateway
     fact_types:
       - automation_component
       - controlled_device
-
   - key: relay_module
     canonical: Реле / модуль
     type: device
@@ -54,13 +46,9 @@ devices:
       - шайбы
       - умная шайба
       - модуль управления
-    signal_types:
-      - smart_relay_control
-      - lighting_automation
     fact_types:
       - automation_component
       - controlled_device
-
   - key: leak_sensor
     canonical: Датчик протечки
     type: device
@@ -76,13 +64,9 @@ devices:
       - беспроводной датчик протечки
       - датчик сработал
       - датчик срабатывания протечки
-    signal_types:
-      - leak_protection
-      - water_leak_protection
     fact_types:
       - automation_component
       - controlled_device
-
   - key: leak_valve
     canonical: Кран защиты от протечки
     type: device
@@ -97,13 +81,9 @@ devices:
       - система контроля протечки
       - система защиты от протечки
       - система защиты от протечек
-    signal_types:
-      - leak_protection
-      - water_leak_protection
     fact_types:
       - automation_component
       - controlled_device
-
   - key: motion_sensor
     canonical: Датчик движения
     type: device
@@ -118,13 +98,9 @@ devices:
       - presence sensor
       - PIR датчик
       - PIR
-    signal_types:
-      - motion_lighting_automation
-      - lighting_automation
     fact_types:
       - automation_component
       - controlled_device
-
   - key: opening_sensor
     canonical: Датчик открытия
     type: device
@@ -136,13 +112,9 @@ devices:
       - магнитоконтактный датчик
       - датчик разбития стекла
       - датчик удара
-    signal_types:
-      - security_alarm
-      - access_control
     fact_types:
       - automation_component
       - access_device
-
   - key: smoke_gas_sensor
     canonical: Датчик дыма / газа
     type: device
@@ -154,13 +126,9 @@ devices:
       - датчик CO2
       - датчик угарного газа
       - датчик качества воздуха
-    signal_types:
-      - security_alarm
-      - climate_automation
     fact_types:
       - automation_component
       - controlled_device
-
   - key: smart_socket
     canonical: Умная розетка
     type: device
@@ -174,13 +142,9 @@ devices:
       - встраиваемая розетка
       - smart plug
       - smart socket
-    signal_types:
-      - smart_home_automation
-      - power_backup
     fact_types:
       - automation_component
       - controlled_device
-
   - key: smart_switch
     canonical: Умный выключатель
     type: device
@@ -194,13 +158,9 @@ devices:
       - проходной выключатель
       - кнопочный выключатель
       - выключатель звонкового типа
-    signal_types:
-      - lighting_automation
-      - smart_relay_control
     fact_types:
       - automation_component
       - controlled_device
-
   - key: dimmer
     canonical: Диммер
     type: device
@@ -210,13 +170,9 @@ devices:
       - светорегулятор
       - светорегулирование
       - регулировка яркости
-    signal_types:
-      - lighting_automation
-      - smart_relay_control
     fact_types:
       - automation_component
       - controlled_device
-
   - key: smart_lighting
     canonical: Умный свет
     type: device
@@ -237,13 +193,9 @@ devices:
       - закарнизная подсветка
       - сценарии освещения
       - сценарий освещения
-    signal_types:
-      - lighting_automation
-      - lighting_control
     fact_types:
       - automation_component
       - controlled_device
-
   - key: thermostat
     canonical: Термостат / терморегулятор
     type: device
@@ -257,13 +209,9 @@ devices:
       - теплые полы
       - управление отоплением
       - радиаторный термостат
-    signal_types:
-      - climate_automation
-      - climate_control
     fact_types:
       - automation_component
       - controlled_device
-
   - key: climate_control_device
     canonical: Климатическое оборудование
     type: device
@@ -278,13 +226,9 @@ devices:
       - климат
       - управление климатом
       - ИК пульт для кондиционера
-    signal_types:
-      - climate_automation
-      - climate_control
     fact_types:
       - automation_component
       - controlled_device
-
   - key: electric_curtain
     canonical: Электрокарниз
     type: device
@@ -301,13 +245,9 @@ devices:
       - умные шторы
       - рольставни
       - рулонные шторы
-    signal_types:
-      - electric_curtain_control
-      - lighting_automation
     fact_types:
       - automation_component
       - controlled_device
-
   - key: camera
     canonical: Камера видеонаблюдения
     type: device
@@ -327,12 +267,9 @@ devices:
       - следить за няней
       - видеоглазок
       - дверной глазок
-    signal_types:
-      - video_surveillance
     fact_types:
       - automation_component
       - controlled_device
-
   - key: nvr_dvr
     canonical: Видеорегистратор
     type: device
@@ -345,12 +282,9 @@ devices:
       - сетевой регистратор
       - архив видеонаблюдения
       - запись видео
-    signal_types:
-      - video_surveillance
     fact_types:
       - automation_component
       - controlled_device
-
   - key: intercom
     canonical: Домофон / вызывная панель
     type: device
@@ -366,13 +300,9 @@ devices:
       - панель вызова
       - кнопка открывания
       - кнопка выхода
-    signal_types:
-      - intercom
-      - access_control
     fact_types:
       - automation_component
       - access_device
-
   - key: smart_lock
     canonical: Умный замок
     type: device
@@ -386,13 +316,9 @@ devices:
       - замок с Алисой
       - smart lock
       - кодовая клавиатура
-    signal_types:
-      - access_control
-      - smart_home_automation
     fact_types:
       - automation_component
       - access_device
-
   - key: access_reader
     canonical: Считыватель СКУД
     type: device
@@ -406,11 +332,8 @@ devices:
       - брелок доступа
       - биометрический считыватель
       - турникет
-    signal_types:
-      - access_control
     fact_types:
       - access_device
-
   - key: gate_barrier
     canonical: Ворота / шлагбаум
     type: device
@@ -424,13 +347,9 @@ devices:
       - распашные ворота
       - въездная группа
       - автоматизация въездной группы
-    signal_types:
-      - gate_automation
-      - access_control
     fact_types:
       - automation_component
       - access_device
-
   - key: ups
     canonical: ИБП
     type: device
@@ -444,13 +363,9 @@ devices:
       - резервное питание
       - АКБ
       - аккумуляторный блок
-    signal_types:
-      - power_backup
-      - power_quality
     fact_types:
       - power_equipment
       - controlled_device
-
   - key: voltage_stabilizer
     canonical: Стабилизатор / реле напряжения
     type: device
@@ -464,13 +379,9 @@ devices:
       - защита от перенапряжения
       - УЗМ
       - УЗИП
-    signal_types:
-      - power_backup
-      - power_quality
     fact_types:
       - power_equipment
       - controlled_device
-
   - key: smart_panel
     canonical: Сенсорная панель
     type: device
@@ -484,13 +395,9 @@ devices:
       - настенная панель
       - NSPanel
       - NSPanel Pro
-    signal_types:
-      - smart_home_platform
-      - lighting_automation
     fact_types:
       - automation_component
       - controlled_device
-
   - key: siren
     canonical: Сирена
     type: device
@@ -501,12 +408,9 @@ devices:
       - звуковая сирена
       - тревожная кнопка
       - кнопка тревоги
-    signal_types:
-      - security_alarm
     fact_types:
       - automation_component
       - controlled_device
-
   - key: network_equipment
     canonical: Сетевое оборудование
     type: device
@@ -521,12 +425,9 @@ devices:
       - шкаф слаботочки
       - СКС
       - структурированная кабельная сеть
-    signal_types:
-      - network_infrastructure
     fact_types:
       - network_scope
       - controlled_device
-
   - key: ir_remote
     canonical: ИК-пульт
     type: device
@@ -538,9 +439,6 @@ devices:
       - пульт для кондиционера
       - пульт для ТВ
       - IR blaster
-    signal_types:
-      - protocol_gateway
-      - climate_automation
     fact_types:
       - automation_component
       - controlled_device

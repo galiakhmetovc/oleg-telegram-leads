@@ -154,7 +154,11 @@ test("loads settings center on demand", async () => {
                   { predicate: "normalized", value: "консультация" }
                 ]
               }
-            ]
+            ],
+            match: {
+              aliases: [{ catalog: "vendors", keys: ["aqara"], kinds: ["vendor"] }],
+              facts: [{ types: ["vendor"] }]
+            }
           }
         ],
         facts: [],
@@ -164,7 +168,6 @@ test("loads settings center on demand", async () => {
             canonical: "Aqara",
             type: "vendor",
             aliases: ["Aqara", "Акара"],
-            signal_types: ["smart_home_platform"],
             fact_types: ["vendor"]
           }
         ],
@@ -199,6 +202,8 @@ test("loads settings center on demand", async () => {
   expect(screen.getByText("Лемматические фразы")).toBeInTheDocument();
   expect(screen.getByText("Нужна консультация")).toBeInTheDocument();
   expect(screen.getByText("нужный консультация")).toBeInTheDocument();
+  expect(screen.getByLabelText("match.aliases")).toHaveValue("vendors,kind=vendor:aqara");
+  expect(screen.getByLabelText("match.facts")).toHaveValue("vendor");
   expect(screen.queryByText(/normalized:/)).not.toBeInTheDocument();
   fireEvent.click(screen.getByRole("button", { name: "Оценка лида" }));
   expect(screen.getByText("Пороги оценки")).toBeInTheDocument();
@@ -598,7 +603,8 @@ test("renders expanded settings help page for all editable NLP settings", () => 
   expect(screen.getByText(/confidence - доверие к правилу/i)).toBeInTheDocument();
   expect(screen.getByText(/group - папка/i)).toBeInTheDocument();
   expect(screen.getByText(/Связь сигналов и словарей/i)).toBeInTheDocument();
-  expect(screen.getByText(/Нептун не добавляем в phrases/i)).toBeInTheDocument();
+  expect(screen.getByText(/vendors:neptun/i)).toBeInTheDocument();
+  expect(screen.getAllByText(/match.aliases/i).length).toBeGreaterThan(0);
   expect(screen.getByText(/source=alias_catalog/i)).toBeInTheDocument();
   expect(screen.getAllByText(/weights.signals/i).length).toBeGreaterThan(0);
   expect(screen.getAllByText(/weights.facts/i).length).toBeGreaterThan(0);

@@ -89,8 +89,9 @@ lead scoring, analytics filters, or API identifiers.
 Yargy rules are externalized as configuration data, but the operator-facing
 model is intentionally simpler than Yargy internals:
 
-- Exact phrases: stable token sequences for abbreviations, brands, protocols,
-  technical notation, and wording where the exact written form matters.
+- Exact phrases: stable token sequences for abbreviations, technical notation,
+  and wording where the exact written form matters. Concrete market names belong
+  in alias catalogs instead of signal/fact phrase rules.
 - Lemmatized phrases: Russian domain phrases entered as normal text and stored
   with both the operator's source text and backend-built lemmas.
 
@@ -104,29 +105,37 @@ because that is what the rule engine consumes. The web UI does not expose Yargy
 predicate names as the product vocabulary.
 
 Exact phrases are matched as lowercased literal text with word-like boundaries,
-not through Yargy morphology. This keeps technical variants such as `Wi-Fi`,
-`220v`, `Z-Wave`, product names, and abbreviations in the exact matching mode.
-Lemmatized phrases use Yargy `normalized` tokens. Documents that still contain
-`caseless` are invalid for v2 and must be replaced by a new PostgreSQL config
-revision or reseeded from current bootstrap YAML.
+not through Yargy morphology. This keeps technical variants such as `220v` and
+abbreviations in the exact matching mode. Product names, brands, protocols, and
+software names are handled by alias catalogs. Lemmatized phrases use Yargy
+`normalized` tokens. Documents that still contain `caseless` are invalid for v2
+and must be replaced by a new PostgreSQL config revision or reseeded from
+current bootstrap YAML.
 
-Alias catalogs are separate from domain signals. Domain signals remain semantic
-categories such as `smart_home_platform`, `protocol_gateway`, `leak_protection`,
-`lighting_automation`, `climate_automation`, `access_control`, `intercom`,
-`video_surveillance`, and `power_backup`. Alias catalogs store written variants:
-canonical name, alias type (`vendor`, `protocol`, `device`, `software`, or
-`model`), Latin/Cyrillic/transliterated/mistyped spellings, and links to the
-semantic signal and fact types emitted when the alias matches. Exact alias
-matching lowercases the input text before matching and returns the original
-span text in enrichment output.
+Alias catalogs are separate from domain signals. Alias catalogs store written
+variants: canonical name, alias type (`vendor`, `protocol`, `device`,
+`software`, or `model`), Latin/Cyrillic/transliterated/mistyped spellings, and
+`fact_types` emitted when the alias matches. Exact alias matching lowercases the
+input text before matching and returns the original span text in enrichment
+output.
+
+Domain signals are the inference layer over semantic phrases, alias catalogs,
+and facts. They remain semantic categories such as `smart_home_platform`,
+`protocol_gateway`, `leak_protection`, `lighting_automation`,
+`climate_automation`, `access_control`, `intercom`, `video_surveillance`, and
+`power_backup`. A signal may define `match.aliases` dependencies such as
+`vendors:yandex, aqara`, `software:alice`, or `devices:leak_sensor`. If a
+matching alias is found, the signal is emitted with `source=alias_catalog`.
+Signals may also define `match.facts` dependencies to build a higher-level
+signal from already extracted fact types.
 
 Brand/model spellings must not be duplicated in domain signal or fact phrase
 rules. For example, `Нептун`, `Нептуп`, `Neptun ProW`, and `Profi Wi-Fi` live in
-the `neptun` vendor alias. That alias emits linked `leak_protection` and
-`water_leak_protection` signals plus `vendor`/`model` facts. Domain signal rules
-keep only semantic language such as `датчик протечки` or `защита от протечек`.
-Lead scoring uses the resulting signal/fact types, not the storage location of
-the rule.
+the `neptun` vendor alias. The `water_leak_protection` and `leak_protection`
+signals explicitly reference that alias through `match.aliases`; the alias
+itself emits `vendor`/`model` facts. Domain signal rules keep only semantic
+language such as `датчик протечки` or `защита от протечек`. Lead scoring uses
+the resulting signal/fact types, not the storage location of the rule.
 
 ## Lead Assessment
 
@@ -214,7 +223,8 @@ signals or facts.
 The frontend Settings Center edits exact phrases and lemmatized phrases as
 separate lists with add/edit/delete actions. New lemmatized phrases are created
 from natural operator input through the backend semantic-pattern endpoint so the
-UI can show both the original text and the generated lemmas. The UI also has a
+UI can show both the original text and the generated lemmas. Domain signals also
+expose editable `match.aliases` and `match.facts` dependencies. The UI has a
 Help page that explains these matching modes. The Settings Center also exposes
 the alias catalogs as editable lists for vended platforms, protocols, devices,
 and software. Lead scoring settings include review lanes, so review queue logic

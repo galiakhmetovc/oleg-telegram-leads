@@ -10,11 +10,8 @@ protocols:
       - Зиг БИ
       - Zigbee 3.0
       - ZigBee
-    signal_types:
-      - protocol_gateway
     fact_types:
       - protocol
-
   - key: z_wave
     canonical: Z-Wave
     type: protocol
@@ -26,11 +23,8 @@ protocols:
       - З-Вейв
       - З Вейв
       - z-wave
-    signal_types:
-      - protocol_gateway
     fact_types:
       - protocol
-
   - key: knx
     canonical: KNX
     type: protocol
@@ -40,12 +34,8 @@ protocols:
       - КNX
       - KNX IP
       - KNX TP
-    signal_types:
-      - protocol_gateway
-      - smart_home_platform
     fact_types:
       - protocol
-
   - key: matter
     canonical: Matter
     type: protocol
@@ -57,12 +47,8 @@ protocols:
       - Matter Wi-Fi
       - Matter WiFi
       - Matter over Thread
-    signal_types:
-      - protocol_gateway
-      - smart_home_platform
     fact_types:
       - protocol
-
   - key: thread
     canonical: Thread
     type: protocol
@@ -72,11 +58,8 @@ protocols:
       - Thread border router
       - Border Router
       - бордер роутер
-    signal_types:
-      - protocol_gateway
     fact_types:
       - protocol
-
   - key: wifi
     canonical: Wi-Fi
     type: protocol
@@ -91,11 +74,8 @@ protocols:
       - Wi-Fi 2.4 ГГц
       - Wi-Fi модуль
       - вайфай модуль
-    signal_types:
-      - protocol_gateway
     fact_types:
       - protocol
-
   - key: bluetooth_ble
     canonical: Bluetooth BLE
     type: protocol
@@ -107,10 +87,8 @@ protocols:
       - блю туз
       - Блютуз
       - Bluetooth Low Energy
-    signal_types: []
     fact_types:
       - protocol
-
   - key: rf_433
     canonical: RF 433
     type: protocol
@@ -121,11 +99,8 @@ protocols:
       - 433MHz
       - радиоканал 433
       - радио 433
-    signal_types:
-      - protocol_gateway
     fact_types:
       - protocol
-
   - key: modbus
     canonical: Modbus
     type: protocol
@@ -136,12 +111,8 @@ protocols:
       - Modbus TCP
       - быстрый Modbus
       - Fast Modbus
-    signal_types:
-      - protocol_gateway
-      - network_infrastructure
     fact_types:
       - protocol
-
   - key: rs_485
     canonical: RS-485
     type: protocol
@@ -152,12 +123,8 @@ protocols:
       - РС485
       - 485 шина
       - шина RS-485
-    signal_types:
-      - protocol_gateway
-      - network_infrastructure
     fact_types:
       - protocol
-
   - key: mqtt
     canonical: MQTT
     type: protocol
@@ -168,12 +135,8 @@ protocols:
       - МКТТ
       - mqtt брокер
       - MQTT broker
-    signal_types:
-      - protocol_gateway
-      - network_infrastructure
     fact_types:
       - protocol
-
   - key: poe
     canonical: PoE
     type: protocol
@@ -183,14 +146,8 @@ protocols:
       - poe
       - питание по PoE
       - Power over Ethernet
-    signal_types:
-      - protocol_gateway
-      - video_surveillance
-      - network_infrastructure
-      - power_backup
     fact_types:
       - protocol
-
   - key: ethernet
     canonical: Ethernet
     type: protocol
@@ -201,12 +158,8 @@ protocols:
       - LAN
       - ЛВС
       - проводная сеть
-    signal_types:
-      - network_infrastructure
-      - protocol_gateway
     fact_types:
       - protocol
-
   - key: dali
     canonical: DALI
     type: protocol
@@ -215,12 +168,8 @@ protocols:
       - ДАЛИ
       - DALI-2
       - DALI 2
-    signal_types:
-      - lighting_automation
-      - protocol_gateway
     fact_types:
       - protocol
-
   - key: one_wire
     canonical: 1-Wire
     type: protocol
@@ -231,12 +180,8 @@ protocols:
       - one wire
       - ван вайр
       - DS18B20
-    signal_types:
-      - climate_automation
-      - protocol_gateway
     fact_types:
       - protocol
-
   - key: opentherm
     canonical: OpenTherm
     type: protocol
@@ -245,12 +190,8 @@ protocols:
       - Open Therm
       - Опентерм
       - OpenTherm шлюз
-    signal_types:
-      - climate_automation
-      - protocol_gateway
     fact_types:
       - protocol
-
   - key: ebus
     canonical: eBUS
     type: protocol
@@ -259,12 +200,8 @@ protocols:
       - eBus
       - ебас
       - eBUS котел
-    signal_types:
-      - climate_automation
-      - protocol_gateway
     fact_types:
       - protocol
-
   - key: infrared
     canonical: IR
     type: protocol
@@ -275,12 +212,8 @@ protocols:
       - инфракрасный пульт
       - infrared
       - IrDA
-    signal_types:
-      - protocol_gateway
-      - climate_automation
     fact_types:
       - protocol
-
   - key: rtsp
     canonical: RTSP
     type: protocol
@@ -289,12 +222,8 @@ protocols:
       - rtsp
       - RTSP камера
       - RTSP камеры
-    signal_types:
-      - video_surveillance
-      - protocol_gateway
     fact_types:
       - protocol
-
   - key: onvif
     canonical: ONVIF
     type: protocol
@@ -303,8 +232,5 @@ protocols:
       - onvif
       - ONVIF камера
       - ONVIF камеры
-    signal_types:
-      - video_surveillance
-      - protocol_gateway
     fact_types:
       - protocol

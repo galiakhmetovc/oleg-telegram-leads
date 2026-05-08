@@ -173,6 +173,22 @@ type RulePatternSetting = {
   tokens: PatternTokenSetting[];
 };
 
+type AliasMatchSetting = {
+  catalog?: string | null;
+  catalogs?: string[];
+  keys?: string[];
+  kinds?: string[];
+};
+
+type FactMatchSetting = {
+  types: string[];
+};
+
+type RuleMatchSetting = {
+  aliases: AliasMatchSetting[];
+  facts: FactMatchSetting[];
+};
+
 type SemanticPatternResponse = {
   source_text: string;
   lemma_text: string;
@@ -185,6 +201,7 @@ type RuleSetting = {
   group?: string | null;
   phrases: string[][];
   patterns: RulePatternSetting[];
+  match?: RuleMatchSetting;
   color?: string | null;
   confidence?: number | null;
 };
@@ -194,7 +211,6 @@ type AliasSetting = {
   canonical: string;
   type: "vendor" | "protocol" | "device" | "software" | "model";
   aliases: string[];
-  signal_types: string[];
   fact_types: string[];
   color?: string | null;
   confidence?: number | null;
@@ -671,7 +687,8 @@ function SettingsCenter() {
       color: collection === "signals" ? "#0b57d0" : null,
       confidence: 0.5,
       phrases: [["пример"]],
-      patterns: []
+      patterns: [],
+      match: { aliases: [], facts: [] }
     };
     updateDraft({ ...draft, [collection]: [...draft[collection], rule] });
   }
@@ -702,7 +719,6 @@ function SettingsCenter() {
       canonical: "Новый alias",
       type: aliasTypeForCatalog(catalog),
       aliases: ["новый alias"],
-      signal_types: [],
       fact_types: [aliasTypeForCatalog(catalog)],
       confidence: 0.7,
       color: null
@@ -1000,8 +1016,8 @@ function SettingsHelpPage() {
               Доменный сигнал - это смысловой маркер в сообщении. Он отвечает на вопрос:
               "О чём здесь говорят с точки зрения бизнеса ПУР?". Например,
               `smart_home_platform`, `video_surveillance`, `water_leak_protection`,
-              `access_control`. Один сигнал может быть найден точной фразой, лемматической
-              фразой или через словарь alias.
+              `access_control`. Один сигнал может быть найден точной фразой,
+              лемматической фразой или зависимостью `match` от словаря/факта.
             </Typography>
             <TableContainer>
               <Table size="small">
@@ -1049,6 +1065,18 @@ function SettingsHelpPage() {
                     <TableCell>лемматические фразы</TableCell>
                     <TableCell>оператор вводит обычный текст, backend сохраняет исходный текст и леммы</TableCell>
                     <TableCell>находит формы слов: "умного дома", "умному дому", "систему видеонаблюдения"</TableCell>
+                  </TableRow>
+                  <TableRow>
+                    <TableCell>match.aliases</TableCell>
+                    <TableCell>явные зависимости сигнала от словарей</TableCell>
+                    <TableCell>`vendors:yandex, aqara`, `software:alice`, `devices:leak_sensor`</TableCell>
+                    <TableCell>если найден alias с указанным ключом/каталогом, появляется этот доменный сигнал</TableCell>
+                  </TableRow>
+                  <TableRow>
+                    <TableCell>match.facts</TableCell>
+                    <TableCell>зависимости сигнала от уже найденных фактов</TableCell>
+                    <TableCell>`automation_component`, `vendor`, `service_location`</TableCell>
+                    <TableCell>позволяет строить сигнал поверх структурных фактов без повторного поиска текста</TableCell>
                   </TableRow>
                 </TableBody>
               </Table>
@@ -1139,13 +1167,7 @@ function SettingsHelpPage() {
                     <TableCell>aliases</TableCell>
                     <TableCell>варианты написания</TableCell>
                     <TableCell>латиница, кириллица, транслитерация, частые ошибки: `Нептун`, `Нептуп`</TableCell>
-                    <TableCell>каждый alias может создать связанные сигналы и факты</TableCell>
-                  </TableRow>
-                  <TableRow>
-                    <TableCell>signal_types</TableCell>
-                    <TableCell>какие доменные сигналы добавить при совпадении</TableCell>
-                    <TableCell>например `smart_home_platform`, `protocol_gateway`, `leak_protection`</TableCell>
-                    <TableCell>дальше эти сигналы участвуют в score и аналитике</TableCell>
+                    <TableCell>сам alias создаёт факты; сигналы ссылаются на него через `match.aliases`</TableCell>
                   </TableRow>
                   <TableRow>
                     <TableCell>fact_types</TableCell>
@@ -1162,9 +1184,9 @@ function SettingsHelpPage() {
             <Typography variant="h6">Связь сигналов и словарей</Typography>
             <Typography variant="body2" color="text.secondary">
               Доменный сигнал и словарь не заменяют друг друга. Они являются разными источниками
-              совпадений и могут выпускать один и тот же `type`. Это сделано специально:
-              смысловая категория остаётся в доменных сигналах, а конкретные бренды, модели,
-              протоколы и приложения живут в словарях.
+              данных. Смысловая категория остаётся в доменных сигналах, а конкретные бренды,
+              модели, протоколы и приложения живут в словарях. Связь хранится на стороне
+              сигнала в `match.aliases`.
             </Typography>
             <TableContainer>
               <Table size="small">
@@ -1182,9 +1204,14 @@ function SettingsHelpPage() {
                     <TableCell>когда фраза описывает смысловую категорию, а не бренд или модель</TableCell>
                   </TableRow>
                   <TableRow>
+                    <TableCell>`match.aliases` у `water_leak_protection`</TableCell>
+                    <TableCell>сигнал явно ссылается на `vendors:neptun`; "Нептун" не добавляем в `phrases`, но сигнал появляется с `source=alias_catalog`</TableCell>
+                    <TableCell>когда смысловой сигнал должен опираться на словарную сущность</TableCell>
+                  </TableRow>
+                  <TableRow>
                     <TableCell>alias `neptun` в словаре vendors</TableCell>
-                    <TableCell>Нептун не добавляем в phrases; alias создаст связанные сигналы `leak_protection`, `water_leak_protection` с `source=alias_catalog` и факты `vendor`, `model`</TableCell>
-                    <TableCell>когда нужно хранить каноническое имя, варианты написания, ошибки и связи с несколькими типами</TableCell>
+                    <TableCell>словарь создаёт факты `vendor`, `model` и хранит `Нептун`, `Нептуп`, `Neptun ProW`, `Profi Wi-Fi`</TableCell>
+                    <TableCell>когда нужно хранить каноническое имя, варианты написания и ошибки</TableCell>
                   </TableRow>
                   <TableRow>
                     <TableCell>lead_scoring</TableCell>
@@ -1196,9 +1223,9 @@ function SettingsHelpPage() {
             </TableContainer>
             <Alert severity="info">
               Практическое правило: бренды, модели, протоколы, приложения и человеческие ошибки
-              написания держим в словарях. Доменные сигналы не ссылаются на словари напрямую;
-              связь задаётся в alias через `signal_types` и `fact_types`. В интерфейсе обратную
-              связь можно вычислять по этим полям, но хранить её второй раз не нужно.
+              написания держим в словарях. Доменные сигналы ссылаются на словари через
+              `match.aliases`; словари не содержат `signal_types`, чтобы не было двух источников
+              правды. Факты от alias задаются через `fact_types`.
             </Alert>
           </Paper>
 
@@ -1544,13 +1571,6 @@ function AliasEditor({
               fullWidth
             />
             <Stack spacing={2}>
-              <TextField
-                label="signal_types"
-                value={stringListToText(alias.signal_types)}
-                onChange={(event) => onUpdate({ ...alias, signal_types: textToStringList(event.target.value) })}
-                multiline
-                minRows={2}
-              />
               <TextField
                 label="fact_types"
                 value={stringListToText(alias.fact_types)}
@@ -1963,6 +1983,7 @@ function RuleCollectionEditor({
               {group.items.map(({ rule, index }) => (
                 <RuleEditor
                   key={`${rule.type}-${index}`}
+                  collection={collection}
                   rule={rule}
                   onRemove={() => onRemove(collection, index)}
                   onUpdate={(nextRule) => onUpdate(collection, index, nextRule)}
@@ -1977,10 +1998,12 @@ function RuleCollectionEditor({
 }
 
 function RuleEditor({
+  collection,
   rule,
   onRemove,
   onUpdate
 }: {
+  collection: "signals" | "facts";
   rule: RuleSetting;
   onRemove: () => void;
   onUpdate: (rule: RuleSetting) => void;
@@ -2031,6 +2054,12 @@ function RuleEditor({
             patterns={rule.patterns}
             onUpdate={(patterns) => onUpdate({ ...rule, patterns })}
           />
+          {collection === "signals" && (
+            <SignalMatchEditor
+              match={normalizeRuleMatch(rule.match)}
+              onUpdate={(match) => onUpdate({ ...rule, match })}
+            />
+          )}
           <Box>
             <IconButton aria-label="Удалить правило" color="error" onClick={onRemove}>
               <DeleteIcon />
@@ -2097,7 +2126,7 @@ function ExactPhraseEditor({
     <Stack spacing={1}>
       <RuleListHeader
         title="Точные фразы"
-        description="Совпадение по такой же последовательности слов без учета регистра. Используй для устойчивых выражений, аббревиатур, брендов и технических обозначений."
+        description="Совпадение по такой же последовательности слов без учета регистра. Используй для устойчивых выражений и аббревиатур; бренды, модели и протоколы держи в словарях."
         addLabel="Добавить точную фразу"
         onAdd={() => setDialog({ index: null, value: "" })}
       />
@@ -2265,6 +2294,45 @@ function SemanticPatternEditor({
           void savePattern();
         }}
       />
+    </Stack>
+  );
+}
+
+function SignalMatchEditor({
+  match,
+  onUpdate
+}: {
+  match: RuleMatchSetting;
+  onUpdate: (match: RuleMatchSetting) => void;
+}) {
+  return (
+    <Stack spacing={1}>
+      <RuleListHeader
+        title="Зависимости сигнала"
+        description="Сигнал может срабатывать от записей словарей и уже найденных фактов. Формат alias: catalog:key1, key2."
+        addLabel="Добавить зависимость"
+        onAdd={() => onUpdate({ ...match, aliases: [...match.aliases, { catalog: "vendors", keys: [] }] })}
+      />
+      <Box className="settings-two-column">
+        <TextField
+          label="match.aliases"
+          helperText="Например: vendors:yandex, aqara"
+          value={aliasMatchesToText(match.aliases)}
+          onChange={(event) => onUpdate({ ...match, aliases: textToAliasMatches(event.target.value) })}
+          multiline
+          minRows={3}
+          fullWidth
+        />
+        <TextField
+          label="match.facts"
+          helperText="Одна строка: fact_type или список через запятую"
+          value={factMatchesToText(match.facts)}
+          onChange={(event) => onUpdate({ ...match, facts: textToFactMatches(event.target.value) })}
+          multiline
+          minRows={3}
+          fullWidth
+        />
+      </Box>
     </Stack>
   );
 }
@@ -2466,6 +2534,69 @@ function textToStringList(value: string): string[] {
   return value
     .split("\n")
     .map((line) => line.trim())
+    .filter(Boolean);
+}
+
+function normalizeRuleMatch(match?: RuleMatchSetting): RuleMatchSetting {
+  return {
+    aliases: match?.aliases ?? [],
+    facts: match?.facts ?? []
+  };
+}
+
+function aliasMatchesToText(items?: AliasMatchSetting[]) {
+  return (items ?? []).map(aliasMatchToText).join("\n");
+}
+
+function aliasMatchToText(item: AliasMatchSetting) {
+  const catalogs = [item.catalog ?? "", ...(item.catalogs ?? [])].filter(Boolean);
+  const kindItems = (item.kinds ?? []).map((kind) => `kind=${kind}`);
+  const left = [...catalogs, ...kindItems].join(",");
+  const keys = item.keys ?? [];
+  const right = keys.length > 0 ? keys.join(", ") : "*";
+  return `${left || "*"}:${right}`;
+}
+
+function textToAliasMatches(value: string): AliasMatchSetting[] {
+  return value
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => {
+      const separatorIndex = line.indexOf(":");
+      const leftRaw = separatorIndex >= 0 ? line.slice(0, separatorIndex) : line;
+      const rightRaw = separatorIndex >= 0 ? line.slice(separatorIndex + 1) : "";
+      const leftItems = commaListToStrings(leftRaw).filter((item) => item !== "*");
+      const kindItems = leftItems
+        .filter((item) => item.startsWith("kind=") || item.startsWith("kind:"))
+        .map((item) => item.slice(5));
+      const catalogItems = leftItems.filter((item) => !item.startsWith("kind=") && !item.startsWith("kind:"));
+      const keys = commaListToStrings(rightRaw).filter((item) => item !== "*");
+      return {
+        catalog: catalogItems[0] ?? null,
+        catalogs: catalogItems.slice(1),
+        keys,
+        kinds: kindItems
+      };
+    });
+}
+
+function factMatchesToText(items?: FactMatchSetting[]) {
+  return (items ?? []).map((item) => item.types.join(", ")).join("\n");
+}
+
+function textToFactMatches(value: string): FactMatchSetting[] {
+  return value
+    .split("\n")
+    .map((line) => commaListToStrings(line))
+    .filter((types) => types.length > 0)
+    .map((types) => ({ types }));
+}
+
+function commaListToStrings(value: string): string[] {
+  return value
+    .split(",")
+    .map((item) => item.trim())
     .filter(Boolean);
 }
 

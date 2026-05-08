@@ -208,7 +208,7 @@ facts:
     assert len(tokenizer_ids) == 1
 
 
-def test_enriches_text_with_alias_catalog_signals_and_facts(tmp_path: Path) -> None:
+def test_enriches_text_with_signal_dictionary_dependencies_and_alias_facts(tmp_path: Path) -> None:
     config_dir = tmp_path / "nlp"
     config_dir.mkdir()
     (config_dir / "pipeline.yaml").write_text(
@@ -225,7 +225,39 @@ stages:
 """,
         encoding="utf-8",
     )
-    (config_dir / "signals.yaml").write_text("signals: []\n", encoding="utf-8")
+    (config_dir / "signals.yaml").write_text(
+        """
+signals:
+  - type: smart_home_platform
+    label: Платформа умного дома
+    match:
+      aliases:
+        - catalog: vendors
+          keys:
+            - aqara
+        - catalog: software
+          keys:
+            - alice
+  - type: protocol_gateway
+    label: Протоколы и шлюзы
+    match:
+      aliases:
+        - catalog: protocols
+          keys:
+            - zigbee
+        - catalog: devices
+          keys:
+            - relay
+  - type: water_leak_protection
+    label: Защита от протечек
+    match:
+      aliases:
+        - catalog: devices
+          keys:
+            - leak_sensor
+""",
+        encoding="utf-8",
+    )
     (config_dir / "facts.yaml").write_text("facts: []\n", encoding="utf-8")
     (config_dir / "lead_scoring.yaml").write_text(
         """
@@ -271,8 +303,6 @@ vendors:
     aliases:
       - Aqara
       - Акара
-    signal_types:
-      - smart_home_platform
     fact_types:
       - vendor
 """,
@@ -287,8 +317,6 @@ protocols:
     aliases:
       - Zigbee
       - Зигби
-    signal_types:
-      - protocol_gateway
     fact_types:
       - protocol
 """,
@@ -303,8 +331,6 @@ devices:
     aliases:
       - датчик протечки
       - датчики протечки
-    signal_types:
-      - water_leak_protection
     fact_types:
       - automation_component
   - key: relay
@@ -312,8 +338,6 @@ devices:
     type: device
     aliases:
       - реле
-    signal_types:
-      - protocol_gateway
     fact_types:
       - automation_component
 """,
@@ -327,8 +351,6 @@ software:
     type: software
     aliases:
       - Алиса
-    signal_types:
-      - smart_home_platform
     fact_types:
       - software
 """,
@@ -429,9 +451,23 @@ def test_default_config_keeps_neptun_spellings_only_in_alias_catalogs() -> None:
         alias.casefold()
         for alias in next(alias_rule for alias_rule in config.aliases if alias_rule.key == "neptun").aliases
     }
+    alias_signal_types = {
+        alias_rule.key: getattr(alias_rule, "signal_types", ())
+        for alias_rule in config.aliases
+        if getattr(alias_rule, "signal_types", ())
+    }
+    leak_dependency_keys = {
+        key
+        for rule in config.signals
+        if rule.type in {"water_leak_protection", "leak_protection"}
+        for dependency in rule.match.aliases
+        for key in dependency.keys
+    }
 
     assert forbidden_spellings.isdisjoint(direct_signal_phrases)
     assert forbidden_spellings.isdisjoint(direct_fact_phrases)
+    assert alias_signal_types == {}
+    assert "neptun" in leak_dependency_keys
     assert {"neptun", "нептун", "нептуп"}.issubset(alias_spellings)
     assert any("prow" in alias for alias in alias_spellings)
     assert any("profi" in alias for alias in alias_spellings)
@@ -673,7 +709,7 @@ def test_default_config_marks_follow_up_pur_leads_with_specific_explanations(
                 "ноут подключить? То есть можно вывести внизу где то аккуратную "
                 "розетку с ним?"
             ),
-            "signals": {"smart_home_automation"},
+            "signals": {"smart_home_platform"},
             "facts": {"automation_component", "controlled_device", "wiring_output"},
             "areas": {"smart_home"},
             "segments": set(),

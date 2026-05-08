@@ -27,11 +27,42 @@ class RulePatternConfig:
 
 
 @dataclass(frozen=True)
+class AliasMatchConfig:
+    catalogs: tuple[str, ...] = ()
+    keys: tuple[str, ...] = ()
+    kinds: tuple[str, ...] = ()
+
+    @property
+    def is_empty(self) -> bool:
+        return not self.catalogs and not self.keys and not self.kinds
+
+
+@dataclass(frozen=True)
+class FactMatchConfig:
+    types: tuple[str, ...] = ()
+
+    @property
+    def is_empty(self) -> bool:
+        return not self.types
+
+
+@dataclass(frozen=True)
+class RuleMatchConfig:
+    aliases: tuple[AliasMatchConfig, ...] = ()
+    facts: tuple[FactMatchConfig, ...] = ()
+
+    @property
+    def is_empty(self) -> bool:
+        return not self.aliases and not self.facts
+
+
+@dataclass(frozen=True)
 class PhraseRuleConfig:
     type: str
     label: str
     phrases: tuple[tuple[str, ...], ...]
     patterns: tuple[RulePatternConfig, ...]
+    match: RuleMatchConfig = field(default_factory=RuleMatchConfig)
     group: str | None = None
     color: str | None = None
     confidence: float | None = None
@@ -40,10 +71,10 @@ class PhraseRuleConfig:
 @dataclass(frozen=True)
 class AliasRuleConfig:
     key: str
+    catalog: str
     canonical: str
     kind: str
     aliases: tuple[str, ...]
-    signal_types: tuple[str, ...]
     fact_types: tuple[str, ...]
     color: str | None = None
     confidence: float | None = None
@@ -145,8 +176,9 @@ def _parse_phrase_rule(raw: Any, collection_name: str) -> PhraseRuleConfig:
 
     phrases = raw.get("phrases", [])
     patterns = raw.get("patterns", [])
-    if not phrases and not patterns:
-        raise ValueError(f"{collection_name} item must define phrases or patterns")
+    match = _parse_rule_match(raw.get("match"), collection_name)
+    if not phrases and not patterns and match.is_empty:
+        raise ValueError(f"{collection_name} item must define phrases, patterns, or match")
 
     parsed_phrases: list[tuple[str, ...]] = []
     for phrase in phrases:
@@ -162,6 +194,7 @@ def _parse_phrase_rule(raw: Any, collection_name: str) -> PhraseRuleConfig:
         confidence=float(raw["confidence"]) if raw.get("confidence") is not None else None,
         phrases=tuple(parsed_phrases),
         patterns=_parse_patterns(patterns, collection_name),
+        match=match,
     )
 
 
@@ -194,6 +227,66 @@ def _parse_patterns(raw_patterns: Any, collection_name: str) -> tuple[RulePatter
     return tuple(patterns)
 
 
+def _parse_rule_match(raw_match: Any, collection_name: str) -> RuleMatchConfig:
+    if raw_match is None:
+        return RuleMatchConfig()
+    if not isinstance(raw_match, dict):
+        raise ValueError(f"{collection_name} match must be a mapping")
+
+    aliases = _parse_alias_match_dependencies(raw_match.get("aliases", []), collection_name)
+    facts = _parse_fact_match_dependencies(raw_match.get("facts", []), collection_name)
+    return RuleMatchConfig(aliases=aliases, facts=facts)
+
+
+def _parse_alias_match_dependencies(raw_dependencies: Any, collection_name: str) -> tuple[AliasMatchConfig, ...]:
+    if not raw_dependencies:
+        return ()
+    if not isinstance(raw_dependencies, list):
+        raise ValueError(f"{collection_name} match.aliases must be a list")
+
+    dependencies: list[AliasMatchConfig] = []
+    for raw_dependency in raw_dependencies:
+        if not isinstance(raw_dependency, dict):
+            raise ValueError(f"{collection_name} match.aliases item must be a mapping")
+        catalogs = _parse_string_list(raw_dependency.get("catalogs", []), "match.aliases.catalogs")
+        catalog = raw_dependency.get("catalog")
+        if catalog is not None:
+            catalogs.insert(0, str(catalog))
+        dependency = AliasMatchConfig(
+            catalogs=tuple(dict.fromkeys(catalogs)),
+            keys=tuple(_parse_string_list(raw_dependency.get("keys", []), "match.aliases.keys")),
+            kinds=tuple(_parse_string_list(raw_dependency.get("kinds", []), "match.aliases.kinds")),
+        )
+        if dependency.is_empty:
+            raise ValueError(f"{collection_name} match.aliases item must define catalog, keys, or kinds")
+        dependencies.append(dependency)
+
+    return tuple(dependencies)
+
+
+def _parse_fact_match_dependencies(raw_dependencies: Any, collection_name: str) -> tuple[FactMatchConfig, ...]:
+    if not raw_dependencies:
+        return ()
+    if not isinstance(raw_dependencies, list):
+        raise ValueError(f"{collection_name} match.facts must be a list")
+
+    dependencies: list[FactMatchConfig] = []
+    for raw_dependency in raw_dependencies:
+        if isinstance(raw_dependency, str):
+            dependency = FactMatchConfig(types=(raw_dependency,))
+        elif isinstance(raw_dependency, dict):
+            dependency = FactMatchConfig(
+                types=tuple(_parse_string_list(raw_dependency.get("types", []), "match.facts.types"))
+            )
+        else:
+            raise ValueError(f"{collection_name} match.facts item must be a string or mapping")
+        if dependency.is_empty:
+            raise ValueError(f"{collection_name} match.facts item must define types")
+        dependencies.append(dependency)
+
+    return tuple(dependencies)
+
+
 def _parse_alias_catalog(
     raw_document: dict[str, Any],
     catalog_name: str,
@@ -211,17 +304,16 @@ def _parse_alias_catalog(
         aliases = _parse_string_list(raw.get("aliases", []), f"{catalog_name}.aliases")
         if not aliases:
             raise ValueError(f"{catalog_name} item must define aliases")
-        signal_types = _parse_string_list(raw.get("signal_types", []), f"{catalog_name}.signal_types")
         fact_types = _parse_string_list(raw.get("fact_types", []), f"{catalog_name}.fact_types")
-        if not signal_types and not fact_types:
-            raise ValueError(f"{catalog_name} item must define signal_types or fact_types")
+        if not fact_types:
+            raise ValueError(f"{catalog_name} item must define fact_types")
         items.append(
             AliasRuleConfig(
                 key=str(raw["key"]),
+                catalog=catalog_name,
                 canonical=str(raw.get("canonical", raw.get("label", raw["key"]))),
                 kind=str(raw.get("type", _catalog_item_kind(catalog_name))),
                 aliases=tuple(aliases),
-                signal_types=tuple(signal_types),
                 fact_types=tuple(fact_types),
                 color=raw.get("color"),
                 confidence=float(raw["confidence"]) if raw.get("confidence") is not None else None,

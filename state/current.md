@@ -22,15 +22,16 @@
   defaults only. Runtime/env settings are shown read-only.
 - The UI Help tab now documents current editable NLP settings: pipeline stages,
   exact and lemmatized matching, domain signals, facts, alias dictionaries, lead
-  scoring, thresholds, weights, solution areas, customer segments, intent/noise
-  signals, and review lanes.
+  signal dependencies, scoring, thresholds, weights, solution areas, customer
+  segments, intent/noise signals, and review lanes.
 - Domain signals and facts now support editable `group` folders stored in NLP
   config revisions. Settings Center groups large rule lists by these folders,
-  and Help explains how semantic signal/fact types receive alias catalog matches.
+  and Help explains how signal dependencies work.
 - Brand/model spellings such as `Нептун`, `Нептуп`, `Neptun ProW`, and
   `Profi Wi-Fi` live only in alias catalogs. Domain signals keep semantic
-  phrases and receive brand matches through `alias.signal_types`; facts receive
-  them through `alias.fact_types`.
+  phrases and explicitly reference dictionaries through `match.aliases`; alias
+  catalogs emit structured facts through `fact_types` and no longer carry
+  `signal_types`.
 - Settings rule editing now presents operator-facing matching modes: exact
   phrases and lemmatized phrases. Exact/semantic rules are edited with explicit
   add/edit/delete actions. New lemmatized phrases are built by the backend from
@@ -44,8 +45,9 @@
   use each mode.
 - Settings Center now also exposes editable alias catalogs for `vendors`,
   `protocols`, `devices`, and `software`. These catalogs keep canonical names,
-  Latin/Cyrillic/transliterated/mistyped aliases, alias type, and links to
-  semantic signal/fact types.
+  Latin/Cyrillic/transliterated/mistyped aliases, alias type, and fact type
+  links. Domain signal dictionary dependencies are edited on the signal rule
+  itself.
 - Default NLP config includes a broad curated first pass for РФ/СНГ smart-home
   market terms: Яндекс/Сбер/Aqara/Xiaomi/Tuya/Sonoff/Rubetek/Livicom/Wiren Board,
   leak protection brands, CCTV/access vendors, Matter/Zigbee/Z-Wave/KNX/Wi-Fi/
@@ -91,7 +93,7 @@
 - Default NLP config recognizes Neptun/Нептун water leak monitoring leads,
   including the typo `Нептуп`, ProW/Profi product mentions, wired leak sensors,
   sensor-trigger monitoring, and smartphone information output.
-- Dev PostgreSQL active NLP config was refreshed to revision 23. The `need`
+- Dev PostgreSQL active NLP config was refreshed to revision 24. The `need`
   signal no longer stores Russian forms such as `нужно`, `нужна`, `нужен` as
   exact phrases; they are represented as lemmatized phrase rules with preserved
   operator source text. Revision 16 also includes the Neptun water leak
@@ -100,7 +102,9 @@
   reseeded from current bootstrap YAML after dropping `caseless` compatibility;
   revision 22 adds rule-group folders to the active PostgreSQL config; revision
   23 removes direct Neptun/ProW/Profi brand/model rules so those spellings are
-  emitted only through alias catalogs.
+  emitted only through alias catalogs; revision 24 migrates alias
+  `signal_types` into explicit `signals[].match.aliases` dependencies and
+  removes signal outputs from alias dictionaries.
 - `RussianTextEnricher` now precompiles Yargy parsers once per enricher
   instance and shares one Yargy `MorphTokenizer` across compiled rules instead
   of creating a separate `pymorphy2` analyzer for every parser. This keeps

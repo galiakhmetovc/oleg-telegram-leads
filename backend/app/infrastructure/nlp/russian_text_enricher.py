@@ -40,6 +40,14 @@ class CompiledExactPhrase:
     pattern: re.Pattern[str]
 
 
+@dataclass(frozen=True)
+class AliasTextMatch:
+    config: AliasRuleConfig
+    start: int
+    stop: int
+    text: str
+
+
 class RussianTextEnricher:
     def __init__(self, config: NlpPipelineConfig) -> None:
         self._config = config
@@ -50,7 +58,6 @@ class RussianTextEnricher:
         self._syntax_parser: NewsSyntaxParser | None = None
         self._ner_tagger: NewsNERTagger | None = None
         self._yargy_tokenizer = MorphTokenizer()
-        self._signal_rules_by_type = {rule.type: rule for rule in config.signals}
         self._compiled_signal_rules = self._compile_phrase_rules(config.signals)
         self._compiled_fact_rules = self._compile_phrase_rules(config.facts)
         self._compiled_alias_rules = self._compile_alias_rules(config.aliases)
@@ -94,12 +101,16 @@ class RussianTextEnricher:
                 span.normalize(self._morph_vocab)
             mark("ner", 70, "Найдены именованные сущности")
 
-        facts = self._extract_facts(text) if self._config.is_enabled("facts") else []
+        alias_matches = self._find_alias_matches(text)
+
+        facts = self._extract_facts(text, alias_matches) if self._config.is_enabled("facts") else []
         if self._config.is_enabled("facts"):
             mark("facts", 80, "Извлечены факты по Yargy-правилам")
 
         signals = (
-            self._extract_domain_signals(text) if self._config.is_enabled("domain_signals") else []
+            self._extract_domain_signals(text, alias_matches, facts)
+            if self._config.is_enabled("domain_signals")
+            else []
         )
         if self._config.is_enabled("domain_signals"):
             mark("domain_signals", 90, "Найдены доменные сигналы-кандидаты")
@@ -196,7 +207,12 @@ class RussianTextEnricher:
             self._ner_tagger = NewsNERTagger(self._embedding_instance())
         return self._ner_tagger
 
-    def _extract_domain_signals(self, text: str) -> list[DomainSignal]:
+    def _extract_domain_signals(
+        self,
+        text: str,
+        alias_matches: list[AliasTextMatch],
+        facts: list[ExtractedFact],
+    ) -> list[DomainSignal]:
         signals: list[DomainSignal] = []
         for compiled_rule in self._compiled_signal_rules:
             rule_config = compiled_rule.config
@@ -217,27 +233,43 @@ class RussianTextEnricher:
                     compiled_rule.parser,
                 )
             )
-        for compiled_alias in self._compiled_alias_rules:
-            alias_config = compiled_alias.config
-            for start, stop, match_text in self._find_phrase_matches(
-                text,
-                compiled_alias.exact_phrases,
-                None,
-            ):
-                signals.extend(
-                    self._signal_from_alias(
-                        alias_config=alias_config,
-                        signal_type=signal_type,
-                        match_text=match_text,
-                        start=start,
-                        stop=stop,
-                        index=len(signals) + offset + 1,
+            for alias_match in alias_matches:
+                if not _rule_matches_alias(rule_config, alias_match.config):
+                    continue
+                signals.append(
+                    DomainSignal(
+                        id=f"signal-{len(signals) + 1}",
+                        text=alias_match.text,
+                        type=rule_config.type,
+                        label=rule_config.label,
+                        range=TextRange(start=alias_match.start, stop=alias_match.stop),
+                        source="alias_catalog",
+                        confidence=rule_config.confidence,
+                        color=rule_config.color,
                     )
-                    for offset, signal_type in enumerate(alias_config.signal_types)
+                )
+            for fact in facts:
+                if not _rule_matches_fact(rule_config, fact):
+                    continue
+                signals.append(
+                    DomainSignal(
+                        id=f"signal-{len(signals) + 1}",
+                        text=fact.text,
+                        type=rule_config.type,
+                        label=rule_config.label,
+                        range=fact.range,
+                        source="fact_dependency",
+                        confidence=rule_config.confidence,
+                        color=rule_config.color,
+                    )
                 )
         return _dedupe_signals(signals)
 
-    def _extract_facts(self, text: str) -> list[ExtractedFact]:
+    def _extract_facts(
+        self,
+        text: str,
+        alias_matches: list[AliasTextMatch],
+    ) -> list[ExtractedFact]:
         facts: list[ExtractedFact] = []
         for compiled_rule in self._compiled_fact_rules:
             rule_config = compiled_rule.config
@@ -257,48 +289,21 @@ class RussianTextEnricher:
                     compiled_rule.parser,
                 )
             )
-        for compiled_alias in self._compiled_alias_rules:
-            alias_config = compiled_alias.config
-            for start, stop, match_text in self._find_phrase_matches(
-                text,
-                compiled_alias.exact_phrases,
-                None,
-            ):
-                facts.extend(
-                    ExtractedFact(
-                        id=f"fact-{len(facts) + offset + 1}",
-                        text=match_text,
-                        type=fact_type,
-                        label=_alias_fact_label(alias_config, fact_type),
-                        range=TextRange(start=start, stop=stop),
-                        source="alias_catalog",
-                        confidence=alias_config.confidence,
-                    )
-                    for offset, fact_type in enumerate(alias_config.fact_types)
+        for alias_match in alias_matches:
+            alias_config = alias_match.config
+            facts.extend(
+                ExtractedFact(
+                    id=f"fact-{len(facts) + offset + 1}",
+                    text=alias_match.text,
+                    type=fact_type,
+                    label=_alias_fact_label(alias_config, fact_type),
+                    range=TextRange(start=alias_match.start, stop=alias_match.stop),
+                    source="alias_catalog",
+                    confidence=alias_config.confidence,
                 )
+                for offset, fact_type in enumerate(alias_config.fact_types)
+            )
         return _dedupe_facts(facts)
-
-    def _signal_from_alias(
-        self,
-        *,
-        alias_config: AliasRuleConfig,
-        signal_type: str,
-        match_text: str,
-        start: int,
-        stop: int,
-        index: int,
-    ) -> DomainSignal:
-        signal_config = self._signal_rules_by_type.get(signal_type)
-        return DomainSignal(
-            id=f"signal-{index}",
-            text=match_text,
-            type=signal_type,
-            label=signal_config.label if signal_config else alias_config.canonical,
-            range=TextRange(start=start, stop=stop),
-            source="alias_catalog",
-            confidence=signal_config.confidence if signal_config else alias_config.confidence,
-            color=signal_config.color if signal_config else alias_config.color,
-        )
 
     def _compile_phrase_rules(
         self,
@@ -339,6 +344,24 @@ class RussianTextEnricher:
         if not yargy_rules:
             return None
         return _parser_from_rules(yargy_rules, tokenizer=self._yargy_tokenizer)
+
+    def _find_alias_matches(self, text: str) -> list[AliasTextMatch]:
+        matches: list[AliasTextMatch] = []
+        for compiled_alias in self._compiled_alias_rules:
+            for start, stop, match_text in self._find_phrase_matches(
+                text,
+                compiled_alias.exact_phrases,
+                None,
+            ):
+                matches.append(
+                    AliasTextMatch(
+                        config=compiled_alias.config,
+                        start=start,
+                        stop=stop,
+                        text=match_text,
+                    )
+                )
+        return sorted(matches, key=lambda item: (item.start, item.stop, item.text.lower()))
 
     def _find_phrase_matches(
         self,
@@ -409,6 +432,22 @@ def _alias_fact_label(alias_config: AliasRuleConfig, fact_type: str) -> str:
         "model": "Модель",
     }.get(fact_type, alias_config.kind)
     return f"{prefix}: {alias_config.canonical}"
+
+
+def _rule_matches_alias(rule_config: PhraseRuleConfig, alias_config: AliasRuleConfig) -> bool:
+    for dependency in rule_config.match.aliases:
+        if dependency.catalogs and alias_config.catalog not in dependency.catalogs:
+            continue
+        if dependency.keys and alias_config.key not in dependency.keys:
+            continue
+        if dependency.kinds and alias_config.kind not in dependency.kinds:
+            continue
+        return True
+    return False
+
+
+def _rule_matches_fact(rule_config: PhraseRuleConfig, fact: ExtractedFact) -> bool:
+    return any(fact.type in dependency.types for dependency in rule_config.match.facts)
 
 
 def _dedupe_signals(signals: list[DomainSignal]) -> list[DomainSignal]:

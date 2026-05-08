@@ -2,939 +2,1223 @@ signals:
   - type: need
     label: Потребность
     group: Спрос и намерение
-    color: "#2e7d32"
+    color: '#2e7d32'
     confidence: 0.72
     patterns:
-      - source_text: "нужно"
+      - source_text: нужно
         tokens:
-          - normalized: "нужный"
-      - source_text: "ищем"
+          - normalized: нужный
+      - source_text: ищем
         tokens:
-          - normalized: "искать"
-      - source_text: "ищем поставщика"
+          - normalized: искать
+      - source_text: ищем поставщика
         tokens:
-          - normalized: "искать"
-          - normalized: "поставщик"
-      - source_text: "купим"
+          - normalized: искать
+          - normalized: поставщик
+      - source_text: купим
         tokens:
-          - normalized: "купить"
-      - source_text: "требуется"
+          - normalized: купить
+      - source_text: требуется
         tokens:
-          - normalized: "требоваться"
-
+          - normalized: требоваться
   - type: supply
     label: Предложение
     group: Шум и продажи
-    color: "#1565c0"
+    color: '#1565c0'
     confidence: 0.68
     phrases:
-      - ["продаем"]
-      - ["предлагаем"]
-      - ["есть", "в", "наличии"]
-      - ["поставляем"]
-
+      - - продаем
+      - - предлагаем
+      - - есть
+        - в
+        - наличии
+      - - поставляем
   - type: urgency
     label: Срочность
     group: Спрос и намерение
-    color: "#c62828"
+    color: '#c62828'
     confidence: 0.64
     phrases:
-      - ["срочно"]
-      - ["как", "можно", "быстрее"]
-      - ["до", "конца", "недели"]
-
+      - - срочно
+      - - как
+        - можно
+        - быстрее
+      - - до
+        - конца
+        - недели
   - type: commercial_terms
     label: Коммерческие условия
     group: Коммерция
-    color: "#6a1b9a"
+    color: '#6a1b9a'
     confidence: 0.6
     phrases:
-      - ["с", "ндс"]
-      - ["без", "ндс"]
-      - ["по", "договору"]
-      - ["предоплата"]
-
+      - - с
+        - ндс
+      - - без
+        - ндс
+      - - по
+        - договору
+      - - предоплата
   - type: customer_intent
     label: Запрос заказчика
     group: Спрос и намерение
-    color: "#ef6c00"
+    color: '#ef6c00'
     confidence: 0.76
     patterns:
       - tokens:
-          - normalized: "заказчик"
-          - normalized: "хотеть"
+          - normalized: заказчик
+          - normalized: хотеть
       - tokens:
-          - normalized: "клиент"
-          - normalized: "хотеть"
+          - normalized: клиент
+          - normalized: хотеть
       - tokens:
-          - normalized: "запрос"
-          - normalized: "от"
-          - normalized: "клиент"
+          - normalized: запрос
+          - normalized: от
+          - normalized: клиент
       - tokens:
-          - normalized: "хотеть"
-          - normalized: "реализовать"
-
+          - normalized: хотеть
+          - normalized: реализовать
   - type: provider_search
     label: Поиск исполнителя / контактов
     group: Спрос и намерение
-    color: "#ad1457"
+    color: '#ad1457'
     confidence: 0.86
     patterns:
       - tokens:
-          - normalized: "посоветовать"
-          - normalized: "контакт"
+          - normalized: посоветовать
+          - normalized: контакт
       - tokens:
-          - normalized: "к"
-          - normalized: "кто"
-          - normalized: "идти"
+          - normalized: к
+          - normalized: кто
+          - normalized: идти
       - tokens:
-          - normalized: "где"
-          - normalized: "можно"
-          - normalized: "заказать"
+          - normalized: где
+          - normalized: можно
+          - normalized: заказать
       - tokens:
-          - normalized: "поделиться"
-          - normalized: "контакт"
+          - normalized: поделиться
+          - normalized: контакт
       - tokens:
-          - normalized: "хороший"
-          - normalized: "подрядчик"
-
+          - normalized: хороший
+          - normalized: подрядчик
   - type: installation_request
     label: Запрос на установку / подключение
     group: Спрос и намерение
-    color: "#0277bd"
+    color: '#0277bd'
     confidence: 0.84
     patterns:
       - tokens:
-          - normalized: "установить"
-          - normalized: "и"
-          - normalized: "подключить"
+          - normalized: установить
+          - normalized: и
+          - normalized: подключить
       - tokens:
-          - normalized: "установить"
+          - normalized: установить
       - tokens:
-          - normalized: "хотеть"
-          - normalized: "установить"
-
+          - normalized: хотеть
+          - normalized: установить
   - type: smart_home_automation
     label: Умный дом / автоматизация
     group: Умный дом и интеграции
-    color: "#00838f"
+    color: '#00838f'
     confidence: 0.84
     patterns:
       - tokens:
-          - normalized: "умный"
-          - normalized: "дом"
+          - normalized: умный
+          - normalized: дом
       - tokens:
-          - normalized: "автоматизация"
+          - normalized: автоматизация
       - tokens:
-          - normalized: "zigbee"
-          - normalized: "шлюз"
+          - normalized: система
+          - normalized: защита
+          - normalized: от
+          - normalized: протечка
       - tokens:
-          - normalized: "алиса"
-      - tokens:
-          - normalized: "система"
-          - normalized: "защита"
-          - normalized: "от"
-          - normalized: "протечка"
-      - tokens:
-          - normalized: "умный"
-          - normalized: "функционал"
-
+          - normalized: умный
+          - normalized: функционал
+    match:
+      aliases:
+        - catalog: devices
+          keys:
+            - smart_home_hub
+            - controller
+            - relay_module
+            - leak_sensor
+            - leak_valve
+            - smart_socket
+            - smart_lock
+            - smart_switch
+            - dimmer
+            - smart_lighting
+            - smart_panel
+            - motion_sensor
+            - thermostat
+            - electric_curtain
   - type: smart_home_platform
     label: Платформа / экосистема умного дома
     group: Умный дом и интеграции
-    color: "#006c9c"
+    color: '#006c9c'
     confidence: 0.78
     patterns:
-      - source_text: "экосистема умного дома"
+      - source_text: экосистема умного дома
         tokens:
-          - normalized: "экосистема"
-          - normalized: "умный"
-          - normalized: "дом"
-      - source_text: "платформа умного дома"
+          - normalized: экосистема
+          - normalized: умный
+          - normalized: дом
+      - source_text: платформа умного дома
         tokens:
-          - normalized: "платформа"
-          - normalized: "умный"
-          - normalized: "дом"
-      - source_text: "голосовой помощник"
+          - normalized: платформа
+          - normalized: умный
+          - normalized: дом
+      - source_text: голосовой помощник
         tokens:
-          - normalized: "голосовой"
-          - normalized: "помощник"
-      - source_text: "управление через приложение"
+          - normalized: голосовой
+          - normalized: помощник
+      - source_text: управление через приложение
         tokens:
-          - normalized: "управление"
-          - normalized: "через"
-          - normalized: "приложение"
-
+          - normalized: управление
+          - normalized: через
+          - normalized: приложение
+    match:
+      aliases:
+        - catalog: vendors
+          keys:
+            - yandex
+            - sber
+            - aqara
+            - xiaomi
+            - tuya
+            - sonoff
+            - rubetek
+            - livicom
+            - wiren_board
+            - spruthub
+            - hdl
+            - legrand_netatmo
+            - schneider
+            - abb
+            - jung
+            - gira
+            - shelly
+            - tp_link_tapo
+            - hiper
+            - ekf_connect
+            - gauss
+            - yeelight
+            - hikvision
+        - catalog: protocols
+          keys:
+            - knx
+            - matter
+        - catalog: devices
+          keys:
+            - smart_home_hub
+            - controller
+            - smart_panel
+        - catalog: software
+          keys:
+            - alice
+            - sber_salut
+            - home_assistant
+            - apple_home
+            - google_home
+            - tuya_smart_life
+            - aqara_home
+            - mi_home
+            - ewelink
+            - zigbee2mqtt
+            - node_red
+            - iobroker
+            - majordomo
+            - domoticz
+            - iridium
+            - wiren_board_software
+            - sprut_home
+            - ekf_connect_home
+            - hiper_iot
+            - rubetek_app
+            - livicom_app
   - type: protocol_gateway
     label: Протоколы / шлюзы / интеграции
     group: Умный дом и интеграции
-    color: "#3949ab"
+    color: '#3949ab'
     confidence: 0.76
     patterns:
-      - source_text: "zigbee шлюз"
+      - source_text: протокол умного дома
         tokens:
-          - normalized: "zigbee"
-          - normalized: "шлюз"
-      - source_text: "умный хаб"
-        tokens:
-          - normalized: "умный"
-          - normalized: "хаб"
-      - source_text: "контроллер автоматизации"
-        tokens:
-          - normalized: "контроллер"
-          - normalized: "автоматизация"
-      - source_text: "протокол умного дома"
-        tokens:
-          - normalized: "протокол"
-          - normalized: "умный"
-          - normalized: "дом"
-
+          - normalized: протокол
+          - normalized: умный
+          - normalized: дом
+    match:
+      aliases:
+        - catalog: vendors
+          keys:
+            - sonoff
+            - wiren_board
+            - spruthub
+            - hdl
+        - catalog: protocols
+          keys:
+            - zigbee
+            - z_wave
+            - knx
+            - matter
+            - thread
+            - wifi
+            - rf_433
+            - modbus
+            - rs_485
+            - mqtt
+            - poe
+            - ethernet
+            - dali
+            - one_wire
+            - opentherm
+            - ebus
+            - infrared
+            - rtsp
+            - onvif
+        - catalog: devices
+          keys:
+            - smart_home_hub
+            - controller
+            - ir_remote
+        - catalog: software
+          keys:
+            - home_assistant
+            - ewelink
+            - zigbee2mqtt
+            - node_red
+            - iobroker
+            - wiren_board_software
   - type: video_surveillance
     label: Видеонаблюдение
     group: Безопасность
-    color: "#455a64"
+    color: '#455a64'
     confidence: 0.84
     patterns:
       - tokens:
-          - normalized: "система"
-          - normalized: "видеонаблюдение"
+          - normalized: система
+          - normalized: видеонаблюдение
       - tokens:
-          - normalized: "видеонаблюдение"
-
+          - normalized: видеонаблюдение
+    match:
+      aliases:
+        - catalog: vendors
+          keys:
+            - rubetek
+            - livicom
+            - tp_link_tapo
+            - dahua
+            - hikvision
+            - trassir
+            - ivideon
+            - ajax
+        - catalog: protocols
+          keys:
+            - poe
+            - rtsp
+            - onvif
+        - catalog: devices
+          keys:
+            - camera
+            - nvr_dvr
+        - catalog: software
+          keys:
+            - video_security_apps
   - type: consultation_request
     label: Нужна консультация
     group: Спрос и намерение
-    color: "#7b1fa2"
+    color: '#7b1fa2'
     confidence: 0.78
     patterns:
       - tokens:
-          - normalized: "подсказать"
+          - normalized: подсказать
       - tokens:
-          - normalized: "подсказать"
-          - normalized: "пожалуйста"
+          - normalized: подсказать
+          - normalized: пожалуйста
       - tokens:
-          - normalized: "проконсультироваться"
+          - normalized: проконсультироваться
       - tokens:
-          - normalized: "нужно"
-          - normalized: "проконсультироваться"
+          - normalized: нужно
+          - normalized: проконсультироваться
       - tokens:
-          - normalized: "хотеть"
-          - normalized: "понять"
+          - normalized: хотеть
+          - normalized: понять
       - tokens:
-          - normalized: "подсказать"
-          - normalized: "какой"
+          - normalized: подсказать
+          - normalized: какой
       - tokens:
-          - normalized: "поделиться"
-          - normalized: "опыт"
+          - normalized: поделиться
+          - normalized: опыт
       - tokens:
-          - normalized: "нужный"
-          - normalized: "помощь"
+          - normalized: нужный
+          - normalized: помощь
       - tokens:
-          - normalized: "кто"
-          - normalized: "сталкиваться"
+          - normalized: кто
+          - normalized: сталкиваться
       - tokens:
-          - normalized: "может"
-          - normalized: "помочь"
+          - normalized: может
+          - normalized: помочь
       - tokens:
-          - normalized: "помочь"
-          - normalized: "решить"
+          - normalized: помочь
+          - normalized: решить
       - tokens:
-          - normalized: "как"
-          - normalized: "реализоваться"
-
+          - normalized: как
+          - normalized: реализоваться
   - type: solution_selection_request
     label: Подбор полезных решений
     group: Спрос и намерение
-    color: "#00897b"
+    color: '#00897b'
     confidence: 0.82
     patterns:
       - tokens:
-          - normalized: "какой"
-          - normalized: "действительно"
-          - normalized: "нужный"
+          - normalized: какой
+          - normalized: действительно
+          - normalized: нужный
       - tokens:
-          - normalized: "нужный"
-          - normalized: "и"
-          - normalized: "полезный"
+          - normalized: нужный
+          - normalized: и
+          - normalized: полезный
       - tokens:
-          - normalized: "можно"
-          - normalized: "внедрить"
+          - normalized: можно
+          - normalized: внедрить
       - tokens:
-          - normalized: "внедрить"
-          - normalized: "в"
-          - normalized: "проект"
-
+          - normalized: внедрить
+          - normalized: в
+          - normalized: проект
   - type: education_request
     label: Изучение темы / первый опыт
     group: Спрос и намерение
-    color: "#5e35b1"
+    color: '#5e35b1'
     confidence: 0.74
     patterns:
       - tokens:
-          - normalized: "где"
-          - normalized: "можно"
-          - normalized: "изучить"
+          - normalized: где
+          - normalized: можно
+          - normalized: изучить
       - tokens:
-          - normalized: "изучить"
-          - normalized: "этот"
-          - normalized: "тема"
+          - normalized: изучить
+          - normalized: этот
+          - normalized: тема
       - tokens:
-          - normalized: "раньше"
-          - normalized: "вообще"
-          - normalized: "с"
-          - normalized: "это"
-          - normalized: "не"
-          - normalized: "сталкиваться"
+          - normalized: раньше
+          - normalized: вообще
+          - normalized: с
+          - normalized: это
+          - normalized: не
+          - normalized: сталкиваться
       - tokens:
-          - normalized: "впервые"
-          - normalized: "сталкиваться"
+          - normalized: впервые
+          - normalized: сталкиваться
       - tokens:
-          - normalized: "ни"
-          - normalized: "раз"
+          - normalized: ни
+          - normalized: раз
       - tokens:
-          - normalized: "первый"
-          - normalized: "раз"
-
+          - normalized: первый
+          - normalized: раз
   - type: smart_home_value_question
     label: Вопрос о ценности умного дома
     group: Спрос и намерение
-    color: "#ef6c00"
+    color: '#ef6c00'
     confidence: 0.82
     phrases:
-      - ["кому", "и", "зачем"]
+      - - кому
+        - и
+        - зачем
     patterns:
       - tokens:
-          - normalized: "надо"
-          - normalized: "ли"
+          - normalized: надо
+          - normalized: ли
       - tokens:
-          - normalized: "какой"
-          - normalized: "плюшка"
+          - normalized: какой
+          - normalized: плюшка
       - tokens:
-          - normalized: "нужный"
-          - normalized: "умный"
-          - normalized: "дом"
-
+          - normalized: нужный
+          - normalized: умный
+          - normalized: дом
   - type: budget_constraint
     label: Бюджетное ограничение
     group: Спрос и намерение
-    color: "#795548"
+    color: '#795548'
     confidence: 0.72
     patterns:
       - tokens:
-          - normalized: "бюджет"
-          - normalized: "не"
-          - normalized: "хватить"
-
+          - normalized: бюджет
+          - normalized: не
+          - normalized: хватить
   - type: installation_context
     label: Монтажный контекст
     group: Проектирование и ремонт
-    color: "#6d4c41"
+    color: '#6d4c41'
     confidence: 0.72
     phrases:
-      - ["220v"]
+      - - 220v
     patterns:
       - tokens:
-          - normalized: "камера"
-          - normalized: "на"
-          - normalized: "стена"
+          - normalized: камера
+          - normalized: на
+          - normalized: стена
       - tokens:
-          - normalized: "вывод"
+          - normalized: вывод
       - tokens:
-          - normalized: "спрятать"
-          - normalized: "датчик"
+          - normalized: спрятать
+          - normalized: датчик
       - tokens:
-          - normalized: "керамогранит"
+          - normalized: керамогранит
       - tokens:
-          - normalized: "кабель"
-          - normalized: "канал"
-
+          - normalized: кабель
+          - normalized: канал
   - type: water_leak_protection
     label: Защита от протечек
     group: Защита от протечек
-    color: "#00695c"
+    color: '#00695c'
     confidence: 0.82
     patterns:
-      - source_text: "датчик протечки"
+      - source_text: датчик протечки
         tokens:
-          - normalized: "датчик"
-          - normalized: "протечка"
-      - source_text: "протечка"
+          - normalized: датчик
+          - normalized: протечка
+      - source_text: протечка
         tokens:
-          - normalized: "протечка"
-      - source_text: "проводной датчик"
+          - normalized: протечка
+      - source_text: проводной датчик
         tokens:
-          - normalized: "проводной"
-          - normalized: "датчик"
-      - source_text: "датчик сработал"
+          - normalized: проводной
+          - normalized: датчик
+      - source_text: датчик сработал
         tokens:
-          - normalized: "датчик"
-          - normalized: "сработать"
-      - source_text: "вывод информации на смартфон"
+          - normalized: датчик
+          - normalized: сработать
+      - source_text: вывод информации на смартфон
         tokens:
-          - normalized: "вывод"
-          - normalized: "информация"
-          - normalized: "на"
-          - normalized: "смартфон"
-
+          - normalized: вывод
+          - normalized: информация
+          - normalized: на
+          - normalized: смартфон
+    match:
+      aliases:
+        - catalog: vendors
+          keys:
+            - neptun
+            - gidrolock
+            - akvastorozh
+        - catalog: devices
+          keys:
+            - leak_sensor
+            - leak_valve
   - type: leak_protection
     label: Защита от протечек / контроль воды
     group: Защита от протечек
-    color: "#00796b"
+    color: '#00796b'
     confidence: 0.82
     patterns:
-      - source_text: "защита от протечек"
+      - source_text: защита от протечек
         tokens:
-          - normalized: "защита"
-          - normalized: "от"
-          - normalized: "протечка"
-      - source_text: "контроль протечки воды"
+          - normalized: защита
+          - normalized: от
+          - normalized: протечка
+      - source_text: контроль протечки воды
         tokens:
-          - normalized: "контроль"
-          - normalized: "протечка"
-          - normalized: "вода"
-      - source_text: "перекрывает воду"
+          - normalized: контроль
+          - normalized: протечка
+          - normalized: вода
+      - source_text: перекрывает воду
         tokens:
-          - normalized: "перекрывать"
-          - normalized: "вода"
-
+          - normalized: перекрывать
+          - normalized: вода
+    match:
+      aliases:
+        - catalog: vendors
+          keys:
+            - rubetek
+            - livicom
+            - ekf_connect
+            - neptun
+            - gidrolock
+            - akvastorozh
+            - ajax
+        - catalog: devices
+          keys:
+            - leak_sensor
+            - leak_valve
   - type: implementation_intent
     label: Намерение реализовать
     group: Спрос и намерение
-    color: "#2e7d32"
+    color: '#2e7d32'
     confidence: 0.78
     patterns:
       - tokens:
-          - normalized: "хотеть"
-          - normalized: "реализовать"
+          - normalized: хотеть
+          - normalized: реализовать
       - tokens:
-          - normalized: "отобразить"
-
+          - normalized: отобразить
   - type: hot_lead_intent
     label: Горячий лид
     group: Спрос и намерение
-    color: "#d32f2f"
+    color: '#d32f2f'
     confidence: 0.9
     patterns:
       - tokens:
-          - normalized: "запрос"
-          - normalized: "от"
-          - normalized: "клиент"
+          - normalized: запрос
+          - normalized: от
+          - normalized: клиент
       - tokens:
-          - normalized: "посоветовать"
-          - normalized: "контакт"
+          - normalized: посоветовать
+          - normalized: контакт
       - tokens:
-          - normalized: "установить"
-          - normalized: "и"
-          - normalized: "подключить"
-
+          - normalized: установить
+          - normalized: и
+          - normalized: подключить
   - type: electrical_design_context
     label: Контекст электрики
     group: Проектирование и ремонт
-    color: "#5d4037"
+    color: '#5d4037'
     confidence: 0.74
     patterns:
       - tokens:
-          - normalized: "чертеж"
-          - normalized: "электрика"
+          - normalized: чертеж
+          - normalized: электрика
       - tokens:
-          - normalized: "план"
-          - normalized: "розетка"
+          - normalized: план
+          - normalized: розетка
       - tokens:
-          - normalized: "освещение"
+          - normalized: освещение
       - tokens:
-          - normalized: "проектировать"
-          - normalized: "дизайн"
+          - normalized: проектировать
+          - normalized: дизайн
       - tokens:
-          - normalized: "технический"
-          - normalized: "проект"
+          - normalized: технический
+          - normalized: проект
       - tokens:
-          - normalized: "проект"
-          - normalized: "по"
-          - normalized: "умный"
-          - normalized: "дом"
+          - normalized: проект
+          - normalized: по
+          - normalized: умный
+          - normalized: дом
       - tokens:
-          - normalized: "проект"
-          - normalized: "по"
-          - normalized: "умный"
-          - normalized: "функционал"
+          - normalized: проект
+          - normalized: по
+          - normalized: умный
+          - normalized: функционал
       - tokens:
-          - normalized: "проработать"
-          - normalized: "с"
-          - normalized: "электрик"
-
+          - normalized: проработать
+          - normalized: с
+          - normalized: электрик
   - type: developer_smart_home_context
     label: Умный дом от застройщика
     group: Умный дом и интеграции
-    color: "#00695c"
+    color: '#00695c'
     confidence: 0.82
     patterns:
       - tokens:
-          - normalized: "умный"
-          - normalized: "дом"
-
+          - normalized: умный
+          - normalized: дом
   - type: smart_relay_control
     label: Реле / модули умного света
     group: Умный дом и интеграции
-    color: "#00897b"
+    color: '#00897b'
     confidence: 0.78
     patterns:
       - tokens:
-          - normalized: "шайба"
+          - normalized: шайба
       - tokens:
-          - normalized: "ставиться"
-          - normalized: "на"
-          - normalized: "электрика"
+          - normalized: ставиться
+          - normalized: на
+          - normalized: электрика
       - tokens:
-          - normalized: "подключить"
-          - normalized: "свет"
+          - normalized: подключить
+          - normalized: свет
       - tokens:
-          - normalized: "устройство"
-          - normalized: "с"
-          - normalized: "пульт"
-          - normalized: "от"
-          - normalized: "застройщик"
+          - normalized: устройство
+          - normalized: с
+          - normalized: пульт
+          - normalized: от
+          - normalized: застройщик
       - tokens:
-          - normalized: "от"
-          - normalized: "застройщик"
+          - normalized: от
+          - normalized: застройщик
       - tokens:
-          - normalized: "застройщик"
-          - normalized: "говорить"
-
+          - normalized: застройщик
+          - normalized: говорить
+    match:
+      aliases:
+        - catalog: devices
+          keys:
+            - relay_module
+            - smart_switch
+            - dimmer
   - type: renovation_modification_context
     label: Изменения в проекте / ремонте
     group: Проектирование и ремонт
-    color: "#ad1457"
+    color: '#ad1457'
     confidence: 0.78
     patterns:
       - tokens:
-          - normalized: "добавление"
-          - normalized: "розетка"
+          - normalized: добавление
+          - normalized: розетка
       - tokens:
-          - normalized: "розетка"
-          - normalized: "выключатель"
+          - normalized: розетка
+          - normalized: выключатель
       - tokens:
-          - normalized: "в"
-          - normalized: "схема"
-          - normalized: "добавить"
+          - normalized: в
+          - normalized: схема
+          - normalized: добавить
       - tokens:
-          - normalized: "брать"
-          - normalized: "в"
-          - normalized: "работа"
+          - normalized: брать
+          - normalized: в
+          - normalized: работа
       - tokens:
-          - normalized: "делать"
-          - normalized: "с"
-          - normalized: "нуль"
+          - normalized: делать
+          - normalized: с
+          - normalized: нуль
       - tokens:
-          - normalized: "конец"
-          - normalized: "ремонт"
+          - normalized: конец
+          - normalized: ремонт
       - tokens:
-          - normalized: "не"
-          - normalized: "сделать"
-          - normalized: "вывод"
-
+          - normalized: не
+          - normalized: сделать
+          - normalized: вывод
   - type: warranty_risk
     label: Риск гарантии / проблем с системой
     group: Проектирование и ремонт
-    color: "#c62828"
+    color: '#c62828'
     confidence: 0.8
     patterns:
       - tokens:
-          - normalized: "слетать"
-          - normalized: "гарантия"
+          - normalized: слетать
+          - normalized: гарантия
       - tokens:
-          - normalized: "опасаться"
-          - normalized: "проблема"
+          - normalized: опасаться
+          - normalized: проблема
       - tokens:
-          - normalized: "проблема"
-          - normalized: "с"
-          - normalized: "система"
-
+          - normalized: проблема
+          - normalized: с
+          - normalized: система
   - type: designer_context
     label: Дизайнер / проектировщик
     group: Проектирование и ремонт
-    color: "#3949ab"
+    color: '#3949ab'
     confidence: 0.7
     patterns:
       - tokens:
-          - normalized: "дизайнер"
+          - normalized: дизайнер
       - tokens:
-          - normalized: "проектировщик"
+          - normalized: проектировщик
       - tokens:
-          - normalized: "проект"
-
+          - normalized: проект
   - type: access_control
     label: СКУД / контроль доступа
     group: СКУД и домофония
-    color: "#00897b"
+    color: '#00897b'
     confidence: 0.82
     phrases:
-      - ["скуд"]
+      - - скуд
     patterns:
       - tokens:
-          - normalized: "контроль"
-          - normalized: "доступ"
+          - normalized: контроль
+          - normalized: доступ
       - tokens:
-          - normalized: "система"
-          - normalized: "контроль"
-          - normalized: "доступ"
+          - normalized: система
+          - normalized: контроль
+          - normalized: доступ
       - tokens:
-          - normalized: "электромагнитный"
-          - normalized: "замок"
+          - normalized: электромагнитный
+          - normalized: замок
       - tokens:
-          - normalized: "кнопка"
-          - normalized: "открывание"
-
+          - normalized: кнопка
+          - normalized: открывание
+    match:
+      aliases:
+        - catalog: vendors
+          keys:
+            - rubetek
+            - dahua
+            - hikvision
+            - trassir
+            - ajax
+            - gate_automation_brands
+        - catalog: devices
+          keys:
+            - opening_sensor
+            - intercom
+            - smart_lock
+            - access_reader
+            - gate_barrier
   - type: security_alarm
     label: Охранная / пожарная сигнализация
     group: Безопасность
-    color: "#c62828"
+    color: '#c62828'
     confidence: 0.82
     patterns:
       - tokens:
-          - normalized: "охранный"
-          - normalized: "сигнализация"
+          - normalized: охранный
+          - normalized: сигнализация
       - tokens:
-          - normalized: "пожарный"
-          - normalized: "сигнализация"
+          - normalized: пожарный
+          - normalized: сигнализация
       - tokens:
-          - normalized: "охранный"
-          - normalized: "и"
-          - normalized: "пожарный"
-          - normalized: "сигнализация"
-
+          - normalized: охранный
+          - normalized: и
+          - normalized: пожарный
+          - normalized: сигнализация
+    match:
+      aliases:
+        - catalog: vendors
+          keys:
+            - livicom
+            - ajax
+        - catalog: devices
+          keys:
+            - opening_sensor
+            - smoke_gas_sensor
+            - siren
+        - catalog: software
+          keys:
+            - livicom_app
   - type: intercom
     label: Домофония
     group: СКУД и домофония
-    color: "#546e7a"
+    color: '#546e7a'
     confidence: 0.8
     patterns:
       - tokens:
-          - normalized: "домофон"
+          - normalized: домофон
       - tokens:
-          - normalized: "вызывной"
-          - normalized: "панель"
-
+          - normalized: вызывной
+          - normalized: панель
+    match:
+      aliases:
+        - catalog: vendors
+          keys:
+            - dahua
+            - hikvision
+        - catalog: devices
+          keys:
+            - intercom
   - type: gate_automation
     label: Автоматизация ворот / шлагбаумов
     group: СКУД и домофония
-    color: "#6d4c41"
+    color: '#6d4c41'
     confidence: 0.8
     patterns:
       - tokens:
-          - normalized: "автоматизация"
-          - normalized: "ворота"
+          - normalized: автоматизация
+          - normalized: ворота
       - tokens:
-          - normalized: "ворота"
+          - normalized: ворота
       - tokens:
-          - normalized: "шлагбаум"
+          - normalized: шлагбаум
       - tokens:
-          - normalized: "въездной"
-          - normalized: "группа"
-
+          - normalized: въездной
+          - normalized: группа
+    match:
+      aliases:
+        - catalog: vendors
+          keys:
+            - gate_automation_brands
+        - catalog: devices
+          keys:
+            - gate_barrier
   - type: power_quality
     label: Электропитание / ИБП / стабилизаторы
     group: Электропитание
-    color: "#f57f17"
+    color: '#f57f17'
     confidence: 0.8
     phrases:
-      - ["ибп"]
+      - - ибп
     patterns:
       - tokens:
-          - normalized: "бесперебойный"
-          - normalized: "питание"
+          - normalized: бесперебойный
+          - normalized: питание
       - tokens:
-          - normalized: "стабилизатор"
-          - normalized: "напряжение"
+          - normalized: стабилизатор
+          - normalized: напряжение
       - tokens:
-          - normalized: "нестабильный"
-          - normalized: "электроснабжение"
+          - normalized: нестабильный
+          - normalized: электроснабжение
       - tokens:
-          - normalized: "скачок"
-          - normalized: "напряжение"
-
+          - normalized: скачок
+          - normalized: напряжение
+    match:
+      aliases:
+        - catalog: devices
+          keys:
+            - ups
+            - voltage_stabilizer
   - type: power_backup
     label: Резервное питание / защита электросети
     group: Электропитание
-    color: "#f9a825"
+    color: '#f9a825'
     confidence: 0.78
     patterns:
-      - source_text: "резервное питание"
+      - source_text: резервное питание
         tokens:
-          - normalized: "резервный"
-          - normalized: "питание"
-      - source_text: "комплект бесперебойного питания"
+          - normalized: резервный
+          - normalized: питание
+      - source_text: комплект бесперебойного питания
         tokens:
-          - normalized: "комплект"
-          - normalized: "бесперебойный"
-          - normalized: "питание"
-      - source_text: "защита от перенапряжения"
+          - normalized: комплект
+          - normalized: бесперебойный
+          - normalized: питание
+      - source_text: защита от перенапряжения
         tokens:
-          - normalized: "защита"
-          - normalized: "от"
-          - normalized: "перенапряжение"
-
+          - normalized: защита
+          - normalized: от
+          - normalized: перенапряжение
+    match:
+      aliases:
+        - catalog: vendors
+          keys:
+            - legrand_netatmo
+            - schneider
+        - catalog: protocols
+          keys:
+            - poe
+        - catalog: devices
+          keys:
+            - smart_socket
+            - ups
+            - voltage_stabilizer
   - type: climate_control
     label: Управление климатом
     group: Климат
-    color: "#0277bd"
+    color: '#0277bd'
     confidence: 0.78
     patterns:
       - tokens:
-          - normalized: "управление"
-          - normalized: "климат"
+          - normalized: управление
+          - normalized: климат
       - tokens:
-          - normalized: "кондиционер"
+          - normalized: кондиционер
       - tokens:
-          - normalized: "теплый"
-          - normalized: "пол"
+          - normalized: теплый
+          - normalized: пол
       - tokens:
-          - normalized: "отопление"
+          - normalized: отопление
       - tokens:
-          - normalized: "канальный"
-          - normalized: "кондиционирование"
+          - normalized: канальный
+          - normalized: кондиционирование
       - tokens:
-          - normalized: "статический"
-          - normalized: "давление"
+          - normalized: статический
+          - normalized: давление
       - tokens:
-          - normalized: "потолочный"
-          - normalized: "карниз"
-
+          - normalized: потолочный
+          - normalized: карниз
+    match:
+      aliases:
+        - catalog: vendors
+          keys:
+            - zont
+            - terneo
+            - salus
+            - danfoss
+            - oclimate
+            - orac
+        - catalog: devices
+          keys:
+            - thermostat
+            - climate_control_device
   - type: climate_automation
     label: Автоматизация климата
     group: Климат
-    color: "#0288d1"
+    color: '#0288d1'
     confidence: 0.78
     patterns:
-      - source_text: "автоматизация климата"
+      - source_text: автоматизация климата
         tokens:
-          - normalized: "автоматизация"
-          - normalized: "климат"
-      - source_text: "управление кондиционером"
+          - normalized: автоматизация
+          - normalized: климат
+      - source_text: управление кондиционером
         tokens:
-          - normalized: "управление"
-          - normalized: "кондиционер"
-      - source_text: "управление отоплением"
+          - normalized: управление
+          - normalized: кондиционер
+      - source_text: управление отоплением
         tokens:
-          - normalized: "управление"
-          - normalized: "отопление"
-
+          - normalized: управление
+          - normalized: отопление
+    match:
+      aliases:
+        - catalog: vendors
+          keys:
+            - ekf_connect
+            - zont
+            - terneo
+            - salus
+            - danfoss
+            - oclimate
+            - orac
+        - catalog: protocols
+          keys:
+            - one_wire
+            - opentherm
+            - ebus
+            - infrared
+        - catalog: devices
+          keys:
+            - smoke_gas_sensor
+            - thermostat
+            - climate_control_device
+            - ir_remote
   - type: lighting_control
     label: Управление освещением
     group: Освещение и шторы
-    color: "#afb42b"
+    color: '#afb42b'
     confidence: 0.78
     patterns:
       - tokens:
-          - normalized: "управление"
-          - normalized: "освещение"
+          - normalized: управление
+          - normalized: освещение
       - tokens:
-          - normalized: "умный"
-          - normalized: "свет"
+          - normalized: умный
+          - normalized: свет
       - tokens:
-          - normalized: "сценарий"
-          - normalized: "освещение"
+          - normalized: сценарий
+          - normalized: освещение
       - tokens:
-          - normalized: "ночной"
-          - normalized: "свет"
+          - normalized: ночной
+          - normalized: свет
       - tokens:
-          - normalized: "датчик"
-          - normalized: "движение"
+          - normalized: датчик
+          - normalized: движение
       - tokens:
-          - normalized: "при"
-          - normalized: "движение"
+          - normalized: при
+          - normalized: движение
       - tokens:
-          - normalized: "бра"
+          - normalized: бра
       - tokens:
-          - normalized: "трек"
-
+          - normalized: трек
+    match:
+      aliases:
+        - catalog: devices
+          keys:
+            - smart_lighting
   - type: lighting_automation
     label: Автоматизация освещения
     group: Освещение и шторы
-    color: "#9e9d24"
+    color: '#9e9d24'
     confidence: 0.78
     patterns:
-      - source_text: "автоматизация освещения"
+      - source_text: автоматизация освещения
         tokens:
-          - normalized: "автоматизация"
-          - normalized: "освещение"
-      - source_text: "сценарий освещения"
+          - normalized: автоматизация
+          - normalized: освещение
+      - source_text: сценарий освещения
         tokens:
-          - normalized: "сценарий"
-          - normalized: "освещение"
-      - source_text: "умный выключатель"
+          - normalized: сценарий
+          - normalized: освещение
+      - source_text: умный выключатель
         tokens:
-          - normalized: "умный"
-          - normalized: "выключатель"
-      - source_text: "умное реле"
+          - normalized: умный
+          - normalized: выключатель
+      - source_text: умное реле
         tokens:
-          - normalized: "умный"
-          - normalized: "реле"
-
+          - normalized: умный
+          - normalized: реле
+    match:
+      aliases:
+        - catalog: vendors
+          keys:
+            - legrand_netatmo
+            - schneider
+            - abb
+            - jung
+            - gira
+            - shelly
+            - hiper
+            - ekf_connect
+            - gauss
+            - yeelight
+        - catalog: protocols
+          keys:
+            - dali
+        - catalog: devices
+          keys:
+            - relay_module
+            - motion_sensor
+            - smart_switch
+            - dimmer
+            - smart_lighting
+            - electric_curtain
+            - smart_panel
   - type: motion_lighting_automation
     label: Автоматизация света по движению
     group: Освещение и шторы
-    color: "#7cb342"
+    color: '#7cb342'
     confidence: 0.8
     patterns:
       - tokens:
-          - normalized: "включаться"
-          - normalized: "на"
-          - normalized: "движение"
+          - normalized: включаться
+          - normalized: на
+          - normalized: движение
       - tokens:
-          - normalized: "при"
-          - normalized: "движение"
+          - normalized: при
+          - normalized: движение
       - tokens:
-          - normalized: "определенный"
-          - normalized: "часы"
+          - normalized: определенный
+          - normalized: часы
       - tokens:
-          - normalized: "механический"
-          - normalized: "включение"
-
+          - normalized: механический
+          - normalized: включение
+    match:
+      aliases:
+        - catalog: devices
+          keys:
+            - motion_sensor
   - type: electric_curtain_control
     label: Электрические карнизы / шторы
     group: Освещение и шторы
-    color: "#8e24aa"
+    color: '#8e24aa'
     confidence: 0.78
     phrases:
-      - ["wi-fi", "модуль"]
+      - - wi-fi
+        - модуль
     patterns:
       - tokens:
-          - normalized: "электрический"
-          - normalized: "карниз"
+          - normalized: электрический
+          - normalized: карниз
       - tokens:
-          - normalized: "работа"
-          - normalized: "с"
-          - normalized: "алиса"
-
+          - normalized: работа
+          - normalized: с
+          - normalized: алиса
+    match:
+      aliases:
+        - catalog: devices
+          keys:
+            - electric_curtain
   - type: network_infrastructure
     label: СКС / слаботочные сети
     group: Сети и инженерка
-    color: "#5e35b1"
+    color: '#5e35b1'
     confidence: 0.76
     phrases:
-      - ["скс"]
+      - - скс
     patterns:
       - tokens:
-          - normalized: "структурированный"
-          - normalized: "кабельный"
-          - normalized: "сеть"
+          - normalized: структурированный
+          - normalized: кабельный
+          - normalized: сеть
       - tokens:
-          - normalized: "слаботочный"
-          - normalized: "сеть"
+          - normalized: слаботочный
+          - normalized: сеть
       - tokens:
-          - normalized: "инженерный"
-          - normalized: "система"
-
+          - normalized: инженерный
+          - normalized: система
+    match:
+      aliases:
+        - catalog: protocols
+          keys:
+            - modbus
+            - rs_485
+            - mqtt
+            - poe
+            - ethernet
+        - catalog: devices
+          keys:
+            - network_equipment
   - type: commercial_object
     label: Коммерческий объект
     group: Объект и сегмент
-    color: "#455a64"
+    color: '#455a64'
     confidence: 0.68
     phrases:
-      - ["тц"]
+      - - тц
     patterns:
       - tokens:
-          - normalized: "офис"
+          - normalized: офис
       - tokens:
-          - normalized: "медицинский"
-          - normalized: "учреждение"
+          - normalized: медицинский
+          - normalized: учреждение
       - tokens:
-          - normalized: "коммерческий"
-          - normalized: "объект"
+          - normalized: коммерческий
+          - normalized: объект
       - tokens:
-          - normalized: "коммерческий"
-          - normalized: "помещение"
+          - normalized: коммерческий
+          - normalized: помещение
       - tokens:
-          - normalized: "коммерция"
-
+          - normalized: коммерция
   - type: country_house
     label: Загородный дом / дача
     group: Объект и сегмент
-    color: "#558b2f"
+    color: '#558b2f'
     confidence: 0.72
     patterns:
       - tokens:
-          - normalized: "частный"
-          - normalized: "дом"
+          - normalized: частный
+          - normalized: дом
       - tokens:
-          - normalized: "коттедж"
+          - normalized: коттедж
       - tokens:
-          - normalized: "дача"
+          - normalized: дача
       - tokens:
-          - normalized: "загородный"
-          - normalized: "дом"
+          - normalized: загородный
+          - normalized: дом
       - tokens:
-          - normalized: "коттеджный"
-          - normalized: "поселок"
-
+          - normalized: коттеджный
+          - normalized: поселок
   - type: apartment_context
     label: Квартира
     group: Объект и сегмент
-    color: "#00838f"
+    color: '#00838f'
     confidence: 0.68
     patterns:
       - tokens:
-          - normalized: "квартира"
-
+          - normalized: квартира
   - type: family_apartment_context
     label: Семейная квартира
     group: Объект и сегмент
-    color: "#2e7d32"
+    color: '#2e7d32'
     confidence: 0.68
     patterns:
       - tokens:
-          - normalized: "родитель"
+          - normalized: родитель
       - tokens:
-          - normalized: "двое"
-          - normalized: "ребенок"
-
+          - normalized: двое
+          - normalized: ребенок
   - type: diy_or_equipment_only
     label: DIY / только оборудование
     group: Шум и продажи
-    color: "#757575"
+    color: '#757575'
     confidence: 0.74
     patterns:
       - tokens:
-          - normalized: "сам"
-          - normalized: "поставить"
+          - normalized: сам
+          - normalized: поставить
       - tokens:
-          - normalized: "своими"
-          - normalized: "рука"
+          - normalized: своими
+          - normalized: рука
       - tokens:
-          - normalized: "без"
-          - normalized: "монтаж"
+          - normalized: без
+          - normalized: монтаж
       - tokens:
-          - normalized: "только"
-          - normalized: "оборудование"
+          - normalized: только
+          - normalized: оборудование
       - tokens:
-          - normalized: "самовывоз"
-
+          - normalized: самовывоз
   - type: irrelevant_or_sale
     label: Нерелевантная продажа / объявление
     group: Шум и продажи
-    color: "#616161"
+    color: '#616161'
     confidence: 0.72
     phrases:
-      - ["б", "у"]
+      - - б
+        - у
     patterns:
       - tokens:
-          - normalized: "продать"
+          - normalized: продать
       - tokens:
-          - normalized: "в"
-          - normalized: "наличие"
-          - normalized: "самовывоз"
-
+          - normalized: в
+          - normalized: наличие
+          - normalized: самовывоз
   - type: price_only
     label: Только цена / дешево
     group: Шум и продажи
-    color: "#8d6e63"
+    color: '#8d6e63'
     confidence: 0.66
     patterns:
       - tokens:
-          - normalized: "дешево"
+          - normalized: дешево
       - tokens:
-          - normalized: "самый"
-          - normalized: "дешевый"
+          - normalized: самый
+          - normalized: дешевый
       - tokens:
-          - normalized: "без"
-          - normalized: "переплата"
+          - normalized: без
+          - normalized: переплата

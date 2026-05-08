@@ -38,19 +38,46 @@ class PatternSettings(BaseModel):
     tokens: list[PatternTokenSettings] = Field(min_length=1)
 
 
+class AliasMatchSettings(BaseModel):
+    catalog: str | None = None
+    catalogs: list[str] = Field(default_factory=list)
+    keys: list[str] = Field(default_factory=list)
+    kinds: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def validate_alias_match_source(self) -> AliasMatchSettings:
+        if not self.catalog and not self.catalogs and not self.keys and not self.kinds:
+            raise ValueError("alias match must define catalog, catalogs, keys, or kinds")
+        return self
+
+
+class FactMatchSettings(BaseModel):
+    types: list[str] = Field(min_length=1)
+
+
+class RuleMatchSettings(BaseModel):
+    aliases: list[AliasMatchSettings] = Field(default_factory=list)
+    facts: list[FactMatchSettings] = Field(default_factory=list)
+
+    @property
+    def is_empty(self) -> bool:
+        return not self.aliases and not self.facts
+
+
 class RuleSettings(BaseModel):
     type: str = Field(min_length=1)
     label: str = Field(min_length=1)
     group: str | None = None
     phrases: list[list[str]] = Field(default_factory=list)
     patterns: list[PatternSettings] = Field(default_factory=list)
+    match: RuleMatchSettings = Field(default_factory=RuleMatchSettings)
     color: str | None = None
     confidence: float | None = None
 
     @model_validator(mode="after")
     def validate_rule_source(self) -> RuleSettings:
-        if not self.phrases and not self.patterns:
-            raise ValueError("rule must define phrases or patterns")
+        if not self.phrases and not self.patterns and self.match.is_empty:
+            raise ValueError("rule must define phrases, patterns, or match")
         return self
 
 
@@ -59,16 +86,9 @@ class AliasSettings(BaseModel):
     canonical: str = Field(min_length=1)
     type: Literal["vendor", "protocol", "device", "software", "model"]
     aliases: list[str] = Field(min_length=1)
-    signal_types: list[str] = Field(default_factory=list)
-    fact_types: list[str] = Field(default_factory=list)
+    fact_types: list[str] = Field(min_length=1)
     color: str | None = None
     confidence: float | None = None
-
-    @model_validator(mode="after")
-    def validate_alias_links(self) -> AliasSettings:
-        if not self.signal_types and not self.fact_types:
-            raise ValueError("alias must define signal_types or fact_types")
-        return self
 
 
 class LeadCategorySettings(BaseModel):
@@ -314,6 +334,8 @@ def _rule_to_document(rule: RuleSettings) -> dict[str, Any]:
             }
             for pattern in rule.patterns
         ]
+    if not rule.match.is_empty:
+        payload["match"] = _rule_match_to_document(rule.match)
     return payload
 
 
@@ -331,7 +353,35 @@ def _rule_from_document(raw_rule: dict[str, Any]) -> RuleSettings:
         }
         for raw_pattern in payload.get("patterns", [])
     ]
+    payload["match"] = _rule_match_from_document(payload.get("match", {}))
     return RuleSettings.model_validate(payload)
+
+
+def _rule_match_to_document(match: RuleMatchSettings) -> dict[str, Any]:
+    payload: dict[str, Any] = {}
+    if match.aliases:
+        payload["aliases"] = [dependency.model_dump(exclude_none=True) for dependency in match.aliases]
+    if match.facts:
+        payload["facts"] = [dependency.model_dump() for dependency in match.facts]
+    return payload
+
+
+def _rule_match_from_document(raw_match: Any) -> dict[str, Any]:
+    if not raw_match:
+        return {"aliases": [], "facts": []}
+    if not isinstance(raw_match, dict):
+        return {"aliases": [], "facts": []}
+
+    facts = []
+    for raw_fact in raw_match.get("facts", []):
+        if isinstance(raw_fact, str):
+            facts.append({"types": [raw_fact]})
+        else:
+            facts.append(raw_fact)
+    return {
+        "aliases": raw_match.get("aliases", []),
+        "facts": facts,
+    }
 
 
 def _alias_to_document(alias: AliasSettings) -> dict[str, Any]:
@@ -340,7 +390,6 @@ def _alias_to_document(alias: AliasSettings) -> dict[str, Any]:
         "canonical": alias.canonical,
         "type": alias.type,
         "aliases": alias.aliases,
-        "signal_types": alias.signal_types,
         "fact_types": alias.fact_types,
     }
     if alias.color:
@@ -357,7 +406,6 @@ def _alias_from_document(raw_alias: dict[str, Any]) -> AliasSettings:
             "canonical": raw_alias.get("canonical", raw_alias.get("label", raw_alias.get("key"))),
             "type": raw_alias.get("type"),
             "aliases": raw_alias.get("aliases", []),
-            "signal_types": raw_alias.get("signal_types", []),
             "fact_types": raw_alias.get("fact_types", []),
             "color": raw_alias.get("color"),
             "confidence": raw_alias.get("confidence"),

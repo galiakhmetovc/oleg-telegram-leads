@@ -102,8 +102,6 @@ vendors:
     aliases:
       - Aqara
       - Акара
-    signal_types:
-      - smart_home_platform
     fact_types:
       - vendor
 """,
@@ -118,8 +116,6 @@ protocols:
     aliases:
       - Zigbee
       - Зигби
-    signal_types:
-      - protocol_gateway
     fact_types:
       - protocol
 """,
@@ -133,8 +129,6 @@ devices:
     type: device
     aliases:
       - реле
-    signal_types:
-      - smart_relay_control
     fact_types:
       - automation_component
 """,
@@ -148,8 +142,6 @@ software:
     type: software
     aliases:
       - Алиса
-    signal_types:
-      - smart_home_platform
     fact_types:
       - software
 """,
@@ -362,6 +354,16 @@ def test_preview_nlp_settings_uses_draft_without_saving(tmp_path: Path) -> None:
     client = _app_with_settings_repo(config_dir, repository)
     draft = client.get("/api/v1/settings").json()["nlp"]
     draft["signals"][0]["phrases"].append(["ищем", "поставщика"])
+    draft["signals"].append(
+        {
+            "type": "smart_home_platform",
+            "label": "Платформа умного дома",
+            "group": "Умный дом",
+            "phrases": [],
+            "patterns": [],
+            "match": {"aliases": [{"catalog": "vendors", "keys": ["aqara"]}], "facts": []},
+        }
+    )
     draft["vendors"][0]["aliases"].append("Аккара")
     draft["pipeline"]["stages"].append({"name": "lead_scoring", "enabled": True})
     draft["lead_scoring"]["lead_threshold"] = 20

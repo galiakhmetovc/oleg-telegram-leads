@@ -186,9 +186,10 @@ Rationale:
 Keep domain signals as semantic categories and move market spellings into
 separate PostgreSQL-backed alias catalogs: `vendors`, `protocols`, `devices`,
 and `software`. Each alias row stores canonical name, alias type, written
-variants, and links to signal/fact types. Bootstrap YAML files seed a curated
-first pass for common РФ/СНГ smart-home platforms, protocols, devices, software,
-and security/leak/power/climate brands.
+variants, and fact types emitted by alias matches. Domain signals reference
+alias entries explicitly through `match.aliases`. Bootstrap YAML files seed a
+curated first pass for common РФ/СНГ smart-home platforms, protocols, devices,
+software, and security/leak/power/climate brands.
 
 Rationale:
 
@@ -197,8 +198,8 @@ Rationale:
 - Operators need to see and edit human spellings such as `Aqara/Акара`,
   `Zigbee/Зигби`, `Home Assistant/Хоум Ассистант`, and `Neptun/Нептун/Нептуп`
   without changing code.
-- Exact alias matching is deterministic and cheap, while linked signal/fact
-  types keep lead scoring explainable.
+- Exact alias matching is deterministic and cheap, while explicit signal
+  dependencies keep lead scoring explainable.
 - The curated bootstrap pass is intentionally broad but not final; production
   review and eval data should continue extending these catalogs.
 
@@ -221,18 +222,39 @@ Rationale:
 
 Do not duplicate concrete brands, model names, product names, or typo variants
 inside domain signal/fact phrase rules. Domain signals and facts describe
-semantic categories. Alias catalogs own market spellings and link them to
-semantic `signal_types` and `fact_types`.
+semantic categories. Alias catalogs own market spellings and emit only
+structured `fact_types`. Domain signals own the dependency graph through
+`match.aliases` and `match.facts`.
 
 Rationale:
 
 - `Нептун`, `Нептуп`, `Neptun ProW`, and `Profi Wi-Fi` are vendor/model aliases,
   not semantic signal phrases.
-- Reverse references from a domain signal to dictionaries would duplicate the
-  same relationship. The durable link is `alias.signal_types` and
-  `alias.fact_types`; UI can compute reverse lookup from those fields.
+- The durable relationship for signal detection is now stored on the signal:
+  `water_leak_protection.match.aliases -> vendors:neptun`. This makes the
+  inference layer explicit and avoids hidden reverse links inside dictionaries.
+- Alias rows still emit facts such as `vendor`, `model`, `protocol`, `software`,
+  or `automation_component`; signals can depend on those facts through
+  `match.facts` when useful.
 - This keeps scoring explainable while avoiding double extraction paths such as
   `source=yargy` and `source=alias_catalog` for the same brand span.
+
+## 2026-05-08: Domain Signals Own Dictionary Dependencies
+
+Domain signals are the inference layer over dictionaries and facts. A signal
+may be triggered by exact/lemmatized semantic phrases, `match.aliases`
+dependencies on alias catalog entries, or `match.facts` dependencies on already
+extracted facts. Alias catalogs no longer contain `signal_types`.
+
+Rationale:
+
+- The operator needs to understand why `smart_home_platform` depends on
+  `vendors:yandex`, `software:alice`, `protocols:knx`, and similar dictionaries
+  from the signal configuration itself.
+- Keeping dependencies on the signal side removes the second source of truth
+  that existed when alias rows also declared signal outputs.
+- `Алиса` is modeled as `smart_home_platform`, not as both platform and broad
+  automation, to avoid overheating weak child-room/audio wiring mentions.
 
 ## 2026-05-07: Yargy Parsers Share Morphology Resources
 
