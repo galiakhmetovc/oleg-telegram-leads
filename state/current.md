@@ -26,8 +26,11 @@
   signals, and review lanes.
 - Domain signals and facts now support editable `group` folders stored in NLP
   config revisions. Settings Center groups large rule lists by these folders,
-  and Help explains how direct phrases relate to alias catalog entries such as
-  `Нептун`.
+  and Help explains how semantic signal/fact types receive alias catalog matches.
+- Brand/model spellings such as `Нептун`, `Нептуп`, `Neptun ProW`, and
+  `Profi Wi-Fi` live only in alias catalogs. Domain signals keep semantic
+  phrases and receive brand matches through `alias.signal_types`; facts receive
+  them through `alias.fact_types`.
 - Settings rule editing now presents operator-facing matching modes: exact
   phrases and lemmatized phrases. Exact/semantic rules are edited with explicit
   add/edit/delete actions. New lemmatized phrases are built by the backend from
@@ -88,14 +91,16 @@
 - Default NLP config recognizes Neptun/Нептун water leak monitoring leads,
   including the typo `Нептуп`, ProW/Profi product mentions, wired leak sensors,
   sensor-trigger monitoring, and smartphone information output.
-- Dev PostgreSQL active NLP config was refreshed to revision 22. The `need`
+- Dev PostgreSQL active NLP config was refreshed to revision 23. The `need`
   signal no longer stores Russian forms such as `нужно`, `нужна`, `нужен` as
   exact phrases; they are represented as lemmatized phrase rules with preserved
   operator source text. Revision 16 also includes the Neptun water leak
   monitoring lead calibration, and revision 19 includes the smart-home alias
   catalogs plus calibrated semantic signal/fact weights. Revision 20 was
   reseeded from current bootstrap YAML after dropping `caseless` compatibility;
-  revision 22 adds rule-group folders to the active PostgreSQL config.
+  revision 22 adds rule-group folders to the active PostgreSQL config; revision
+  23 removes direct Neptun/ProW/Profi brand/model rules so those spellings are
+  emitted only through alias catalogs.
 - `RussianTextEnricher` now precompiles Yargy parsers once per enricher
   instance and shares one Yargy `MorphTokenizer` across compiled rules instead
   of creating a separate `pymorphy2` analyzer for every parser. This keeps

@@ -217,6 +217,23 @@ Rationale:
 - Russian group labels are acceptable because they are operator-facing folder
   names, while stable scoring/filter keys remain English `type` values.
 
+## 2026-05-08: Brand Spellings Stay In Alias Catalogs
+
+Do not duplicate concrete brands, model names, product names, or typo variants
+inside domain signal/fact phrase rules. Domain signals and facts describe
+semantic categories. Alias catalogs own market spellings and link them to
+semantic `signal_types` and `fact_types`.
+
+Rationale:
+
+- `Нептун`, `Нептуп`, `Neptun ProW`, and `Profi Wi-Fi` are vendor/model aliases,
+  not semantic signal phrases.
+- Reverse references from a domain signal to dictionaries would duplicate the
+  same relationship. The durable link is `alias.signal_types` and
+  `alias.fact_types`; UI can compute reverse lookup from those fields.
+- This keeps scoring explainable while avoiding double extraction paths such as
+  `source=yargy` and `source=alias_catalog` for the same brand span.
+
 ## 2026-05-07: Yargy Parsers Share Morphology Resources
 
 Compile Yargy parsers once per `RussianTextEnricher` instance and share one

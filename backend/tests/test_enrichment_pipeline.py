@@ -409,6 +409,34 @@ def test_default_config_detects_curated_rf_cis_smart_home_aliases(
     assert result.lead_assessment.temperature in {"warm", "hot"}
 
 
+def test_default_config_keeps_neptun_spellings_only_in_alias_catalogs() -> None:
+    config = _lead_detection_config_without_heavy_natasha()
+    forbidden_spellings = {"neptun", "нептун", "нептуп", "prow", "profi"}
+
+    direct_signal_phrases = {
+        token.casefold()
+        for rule in config.signals
+        for phrase in rule.phrases
+        for token in phrase
+    }
+    direct_fact_phrases = {
+        token.casefold()
+        for rule in config.facts
+        for phrase in rule.phrases
+        for token in phrase
+    }
+    alias_spellings = {
+        alias.casefold()
+        for alias in next(alias_rule for alias_rule in config.aliases if alias_rule.key == "neptun").aliases
+    }
+
+    assert forbidden_spellings.isdisjoint(direct_signal_phrases)
+    assert forbidden_spellings.isdisjoint(direct_fact_phrases)
+    assert {"neptun", "нептун", "нептуп"}.issubset(alias_spellings)
+    assert any("prow" in alias for alias in alias_spellings)
+    assert any("profi" in alias for alias in alias_spellings)
+
+
 def test_default_config_marks_smart_home_automation_lead_text(
     default_lead_enricher: RussianTextEnricher,
 ) -> None:
@@ -842,12 +870,19 @@ def test_default_config_marks_neptun_water_leak_monitoring_lead(
 
     signal_types = {signal.type for signal in result.domain_signals}
     fact_types = {fact.type for fact in result.facts}
+    neptun_signal_sources = {
+        signal.source
+        for signal in result.domain_signals
+        if signal.type in {"water_leak_protection", "leak_protection"}
+        and signal.text.casefold().startswith("нептуп")
+    }
 
     assert result.lead_assessment is not None
     assert result.lead_assessment.is_lead is True
     assert result.lead_assessment.temperature in {"warm", "hot"}
     assert {"water_leak_protection", "consultation_request"} <= signal_types
     assert {"vendor", "automation_component", "controlled_device"} <= fact_types
+    assert neptun_signal_sources == {"alias_catalog"}
     assert "smart_home" in {item.type for item in result.lead_assessment.solution_areas}
     assert "security" in {item.type for item in result.lead_assessment.solution_areas}
 

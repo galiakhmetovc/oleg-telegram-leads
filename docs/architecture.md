@@ -120,11 +120,13 @@ semantic signal and fact types emitted when the alias matches. Exact alias
 matching lowercases the input text before matching and returns the original
 span text in enrichment output.
 
-The same written text can appear both as a direct phrase on a domain signal and
-as an alias catalog entry. For example, `Нептун` may emit a direct
-`water_leak_protection` domain signal, while the `neptun` vendor alias emits
-linked leak-protection signals plus `vendor`/`model` facts. Lead scoring uses
-the resulting signal/fact types, not the storage location of the rule.
+Brand/model spellings must not be duplicated in domain signal or fact phrase
+rules. For example, `Нептун`, `Нептуп`, `Neptun ProW`, and `Profi Wi-Fi` live in
+the `neptun` vendor alias. That alias emits linked `leak_protection` and
+`water_leak_protection` signals plus `vendor`/`model` facts. Domain signal rules
+keep only semantic language such as `датчик протечки` or `защита от протечек`.
+Lead scoring uses the resulting signal/fact types, not the storage location of
+the rule.
 
 ## Lead Assessment
 

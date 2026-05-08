@@ -598,7 +598,7 @@ test("renders expanded settings help page for all editable NLP settings", () => 
   expect(screen.getByText(/confidence - доверие к правилу/i)).toBeInTheDocument();
   expect(screen.getByText(/group - папка/i)).toBeInTheDocument();
   expect(screen.getByText(/Связь сигналов и словарей/i)).toBeInTheDocument();
-  expect(screen.getByText(/Нептун как точная фраза/i)).toBeInTheDocument();
+  expect(screen.getByText(/Нептун не добавляем в phrases/i)).toBeInTheDocument();
   expect(screen.getByText(/source=alias_catalog/i)).toBeInTheDocument();
   expect(screen.getAllByText(/weights.signals/i).length).toBeGreaterThan(0);
   expect(screen.getAllByText(/weights.facts/i).length).toBeGreaterThan(0);

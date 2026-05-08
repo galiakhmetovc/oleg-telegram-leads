@@ -110,27 +110,6 @@ facts:
           - normalized: "коммерческий"
           - normalized: "помещение"
 
-  - type: vendor
-    label: Вендор
-    group: Словари и бренды
-    confidence: 0.7
-    phrases:
-      - ["neptun"]
-      - ["нептун"]
-      - ["нептуп"]
-      - ["prow"]
-      - ["profi"]
-      - ["yandex"]
-      - ["livicom"]
-      - ["o’climate"]
-      - ["o'climate"]
-      - ["orac"]
-    patterns:
-      - tokens:
-          - normalized: "яндекс"
-      - tokens:
-          - normalized: "ораковский"
-
   - type: design_scope
     label: Раздел проектирования
     group: Проектирование и работы
@@ -266,10 +245,6 @@ facts:
         tokens:
           - normalized: "датчик"
           - normalized: "сработать"
-      - source_text: "система Profi Wi-Fi"
-        tokens:
-          - normalized: "система"
-          - normalized: "profi"
       - tokens:
           - normalized: "домофон"
       - tokens:

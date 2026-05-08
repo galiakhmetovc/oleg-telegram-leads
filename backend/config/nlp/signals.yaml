@@ -353,11 +353,6 @@ signals:
     group: Защита от протечек
     color: "#00695c"
     confidence: 0.82
-    phrases:
-      - ["нептун"]
-      - ["нептуп"]
-      - ["neptun"]
-      - ["prow"]
     patterns:
       - source_text: "датчик протечки"
         tokens:

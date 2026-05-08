@@ -1177,13 +1177,13 @@ function SettingsHelpPage() {
                 </TableHead>
                 <TableBody>
                   <TableRow>
-                    <TableCell>phrases у `water_leak_protection`</TableCell>
-                    <TableCell>Нептун как точная фраза создаст доменный сигнал `water_leak_protection` с `source=yargy`</TableCell>
-                    <TableCell>когда сама фраза является прямым признаком бизнес-домена</TableCell>
+                    <TableCell>patterns у `water_leak_protection`</TableCell>
+                    <TableCell>общие фразы вроде "датчик протечки" создают сигнал `water_leak_protection` с `source=yargy`</TableCell>
+                    <TableCell>когда фраза описывает смысловую категорию, а не бренд или модель</TableCell>
                   </TableRow>
                   <TableRow>
                     <TableCell>alias `neptun` в словаре vendors</TableCell>
-                    <TableCell>создаст связанные сигналы `leak_protection`, `water_leak_protection` с `source=alias_catalog` и факты `vendor`, `model`</TableCell>
+                    <TableCell>Нептун не добавляем в phrases; alias создаст связанные сигналы `leak_protection`, `water_leak_protection` с `source=alias_catalog` и факты `vendor`, `model`</TableCell>
                     <TableCell>когда нужно хранить каноническое имя, варианты написания, ошибки и связи с несколькими типами</TableCell>
                   </TableRow>
                   <TableRow>
@@ -1195,10 +1195,10 @@ function SettingsHelpPage() {
               </Table>
             </TableContainer>
             <Alert severity="info">
-              Практическое правило: бренды и модели лучше держать в словарях, а общие смысловые
-              формулировки - в доменных сигналах. Если бренд очень сильный признак домена, он может
-              временно быть и точной фразой сигнала, но словарь всё равно нужен для canonical name,
-              alias-ошибок и фактов.
+              Практическое правило: бренды, модели, протоколы, приложения и человеческие ошибки
+              написания держим в словарях. Доменные сигналы не ссылаются на словари напрямую;
+              связь задаётся в alias через `signal_types` и `fact_types`. В интерфейсе обратную
+              связь можно вычислять по этим полям, но хранить её второй раз не нужно.
             </Alert>
           </Paper>
 
