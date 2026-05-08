@@ -257,6 +257,35 @@ Rationale:
 - `Алиса` is modeled as `smart_home_platform`, not as both platform and broad
   automation, to avoid overheating weak child-room/audio wiring mentions.
 
+## 2026-05-08: Telegram Runtime Uses Durable Postgres Outboxes
+
+Use Telethon userbot accounts for Telegram input and Telegram bot accounts for
+Telegram output, but keep both production handoff points durable in PostgreSQL.
+
+Runtime flow:
+
+- `userbot` receives/polls source chats and persists source messages.
+- It creates normal enrichment jobs and publishes them to the existing
+  Celery/Redis worker queue.
+- The enrichment worker stores results and enqueues matched notifications in
+  `notification_outbox` instead of sending immediately.
+- `notification-dispatcher` batches outbox items by bot+chat and sends Telegram
+  bot messages.
+
+Rationale:
+
+- Redis/Celery is good for execution, but Telegram source messages and pending
+  notifications are business records that must survive restarts and support
+  deduplication/retry/audit.
+- RabbitMQ would add routing mechanics before the product needs them. If
+  broker-level exchanges, dead-letter policies, or high-volume fanout become a
+  real requirement, it can be introduced behind the same ports later.
+- Batch-runner must remain offline/testing tooling and must not dispatch
+  production notifications.
+- Telegram has message size and frequency limits, so output must batch leads:
+  pack up to the Bot API text limit and flush non-full batches when the oldest
+  item waits 5 minutes.
+
 ## 2026-05-07: Yargy Parsers Share Morphology Resources
 
 Compile Yargy parsers once per `RussianTextEnricher` instance and share one
@@ -415,3 +444,201 @@ Rationale:
   they support copy/paste, browser back/forward, and direct page opening.
 - The route stays inside the React SPA so the current input text and enrichment
   result remain in memory when the operator returns to `Обогащение`.
+
+## 2026-05-08: Telegram Notifications Use Bots, Chats, And Routes
+
+Add notification delivery as application/infrastructure adapters. Telegram is
+the first delivery adapter, but its configuration is not a single channel:
+
+- bots are named Telegram bots and own secret tokens;
+- chats are named Telegram destinations and own `telegram_chat_id` values;
+- routes are priority-ordered rules that select one bot and one chat based on
+  completed enrichment output.
+
+Route conditions can use the data already produced by enrichment:
+`lead_assessment.is_lead`, score bounds, temperature, review lane, solution
+areas, customer segments, domain signals, facts, score reasons, and noise
+signals. Routes have `all` or `any` condition mode and a message template.
+
+Store notification settings in PostgreSQL table `notification_settings` as a
+routing aggregate. This is separate from NLP config revisions because delivery
+channels are operational integration settings, not text-analysis rules. API
+responses must not return full secret values: Telegram bot responses expose only
+`has_token` and a masked token.
+
+Runtime enrichment jobs dispatch notifications after a job is completed.
+Batch-runner does not dispatch notifications; it remains an offline testing and
+calibration tool. The future Telegram userbot should receive source messages
+and create normal runtime enrichment jobs, which then pass through notification
+routing after completion.
+
+Rationale:
+
+- The upcoming lead workflow needs outbound notifications, but Telegram should
+  not leak into domain objects or NLP pipeline code.
+- Keeping delivery behind ports/adapters lets us add more channels later without
+  rewriting use cases.
+- Settings belong in PostgreSQL per the project rule that product/runtime
+  integration settings are not hardcoded.
+- Test-send gives the operator a direct way to validate token/chat configuration
+  before real lead notifications are wired.
+- Separating bots, chats, and routes avoids coupling one bot to one group and
+  lets operators route hot leads, noise, segments, or solution areas differently.
+- Batch runs over historical archives can contain thousands of matches, so they
+  must not accidentally send Telegram messages.
+
+## 2026-05-08: Runtime Operator UI Is Authenticated And Live
+
+The dev operator app is closed with simple signed-cookie authentication. The
+default credentials are `admin / pur-dev-password` and can be overridden through
+environment variables. This is deliberately a dev/runtime guard, not a final
+multi-user auth subsystem.
+
+The Analytics tab is now the default landing page and uses live Telegram runtime
+data, not imported batch analytics. A virtual run `Telegram live` is computed
+from `telegram_source_messages`, `enrichment_jobs`, and `enrichment_results`.
+Migration `0008_runtime_analytics_cleanup` clears old imported analytics rows
+so the operator does not review stale archive data as if it came from connected
+channels.
+
+Notifications for Telegram-originated enrichments include source-message links:
+a Telegram permalink when derivable and an app link to
+`#/analytics/message/{source_message_id}`. Analytics rows also offer a direct
+"Проверить" action that opens the message in Testing and starts enrichment.
+Only enrichment jobs linked to `telegram_source_messages` enqueue notifications;
+manual Testing jobs intentionally skip notification routing.
+
+Rationale:
+
+- The connected-channel workflow is now the primary production-like path.
+- Batch analytics remains useful for calibration, but mixing old archive rows
+  with live channel rows makes review quality hard to reason about.
+- Operators need to move between Telegram, analytics review, and deterministic
+  testing without manually copying text.
+- Testing is a diagnostic workflow, so rechecking the same text must not resend
+  production lead notifications.
+- A simple dev auth layer is enough for the current exposed dev URL while
+  keeping production identity/access design separate.
+
+## 2026-05-08: Telegram Input Uses Live Listener And Persisted Cooldown
+
+The Telegram input service runs in live listener mode by default. It uses
+Telethon `NewMessage` updates for configured source chats, persists every new
+text message in `telegram_source_messages`, and creates normal enrichment jobs
+through the existing Celery/Redis worker queue. On startup, a source without a
+cursor is bootstrapped by saving the current latest Telegram message id; a
+resolved source gets one bounded recovery read after `last_message_id` to cover
+service downtime. Historical imports stay in batch tooling.
+
+Telegram `FloodWait` is persisted at the userbot-account level as
+`cooldown_until` plus `last_error`. While that timestamp is in the future, the
+service skips the account entirely and makes no Telegram read/resolve calls,
+including after container restarts. The old polling mode remains available only
+as an explicit diagnostic mode and uses the same cooldown guard.
+
+After an account resumes from cooldown, source recovery is intentionally
+throttled: each source is recovered one at a time, backlog is drained in small
+delayed batches, and the service also delays between source reads. The dev
+runtime uses 10 messages per recovery batch and 15 seconds between batches or
+sources.
+
+System Status separates these counters:
+
+- worker progress journal rows in `enrichment_events`;
+- Telegram messages received by userbot;
+- Telegram messages whose enrichment result is ready and therefore visible in
+  live Analytics;
+- Telegram messages still waiting for enrichment or failed enrichment.
+
+Rationale:
+
+- FloodWait is based on Telegram API calls, not the number of new messages. A
+  polling loop that repeatedly resolves and reads quiet chats can still trigger
+  rate limits.
+- Persisting cooldown prevents process restarts from immediately retrying and
+  extending the wait window.
+- Soft recovery after cooldown prevents the first successful retry from
+  immediately reading every configured chat/channel and triggering another
+  FloodWait.
+- Live updates plus one bounded recovery read preserve durability without
+  importing old channel history by accident.
+- Operator status must not imply that worker progress events are the same thing
+  as analytics candidates.
+
+## 2026-05-08: Manual Review Is A Separate Operator Workspace
+
+Analytics remains a scanning surface. Candidate rows keep quick links, but
+manual verdicts are handled by a dedicated route:
+`#/analytics/review/{source_message_id}`.
+
+Review state is stored in `message_reviews`, keyed by the Telegram source
+message id. The row contains only operator feedback: verdict, comment, and
+timestamps. It does not modify the deterministic enrichment result, score,
+temperature, review lane, or notification outbox.
+
+The Review page combines the existing expanded Analytics evidence with manual
+actions: `Лид`, `Не лид`, `Сомнительно`, `Шум`, a comment field, and a first
+constructor panel that captures a selected source-text fragment for later
+dictionary/fact/signal/noise editing.
+
+Rationale:
+
+- Operator ground truth must be preserved separately from machine output so it
+  can be audited and reused for calibration.
+- Putting verdict buttons directly into the Analytics table would make the
+  scanning view too dense and too easy to click accidentally.
+- A separate page gives enough room for evidence, comments, and the future
+  settings constructor without duplicating the whole Analytics table.
+
+## 2026-05-08: Analytics Is A Review Queue, Not Only A Report
+
+Live Analytics must expose review state in the candidate list. The list API
+returns the saved `message_reviews` row when it exists and accepts filters for
+`review_status` (`reviewed` / `unreviewed`) and operator `verdict`. The UI shows
+review chips in the table and uses human labels for common review lanes.
+
+Review links include a URL-encoded `return` hash containing the current
+Analytics filters, selected run, and pagination offset. Returning from
+`#/analytics/review/{source_message_id}` should bring the operator back to the
+same queue context instead of a fresh Analytics page.
+
+Rationale:
+
+- The operator workflow is queue processing: new candidates, reviewed items,
+  false positives, and uncertain messages must be separable without manual text
+  filters.
+- A dedicated Review page is still correct, but it must not make the operator
+  lose the working slice they were reviewing.
+- Review verdicts are ground truth for calibration, so they should be visible
+  in the scan table immediately after saving.
+- Hash URLs are the current SPA routing contract; preserving filters in the URL
+  keeps browser back/forward and copyable links useful without introducing a
+  new router dependency.
+
+## 2026-05-08: Telegram Runtime Protects Cursors And Notification Idempotency
+
+Telegram input settings are split conceptually into editable fields and runtime
+state. Ordinary settings saves update account/source form fields, but preserve
+resolved chat ids, source cursors, last errors, authorization metadata, and
+FloodWait cooldowns for unchanged sources/accounts. Changing a source identity
+resets the cursor deliberately.
+
+The userbot creates an enrichment job before saving a source message, but it
+publishes the Celery task only after `telegram_source_messages` is persisted.
+That ordering prevents the worker from completing before Telegram source
+context exists.
+
+Notification outbox rows created from Telegram source messages carry
+`source_message_id` and `enrichment_job_id`. `(source_message_id, route_id)` is
+unique, so worker redelivery cannot enqueue the same route notification twice.
+The dispatcher claims rows by moving them to `sending` with `claimed_at` through
+`FOR UPDATE SKIP LOCKED`; stale claims can be picked up again after timeout.
+
+Rationale:
+
+- Cursors are runtime safety state; clearing them through a normal settings save
+  can silently skip channel messages.
+- A completed enrichment without source context creates an invisible lost
+  notification.
+- Telegram sends need at-least-once processing internally but at-most-once
+  enqueueing per source message and route.

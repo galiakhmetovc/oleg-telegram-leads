@@ -6,8 +6,12 @@ from uuid import uuid4
 
 from fastapi.testclient import TestClient
 
+from app.api.notifications import get_notification_settings_repository
 from app.api.settings import get_nlp_config_dir, get_nlp_config_repository
+from app.api.telegram_ingestion import get_telegram_ingestion_repository
+from app.domain.notifications import NotificationSettings
 from app.domain.settings import NlpConfigRevision
+from app.domain.telegram_ingestion import TelegramIngestionSettings
 from app.main import create_app
 
 
@@ -186,6 +190,28 @@ class InMemoryNlpConfigRepository:
         )
 
 
+class InMemoryNotificationSettingsRepository:
+    async def get_settings(self) -> NotificationSettings:
+        return NotificationSettings(bots=[], chats=[], routes=[], updated_at=None)
+
+    async def save_settings(
+        self,
+        settings: NotificationSettings,
+    ) -> NotificationSettings:
+        return settings
+
+
+class InMemoryTelegramIngestionSettingsRepository:
+    async def get_settings(self) -> TelegramIngestionSettings:
+        return TelegramIngestionSettings(accounts=[], chats=[])
+
+    async def save_settings(
+        self,
+        settings: TelegramIngestionSettings,
+    ) -> TelegramIngestionSettings:
+        return settings
+
+
 def _app_with_settings_repo(
     config_dir: Path,
     repository: InMemoryNlpConfigRepository,
@@ -195,6 +221,12 @@ def _app_with_settings_repo(
     app = create_app()
     app.dependency_overrides[get_nlp_config_dir] = lambda: config_dir
     app.dependency_overrides[get_nlp_config_repository] = lambda: repository
+    app.dependency_overrides[get_notification_settings_repository] = (
+        lambda: InMemoryNotificationSettingsRepository()
+    )
+    app.dependency_overrides[get_telegram_ingestion_repository] = (
+        lambda: InMemoryTelegramIngestionSettingsRepository()
+    )
     return TestClient(app, raise_server_exceptions=raise_server_exceptions)
 
 
@@ -229,6 +261,11 @@ def test_get_settings_returns_editable_nlp_and_readonly_system_settings(tmp_path
     assert payload["nlp"]["lead_scoring"]["solution_areas"]["supply"]["label"] == "Снабжение"
     assert payload["nlp"]["lead_scoring"]["review_lanes"][0]["key"] == "direct_pur_lead"
     assert payload["nlp"]["lead_scoring"]["review_lanes"][0]["match_groups"][0]["solution_area_types"] == ["supply"]
+    assert payload["notifications"]["bots"] == []
+    assert payload["notifications"]["chats"] == []
+    assert payload["notifications"]["routes"] == []
+    assert payload["telegram_ingestion"]["accounts"] == []
+    assert payload["telegram_ingestion"]["chats"] == []
     assert any(item["key"] == "environment" and item["editable"] is False for item in payload["system"])
     assert repository.active is not None
 

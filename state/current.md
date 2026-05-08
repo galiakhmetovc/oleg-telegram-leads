@@ -11,6 +11,53 @@
   Natasha/Yargy NLP pipeline.
 - Current dev UI is exposed through host Caddy at
   `https://secclaw.qlbc.ru:19443/`; `/api/*` and SSE are proxied to FastAPI.
+- Dev UI/API are now protected by a simple signed-cookie login. Dev defaults are
+  `admin / pur-dev-password`; `/health` remains open.
+- The default page after login is Analytics. The previous "Обогащение" page is
+  now named "Тестирование".
+- Analytics now defaults to a virtual live run, `Telegram live`, computed from
+  `telegram_source_messages`, `enrichment_jobs`, and `enrichment_results`.
+  Migration `0008_runtime_analytics_cleanup` cleared old batch analytics rows in
+  the dev database.
+- Analytics rows include links to the source Telegram message when derivable,
+  an internal analytics permalink, a "Ревью" action, and a "Проверить" action
+  that opens the text in Testing and starts enrichment. Notification messages
+  now append Telegram and app analytics links for Telegram-originated
+  enrichments.
+- Message review is stored separately from deterministic enrichment in
+  `message_reviews`. The route `#/analytics/review/{source_message_id}` opens a
+  full review workspace where the operator can mark `Лид`, `Не лид`,
+  `Сомнительно`, or `Шум`, add a comment, inspect the same evidence as in
+  Analytics, and select a text fragment for the future settings/entity
+  constructor.
+- Analytics candidate lists now include saved review state, show a review chip
+  (`Без ревью`, `Лид`, `Не лид`, `Сомнительно`, `Шум`), and can filter by
+  `review_status` and `verdict`. Review links carry a return URL with the
+  current filters, run, and pagination offset, so the operator can return to the
+  same queue context after opening a dedicated Review page.
+- The UI now includes "Логи" and "Статус системы" tabs backed by durable
+  runtime state and health counters. System Status distinguishes worker progress
+  journal rows from Telegram messages visible in live Analytics.
+- Runtime logs now have backend filtering by service, level, text, and time
+  range, limit/offset pagination in the UI, and configurable retention caps for
+  enrichment events and non-pending notification outbox rows so log-like tables
+  do not grow without bound. Docker Compose also rotates per-service stdout logs
+  at 10 MB x 5 files.
+- The UI now includes "Проектная документация": a read-only file browser for
+  repository markdown docs from `README.md`, `AGENTS.md`, `docs/`, `notes/`,
+  and `state/`, served through an allowlisted backend API.
+- Telegram FloodWait is treated as a persisted temporary rate limit on the
+  userbot account. The userbot stores `cooldown_until` and skips Telegram
+  read/resolve calls for that account until the timestamp expires, including
+  after container restarts. Source chats stay in their previous non-error state
+  and keep the wait reason in `last_error`. After cooldown expiration, recovery
+  is soft-resumed with small delayed batches and a delay between source reads so
+  the service does not burst through all chats at once.
+- Telegram userbot listener now keeps running after a handled FloodWait or
+  ordinary reconnectable exception instead of reading a stale/missing loop
+  summary. Saving Telegram input settings preserves runtime cursor/error/
+  cooldown state for unchanged sources and accounts, so ordinary settings edits
+  do not reset `last_message_id`.
 - Default NLP config now recognizes the smart-home automation lead case with
   customer intent, vendor, solution area, and electrical design context signals.
 - Default NLP config also recognizes hot Zigbee installation requests with
@@ -20,6 +67,40 @@
 - Settings Center is available in the UI. NLP/domain settings are viewed,
   previewed, and saved as active PostgreSQL revisions; YAML files are bootstrap
   defaults only. Runtime/env settings are shown read-only.
+- Settings Center now includes Telegram notification routing. Operators manage
+  bots, chats, and routes separately: bots own masked tokens, chats own
+  destination `chat_id` values, and routes choose bot+chat based on completed
+  enrichment data such as lead verdict, score, temperature, review lane,
+  solution areas, customer segments, signals, facts, reasons, and noise. Runtime
+  enrichment jobs enqueue matched notifications into `notification_outbox`;
+  `notification-dispatcher` sends Telegram bot messages in batches. Batch-runner
+  does not send notifications and stays a testing/calibration tool.
+- Settings Center now includes Telegram input/userbot settings. Operators manage
+  userbot accounts with phone, Telegram app `api_id`/`api_hash`, masked session
+  state, interactive login code, and source chats with `input_ref` and
+  high-water mark status. The `userbot` service listens to configured source
+  chats through Telethon live updates, does one bounded recovery read after
+  startup, persists text messages in `telegram_source_messages`, and creates
+  normal Celery-backed enrichment jobs. Legacy history polling remains available
+  as an explicit diagnostic mode.
+- Telegram input UI now explicitly explains that "Сохранить Telegram вход"
+  persists both userbot accounts and source chats. Source-chat `draft` is a
+  saved runtime state before userbot resolution, and the UI has "Обновить
+  статус" to reread resolved chat ids and cursors from backend.
+- Telegram notification delivery is batched by bot+chat under the Bot API
+  `sendMessage` 4096-character limit. Full batches are sent immediately; partial
+  batches flush when the oldest pending item is at least 5 minutes old.
+- Telegram notification outbox rows for source messages are idempotent per
+  `(source_message_id, route_id)`. The dispatcher atomically claims pending rows
+  with status `sending`/`claimed_at`, so worker retries do not enqueue duplicate
+  route notifications and parallel dispatchers do not send the same row.
+- Default Telegram lead notifications now use a structured operator-readable
+  template with score, review lane label, solution areas, customer segments,
+  score reasons, text preview, and separate source/app links. Existing routes
+  that still had the old default template are migrated to the new format.
+- Telegram lead notifications are now queued only for enrichment jobs linked to
+  `telegram_source_messages`. Manual Testing enrichments may reuse a live
+  message's text, but they do not send duplicate Telegram alerts.
 - The UI Help tab now documents current editable NLP settings: pipeline stages,
   exact and lemmatized matching, domain signals, facts, alias dictionaries, lead
   signal dependencies, scoring, thresholds, weights, solution areas, customer
@@ -94,6 +175,9 @@
   highlighted message fragments, lead temperature/score, review lane, solution
   areas, customer segments, intent/noise signals, score reasons, domain signals,
   and facts.
+- Analytics highlighting now prefers backend span ranges and converts Python
+  Unicode code point offsets into browser UTF-16 offsets before slicing. Text
+  search remains only as a fallback for old/live rows that do not carry ranges.
 - Default NLP config recognizes the developer-provided smart-home apartment
   modification lead: apartments with smart home from a developer, socket/switch
   changes, electrical scheme changes, and warranty risk.
@@ -157,8 +241,10 @@
 
 ## Next Steps
 
-1. Review the lead assessment UI manually in the browser.
-2. Promote the 9 production-confirmed leads into a curated eval/golden dataset
+1. Configure a Telegram userbot account and source chat in the Settings Center,
+   then run the userbot service against a small live source.
+2. Review the lead assessment UI manually in the browser.
+3. Promote the 9 production-confirmed leads into a curated eval/golden dataset
    after deciding what production text can be committed versus kept in ignored
    artifacts.
-3. Keep an eye on host disk usage before larger dependency/model downloads.
+4. Keep an eye on host disk usage before larger dependency/model downloads.

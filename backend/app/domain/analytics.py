@@ -3,7 +3,10 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
+from typing import Literal
 from uuid import UUID
+
+AnalyticsReviewVerdict = Literal["lead", "not_lead", "uncertain", "noise"]
 
 
 @dataclass(frozen=True)
@@ -53,9 +56,29 @@ class AnalyticsCandidate:
     reasons: list[dict[str, Any]]
     domain_signals: list[dict[str, Any]]
     facts: list[dict[str, Any]]
+    is_lead: bool = False
+    received_at: datetime | None = None
+    source_chat_id: str | None = None
+    source_chat_title: str | None = None
+    telegram_chat_id: str | None = None
+    telegram_message_id: int | None = None
+    telegram_message_url: str | None = None
+    app_message_url: str | None = None
+    testing_url: str | None = None
+    enrichment_job_id: str | None = None
+    review: AnalyticsMessageReview | None = None
 
 
 @dataclass(frozen=True)
 class AnalyticsCandidatePage:
     total: int
     items: list[AnalyticsCandidate]
+
+
+@dataclass(frozen=True)
+class AnalyticsMessageReview:
+    source_message_id: str
+    verdict: AnalyticsReviewVerdict | None
+    comment: str
+    created_at: datetime
+    updated_at: datetime

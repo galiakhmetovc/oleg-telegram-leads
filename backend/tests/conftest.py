@@ -1,6 +1,10 @@
 from __future__ import annotations
 
+import os
+
 import pytest
+
+os.environ.setdefault("PUR_AUTH_ENABLED", "false")
 
 
 def pytest_addoption(parser: pytest.Parser) -> None:

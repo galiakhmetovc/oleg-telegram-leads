@@ -59,6 +59,100 @@ nlp_config_revisions = sa.Table(
     sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
 )
 
+notification_settings = sa.Table(
+    "notification_settings",
+    metadata,
+    sa.Column("channel", sa.Text(), primary_key=True),
+    sa.Column("config", JSONB(), nullable=False),
+    sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
+)
+
+telegram_userbot_accounts = sa.Table(
+    "telegram_userbot_accounts",
+    metadata,
+    sa.Column("id", UUID(as_uuid=True), primary_key=True),
+    sa.Column("name", sa.Text(), nullable=False),
+    sa.Column("phone", sa.Text(), nullable=False),
+    sa.Column("api_id", sa.Integer(), nullable=False),
+    sa.Column("api_hash", sa.Text(), nullable=True),
+    sa.Column("session_string", sa.Text(), nullable=True),
+    sa.Column("phone_code_hash", sa.Text(), nullable=True),
+    sa.Column("enabled", sa.Boolean(), nullable=False),
+    sa.Column("status", sa.Text(), nullable=False),
+    sa.Column("last_error", sa.Text(), nullable=True),
+    sa.Column("telegram_user_id", sa.Text(), nullable=True),
+    sa.Column("telegram_username", sa.Text(), nullable=True),
+    sa.Column("cooldown_until", sa.DateTime(timezone=True), nullable=True),
+    sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
+    sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
+)
+
+telegram_source_chats = sa.Table(
+    "telegram_source_chats",
+    metadata,
+    sa.Column("id", UUID(as_uuid=True), primary_key=True),
+    sa.Column("account_id", UUID(as_uuid=True), nullable=False),
+    sa.Column("title", sa.Text(), nullable=False),
+    sa.Column("input_ref", sa.Text(), nullable=False),
+    sa.Column("telegram_chat_id", sa.Text(), nullable=True),
+    sa.Column("enabled", sa.Boolean(), nullable=False),
+    sa.Column("status", sa.Text(), nullable=False),
+    sa.Column("last_message_id", sa.BigInteger(), nullable=True),
+    sa.Column("last_error", sa.Text(), nullable=True),
+    sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
+    sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
+)
+
+telegram_source_messages = sa.Table(
+    "telegram_source_messages",
+    metadata,
+    sa.Column("id", UUID(as_uuid=True), primary_key=True),
+    sa.Column("account_id", UUID(as_uuid=True), nullable=False),
+    sa.Column("source_chat_id", UUID(as_uuid=True), nullable=False),
+    sa.Column("telegram_message_id", sa.BigInteger(), nullable=False),
+    sa.Column("message_date", sa.DateTime(timezone=True), nullable=True),
+    sa.Column("sender_id", sa.Text(), nullable=True),
+    sa.Column("sender_username", sa.Text(), nullable=True),
+    sa.Column("text", sa.Text(), nullable=False),
+    sa.Column("raw_payload", JSONB(), nullable=False),
+    sa.Column("enrichment_job_id", UUID(as_uuid=True), nullable=False),
+    sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
+    sa.UniqueConstraint("source_chat_id", "telegram_message_id", name="uq_telegram_source_message"),
+)
+
+message_reviews = sa.Table(
+    "message_reviews",
+    metadata,
+    sa.Column(
+        "source_message_id",
+        UUID(as_uuid=True),
+        sa.ForeignKey("telegram_source_messages.id", ondelete="CASCADE"),
+        primary_key=True,
+    ),
+    sa.Column("verdict", sa.Text(), nullable=True),
+    sa.Column("comment", sa.Text(), nullable=False),
+    sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
+    sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
+)
+
+notification_outbox = sa.Table(
+    "notification_outbox",
+    metadata,
+    sa.Column("id", UUID(as_uuid=True), primary_key=True),
+    sa.Column("route_id", sa.Text(), nullable=False),
+    sa.Column("bot_id", sa.Text(), nullable=False),
+    sa.Column("chat_id", sa.Text(), nullable=False),
+    sa.Column("source_message_id", UUID(as_uuid=True), nullable=True),
+    sa.Column("enrichment_job_id", UUID(as_uuid=True), nullable=True),
+    sa.Column("text", sa.Text(), nullable=False),
+    sa.Column("status", sa.Text(), nullable=False),
+    sa.Column("attempts", sa.Integer(), nullable=False),
+    sa.Column("last_error", sa.Text(), nullable=True),
+    sa.Column("claimed_at", sa.DateTime(timezone=True), nullable=True),
+    sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
+    sa.Column("sent_at", sa.DateTime(timezone=True), nullable=True),
+)
+
 analytics_runs = sa.Table(
     "analytics_runs",
     metadata,
@@ -94,6 +188,9 @@ analytics_candidates = sa.Table(
     sa.Column("reasons", JSONB(), nullable=False),
     sa.Column("domain_signals", JSONB(), nullable=False),
     sa.Column("facts", JSONB(), nullable=False),
+    sa.Column("received_at", sa.DateTime(timezone=True), nullable=True),
+    sa.Column("source_chat_id", sa.Text(), nullable=True),
+    sa.Column("source_chat_title", sa.Text(), nullable=True),
     sa.Column("signal_types", sa.ARRAY(sa.Text()), nullable=False),
     sa.Column("fact_types", sa.ARRAY(sa.Text()), nullable=False),
     sa.Column("reason_keys", sa.ARRAY(sa.Text()), nullable=False),

@@ -8,7 +8,7 @@ in this repository layout:
 - `backend/` - FastAPI service, SQLAlchemy/Alembic, PostgreSQL only.
 - `frontend/` - React + Vite + TypeScript operator UI.
 - `docker-compose.yml` - local container stack for PostgreSQL, Redis, backend,
-  worker, and frontend.
+  worker, Telegram userbot listener, notification dispatcher, and frontend.
 - `docs/` - architecture and durable decisions.
 - `state/` - current work and backlog.
 - `artifacts/` - ignored local exports and evidence, including production lead examples.
@@ -26,6 +26,17 @@ Services:
 - postgres: `127.0.0.1:55433`
 - redis: `127.0.0.1:6379`
 - caddy dev access: `https://secclaw.qlbc.ru:19443`
+- worker: Celery enrichment worker
+- userbot: Telegram source listener, no public port
+- notification-dispatcher: Telegram notification outbox flusher, no public port
+
+The dev operator UI is protected by a simple session cookie login. Defaults are:
+
+- login: `admin`
+- password: `pur-dev-password`
+
+Override with `PUR_AUTH_USERNAME`, `PUR_AUTH_PASSWORD`, and
+`PUR_AUTH_SESSION_SECRET` in the dev environment.
 
 ## Внешний Dev-Доступ
 
@@ -74,6 +85,102 @@ settings detail pages through hash deeplinks like
 text in the SPA context. Scoring thresholds, weights, review lanes, and taxonomy
 mappings are edited through the same PostgreSQL-backed Settings Center.
 
+The default Analytics screen is now the live Telegram review surface. It reads
+from `telegram_source_messages` joined to enrichment jobs/results, not from old
+batch imports. Old batch analytics rows are cleared by migration
+`0008_runtime_analytics_cleanup`; batch tooling remains available for offline
+calibration, but does not feed the operator's default live analytics screen.
+Each row keeps quick Telegram/app/test links and has a dedicated `Ревью` action
+opening `#/analytics/review/{source_message_id}`. Review verdicts and comments
+are stored in `message_reviews`, separate from deterministic enrichment output,
+so operator ground truth can later drive calibration and rule edits. The
+candidate list shows saved review chips, supports filters for reviewed/
+unreviewed messages and verdicts, and review links preserve the current run,
+filters, and page offset when returning from the dedicated Review page.
+
+The Settings Center also exposes Telegram runtime settings:
+
+- Notification routing: Telegram bots, Telegram chats, and routes are separate
+  settings. Bots own tokens, chats own destination `chat_id` values, and routes
+  decide where to notify based on the enrichment result (`is_lead`, score,
+  temperature, review lane, solution areas, customer segments, signals, facts,
+  reasons, and noise). API responses return only token presence and a masked
+  token, never the full bot token. Default lead notifications are formatted as
+  readable blocks with score, review lane, solution areas, customer segments,
+  score reasons, source text preview, and Telegram/app links.
+- Telegram input: userbot accounts own phone/app credentials/session state, and
+  source chats own input refs such as `@channel` plus the high-water mark
+  `last_message_id`. API responses mask `api_hash` and never return the
+  Telethon session string. A saved source chat can temporarily show `draft`:
+  that means the row is stored, but the userbot has not yet resolved the
+  `input_ref` into a concrete Telegram chat id and cursor. Saving editable
+  Telegram input settings preserves runtime cursor/error/cooldown state unless
+  the source identity changes. Telegram `FloodWait` is stored on the userbot
+  account as `cooldown_until`; while it is active, the service does not
+  reconnect or issue read/resolve calls for that account. Immediately after
+  cooldown expires, recovery is throttled: dev Compose reads at most 10 messages
+  per source batch, drains larger backlogs in repeated delayed batches, and
+  waits 15 seconds between source recovery reads before switching to live
+  updates.
+
+Production runtime flow:
+
+1. `userbot` listens to configured Telegram source chats through Telethon live
+   updates. On startup it does one bounded recovery read after the stored
+   `last_message_id`.
+2. New text messages are persisted in `telegram_source_messages`.
+3. The userbot creates a normal enrichment job and publishes it through the
+   existing Celery/Redis queue only after the source message row is saved.
+4. `worker` enriches the text and stores the result in PostgreSQL.
+5. Notification routing writes matching messages to `notification_outbox`.
+6. `notification-dispatcher` atomically claims pending outbox rows, groups by
+   bot+chat, packs batches under Telegram `sendMessage` 4096-character limit,
+   and sends a partial batch after the oldest item waits 5 minutes.
+
+Telegram notifications are emitted only for enrichment jobs that belong to a
+stored Telegram source message. Manual Testing enrichments can reuse the same
+text for debugging, but they do not enqueue lead notifications. Telegram
+notifications include a link to the source Telegram message when a stable
+permalink can be derived, and a link back to the app analytics view for the
+stored source message. The Analytics table also has a quick "Проверить" action
+that opens `#/testing?message_id={source_message_id}`, loads the source text in
+the Testing screen, and starts enrichment.
+Outbox rows for Telegram-originated jobs carry `source_message_id` and
+`enrichment_job_id`; `(source_message_id, route_id)` is unique, so worker
+redelivery cannot enqueue the same route notification twice for the same source
+message.
+
+The Review page is the detailed operator workspace for one message. It shows the
+source text, score/temperature/lane, reasons, facts, domain signals, and
+highlighted fragments, then lets the operator save one of `Лид`, `Не лид`,
+`Сомнительно`, or `Шум` with a comment. The page also contains the first
+constructor panel: select a fragment in the source text to prepare a future
+dictionary/fact/signal/noise edit.
+
+The UI includes Logs and System Status tabs. These are based on durable backend
+state: enrichment events, source messages, source chat errors, notification
+outbox state, database/Redis checks, source-chat statuses, job counters, and
+outbox counters. Logs are filtered and paginated on the backend by service,
+level, text, and time range. Runtime log API limits are configurable with
+`PUR_RUNTIME_LOG_DEFAULT_LIMIT` and `PUR_RUNTIME_LOG_MAX_LIMIT`. To avoid
+unbounded growth, log-like retention keeps the newest
+`PUR_RUNTIME_ENRICHMENT_EVENT_RETENTION_ROWS` enrichment events and newest
+`PUR_RUNTIME_NOTIFICATION_OUTBOX_RETENTION_ROWS` non-pending notification
+outbox rows; pending/sending notifications and Telegram source messages are not
+trimmed by this log retention policy. `enrichment_events` are worker progress journal
+rows, not analytics candidates; live Analytics shows only Telegram source
+messages that already have an enrichment result. Docker Compose also rotates
+container stdout logs with `max-size=10m` and `max-file=5` per service.
+
+The UI also includes a Project Documentation tab. It reads repository markdown
+documents through the backend from `README.md`, `AGENTS.md`, `docs/`, `notes/`,
+and `state/`, and shows them grouped by file without exposing arbitrary host
+paths. In Docker dev mode the backend gets the project root as a read-only
+`/workspace` mount via `PUR_PROJECT_DOCS_ROOT`.
+
+Batch enrichment remains offline/testing/calibration tooling. It does not send
+notifications and is not connected to Telegram input.
+
 ## Batch Enrichment
 
 Local exports can be enriched without creating one API/Celery job per message:
@@ -107,9 +214,10 @@ uv run python -m app.cli.import_analytics \
 
 The UI tab `Аналитика` shows imported runs, high-level KPIs, score buckets, top
 signals/reasons/segments, review lanes, and a candidate table filtered by score,
-temperature, signal, reason, solution area, customer segment, review lane, and
-text. Review lanes are configured in `lead_scoring.review_lanes` and stored in
-PostgreSQL NLP config revisions; YAML is only the bootstrap default.
+temperature, signal, reason, solution area, customer segment, review lane,
+source channel, received date, review state, verdict, and text. Review lanes are
+configured in `lead_scoring.review_lanes` and stored in PostgreSQL NLP config
+revisions; YAML is only the bootstrap default.
 
 Checks:
 

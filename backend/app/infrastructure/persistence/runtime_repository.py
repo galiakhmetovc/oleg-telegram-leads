@@ -1,0 +1,499 @@
+from __future__ import annotations
+
+from datetime import UTC, datetime
+from typing import Any, cast
+
+import redis.asyncio as redis
+import sqlalchemy as sa
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+
+from app.core.config import get_settings
+from app.infrastructure.persistence.runtime_retention import trim_enrichment_events
+from app.infrastructure.persistence.runtime_retention import trim_notification_outbox
+from app.infrastructure.persistence.tables import enrichment_events, enrichment_jobs
+from app.infrastructure.persistence.tables import enrichment_results
+from app.infrastructure.persistence.tables import notification_outbox
+from app.infrastructure.persistence.tables import telegram_userbot_accounts
+from app.infrastructure.persistence.tables import telegram_source_chats, telegram_source_messages
+
+
+class PostgresRuntimeRepository:
+    def __init__(self, session_factory: async_sessionmaker[AsyncSession]) -> None:
+        self._session_factory = session_factory
+
+    async def list_logs(
+        self,
+        *,
+        limit: int,
+        offset: int,
+        service: str | None,
+        level: str | None,
+        q: str | None,
+        created_from: datetime | None,
+        created_to: datetime | None,
+    ) -> dict[str, Any]:
+        async with self._session_factory() as session:
+            logs = _logs_query().subquery("runtime_logs")
+            conditions = _log_conditions(
+                logs,
+                service=service,
+                level=level,
+                q=q,
+                created_from=created_from,
+                created_to=created_to,
+            )
+            filtered = sa.select(logs).where(*conditions).subquery("filtered_runtime_logs")
+            total_result = await session.execute(sa.select(sa.func.count()).select_from(filtered))
+            rows_result = await session.execute(
+                sa.select(filtered)
+                .order_by(filtered.c.created_at.desc())
+                .limit(limit)
+                .offset(offset)
+            )
+        return {
+            "total": int(total_result.scalar_one()),
+            "items": [dict(row) for row in rows_result.mappings()],
+        }
+
+    async def enforce_log_retention(
+        self,
+        *,
+        enrichment_event_rows: int,
+        notification_outbox_rows: int,
+    ) -> dict[str, int]:
+        async with self._session_factory() as session:
+            enrichment_deleted = await trim_enrichment_events(
+                session,
+                max_rows=enrichment_event_rows,
+            )
+            notification_deleted = await trim_notification_outbox(
+                session,
+                max_rows=notification_outbox_rows,
+            )
+            await session.commit()
+        return {
+            "enrichment_events_deleted": enrichment_deleted,
+            "notification_outbox_deleted": notification_deleted,
+        }
+
+    async def system_status(self) -> list[dict[str, Any]]:
+        settings = get_settings()
+        checked_at = datetime.now(UTC)
+        async with self._session_factory() as session:
+            database_ok = await _database_ok(session)
+            source_counts = await _counts_by_status(session, telegram_source_chats.c.status, telegram_source_chats)
+            job_counts = await _counts_by_status(session, enrichment_jobs.c.status, enrichment_jobs)
+            outbox_counts = await _counts_by_status(session, notification_outbox.c.status, notification_outbox)
+            accounts_total = await _count_rows(session, telegram_userbot_accounts)
+            accounts_enabled = await _count_rows(
+                session,
+                telegram_userbot_accounts,
+                telegram_userbot_accounts.c.enabled.is_(True),
+            )
+            accounts_in_cooldown = await _count_rows(
+                session,
+                telegram_userbot_accounts,
+                telegram_userbot_accounts.c.enabled.is_(True),
+                telegram_userbot_accounts.c.cooldown_until > checked_at,
+            )
+            next_cooldown_until = await _min_value(
+                session,
+                telegram_userbot_accounts,
+                telegram_userbot_accounts.c.cooldown_until,
+                telegram_userbot_accounts.c.enabled.is_(True),
+                telegram_userbot_accounts.c.cooldown_until > checked_at,
+            )
+            account_errors = await _latest_account_errors(session)
+            source_chats_total = await _count_rows(session, telegram_source_chats)
+            source_chats_enabled = await _count_rows(
+                session,
+                telegram_source_chats,
+                telegram_source_chats.c.enabled.is_(True),
+            )
+            messages_total = await _count_rows(session, telegram_source_messages)
+            latest_message_at = await _max_value(session, telegram_source_messages, telegram_source_messages.c.created_at)
+            errored_sources = await _latest_source_errors(session)
+
+            jobs_total = await _count_rows(session, enrichment_jobs)
+            latest_job_created_at = await _max_value(session, enrichment_jobs, enrichment_jobs.c.created_at)
+            latest_event_at = await _max_value(session, enrichment_events, enrichment_events.c.created_at)
+            enrichment_events_retained = await _count_rows(session, enrichment_events)
+            telegram_messages_enriched = await _telegram_messages_with_results(session)
+            telegram_messages_failed_enrichment = await _telegram_messages_with_failed_jobs(session)
+            telegram_messages_waiting_enrichment = max(
+                messages_total - telegram_messages_enriched - telegram_messages_failed_enrichment,
+                0,
+            )
+            latest_job_error = await _latest_failed_job_error(session)
+
+            outbox_total = await _count_rows(session, notification_outbox)
+            latest_notification_at = await _max_value(
+                session,
+                notification_outbox,
+                sa.func.coalesce(notification_outbox.c.sent_at, notification_outbox.c.created_at),
+            )
+            oldest_pending_at = await _min_value(
+                session,
+                notification_outbox,
+                notification_outbox.c.created_at,
+                notification_outbox.c.status == "pending",
+            )
+            latest_notification_error = await _latest_failed_notification_error(session)
+        redis_ok = await _redis_ok()
+        return [
+            {
+                "service": "backend",
+                "status": "ok",
+                "details": {
+                    "environment": settings.environment,
+                    "auth_enabled": settings.auth_enabled,
+                    "public_base_url": settings.public_base_url,
+                    "status_checked_at": checked_at,
+                },
+            },
+            {
+                "service": "postgres",
+                "status": "ok" if database_ok else "error",
+                "details": {"database_ok": database_ok, "status_checked_at": checked_at},
+            },
+            {
+                "service": "redis",
+                "status": "ok" if redis_ok else "error",
+                "details": {"redis_ok": redis_ok, "status_checked_at": checked_at},
+            },
+            {
+                "service": "userbot",
+                "status": _userbot_status(
+                    source_errors=source_counts.get("error", 0),
+                    accounts_in_cooldown=accounts_in_cooldown,
+                    account_errors=len(account_errors),
+                ),
+                "details": {
+                    "accounts_total": accounts_total,
+                    "accounts_enabled": accounts_enabled,
+                    "accounts_in_cooldown": accounts_in_cooldown,
+                    "next_cooldown_until": next_cooldown_until,
+                    "account_errors": account_errors,
+                    "source_chats_total": source_chats_total,
+                    "source_chats_enabled": source_chats_enabled,
+                    "source_chats_by_status": source_counts,
+                    "messages_total": messages_total,
+                    "latest_message_at": latest_message_at,
+                    "errored_sources": errored_sources,
+                },
+            },
+            {
+                "service": "worker",
+                "status": "warning" if job_counts.get("failed", 0) else "ok",
+                "details": {
+                    "jobs_total": jobs_total,
+                    "jobs_by_status": job_counts,
+                    "latest_job_created_at": latest_job_created_at,
+                    "latest_event_at": latest_event_at,
+                    "enrichment_events_retained": enrichment_events_retained,
+                    "telegram_messages_enriched": telegram_messages_enriched,
+                    "telegram_messages_waiting_enrichment": telegram_messages_waiting_enrichment,
+                    "telegram_messages_failed_enrichment": telegram_messages_failed_enrichment,
+                    "failed_latest_error": latest_job_error,
+                },
+            },
+            {
+                "service": "notification-dispatcher",
+                "status": "warning" if outbox_counts.get("failed", 0) else "ok",
+                "details": {
+                    "outbox_total": outbox_total,
+                    "outbox_by_status": outbox_counts,
+                    "latest_notification_at": latest_notification_at,
+                    "oldest_pending_at": oldest_pending_at,
+                    "failed_latest_error": latest_notification_error,
+                },
+            },
+        ]
+
+
+async def _database_ok(session: AsyncSession) -> bool:
+    try:
+        await session.execute(sa.text("select 1"))
+        return True
+    except Exception:
+        return False
+
+
+async def _redis_ok() -> bool:
+    client = redis.from_url(get_settings().redis_url)
+    try:
+        return bool(await cast(Any, client.ping()))
+    except Exception:
+        return False
+    finally:
+        await client.aclose()
+
+
+async def _counts_by_status(
+    session: AsyncSession,
+    status_column: Any,
+    table: sa.Table,
+) -> dict[str, int]:
+    result = await session.execute(
+        sa.select(status_column, sa.func.count()).select_from(table).group_by(status_column)
+    )
+    return {str(status): int(count) for status, count in result.all()}
+
+
+async def _count_rows(session: AsyncSession, table: sa.Table, *conditions: Any) -> int:
+    result = await session.scalar(sa.select(sa.func.count()).select_from(table).where(*conditions))
+    return int(result or 0)
+
+
+async def _max_value(session: AsyncSession, table: sa.Table, column: Any) -> Any:
+    return await session.scalar(sa.select(sa.func.max(column)).select_from(table))
+
+
+async def _min_value(session: AsyncSession, table: sa.Table, column: Any, *conditions: Any) -> Any:
+    return await session.scalar(sa.select(sa.func.min(column)).select_from(table).where(*conditions))
+
+
+async def _latest_source_errors(session: AsyncSession, limit: int = 5) -> list[dict[str, Any]]:
+    result = await session.execute(
+        sa.select(
+            telegram_source_chats.c.title,
+            telegram_source_chats.c.status,
+            telegram_source_chats.c.last_error,
+            telegram_source_chats.c.updated_at,
+        )
+        .where(telegram_source_chats.c.last_error.is_not(None))
+        .order_by(telegram_source_chats.c.updated_at.desc())
+        .limit(limit)
+    )
+    return [dict(row) for row in result.mappings()]
+
+
+async def _latest_account_errors(session: AsyncSession, limit: int = 5) -> list[dict[str, Any]]:
+    result = await session.execute(
+        sa.select(
+            telegram_userbot_accounts.c.name,
+            telegram_userbot_accounts.c.status,
+            telegram_userbot_accounts.c.last_error,
+            telegram_userbot_accounts.c.cooldown_until,
+            telegram_userbot_accounts.c.updated_at,
+        )
+        .where(telegram_userbot_accounts.c.last_error.is_not(None))
+        .order_by(telegram_userbot_accounts.c.updated_at.desc())
+        .limit(limit)
+    )
+    return [dict(row) for row in result.mappings()]
+
+
+async def _latest_failed_job_error(session: AsyncSession) -> Any:
+    result = await session.execute(
+        sa.select(enrichment_jobs.c.error)
+        .where(enrichment_jobs.c.status == "failed")
+        .order_by(enrichment_jobs.c.updated_at.desc())
+        .limit(1)
+    )
+    return result.scalar_one_or_none()
+
+
+async def _telegram_messages_with_results(session: AsyncSession) -> int:
+    result = await session.scalar(
+        sa.select(sa.func.count())
+        .select_from(
+            telegram_source_messages.join(
+                enrichment_results,
+                telegram_source_messages.c.enrichment_job_id == enrichment_results.c.job_id,
+            )
+        )
+    )
+    return int(result or 0)
+
+
+async def _telegram_messages_with_failed_jobs(session: AsyncSession) -> int:
+    result = await session.scalar(
+        sa.select(sa.func.count())
+        .select_from(
+            telegram_source_messages.join(
+                enrichment_jobs,
+                telegram_source_messages.c.enrichment_job_id == enrichment_jobs.c.id,
+            )
+        )
+        .where(enrichment_jobs.c.status == "failed")
+    )
+    return int(result or 0)
+
+
+def _userbot_status(
+    *,
+    source_errors: int,
+    accounts_in_cooldown: int,
+    account_errors: int,
+) -> str:
+    if source_errors:
+        return "error"
+    if accounts_in_cooldown or account_errors:
+        return "warning"
+    return "ok"
+
+
+async def _latest_failed_notification_error(session: AsyncSession) -> str | None:
+    result = await session.execute(
+        sa.select(notification_outbox.c.last_error)
+        .where(notification_outbox.c.status == "failed")
+        .order_by(notification_outbox.c.created_at.desc())
+        .limit(1)
+    )
+    return result.scalar_one_or_none()
+
+
+def _logs_query() -> sa.CompoundSelect[Any]:
+    return sa.union_all(
+        _enrichment_logs_query(),
+        _telegram_logs_query(),
+        _notification_logs_query(),
+        _account_error_logs_query(),
+        _source_error_logs_query(),
+    )
+
+
+def _log_conditions(
+    logs: Any,
+    *,
+    service: str | None,
+    level: str | None,
+    q: str | None,
+    created_from: datetime | None,
+    created_to: datetime | None,
+) -> list[Any]:
+    conditions = []
+    if service:
+        conditions.append(logs.c.service == service)
+    if level:
+        conditions.append(logs.c.level == level)
+    if q:
+        conditions.append(logs.c.message.ilike(f"%{q}%"))
+    if created_from:
+        conditions.append(logs.c.created_at >= created_from)
+    if created_to:
+        conditions.append(logs.c.created_at <= created_to)
+    return conditions
+
+
+def _enrichment_logs_query() -> sa.Select[Any]:
+    return sa.select(
+        enrichment_events.c.created_at.label("created_at"),
+        sa.literal("worker").label("service"),
+        sa.case(
+            (enrichment_events.c.event_type == "job_failed", sa.literal("error")),
+            else_=sa.literal("info"),
+        ).label("level"),
+        enrichment_events.c.message.label("message"),
+        sa.func.jsonb_build_object(
+            "event_type",
+            enrichment_events.c.event_type,
+            "job_id",
+            sa.cast(enrichment_events.c.job_id, sa.Text()),
+            "progress_percent",
+            enrichment_events.c.progress_percent,
+        ).label("payload"),
+    )
+
+
+def _telegram_logs_query() -> sa.Select[Any]:
+    return (
+        sa.select(
+            telegram_source_messages.c.created_at.label("created_at"),
+            sa.literal("userbot").label("service"),
+            sa.literal("info").label("level"),
+            sa.func.concat(
+                sa.literal("Получено сообщение Telegram из "),
+                telegram_source_chats.c.title,
+            ).label("message"),
+            sa.func.jsonb_build_object(
+                "source_chat_id",
+                sa.cast(telegram_source_messages.c.source_chat_id, sa.Text()),
+                "telegram_message_id",
+                telegram_source_messages.c.telegram_message_id,
+                "enrichment_job_id",
+                sa.cast(telegram_source_messages.c.enrichment_job_id, sa.Text()),
+            ).label("payload"),
+        )
+        .select_from(
+            telegram_source_messages.join(
+                telegram_source_chats,
+                telegram_source_messages.c.source_chat_id == telegram_source_chats.c.id,
+            )
+        )
+    )
+
+
+def _notification_logs_query() -> sa.Select[Any]:
+    return sa.select(
+        sa.func.coalesce(notification_outbox.c.sent_at, notification_outbox.c.created_at).label("created_at"),
+        sa.literal("notification-dispatcher").label("service"),
+        sa.case(
+            (notification_outbox.c.status == "failed", sa.literal("error")),
+            else_=sa.literal("info"),
+        ).label("level"),
+        sa.func.concat(sa.literal("Уведомление "), notification_outbox.c.status).label("message"),
+        sa.func.jsonb_build_object(
+            "route_id",
+            notification_outbox.c.route_id,
+            "bot_id",
+            notification_outbox.c.bot_id,
+            "chat_id",
+            notification_outbox.c.chat_id,
+            "attempts",
+            notification_outbox.c.attempts,
+            "last_error",
+            notification_outbox.c.last_error,
+        ).label("payload"),
+    )
+
+
+def _source_error_logs_query() -> sa.Select[Any]:
+    return (
+        sa.select(
+            telegram_source_chats.c.updated_at.label("created_at"),
+            sa.literal("userbot").label("service"),
+            sa.literal("error").label("level"),
+            sa.func.concat(
+                sa.literal("Ошибка источника "),
+                telegram_source_chats.c.title,
+                sa.literal(": "),
+                telegram_source_chats.c.last_error,
+            ).label("message"),
+            sa.func.jsonb_build_object(
+                "source_chat_id",
+                sa.cast(telegram_source_chats.c.id, sa.Text()),
+                "input_ref",
+                telegram_source_chats.c.input_ref,
+                "status",
+                telegram_source_chats.c.status,
+            ).label("payload"),
+        )
+        .where(telegram_source_chats.c.last_error.is_not(None))
+    )
+
+
+def _account_error_logs_query() -> sa.Select[Any]:
+    return (
+        sa.select(
+            telegram_userbot_accounts.c.updated_at.label("created_at"),
+            sa.literal("userbot").label("service"),
+            sa.literal("error").label("level"),
+            sa.func.concat(
+                sa.literal("Ошибка аккаунта "),
+                telegram_userbot_accounts.c.name,
+                sa.literal(": "),
+                telegram_userbot_accounts.c.last_error,
+            ).label("message"),
+            sa.func.jsonb_build_object(
+                "account_id",
+                sa.cast(telegram_userbot_accounts.c.id, sa.Text()),
+                "status",
+                telegram_userbot_accounts.c.status,
+                "cooldown_until",
+                telegram_userbot_accounts.c.cooldown_until,
+            ).label("payload"),
+        )
+        .where(telegram_userbot_accounts.c.last_error.is_not(None))
+    )

@@ -1,6 +1,13 @@
+x-default-logging: &default-logging
+  driver: "json-file"
+  options:
+    max-size: "10m"
+    max-file: "5"
+
 services:
   postgres:
     image: postgres:16-alpine
+    logging: *default-logging
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-pur_leads_v2}
       POSTGRES_USER: ${POSTGRES_USER:-pur_leads}
@@ -21,6 +28,7 @@ services:
 
   redis:
     image: redis:8-alpine
+    logging: *default-logging
     ports:
       - "127.0.0.1:${REDIS_PORT:-6379}:6379"
     volumes:
@@ -34,6 +42,7 @@ services:
   migrate:
     build:
       context: ./backend
+    logging: *default-logging
     command: alembic upgrade head
     environment:
       PUR_DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-pur_leads}:${POSTGRES_PASSWORD:-pur_leads_dev_password}@postgres:5432/${POSTGRES_DB:-pur_leads_v2}
@@ -47,16 +56,27 @@ services:
   backend:
     build:
       context: ./backend
+    logging: *default-logging
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
     environment:
       PUR_DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-pur_leads}:${POSTGRES_PASSWORD:-pur_leads_dev_password}@postgres:5432/${POSTGRES_DB:-pur_leads_v2}
       PUR_ENVIRONMENT: development
       PUR_REDIS_URL: redis://redis:6379/0
       PUR_NLP_CONFIG_DIR: /app/config/nlp
+      PUR_PUBLIC_BASE_URL: ${PUR_PUBLIC_BASE_URL:-https://secclaw.qlbc.ru:19443}
+      PUR_AUTH_USERNAME: ${PUR_AUTH_USERNAME:-admin}
+      PUR_AUTH_PASSWORD: ${PUR_AUTH_PASSWORD:-pur-dev-password}
+      PUR_AUTH_SESSION_SECRET: ${PUR_AUTH_SESSION_SECRET:-pur-dev-session-secret}
+      PUR_PROJECT_DOCS_ROOT: /workspace
+      PUR_RUNTIME_LOG_DEFAULT_LIMIT: ${PUR_RUNTIME_LOG_DEFAULT_LIMIT:-50}
+      PUR_RUNTIME_LOG_MAX_LIMIT: ${PUR_RUNTIME_LOG_MAX_LIMIT:-200}
+      PUR_RUNTIME_ENRICHMENT_EVENT_RETENTION_ROWS: ${PUR_RUNTIME_ENRICHMENT_EVENT_RETENTION_ROWS:-20000}
+      PUR_RUNTIME_NOTIFICATION_OUTBOX_RETENTION_ROWS: ${PUR_RUNTIME_NOTIFICATION_OUTBOX_RETENTION_ROWS:-10000}
     ports:
       - "127.0.0.1:${BACKEND_PORT:-8000}:8000"
     volumes:
       - ./backend:/app
+      - .:/workspace:ro
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -66,7 +86,28 @@ services:
   worker:
     build:
       context: ./backend
+    logging: *default-logging
     command: celery -A app.worker.celery_app worker --loglevel=info --pool=solo
+    environment:
+      PUR_DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-pur_leads}:${POSTGRES_PASSWORD:-pur_leads_dev_password}@postgres:5432/${POSTGRES_DB:-pur_leads_v2}
+      PUR_ENVIRONMENT: development
+      PUR_REDIS_URL: redis://redis:6379/0
+      PUR_NLP_CONFIG_DIR: /app/config/nlp
+      PUR_PUBLIC_BASE_URL: ${PUR_PUBLIC_BASE_URL:-https://secclaw.qlbc.ru:19443}
+      PUR_RUNTIME_ENRICHMENT_EVENT_RETENTION_ROWS: ${PUR_RUNTIME_ENRICHMENT_EVENT_RETENTION_ROWS:-20000}
+    volumes:
+      - ./backend:/app
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+
+  userbot:
+    build:
+      context: ./backend
+    logging: *default-logging
+    command: python -m app.cli.telegram_userbot_worker --mode listen --batch-limit 100 --cooldown-recovery-limit 10 --cooldown-recovery-delay 15 --idle-retry 60
     environment:
       PUR_DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-pur_leads}:${POSTGRES_PASSWORD:-pur_leads_dev_password}@postgres:5432/${POSTGRES_DB:-pur_leads_v2}
       PUR_ENVIRONMENT: development
@@ -80,9 +121,27 @@ services:
       redis:
         condition: service_healthy
 
+  notification-dispatcher:
+    build:
+      context: ./backend
+    logging: *default-logging
+    command: python -m app.cli.notification_dispatcher --interval 30
+    environment:
+      PUR_DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-pur_leads}:${POSTGRES_PASSWORD:-pur_leads_dev_password}@postgres:5432/${POSTGRES_DB:-pur_leads_v2}
+      PUR_ENVIRONMENT: development
+      PUR_REDIS_URL: redis://redis:6379/0
+      PUR_NLP_CONFIG_DIR: /app/config/nlp
+      PUR_RUNTIME_NOTIFICATION_OUTBOX_RETENTION_ROWS: ${PUR_RUNTIME_NOTIFICATION_OUTBOX_RETENTION_ROWS:-10000}
+    volumes:
+      - ./backend:/app
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
   frontend:
     build:
       context: ./frontend
+    logging: *default-logging
     command: npm run dev -- --host 0.0.0.0 --port 5173
     environment:
       VITE_API_BASE_URL: ""

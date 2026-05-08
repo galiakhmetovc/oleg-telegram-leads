@@ -7,6 +7,12 @@ from typing import Any, Literal
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field, model_validator
 
+from app.api.notifications import NotificationSettingsSnapshot
+from app.api.notifications import get_notification_settings_repository
+from app.api.notifications import read_notification_settings_snapshot
+from app.api.telegram_ingestion import TelegramIngestionSettingsSnapshot
+from app.api.telegram_ingestion import get_telegram_ingestion_repository
+from app.api.telegram_ingestion import read_telegram_ingestion_settings_snapshot
 from app.core.config import Settings, get_settings
 from app.db.session import create_sessionmaker
 from app.domain.settings import NlpConfigRevision
@@ -14,6 +20,12 @@ from app.infrastructure.nlp.config_loader import load_nlp_config_from_documents
 from app.infrastructure.nlp.config_loader import read_nlp_config_documents
 from app.infrastructure.nlp.rule_phrase_normalizer import RussianRulePhraseNormalizer
 from app.infrastructure.nlp.russian_text_enricher import RussianTextEnricher
+from app.infrastructure.persistence.notification_settings_repository import (
+    PostgresNotificationSettingsRepository,
+)
+from app.infrastructure.persistence.telegram_ingestion_repository import (
+    PostgresTelegramIngestionRepository,
+)
 from app.infrastructure.persistence.nlp_config_repository import PostgresNlpConfigRepository
 
 router = APIRouter(prefix="/settings", tags=["settings"])
@@ -201,6 +213,8 @@ class SystemSetting(BaseModel):
 
 class SettingsSnapshot(BaseModel):
     nlp: NlpSettingsSnapshot
+    notifications: NotificationSettingsSnapshot
+    telegram_ingestion: TelegramIngestionSettingsSnapshot
     system: list[SystemSetting]
 
 
@@ -236,10 +250,20 @@ def get_rule_phrase_normalizer() -> RussianRulePhraseNormalizer:
 async def get_all_settings(
     config_dir: Path = Depends(get_nlp_config_dir),
     repository: PostgresNlpConfigRepository = Depends(get_nlp_config_repository),
+    notification_repository: PostgresNotificationSettingsRepository = Depends(
+        get_notification_settings_repository
+    ),
+    telegram_ingestion_repository: PostgresTelegramIngestionRepository = Depends(
+        get_telegram_ingestion_repository
+    ),
     settings: Settings = Depends(get_settings),
 ) -> SettingsSnapshot:
     return SettingsSnapshot(
         nlp=await _read_nlp_snapshot(config_dir, repository),
+        notifications=await read_notification_settings_snapshot(notification_repository),
+        telegram_ingestion=await read_telegram_ingestion_settings_snapshot(
+            telegram_ingestion_repository
+        ),
         system=_system_settings(settings),
     )
 

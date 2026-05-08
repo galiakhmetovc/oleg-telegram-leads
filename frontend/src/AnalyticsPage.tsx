@@ -1,7 +1,11 @@
+import ArrowBackIcon from "@mui/icons-material/ArrowBack";
 import KeyboardArrowDownIcon from "@mui/icons-material/KeyboardArrowDown";
 import KeyboardArrowUpIcon from "@mui/icons-material/KeyboardArrowUp";
 import FilterAltIcon from "@mui/icons-material/FilterAlt";
+import RateReviewIcon from "@mui/icons-material/RateReview";
 import RefreshIcon from "@mui/icons-material/Refresh";
+import SaveIcon from "@mui/icons-material/Save";
+import ScienceIcon from "@mui/icons-material/Science";
 import {
   Alert,
   Box,
@@ -25,7 +29,7 @@ import {
   TextField,
   Typography
 } from "@mui/material";
-import { Fragment, FormEvent, useEffect, useMemo, useState } from "react";
+import { Fragment, FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 
 type AnalyticsRun = {
@@ -76,6 +80,26 @@ type AnalyticsCandidate = {
   reasons: AnalyticsReason[];
   domain_signals: AnalyticsSpan[];
   facts: AnalyticsSpan[];
+  is_lead?: boolean;
+  received_at?: string | null;
+  source_chat_id?: string | null;
+  source_chat_title?: string | null;
+  telegram_message_id?: number | null;
+  telegram_message_url?: string | null;
+  app_message_url?: string | null;
+  testing_url?: string | null;
+  enrichment_job_id?: string | null;
+  review?: AnalyticsMessageReview | null;
+};
+
+type AnalyticsReviewVerdict = "lead" | "not_lead" | "uncertain" | "noise";
+
+type AnalyticsMessageReview = {
+  source_message_id: string;
+  verdict: AnalyticsReviewVerdict | null;
+  comment: string;
+  created_at: string;
+  updated_at: string;
 };
 
 type AnalyticsCategory = {
@@ -96,9 +120,15 @@ type AnalyticsSpan = {
   type: string;
   label?: string;
   text?: string;
+  range?: TextRange | null;
   source?: string;
   color?: string | null;
   confidence?: number | null;
+};
+
+type TextRange = {
+  start: number;
+  stop: number;
 };
 
 type CandidatePage = {
@@ -116,15 +146,41 @@ type CandidateFilters = {
   solutionArea: string;
   customerSegment: string;
   lane: string;
+  sourceChatId: string;
+  receivedFrom: string;
+  receivedTo: string;
+  reviewStatus: string;
+  verdict: string;
   q: string;
 };
 
+type AnalyticsSummaryBlockKey = "score" | "signals" | "reasons" | "segments" | "lanes";
+
 type AnalyticsPageProps = {
   apiBaseUrl: string;
+  focusMessageId?: string | null;
+  onTestMessage?: (candidate: AnalyticsCandidate) => void;
+};
+
+type AnalyticsReviewPageProps = {
+  apiBaseUrl: string;
+  messageId: string;
+  onBack?: () => void;
+  onTestMessage?: (candidate: AnalyticsCandidate) => void;
 };
 
 const numberFormatter = new Intl.NumberFormat("ru-RU");
 const candidatePageSize = 50;
+const reviewVerdictOptions: Array<{
+  value: AnalyticsReviewVerdict;
+  label: string;
+  color: "primary" | "secondary" | "error" | "info" | "success" | "warning";
+}> = [
+  { value: "lead", label: "Лид", color: "success" },
+  { value: "not_lead", label: "Не лид", color: "error" },
+  { value: "uncertain", label: "Сомнительно", color: "warning" },
+  { value: "noise", label: "Шум", color: "secondary" }
+];
 const defaultFilters: CandidateFilters = {
   scoreMin: "",
   temperature: "",
@@ -133,26 +189,62 @@ const defaultFilters: CandidateFilters = {
   solutionArea: "",
   customerSegment: "",
   lane: "",
+  sourceChatId: "",
+  receivedFrom: "",
+  receivedTo: "",
+  reviewStatus: "",
+  verdict: "",
   q: ""
 };
+const collapsedSummaryBlocks: Record<AnalyticsSummaryBlockKey, boolean> = {
+  score: false,
+  signals: false,
+  reasons: false,
+  segments: false,
+  lanes: false
+};
 
-export function AnalyticsPage({ apiBaseUrl }: AnalyticsPageProps) {
+const reviewLaneFallbackLabels: Record<string, string> = {
+  direct_pur_lead: "Прямой лид ПУР",
+  domain_interest: "Доменный интерес",
+  pur_design_context: "Проектный контекст ПУР",
+  research_warm: "Исследование / теплый интерес",
+  noise: "Шум",
+  none: "Без очереди"
+};
+
+export function AnalyticsPage({ apiBaseUrl, focusMessageId, onTestMessage }: AnalyticsPageProps) {
+  const initialAnalyticsStateRef = useRef<AnalyticsUrlState | null>(null);
+  if (initialAnalyticsStateRef.current === null) {
+    initialAnalyticsStateRef.current = parseAnalyticsUrlState(window.location.hash);
+  }
+  const initialAnalyticsState = initialAnalyticsStateRef.current;
   const [runs, setRuns] = useState<AnalyticsRun[]>([]);
-  const [selectedRunId, setSelectedRunId] = useState("");
+  const [selectedRunId, setSelectedRunId] = useState(initialAnalyticsState.runId);
   const [summary, setSummary] = useState<AnalyticsSummary | null>(null);
   const [candidatePage, setCandidatePage] = useState<CandidatePage | null>(null);
-  const [filters, setFilters] = useState<CandidateFilters>(defaultFilters);
-  const [appliedFilters, setAppliedFilters] = useState<CandidateFilters>(defaultFilters);
-  const [candidateOffset, setCandidateOffset] = useState(0);
+  const [focusedCandidate, setFocusedCandidate] = useState<AnalyticsCandidate | null>(null);
+  const [filters, setFilters] = useState<CandidateFilters>(initialAnalyticsState.filters);
+  const [appliedFilters, setAppliedFilters] = useState<CandidateFilters>(initialAnalyticsState.filters);
+  const [candidateOffset, setCandidateOffset] = useState(initialAnalyticsState.offset);
   const [loadingRuns, setLoadingRuns] = useState(true);
   const [loadingSummary, setLoadingSummary] = useState(false);
   const [loadingCandidates, setLoadingCandidates] = useState(false);
   const [analyticsError, setAnalyticsError] = useState<string | null>(null);
+  const [expandedSummaryBlocks, setExpandedSummaryBlocks] = useState<Record<AnalyticsSummaryBlockKey, boolean>>(
+    () => ({ ...collapsedSummaryBlocks })
+  );
+  const focusedCandidatePanelRef = useRef<HTMLDivElement | null>(null);
+  const filterDraftRef = useRef<CandidateFilters>(initialAnalyticsState.filters);
 
   const loadingData = loadingSummary || loadingCandidates;
   const selectedRun = useMemo(
     () => runs.find((run) => run.id === selectedRunId) ?? summary?.run ?? null,
     [runs, selectedRunId, summary]
+  );
+  const focusedCandidateInCurrentPage = useMemo(
+    () => Boolean(focusMessageId && candidatePage?.items.some((candidate) => candidate.message_id === focusMessageId)),
+    [candidatePage, focusMessageId]
   );
 
   useEffect(() => {
@@ -165,16 +257,20 @@ export function AnalyticsPage({ apiBaseUrl }: AnalyticsPageProps) {
         if (!response.ok) {
           throw new Error(`Backend вернул ${response.status}`);
         }
-        const payload = (await response.json()) as { runs: AnalyticsRun[] };
+        const payload = (await response.json()) as { runs?: AnalyticsRun[] };
+        const runs = Array.isArray(payload.runs) ? payload.runs : [];
         if (!active) {
           return;
         }
-        setRuns(payload.runs);
+        setRuns(runs);
         setSelectedRunId((current) => {
-          if (current && payload.runs.some((run) => run.id === current)) {
+          if (current && runs.some((run) => run.id === current)) {
             return current;
           }
-          return payload.runs[0]?.id ?? "";
+          if (initialAnalyticsState.runId && runs.some((run) => run.id === initialAnalyticsState.runId)) {
+            return initialAnalyticsState.runId;
+          }
+          return runs[0]?.id ?? "";
         });
       } catch (caught) {
         if (active) {
@@ -271,6 +367,48 @@ export function AnalyticsPage({ apiBaseUrl }: AnalyticsPageProps) {
     };
   }, [apiBaseUrl, selectedRunId, appliedFilters, candidateOffset]);
 
+  useEffect(() => {
+    if (!focusMessageId) {
+      setFocusedCandidate(null);
+      return;
+    }
+
+    const messageId = focusMessageId;
+    let active = true;
+    async function loadFocusedCandidate() {
+      setAnalyticsError(null);
+      try {
+        const response = await fetch(`${apiBaseUrl}/api/v1/analytics/messages/${encodeURIComponent(messageId)}`);
+        if (!response.ok) {
+          throw new Error(`Backend вернул ${response.status}`);
+        }
+        const candidate = (await response.json()) as AnalyticsCandidate;
+        if (active) {
+          setFocusedCandidate(candidate);
+        }
+      } catch (caught) {
+        if (active) {
+          setAnalyticsError(caught instanceof Error ? caught.message : "Не удалось загрузить сообщение аналитики");
+        }
+      }
+    }
+
+    void loadFocusedCandidate();
+    return () => {
+      active = false;
+    };
+  }, [apiBaseUrl, focusMessageId]);
+
+  useEffect(() => {
+    if (!focusMessageId || !focusedCandidate || focusedCandidate.message_id !== focusMessageId || focusedCandidateInCurrentPage) {
+      return;
+    }
+    const timeoutId = window.setTimeout(() => {
+      focusedCandidatePanelRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+    }, 0);
+    return () => window.clearTimeout(timeoutId);
+  }, [focusedCandidate, focusedCandidateInCurrentPage, focusMessageId]);
+
   function refreshRuns() {
     setSelectedRunId("");
     setRuns([]);
@@ -283,11 +421,12 @@ export function AnalyticsPage({ apiBaseUrl }: AnalyticsPageProps) {
         if (!response.ok) {
           throw new Error(`Backend вернул ${response.status}`);
         }
-        return response.json() as Promise<{ runs: AnalyticsRun[] }>;
+        return response.json() as Promise<{ runs?: AnalyticsRun[] }>;
       })
       .then((payload) => {
-        setRuns(payload.runs);
-        setSelectedRunId(payload.runs[0]?.id ?? "");
+        const runs = Array.isArray(payload.runs) ? payload.runs : [];
+        setRuns(runs);
+        setSelectedRunId(runs[0]?.id ?? "");
       })
       .catch((caught) => {
         setAnalyticsError(caught instanceof Error ? caught.message : "Не удалось обновить аналитику");
@@ -297,27 +436,41 @@ export function AnalyticsPage({ apiBaseUrl }: AnalyticsPageProps) {
 
   function applyFilters(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    const next = filterDraftRef.current;
     setCandidateOffset(0);
-    setAppliedFilters(filters);
+    setAppliedFilters(next);
+    replaceAnalyticsListHash(next, 0, selectedRunId);
   }
 
   function updateSelectFilter(key: keyof CandidateFilters, value: string) {
     setCandidateOffset(0);
-    setFilters((current) => {
-      const next = { ...current, [key]: value };
-      setAppliedFilters(next);
-      return next;
-    });
+    const next = updateFilterDraft(key, value);
+    setAppliedFilters(next);
+    replaceAnalyticsListHash(next, 0, selectedRunId);
+  }
+
+  function updateFilterDraft(key: keyof CandidateFilters, value: string) {
+    const next = { ...filterDraftRef.current, [key]: value };
+    filterDraftRef.current = next;
+    setFilters(next);
+    return next;
   }
 
   function handleSelectedRunChange(nextRunId: string) {
     setCandidateOffset(0);
     setSelectedRunId(nextRunId);
+    replaceAnalyticsListHash(appliedFilters, 0, nextRunId);
   }
 
   function handleCandidatePageChange(nextPage: number) {
     const limit = candidatePage?.limit ?? candidatePageSize;
-    setCandidateOffset(nextPage * limit);
+    const nextOffset = nextPage * limit;
+    setCandidateOffset(nextOffset);
+    replaceAnalyticsListHash(appliedFilters, nextOffset, selectedRunId);
+  }
+
+  function toggleSummaryBlock(key: AnalyticsSummaryBlockKey) {
+    setExpandedSummaryBlocks((current) => ({ ...current, [key]: !current[key] }));
   }
 
   const runForKpi = summary?.run ?? selectedRun;
@@ -332,6 +485,8 @@ export function AnalyticsPage({ apiBaseUrl }: AnalyticsPageProps) {
   const solutionAreaOptions = summary?.aggregates.solution_area ?? [];
   const customerSegmentOptions = summary?.aggregates.customer_segment ?? [];
   const laneOptions = summary?.aggregates.review_lane ?? [];
+  const sourceChatOptions = summary?.aggregates.source_chat ?? [];
+  const analyticsReturnHash = analyticsListHash(appliedFilters, candidateOffset, selectedRunId);
 
   return (
     <Box className="analytics-shell">
@@ -394,31 +549,68 @@ export function AnalyticsPage({ apiBaseUrl }: AnalyticsPageProps) {
 
           {loadingData && <LinearProgress />}
 
+          {focusedCandidate && !focusedCandidateInCurrentPage && (
+            <Paper ref={focusedCandidatePanelRef} variant="outlined" className="analytics-section candidate-row-focused">
+              <Stack spacing={1.5}>
+                <Stack direction={{ xs: "column", sm: "row" }} spacing={1} sx={{ justifyContent: "space-between" }}>
+                  <SectionTitle
+                    title="Сообщение из ссылки"
+                    subtitle={focusedCandidate.source_chat_title || focusedCandidate.message_id}
+                  />
+                  <Button variant="outlined" onClick={() => onTestMessage?.(focusedCandidate)}>
+                    Проверить
+                  </Button>
+                </Stack>
+                <CandidateDetails candidate={focusedCandidate} />
+              </Stack>
+            </Paper>
+          )}
+
           <Box className="analytics-grid">
-            <Paper variant="outlined" className="analytics-section">
-              <SectionTitle title="Score" subtitle={`${formatInteger(candidatePage?.total ?? 0)} в текущей выборке`} />
+            <CollapsibleAnalyticsSection
+              title="Score"
+              subtitle={`${formatInteger(candidatePage?.total ?? 0)} в текущей выборке`}
+              expanded={expandedSummaryBlocks.score}
+              onToggle={() => toggleSummaryBlock("score")}
+            >
               <ScoreBars buckets={scoreBuckets} total={runForKpi?.leads ?? 0} />
-            </Paper>
-            <Paper variant="outlined" className="analytics-section">
-              <SectionTitle title="Доменные сигналы" subtitle="Самые частые причины попадания в лиды" />
+            </CollapsibleAnalyticsSection>
+            <CollapsibleAnalyticsSection
+              title="Доменные сигналы"
+              subtitle="Самые частые причины попадания в лиды"
+              expanded={expandedSummaryBlocks.signals}
+              onToggle={() => toggleSummaryBlock("signals")}
+            >
               <AggregateList items={topSignals} />
-            </Paper>
-            <Paper variant="outlined" className="analytics-section">
-              <SectionTitle title="Причины score" subtitle="Что сильнее всего поднимает оценку" />
+            </CollapsibleAnalyticsSection>
+            <CollapsibleAnalyticsSection
+              title="Причины score"
+              subtitle="Что сильнее всего поднимает оценку"
+              expanded={expandedSummaryBlocks.reasons}
+              onToggle={() => toggleSummaryBlock("reasons")}
+            >
               <AggregateList items={topReasons} />
-            </Paper>
-            <Paper variant="outlined" className="analytics-section">
-              <SectionTitle title="Сегменты" subtitle="Зоны решений и типы клиентов" />
+            </CollapsibleAnalyticsSection>
+            <CollapsibleAnalyticsSection
+              title="Сегменты"
+              subtitle="Зоны решений и типы клиентов"
+              expanded={expandedSummaryBlocks.segments}
+              onToggle={() => toggleSummaryBlock("segments")}
+            >
               <Stack spacing={1.5}>
                 <AggregateChips items={solutionAreas} />
                 <Divider />
                 <AggregateChips items={customerSegments} />
               </Stack>
-            </Paper>
-            <Paper variant="outlined" className="analytics-section">
-              <SectionTitle title="Очереди разбора" subtitle="Очереди ручной проверки кандидатов" />
+            </CollapsibleAnalyticsSection>
+            <CollapsibleAnalyticsSection
+              title="Очереди разбора"
+              subtitle="Очереди ручной проверки кандидатов"
+              expanded={expandedSummaryBlocks.lanes}
+              onToggle={() => toggleSummaryBlock("lanes")}
+            >
               <AggregateList items={reviewLanes} />
-            </Paper>
+            </CollapsibleAnalyticsSection>
           </Box>
 
           <Paper variant="outlined" className="analytics-section">
@@ -439,7 +631,7 @@ export function AnalyticsPage({ apiBaseUrl }: AnalyticsPageProps) {
                     size="small"
                     label="Min score"
                     value={filters.scoreMin}
-                    onChange={(event) => setFilters((current) => ({ ...current, scoreMin: event.target.value }))}
+                    onChange={(event) => updateFilterDraft("scoreMin", event.target.value)}
                     sx={{ width: { sm: 120 } }}
                   />
                   <TextField
@@ -486,21 +678,303 @@ export function AnalyticsPage({ apiBaseUrl }: AnalyticsPageProps) {
                     onChange={(value) => updateSelectFilter("lane", value)}
                   />
                   <TextField
+                    select
+                    size="small"
+                    label="Статус ревью"
+                    value={filters.reviewStatus}
+                    onChange={(event) => updateSelectFilter("reviewStatus", event.target.value)}
+                    sx={{ width: { sm: 170 } }}
+                  >
+                    <MenuItem value="">Любой</MenuItem>
+                    <MenuItem value="unreviewed">Без ревью</MenuItem>
+                    <MenuItem value="reviewed">С ревью</MenuItem>
+                  </TextField>
+                  <TextField
+                    select
+                    size="small"
+                    label="Вердикт"
+                    value={filters.verdict}
+                    onChange={(event) => updateSelectFilter("verdict", event.target.value)}
+                    sx={{ width: { sm: 170 } }}
+                  >
+                    <MenuItem value="">Любой</MenuItem>
+                    {reviewVerdictOptions.map((option) => (
+                      <MenuItem key={option.value} value={option.value}>
+                        {option.label}
+                      </MenuItem>
+                    ))}
+                  </TextField>
+                  <AggregateFilterSelect
+                    label="Канал"
+                    value={filters.sourceChatId}
+                    options={sourceChatOptions}
+                    onChange={(value) => updateSelectFilter("sourceChatId", value)}
+                  />
+                  <TextField
+                    size="small"
+                    type="datetime-local"
+                    label="Дата с"
+                    value={filters.receivedFrom}
+                    onChange={(event) => updateFilterDraft("receivedFrom", event.target.value)}
+                    slotProps={{ inputLabel: { shrink: true } }}
+                    sx={{ width: { sm: 190 } }}
+                  />
+                  <TextField
+                    size="small"
+                    type="datetime-local"
+                    label="Дата по"
+                    value={filters.receivedTo}
+                    onChange={(event) => updateFilterDraft("receivedTo", event.target.value)}
+                    slotProps={{ inputLabel: { shrink: true } }}
+                    sx={{ width: { sm: 190 } }}
+                  />
+                  <TextField
                     size="small"
                     label="Текст"
                     value={filters.q}
-                    onChange={(event) => setFilters((current) => ({ ...current, q: event.target.value }))}
+                    onChange={(event) => updateFilterDraft("q", event.target.value)}
                     sx={{ width: { sm: 220 } }}
                   />
-                  <Button type="submit" variant="contained" startIcon={<FilterAltIcon />} disabled={loadingData}>
+                  <Button type="submit" variant="contained" startIcon={<FilterAltIcon />} disabled={!selectedRunId}>
                     Применить
                   </Button>
                 </Stack>
               </Stack>
-              <CandidateTable page={candidatePage} loading={loadingData} onPageChange={handleCandidatePageChange} />
+              <CandidateTable
+                page={candidatePage}
+                loading={loadingData}
+                focusMessageId={focusMessageId}
+                returnHash={analyticsReturnHash}
+                onPageChange={handleCandidatePageChange}
+              />
             </Stack>
           </Paper>
         </>
+      )}
+    </Box>
+  );
+}
+
+export function AnalyticsReviewPage({ apiBaseUrl, messageId, onBack, onTestMessage }: AnalyticsReviewPageProps) {
+  const [candidate, setCandidate] = useState<AnalyticsCandidate | null>(null);
+  const [verdict, setVerdict] = useState<AnalyticsReviewVerdict | null>(null);
+  const [comment, setComment] = useState("");
+  const [selectedText, setSelectedText] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [saved, setSaved] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    async function loadCandidate() {
+      setLoading(true);
+      setError(null);
+      setSaved(false);
+      try {
+        const response = await fetch(`${apiBaseUrl}/api/v1/analytics/messages/${encodeURIComponent(messageId)}`);
+        if (!response.ok) {
+          throw new Error(`Backend вернул ${response.status}`);
+        }
+        const nextCandidate = (await response.json()) as AnalyticsCandidate;
+        if (!active) {
+          return;
+        }
+        setCandidate(nextCandidate);
+        setVerdict(nextCandidate.review?.verdict ?? null);
+        setComment(nextCandidate.review?.comment ?? "");
+      } catch (caught) {
+        if (active) {
+          setError(caught instanceof Error ? caught.message : "Не удалось загрузить сообщение для ревью");
+        }
+      } finally {
+        if (active) {
+          setLoading(false);
+        }
+      }
+    }
+
+    void loadCandidate();
+    return () => {
+      active = false;
+    };
+  }, [apiBaseUrl, messageId]);
+
+  async function saveReview() {
+    setSaving(true);
+    setError(null);
+    setSaved(false);
+    try {
+      const response = await fetch(`${apiBaseUrl}/api/v1/analytics/messages/${encodeURIComponent(messageId)}/review`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ verdict, comment })
+      });
+      if (!response.ok) {
+        throw new Error(`Backend вернул ${response.status}`);
+      }
+      const nextCandidate = (await response.json()) as AnalyticsCandidate;
+      setCandidate(nextCandidate);
+      setVerdict(nextCandidate.review?.verdict ?? verdict);
+      setComment(nextCandidate.review?.comment ?? comment);
+      setSaved(true);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Не удалось сохранить ревью");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  function rememberSelection() {
+    const text = window.getSelection()?.toString().trim();
+    if (text) {
+      setSelectedText(text);
+    }
+  }
+
+  return (
+    <Box className="analytics-shell analytics-review-shell">
+      <Paper variant="outlined" className="analytics-header">
+        <Stack spacing={2}>
+          <Stack direction={{ xs: "column", md: "row" }} spacing={1.5} sx={{ justifyContent: "space-between" }}>
+            <Box sx={{ minWidth: 0 }}>
+              <Typography variant="h5" component="h2" sx={{ fontWeight: 700 }}>
+                Ревью сообщения
+              </Typography>
+              <Typography variant="body2" color="text.secondary" noWrap>
+                {candidate?.source_chat_title || candidate?.source_chat_id || messageId}
+              </Typography>
+            </Box>
+            <Stack direction={{ xs: "column", sm: "row" }} spacing={1}>
+              <Button variant="outlined" startIcon={<ArrowBackIcon />} onClick={onBack} href={onBack ? undefined : "#/analytics"}>
+                Аналитика
+              </Button>
+              {candidate?.telegram_message_url && (
+                <Button variant="outlined" href={candidate.telegram_message_url} target="_blank" rel="noreferrer">
+                  Telegram
+                </Button>
+              )}
+              <Button
+                variant="outlined"
+                startIcon={<ScienceIcon />}
+                disabled={!candidate}
+                onClick={() => candidate && onTestMessage?.(candidate)}
+              >
+                Проверить
+              </Button>
+            </Stack>
+          </Stack>
+
+          {loading && (
+            <Stack spacing={1}>
+              <LinearProgress />
+              <Typography variant="caption" color="text.secondary">
+                Загружаю сообщение, разбор и сохраненное ревью
+              </Typography>
+            </Stack>
+          )}
+          {error && <Alert severity="error">{error}</Alert>}
+          {saved && <Alert severity="success">Ревью сохранено</Alert>}
+        </Stack>
+      </Paper>
+
+      {candidate && (
+        <Box className="analytics-review-grid">
+          <Stack spacing={2} sx={{ minWidth: 0 }}>
+            <Paper variant="outlined" className="analytics-section">
+              <Stack spacing={1.5}>
+                <SectionTitle title="Разметка" subtitle="Итоговая операторская оценка сообщения" />
+                <Stack direction="row" spacing={1} useFlexGap sx={{ flexWrap: "wrap" }}>
+                  {reviewVerdictOptions.map((option) => (
+                    <Button
+                      key={option.value}
+                      variant={verdict === option.value ? "contained" : "outlined"}
+                      color={option.color}
+                      onClick={() => setVerdict(option.value)}
+                    >
+                      {option.label}
+                    </Button>
+                  ))}
+                  <Button variant={verdict === null ? "contained" : "outlined"} onClick={() => setVerdict(null)}>
+                    Без оценки
+                  </Button>
+                </Stack>
+                <TextField
+                  label="Комментарий ревью"
+                  value={comment}
+                  onChange={(event) => setComment(event.target.value)}
+                  multiline
+                  minRows={4}
+                  fullWidth
+                />
+                <Button
+                  variant="contained"
+                  startIcon={saving ? <CircularProgress size={18} color="inherit" /> : <SaveIcon />}
+                  disabled={saving}
+                  onClick={() => void saveReview()}
+                >
+                  Сохранить ревью
+                </Button>
+              </Stack>
+            </Paper>
+
+            <Paper variant="outlined" className="analytics-section">
+              <Stack spacing={1.25}>
+                <SectionTitle
+                  title="Исходный текст"
+                  subtitle="Выделите фрагмент мышью, чтобы использовать его в конструкторе"
+                />
+                <Box className="review-message-text" onMouseUp={rememberSelection} onKeyUp={rememberSelection}>
+                  {candidate.text}
+                </Box>
+              </Stack>
+            </Paper>
+
+            <Paper variant="outlined" className="analytics-section">
+              <Stack spacing={1.25}>
+                <SectionTitle title="Конструктор сущностей" subtitle="Черновик будущего изменения настроек из выделенного текста" />
+                {selectedText ? (
+                  <Alert severity="info">
+                    Выделено: <strong>{selectedText}</strong>
+                  </Alert>
+                ) : (
+                  <Typography variant="body2" color="text.secondary">
+                    Выделите часть исходного текста, чтобы подготовить новую словарную сущность, факт, доменный сигнал или шум.
+                  </Typography>
+                )}
+                <Stack direction="row" spacing={1} useFlexGap sx={{ flexWrap: "wrap" }}>
+                  <Button variant="outlined" disabled={!selectedText}>
+                    В словарь
+                  </Button>
+                  <Button variant="outlined" disabled={!selectedText}>
+                    В факт
+                  </Button>
+                  <Button variant="outlined" disabled={!selectedText}>
+                    В доменный сигнал
+                  </Button>
+                  <Button variant="outlined" disabled={!selectedText}>
+                    В шум
+                  </Button>
+                </Stack>
+              </Stack>
+            </Paper>
+          </Stack>
+
+          <Stack spacing={2} sx={{ minWidth: 0 }}>
+            <Paper variant="outlined" className="analytics-section">
+              <Stack spacing={1.25}>
+                <SectionTitle title="Карточка кандидата" subtitle="Текущий автоматический разбор сообщения" />
+                <Stack direction="row" spacing={1} useFlexGap sx={{ flexWrap: "wrap" }}>
+                  <Chip label={candidateTemperatureLabel(candidate)} color={candidateTemperatureColor(candidate)} />
+                  <Chip label={`${candidate.score} баллов`} variant="outlined" />
+                  <Chip label={reviewLaneLabel(candidate.review_lane)} variant="outlined" />
+                  {candidate.received_at && <Chip label={formatDateTime(candidate.received_at)} variant="outlined" />}
+                </Stack>
+              </Stack>
+            </Paper>
+            <CandidateDetails candidate={candidate} />
+          </Stack>
+        </Box>
       )}
     </Box>
   );
@@ -529,6 +1003,40 @@ function SectionTitle({ title, subtitle }: { title: string; subtitle: string }) 
         {subtitle}
       </Typography>
     </Box>
+  );
+}
+
+function CollapsibleAnalyticsSection({
+  title,
+  subtitle,
+  expanded,
+  onToggle,
+  children
+}: {
+  title: string;
+  subtitle: string;
+  expanded: boolean;
+  onToggle: () => void;
+  children: ReactNode;
+}) {
+  return (
+    <Paper variant="outlined" className="analytics-section">
+      <Stack spacing={1.5}>
+        <Stack direction="row" spacing={1.5} sx={{ alignItems: "center", justifyContent: "space-between" }}>
+          <SectionTitle title={title} subtitle={subtitle} />
+          <IconButton
+            aria-label={expanded ? `Скрыть блок ${title}` : `Показать блок ${title}`}
+            size="small"
+            onClick={onToggle}
+          >
+            {expanded ? <KeyboardArrowUpIcon fontSize="small" /> : <KeyboardArrowDownIcon fontSize="small" />}
+          </IconButton>
+        </Stack>
+        <Collapse in={expanded} timeout="auto" unmountOnExit>
+          {children}
+        </Collapse>
+      </Stack>
+    </Paper>
   );
 }
 
@@ -648,15 +1156,67 @@ function AggregateFilterSelect({
   );
 }
 
+function candidateRowClass(expanded: boolean, focused: boolean): string | undefined {
+  const classes = [
+    expanded ? "candidate-row-expanded" : "",
+    focused ? "candidate-row-focused" : ""
+  ].filter(Boolean);
+  return classes.length > 0 ? classes.join(" ") : undefined;
+}
+
+function ReviewStatusChip({ review }: { review: AnalyticsMessageReview | null }) {
+  if (!review) {
+    return <Chip size="small" label="Без ревью" variant="outlined" />;
+  }
+  const option = reviewVerdictOptions.find((item) => item.value === review.verdict);
+  return (
+    <Chip
+      size="small"
+      label={option?.label ?? "С ревью"}
+      color={option?.color ?? "default"}
+      variant={option ? "filled" : "outlined"}
+    />
+  );
+}
+
 function CandidateTable({
   page,
   loading,
+  focusMessageId,
+  returnHash,
   onPageChange
 }: {
   page: CandidatePage | null;
   loading: boolean;
+  focusMessageId?: string | null;
+  returnHash: string;
   onPageChange: (nextPage: number) => void;
 }) {
+  const [expandedMessageId, setExpandedMessageId] = useState<string | null>(null);
+  const [dismissedFocusMessageId, setDismissedFocusMessageId] = useState<string | null>(null);
+  const rowRefs = useRef(new Map<string, HTMLTableRowElement>());
+  const focusedPageMessageId =
+    focusMessageId && page?.items.some((candidate) => candidate.message_id === focusMessageId)
+      ? focusMessageId
+      : null;
+  const activeExpandedMessageId =
+    expandedMessageId ?? (focusedPageMessageId !== dismissedFocusMessageId ? focusedPageMessageId : null);
+
+  useEffect(() => {
+    setExpandedMessageId(null);
+    setDismissedFocusMessageId(null);
+  }, [focusMessageId]);
+
+  useEffect(() => {
+    if (!focusedPageMessageId) {
+      return;
+    }
+    const timeoutId = window.setTimeout(() => {
+      rowRefs.current.get(focusedPageMessageId)?.scrollIntoView({ behavior: "smooth", block: "center" });
+    }, 0);
+    return () => window.clearTimeout(timeoutId);
+  }, [focusedPageMessageId]);
+
   if (loading && page === null) {
     return (
       <Stack direction="row" spacing={1.5} sx={{ alignItems: "center" }}>
@@ -675,7 +1235,6 @@ function CandidateTable({
   }
 
   const currentPage = Math.floor(page.offset / page.limit);
-  const [expandedMessageId, setExpandedMessageId] = useState<string | null>(null);
 
   return (
     <Box>
@@ -688,16 +1247,31 @@ function CandidateTable({
               <TableCell>Score</TableCell>
               <TableCell>Температура</TableCell>
               <TableCell>Очередь</TableCell>
+              <TableCell>Ревью</TableCell>
+              <TableCell>Принято</TableCell>
+              <TableCell>Канал</TableCell>
               <TableCell>Текст</TableCell>
               <TableCell>Причины</TableCell>
+              <TableCell>Ссылки</TableCell>
             </TableRow>
           </TableHead>
           <TableBody>
             {page.items.map((candidate) => {
-              const expanded = expandedMessageId === candidate.message_id;
+              const expanded = activeExpandedMessageId === candidate.message_id;
+              const focused = focusMessageId === candidate.message_id;
               return (
                 <Fragment key={candidate.message_id}>
-                  <TableRow hover className={expanded ? "candidate-row-expanded" : undefined}>
+                  <TableRow
+                    ref={(element) => {
+                      if (element) {
+                        rowRefs.current.set(candidate.message_id, element);
+                      } else {
+                        rowRefs.current.delete(candidate.message_id);
+                      }
+                    }}
+                    hover
+                    className={candidateRowClass(expanded, focused)}
+                  >
                     <TableCell>
                       <IconButton
                         aria-label={
@@ -706,17 +1280,25 @@ function CandidateTable({
                             : `Показать разбор сообщения ${candidate.message_id}`
                         }
                         size="small"
-                        onClick={() => setExpandedMessageId(expanded ? null : candidate.message_id)}
+                        onClick={() => {
+                          setExpandedMessageId(expanded ? null : candidate.message_id);
+                          setDismissedFocusMessageId(expanded && focused ? candidate.message_id : null);
+                        }}
                       >
                         {expanded ? <KeyboardArrowUpIcon fontSize="small" /> : <KeyboardArrowDownIcon fontSize="small" />}
                       </IconButton>
                     </TableCell>
                     <TableCell>{candidate.message_id}</TableCell>
                     <TableCell>{candidate.score}</TableCell>
-                    <TableCell>{candidate.temperature}</TableCell>
+                    <TableCell>{candidateTemperatureLabel(candidate)}</TableCell>
                     <TableCell>
-                      <Chip size="small" label={candidate.review_lane} variant="outlined" />
+                      <Chip size="small" label={reviewLaneLabel(candidate.review_lane)} variant="outlined" />
                     </TableCell>
+                    <TableCell>
+                      <ReviewStatusChip review={candidate.review ?? null} />
+                    </TableCell>
+                    <TableCell>{candidate.received_at ? formatDateTime(candidate.received_at) : "не указано"}</TableCell>
+                    <TableCell>{candidate.source_chat_title || candidate.source_chat_id || "не указано"}</TableCell>
                     <TableCell className="candidate-text">{candidate.text}</TableCell>
                     <TableCell className="candidate-reasons">
                       <Stack direction="row" spacing={0.5} useFlexGap sx={{ flexWrap: "wrap" }}>
@@ -729,9 +1311,32 @@ function CandidateTable({
                         ))}
                       </Stack>
                     </TableCell>
+                    <TableCell>
+                      <Stack direction="row" spacing={0.5} useFlexGap sx={{ flexWrap: "wrap" }}>
+                        {candidate.telegram_message_url && (
+                          <Button size="small" href={candidate.telegram_message_url} target="_blank" rel="noreferrer">
+                            TG
+                          </Button>
+                        )}
+                        <Button size="small" href={`#/analytics/message/${candidate.message_id}`}>
+                          Аналитика
+                        </Button>
+                        <Button
+                          size="small"
+                          variant="outlined"
+                          startIcon={<RateReviewIcon fontSize="small" />}
+                          href={analyticsReviewHash(candidate.message_id, returnHash)}
+                        >
+                          Ревью
+                        </Button>
+                        <Button size="small" href={`#/testing?message_id=${encodeURIComponent(candidate.message_id)}`}>
+                          Проверить
+                        </Button>
+                      </Stack>
+                    </TableCell>
                   </TableRow>
                   <TableRow className="candidate-detail-row">
-                    <TableCell colSpan={7} sx={{ p: 0 }}>
+                    <TableCell colSpan={11} sx={{ p: 0 }}>
                       <Collapse in={expanded} timeout="auto" unmountOnExit>
                         <CandidateDetails candidate={candidate} />
                       </Collapse>
@@ -779,9 +1384,12 @@ function CandidateDetails({ candidate }: { candidate: AnalyticsCandidate }) {
         <Stack direction="row" spacing={1} useFlexGap sx={{ alignItems: "center", flexWrap: "wrap" }}>
           <Chip label={candidateTemperatureLabel(candidate)} color={candidateTemperatureColor(candidate)} />
           <Chip label={`${candidate.score} баллов`} variant="outlined" />
-          <Chip label={candidate.review_lane} variant="outlined" />
+          <Chip label={reviewLaneLabel(candidate.review_lane)} variant="outlined" />
+          <ReviewStatusChip review={candidate.review ?? null} />
           <Typography variant="body2" color="text.secondary">
-            Сообщение {candidate.message_id}
+            {candidate.source_chat_title ? `${candidate.source_chat_title}, ` : ""}
+            сообщение {candidate.telegram_message_id ?? candidate.message_id}
+            {candidate.received_at ? `, принято ${formatDateTime(candidate.received_at)}` : ""}
           </Typography>
         </Stack>
 
@@ -863,13 +1471,19 @@ function collectCandidateHighlights(candidate: AnalyticsCandidate): CandidateHig
   ];
   const highlights: CandidateHighlight[] = [];
   const seen = new Set<string>();
+  const codeUnitOffsets = codePointToCodeUnitOffsets(candidate.text);
 
   for (const span of candidates) {
-    const phrase = span.text?.trim();
-    if (!phrase) {
-      continue;
-    }
-    for (const [start, stop] of findTextOccurrences(candidate.text, phrase)) {
+    const ranges = span.range
+      ? [[
+          codePointOffsetToCodeUnit(span.range.start, codeUnitOffsets),
+          codePointOffsetToCodeUnit(span.range.stop, codeUnitOffsets)
+        ] as [number, number]]
+      : findTextOccurrences(candidate.text, span.text?.trim() ?? "");
+    for (const [start, stop] of ranges) {
+      if (stop <= start) {
+        continue;
+      }
       const key = `${span.type}-${start}-${stop}`;
       if (seen.has(key)) {
         continue;
@@ -899,6 +1513,9 @@ function collectCandidateHighlights(candidate: AnalyticsCandidate): CandidateHig
 }
 
 function findTextOccurrences(text: string, phrase: string): Array<[number, number]> {
+  if (!phrase) {
+    return [];
+  }
   const haystack = text.toLocaleLowerCase("ru-RU");
   const needle = phrase.toLocaleLowerCase("ru-RU");
   const occurrences: Array<[number, number]> = [];
@@ -908,6 +1525,26 @@ function findTextOccurrences(text: string, phrase: string): Array<[number, numbe
     start = haystack.indexOf(needle, start + Math.max(needle.length, 1));
   }
   return occurrences;
+}
+
+function codePointToCodeUnitOffsets(text: string): number[] {
+  const offsets = [0];
+  let codeUnitOffset = 0;
+  for (const char of text) {
+    codeUnitOffset += char.length;
+    offsets.push(codeUnitOffset);
+  }
+  return offsets;
+}
+
+function codePointOffsetToCodeUnit(codePointOffset: number, offsets: number[]): number {
+  if (codePointOffset <= 0) {
+    return 0;
+  }
+  if (codePointOffset >= offsets.length) {
+    return offsets[offsets.length - 1] ?? 0;
+  }
+  return offsets[codePointOffset] ?? 0;
 }
 
 function CandidateCategoryGroup({
@@ -1028,6 +1665,62 @@ function candidateTemperatureColor(
   return "default";
 }
 
+type AnalyticsUrlState = {
+  runId: string;
+  offset: number;
+  filters: CandidateFilters;
+};
+
+function parseAnalyticsUrlState(hash: string): AnalyticsUrlState {
+  const queryIndex = hash.indexOf("?");
+  const params = queryIndex === -1 ? new URLSearchParams() : new URLSearchParams(hash.slice(queryIndex + 1));
+  return {
+    runId: params.get("run")?.trim() ?? "",
+    offset: Math.max(0, Number(params.get("offset") ?? "0") || 0),
+    filters: {
+      scoreMin: params.get("score_min") ?? "",
+      temperature: params.get("temperature") ?? "",
+      signal: params.get("signal") ?? "",
+      reason: params.get("reason") ?? "",
+      solutionArea: params.get("solution_area") ?? "",
+      customerSegment: params.get("customer_segment") ?? "",
+      lane: params.get("lane") ?? "",
+      sourceChatId: params.get("source_chat_id") ?? "",
+      receivedFrom: isoToDatetimeLocal(params.get("received_from") ?? ""),
+      receivedTo: isoToDatetimeLocal(params.get("received_to") ?? ""),
+      reviewStatus: params.get("review_status") ?? "",
+      verdict: params.get("verdict") ?? "",
+      q: params.get("q") ?? ""
+    }
+  };
+}
+
+function analyticsListHash(filters: CandidateFilters, offset: number, runId: string): string {
+  const query = candidateQuery(filters, candidatePageSize, offset);
+  const params = new URLSearchParams(query);
+  if (runId) {
+    params.set("run", runId);
+  }
+  return `#/analytics${params.toString() ? `?${params.toString()}` : ""}`;
+}
+
+function replaceAnalyticsListHash(filters: CandidateFilters, offset: number, runId: string) {
+  if (!window.location.hash.startsWith("#/analytics")) {
+    return;
+  }
+  window.history.replaceState(null, "", analyticsListHash(filters, offset, runId));
+}
+
+function analyticsReviewHash(messageId: string, returnHash: string): string {
+  const params = new URLSearchParams();
+  params.set("return", returnHash);
+  return `#/analytics/review/${encodeURIComponent(messageId)}?${params.toString()}`;
+}
+
+function reviewLaneLabel(lane: string): string {
+  return reviewLaneFallbackLabels[lane] ?? lane;
+}
+
 function candidateQuery(filters: CandidateFilters, limit: number, offset: number) {
   const params = new URLSearchParams();
   params.set("limit", String(limit));
@@ -1053,6 +1746,23 @@ function candidateQuery(filters: CandidateFilters, limit: number, offset: number
   if (filters.lane.trim()) {
     params.set("lane", filters.lane.trim());
   }
+  if (filters.reviewStatus.trim()) {
+    params.set("review_status", filters.reviewStatus.trim());
+  }
+  if (filters.verdict.trim()) {
+    params.set("verdict", filters.verdict.trim());
+  }
+  if (filters.sourceChatId.trim()) {
+    params.set("source_chat_id", filters.sourceChatId.trim());
+  }
+  const receivedFrom = datetimeLocalToIso(filters.receivedFrom);
+  if (receivedFrom) {
+    params.set("received_from", receivedFrom);
+  }
+  const receivedTo = datetimeLocalToIso(filters.receivedTo);
+  if (receivedTo) {
+    params.set("received_to", receivedTo);
+  }
   if (filters.q.trim()) {
     params.set("q", filters.q.trim());
   }
@@ -1065,6 +1775,42 @@ function formatInteger(value: number) {
 
 function formatPercent(value: number) {
   return `${value.toFixed(2)}%`;
+}
+
+function formatDateTime(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return value;
+  }
+  return new Intl.DateTimeFormat("ru-RU", {
+    dateStyle: "short",
+    timeStyle: "short"
+  }).format(date);
+}
+
+function datetimeLocalToIso(value: string) {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return "";
+  }
+  const date = new Date(trimmed);
+  if (Number.isNaN(date.getTime())) {
+    return trimmed;
+  }
+  return date.toISOString();
+}
+
+function isoToDatetimeLocal(value: string) {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return "";
+  }
+  const date = new Date(trimmed);
+  if (Number.isNaN(date.getTime())) {
+    return trimmed;
+  }
+  const localOffset = date.getTimezoneOffset() * 60_000;
+  return new Date(date.getTime() - localOffset).toISOString().slice(0, 16);
 }
 
 function formatWeight(value: number) {

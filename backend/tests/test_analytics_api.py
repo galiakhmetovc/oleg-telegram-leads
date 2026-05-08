@@ -7,7 +7,8 @@ from fastapi.testclient import TestClient
 
 from app.api.analytics import get_analytics_repository
 from app.domain.analytics import AnalyticsAggregate, AnalyticsCandidate, AnalyticsCandidatePage
-from app.domain.analytics import AnalyticsRun
+from app.domain.analytics import AnalyticsMessageReview, AnalyticsRun
+from app.domain.analytics import AnalyticsReviewVerdict
 from app.main import create_app
 
 
@@ -89,8 +90,12 @@ class ApiInMemoryAnalyticsRepository:
                 ],
                 domain_signals=[],
                 facts=[],
+                received_at=datetime(2026, 5, 8, 12, 30, tzinfo=UTC),
+                source_chat_id="designers",
+                source_chat_title="Чат дизайнеров",
             )
         ]
+        self.reviews: dict[str, AnalyticsMessageReview] = {}
 
     async def list_runs(self) -> list[AnalyticsRun]:
         return self.runs
@@ -117,6 +122,11 @@ class ApiInMemoryAnalyticsRepository:
         customer_segment: str | None = None,
         lane: str | None = None,
         q: str | None,
+        source_chat_id: str | None = None,
+        received_from: datetime | None = None,
+        received_to: datetime | None = None,
+        review_status: str | None = None,
+        verdict: AnalyticsReviewVerdict | None = None,
     ) -> AnalyticsCandidatePage:
         items = self.candidates
         if score_min is not None:
@@ -131,7 +141,42 @@ class ApiInMemoryAnalyticsRepository:
             items = [item for item in items if any(segment["type"] == customer_segment for segment in item.customer_segments)]
         if lane is not None:
             items = [item for item in items if item.review_lane == lane]
+        if source_chat_id is not None:
+            items = [item for item in items if item.source_chat_id == source_chat_id]
+        if received_from is not None:
+            items = [item for item in items if item.received_at and item.received_at >= received_from]
+        if received_to is not None:
+            items = [item for item in items if item.received_at and item.received_at <= received_to]
+        if review_status == "reviewed":
+            items = [item for item in items if item.review is not None]
+        if review_status == "unreviewed":
+            items = [item for item in items if item.review is None]
+        if verdict is not None:
+            items = [item for item in items if item.review is not None and item.review.verdict == verdict]
         return AnalyticsCandidatePage(total=len(items), items=items[offset : offset + limit])
+
+    async def get_live_candidate_by_message_id(self, message_id: str) -> AnalyticsCandidate | None:
+        return next((candidate for candidate in self.candidates if candidate.message_id == message_id), None)
+
+    async def get_message_review(self, message_id: str) -> AnalyticsMessageReview | None:
+        return self.reviews.get(message_id)
+
+    async def save_message_review(
+        self,
+        *,
+        message_id: str,
+        verdict: AnalyticsReviewVerdict | None,
+        comment: str,
+    ) -> AnalyticsMessageReview:
+        review = AnalyticsMessageReview(
+            source_message_id=message_id,
+            verdict=verdict,
+            comment=comment,
+            created_at=datetime(2026, 5, 8, 13, 0, tzinfo=UTC),
+            updated_at=datetime(2026, 5, 8, 13, 5, tzinfo=UTC),
+        )
+        self.reviews[message_id] = review
+        return review
 
 
 def test_lists_analytics_runs() -> None:
@@ -184,6 +229,50 @@ def test_lists_analytics_candidates_with_filters() -> None:
     assert payload["items"][0]["score"] == 247
     assert payload["items"][0]["review_lane"] == "direct_pur_lead"
     assert payload["items"][0]["reasons"][0]["matched_texts"] == ["умный дом"]
+    assert payload["items"][0]["received_at"] == "2026-05-08T12:30:00Z"
+    assert payload["items"][0]["source_chat_id"] == "designers"
+    assert payload["items"][0]["source_chat_title"] == "Чат дизайнеров"
+
+
+def test_filters_analytics_candidates_by_source_channel_and_received_period() -> None:
+    repository = ApiInMemoryAnalyticsRepository()
+    repository.candidates.append(
+        AnalyticsCandidate(
+            run_id=repository.run_id,
+            message_id="488910",
+            text="Другой канал",
+            score=150,
+            temperature="hot",
+            review_lane="direct_pur_lead",
+            solution_areas=[],
+            customer_segments=[],
+            intent_signals=[],
+            noise_signals=[],
+            reasons=[],
+            domain_signals=[],
+            facts=[],
+            received_at=datetime(2026, 5, 6, 12, 30, tzinfo=UTC),
+            source_chat_id="other",
+            source_chat_title="Другой канал",
+        )
+    )
+    app = create_app()
+    app.dependency_overrides[get_analytics_repository] = lambda: repository
+    client = TestClient(app)
+
+    response = client.get(
+        f"/api/v1/analytics/runs/{repository.run_id}/candidates",
+        params={
+            "source_chat_id": "designers",
+            "received_from": "2026-05-08T00:00:00Z",
+            "received_to": "2026-05-08T23:59:59Z",
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["total"] == 1
+    assert payload["items"][0]["message_id"] == "488906"
 
 
 def test_filters_analytics_candidates_by_reason_key() -> None:
@@ -306,3 +395,89 @@ def test_filters_analytics_candidates_by_review_lane() -> None:
     payload = response.json()
     assert payload["total"] == 1
     assert payload["items"][0]["message_id"] == "488906"
+
+
+def test_lists_analytics_candidates_with_review_status_and_verdict_filters() -> None:
+    repository = ApiInMemoryAnalyticsRepository()
+    repository.candidates[0] = AnalyticsCandidate(
+        **{
+            **repository.candidates[0].__dict__,
+            "review": AnalyticsMessageReview(
+                source_message_id="488906",
+                verdict="not_lead",
+                comment="Нет запроса на подрядчика",
+                created_at=datetime(2026, 5, 8, 13, 0, tzinfo=UTC),
+                updated_at=datetime(2026, 5, 8, 13, 5, tzinfo=UTC),
+            ),
+        }
+    )
+    repository.candidates.append(
+        AnalyticsCandidate(
+            run_id=repository.run_id,
+            message_id="488911",
+            text="Новый неразобранный кандидат",
+            score=120,
+            temperature="hot",
+            review_lane="direct_pur_lead",
+            solution_areas=[],
+            customer_segments=[],
+            intent_signals=[],
+            noise_signals=[],
+            reasons=[],
+            domain_signals=[],
+            facts=[],
+        )
+    )
+    app = create_app()
+    app.dependency_overrides[get_analytics_repository] = lambda: repository
+    client = TestClient(app)
+
+    reviewed = client.get(
+        f"/api/v1/analytics/runs/{repository.run_id}/candidates",
+        params={"review_status": "reviewed", "verdict": "not_lead"},
+    )
+
+    assert reviewed.status_code == 200
+    reviewed_payload = reviewed.json()
+    assert reviewed_payload["total"] == 1
+    assert reviewed_payload["items"][0]["message_id"] == "488906"
+    assert reviewed_payload["items"][0]["review"]["verdict"] == "not_lead"
+    assert reviewed_payload["items"][0]["review"]["comment"] == "Нет запроса на подрядчика"
+
+    unreviewed = client.get(
+        f"/api/v1/analytics/runs/{repository.run_id}/candidates",
+        params={"review_status": "unreviewed"},
+    )
+
+    assert unreviewed.status_code == 200
+    unreviewed_payload = unreviewed.json()
+    assert unreviewed_payload["total"] == 1
+    assert unreviewed_payload["items"][0]["message_id"] == "488911"
+    assert unreviewed_payload["items"][0]["review"] is None
+
+
+def test_gets_and_updates_analytics_message_review() -> None:
+    repository = ApiInMemoryAnalyticsRepository()
+    app = create_app()
+    app.dependency_overrides[get_analytics_repository] = lambda: repository
+    client = TestClient(app)
+
+    initial = client.get("/api/v1/analytics/messages/488906")
+
+    assert initial.status_code == 200
+    assert initial.json()["review"] is None
+
+    update = client.put(
+        "/api/v1/analytics/messages/488906/review",
+        json={"verdict": "not_lead", "comment": "Обсуждение лицензий, нет запроса на подрядчика"},
+    )
+
+    assert update.status_code == 200
+    payload = update.json()
+    assert payload["review"] == {
+        "source_message_id": "488906",
+        "verdict": "not_lead",
+        "comment": "Обсуждение лицензий, нет запроса на подрядчика",
+        "created_at": "2026-05-08T13:00:00Z",
+        "updated_at": "2026-05-08T13:05:00Z",
+    }

@@ -10,8 +10,10 @@ import sqlalchemy as sa
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from app.core.config import get_settings
 from app.domain.enrichment import EnrichmentEvent, EnrichmentJobSnapshot, EnrichmentStatus
 from app.domain.enrichment import TextEnrichmentResult
+from app.infrastructure.persistence.runtime_retention import trim_enrichment_events
 from app.infrastructure.persistence.tables import enrichment_events, enrichment_jobs
 from app.infrastructure.persistence.tables import enrichment_results
 
@@ -205,6 +207,10 @@ class PostgresEnrichmentJobRepository:
                 message="Обработка завершена",
                 payload={"result": result_payload},
             )
+            await trim_enrichment_events(
+                session,
+                max_rows=get_settings().runtime_enrichment_event_retention_rows,
+            )
             await session.commit()
 
     async def fail_job(self, job_id: UUID, error: dict[str, Any]) -> None:
@@ -233,6 +239,10 @@ class PostgresEnrichmentJobRepository:
                 stage_progress_percent=100,
                 message="Обработка завершилась ошибкой",
                 payload={"error": error},
+            )
+            await trim_enrichment_events(
+                session,
+                max_rows=get_settings().runtime_enrichment_event_retention_rows,
             )
             await session.commit()
 

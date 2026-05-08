@@ -1,0 +1,67 @@
+from __future__ import annotations
+
+from typing import Any
+
+import httpx
+
+from app.domain.notifications import TelegramSendResult
+
+
+class TelegramSendError(RuntimeError):
+    pass
+
+
+class HttpTelegramMessageSender:
+    def __init__(self, *, timeout_seconds: float = 10.0) -> None:
+        self._timeout_seconds = timeout_seconds
+
+    async def get_bot_username(self, *, bot_token: str) -> str:
+        url = f"https://api.telegram.org/bot{bot_token}/getMe"
+        async with httpx.AsyncClient(timeout=self._timeout_seconds) as client:
+            try:
+                response = await client.post(url)
+            except httpx.HTTPError as exc:
+                raise TelegramSendError("Telegram API request failed") from exc
+
+        payload = _response_payload(response)
+        if response.status_code >= 400 or not payload.get("ok"):
+            description = str(payload.get("description") or f"HTTP {response.status_code}")
+            raise TelegramSendError(description)
+        result = payload.get("result")
+        if not isinstance(result, dict):
+            raise TelegramSendError("Telegram API response has no bot result")
+        username = result.get("username")
+        if not isinstance(username, str):
+            raise TelegramSendError("Telegram API response has no bot username")
+        return username
+
+    async def send_text(self, *, bot_token: str, chat_id: str, text: str) -> TelegramSendResult:
+        url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
+        async with httpx.AsyncClient(timeout=self._timeout_seconds) as client:
+            try:
+                response = await client.post(url, json={"chat_id": chat_id, "text": text})
+            except httpx.HTTPError as exc:
+                raise TelegramSendError("Telegram API request failed") from exc
+
+        payload = _response_payload(response)
+        if response.status_code >= 400 or not payload.get("ok"):
+            description = str(payload.get("description") or f"HTTP {response.status_code}")
+            raise TelegramSendError(description)
+
+        result = payload.get("result")
+        if not isinstance(result, dict):
+            raise TelegramSendError("Telegram API response has no message result")
+        message_id = result.get("message_id")
+        if not isinstance(message_id, int):
+            raise TelegramSendError("Telegram API response has no message id")
+        return TelegramSendResult(message_id=message_id, chat_id=chat_id)
+
+
+def _response_payload(response: httpx.Response) -> dict[str, Any]:
+    try:
+        payload = response.json()
+    except ValueError as exc:
+        raise TelegramSendError("Telegram API returned non-JSON response") from exc
+    if not isinstance(payload, dict):
+        raise TelegramSendError("Telegram API returned unexpected response")
+    return payload

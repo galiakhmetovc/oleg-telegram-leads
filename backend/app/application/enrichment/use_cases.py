@@ -17,13 +17,19 @@ class CreateEnrichmentJob:
         self._task_publisher = task_publisher
 
     async def execute(self, input_text: str) -> EnrichmentJobSnapshot:
+        job = await self.create(input_text)
+        await self.publish(job.id)
+        return job
+
+    async def create(self, input_text: str) -> EnrichmentJobSnapshot:
         stripped_text = input_text.strip()
         if not stripped_text:
             raise ValueError("input text is empty")
 
-        job = await self._repository.create_job(stripped_text)
-        await self._task_publisher.publish(job.id)
-        return job
+        return await self._repository.create_job(stripped_text)
+
+    async def publish(self, job_id: UUID) -> None:
+        await self._task_publisher.publish(job_id)
 
 
 class GetEnrichmentJob:
