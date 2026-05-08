@@ -50,7 +50,9 @@
   Analytics page. `AnalyticsPage.tsx` keeps page state, review flow, and
   candidate tables; constructor dialogs and constructor API payloads are owned
   by the feature module. Shared analytics/review UI contracts live in
-  `frontend/src/analytics/types.ts`.
+  `frontend/src/analytics/types.ts`. Candidate evidence rendering, settings
+  links, highlighting, and candidate label formatting live in
+  `frontend/src/analytics/CandidateEvidence.tsx`.
 - Analytics candidate lists now include saved review state, show a review chip
   (`Без ревью`, `Лид`, `Не лид`, `Сомнительно`, `Шум`), and can filter by
   `review_status` and `verdict`. Review links carry a return URL with the

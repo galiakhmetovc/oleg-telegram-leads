@@ -582,6 +582,9 @@ The frontend package lives in `frontend/src`.
   message review page.
 - `analytics/types.ts` contains shared analytics/review UI contracts used by
   feature modules.
+- `analytics/CandidateEvidence.tsx` owns candidate evidence rendering:
+  highlighted message text, score reasons, settings links, labels, and
+  temperature/review-lane formatting.
 - `analytics/ReviewConstructor.tsx` owns the Review-page settings constructor:
   target dialogs, selected-fragment payload shaping, and constructor API calls.
 - `main.tsx` mounts React.

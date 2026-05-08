@@ -28,8 +28,8 @@
   either with a combined repository unit of work or stale blocked-task cleanup.
 - Frontend modularization: continue splitting the large app shell/settings/
   analytics/runtime surfaces into feature modules and shared evidence/highlight
-  components. The Review constructor has already been extracted into
-  `frontend/src/analytics/ReviewConstructor.tsx`.
+  components. Analytics types, candidate evidence rendering, and the Review
+  constructor have already been extracted into `frontend/src/analytics/`.
 
 ## Later
 
