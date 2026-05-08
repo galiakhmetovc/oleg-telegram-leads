@@ -346,3 +346,35 @@ Rationale:
   logic remains externalized and editable.
 - Persisting the assigned lane during analytics import makes the UI filters and
   aggregates cheap in PostgreSQL.
+
+## 2026-05-08: Alias Catalogs Prefer Specific Longest Matches
+
+Alias catalogs should produce concise facts instead of every possible nested
+match. When alias spans overlap, the enrichment pipeline keeps the longest span
+and drops shorter nested aliases. Curated settings also avoid duplicating the
+same literal spelling across `vendors`, `software`, `devices`, and `protocols`.
+
+Rationale:
+
+- Market aliases contain nested names: `Нептуп` inside `Нептуп ProW`, `Wi-Fi`
+  inside `Profi Wi-Fi`, and vendor names inside longer platform names.
+- Emitting every nested alias makes the UI noisy and can inflate explanations.
+- The strongest explanation is usually the most specific full phrase. If one
+  spelling must produce multiple facts, attach multiple `fact_types` to that
+  one alias entry instead of duplicating the spelling across catalogs.
+
+## 2026-05-08: Off-Domain Demand Is Not A PUR Lead By Itself
+
+Generic demand and intent markers remain useful context, but their configured
+weights are low enough that a message such as "где заказать обычный стол" does
+not become a PUR lead without a relevant PUR domain signal or fact.
+
+Rationale:
+
+- The product goal is to find potential PUR clients, not every procurement or
+  advice request in a chat.
+- `provider_search`, `consultation_request`, `need`, and `work_type` should
+  explain why a domain-relevant message is actionable.
+- Analytics can still keep off-domain demand in its own review lane when needed,
+  but the default deterministic `is_lead` verdict should require more than
+  generic demand language.

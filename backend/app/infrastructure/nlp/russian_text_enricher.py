@@ -407,7 +407,7 @@ class RussianTextEnricher:
                         text=text[start:stop],
                     )
                 )
-        return sorted(matches, key=lambda item: (item.start, item.stop, item.text.lower()))
+        return _prefer_longest_non_overlapping_alias_matches(matches)
 
     def _find_phrase_matches(
         self,
@@ -458,7 +458,7 @@ def _compile_normalized_aliases(
             CompiledAliasText(
                 compact=compact,
                 fuzzy_distance=_alias_fuzzy_distance(alias, compact, settings),
-                max_word_span=word_count if word_count <= 1 else word_count + 1,
+                max_word_span=word_count,
                 script=_single_script(compact_document.word_scripts),
             )
         )
@@ -514,6 +514,30 @@ def _find_normalized_alias_matches(
                     seen.add((start, stop))
                     matches.append((start, stop))
     return matches
+
+
+def _prefer_longest_non_overlapping_alias_matches(
+    matches: list[AliasTextMatch],
+) -> list[AliasTextMatch]:
+    kept: list[AliasTextMatch] = []
+    for match in sorted(
+        matches,
+        key=lambda item: (
+            item.start,
+            -(item.stop - item.start),
+            item.config.catalog,
+            item.config.key,
+            item.text.casefold(),
+        ),
+    ):
+        if any(_ranges_overlap(match.start, match.stop, item.start, item.stop) for item in kept):
+            continue
+        kept.append(match)
+    return sorted(kept, key=lambda item: (item.start, item.stop, item.text.lower()))
+
+
+def _ranges_overlap(left_start: int, left_stop: int, right_start: int, right_stop: int) -> bool:
+    return left_start < right_stop and right_start < left_stop
 
 
 def _find_compact_exact_matches(

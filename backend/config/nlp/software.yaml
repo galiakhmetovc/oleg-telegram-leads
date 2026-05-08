@@ -74,9 +74,7 @@ software:
     canonical: Tuya / Smart Life
     type: software
     aliases:
-      - Tuya
       - Tuya Smart
-      - Туя
       - Smart Life
       - Смарт Лайф
       - приложение Tuya
@@ -252,14 +250,8 @@ software:
     canonical: ПО видеонаблюдения
     type: software
     aliases:
-      - Ivideon
-      - Ивидеон
-      - TRASSIR
-      - Трассир
       - Hik-Connect
       - Hik Connect
-      - EZVIZ
-      - Эзвиз
       - DMSS
       - Imou Life
       - Dahua DMSS

@@ -127,6 +127,14 @@ distance. Fuzzy is deliberately limited by `fuzzy_min_length`,
 start matching random words. Enrichment output still returns the original span
 text from the input message.
 
+If several alias matches overlap, the pipeline keeps the longest span and drops
+shorter nested matches. For example, `Нептуп ProW` should emit the model/vendor
+facts for the full phrase, not an extra `Нептуп` fact; `Profi Wi-Fi` should not
+also emit a nested `Wi-Fi` protocol fact. Alias spellings are curated so the same
+literal spelling is not duplicated across catalogs; choose the most specific
+catalog (`vendors`, `software`, `devices`, or `protocols`) and make domain
+signals depend on that catalog explicitly.
+
 Domain signals are the inference layer over semantic phrases, alias catalogs,
 and facts. They remain semantic categories such as `smart_home_platform`,
 `protocol_gateway`, `leak_protection`, `lighting_automation`,
@@ -152,6 +160,13 @@ The `lead_scoring` stage runs after Yargy fact and signal extraction. It does no
 contain hardcoded PUR business rules: the code sums configured signal/fact
 weights, applies configured thresholds, maps matched signal/fact types to
 solution areas and customer segments, and returns explanatory reasons.
+
+Generic demand signals such as `need`, `provider_search`, `consultation_request`,
+and generic `work_type` facts are intentionally low-weight. They explain intent,
+but should not by themselves turn an off-domain message into a PUR lead. A strong
+lead should normally combine intent with PUR domain signals or facts such as
+smart home, video surveillance, access control, leak protection, lighting,
+climate, power backup, or engineering network context.
 
 `lead_assessment` is part of every new enrichment result when the stage is
 enabled:

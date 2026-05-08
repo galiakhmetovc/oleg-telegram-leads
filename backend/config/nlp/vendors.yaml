@@ -8,7 +8,6 @@ vendors:
       - Yandex Smart Home
       - Умный дом Яндекс
       - Умный дом от Яндекса
-      - Дом с Алисой
       - Яндекс Хаб
       - Yandex Hub
       - Яндекс Станция
@@ -24,8 +23,6 @@ vendors:
       - СберДевайсы
       - SberDevices
       - Умный дом Сбер
-      - Сбер Салют
-      - Sber Salut
     fact_types:
       - vendor
   - key: aqara
@@ -50,10 +47,6 @@ vendors:
       - Xiaomi
       - Сяоми
       - Ксяоми
-      - Mi Home
-      - Ми Хоум
-      - Mijia
-      - Миджиа
       - Mi Smart
       - Xiaomi Smart Home
     fact_types:
@@ -64,9 +57,6 @@ vendors:
     aliases:
       - Tuya
       - Туя
-      - Tuya Smart
-      - Smart Life
-      - Смарт Лайф
       - Powered by Tuya
     fact_types:
       - vendor
@@ -77,9 +67,6 @@ vendors:
       - Sonoff
       - SONOFF
       - Сонофф
-      - eWeLink
-      - ивелинк
-      - eWeLink CUBE
       - iHost
       - ZBBridge
       - ZB Bridge
@@ -131,12 +118,8 @@ vendors:
       - Sprut Hub
       - СпрутХаб
       - Спрут Хаб
-      - Sprut.home
-      - Sprut Home
-      - Спрут Хоум
     fact_types:
       - vendor
-      - software
   - key: hdl
     canonical: HDL
     type: vendor
@@ -241,24 +224,16 @@ vendors:
       - HIPER
       - Hiper
       - Хайпер
-      - HIPER IoT
-      - Hiper IoT
-      - HIPER IOT
     fact_types:
       - vendor
-      - software
   - key: ekf_connect
     canonical: EKF Connect
     type: vendor
     aliases:
       - EKF
       - ЕКФ
-      - EKF Connect
-      - EKF Connect Home
-      - ЕКФ Коннект
     fact_types:
       - vendor
-      - software
   - key: gauss
     canonical: Gauss Smart Home
     type: vendor
@@ -289,10 +264,8 @@ vendors:
       - IMOU
       - Imou
       - Аймоу
-      - DMSS
     fact_types:
       - vendor
-      - software
   - key: hikvision
     canonical: Hikvision
     type: vendor
@@ -305,11 +278,8 @@ vendors:
       - Ezviz
       - EZVIZ
       - Эзвиз
-      - Hik-Connect
-      - Hik Connect
     fact_types:
       - vendor
-      - software
   - key: trassir
     canonical: TRASSIR
     type: vendor
@@ -319,7 +289,6 @@ vendors:
       - Трассир
     fact_types:
       - vendor
-      - software
   - key: ivideon
     canonical: Ivideon
     type: vendor
@@ -329,7 +298,6 @@ vendors:
       - Айвидеон
     fact_types:
       - vendor
-      - software
   - key: neptun
     canonical: Neptun
     type: vendor

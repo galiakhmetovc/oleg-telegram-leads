@@ -52,6 +52,9 @@
   register via casefold and can normalize separators, `ё/е`, mixed
   Latin/Cyrillic confusable letters, and limited fuzzy edit distance with
   minimum alias length, long-alias distance, and explicit fuzzy exclusions.
+- Alias matching now keeps the longest overlapping dictionary match and drops
+  shorter nested spans, so full model/platform aliases such as `Нептуп ProW` or
+  `Profi Wi-Fi` do not produce extra nested facts for `Нептуп` or `Wi-Fi`.
 - Domain signal dependencies in Settings Center are no longer edited through
   mini-language text such as `vendors:neptun`. Operators add/remove dependency
   rows with buttons, select the alias catalog, choose concrete alias entries,
@@ -101,7 +104,7 @@
 - Default NLP config recognizes Neptun/Нептун water leak monitoring leads,
   including the typo `Нептуп`, ProW/Profi product mentions, wired leak sensors,
   sensor-trigger monitoring, and smartphone information output.
-- Dev PostgreSQL active NLP config was refreshed to revision 24. The `need`
+- Dev PostgreSQL active NLP config has been refreshed through revision 26. The `need`
   signal no longer stores Russian forms such as `нужно`, `нужна`, `нужен` as
   exact phrases; they are represented as lemmatized phrase rules with preserved
   operator source text. Revision 16 also includes the Neptun water leak
@@ -112,7 +115,11 @@
   23 removes direct Neptun/ProW/Profi brand/model rules so those spellings are
   emitted only through alias catalogs; revision 24 migrates alias
   `signal_types` into explicit `signals[].match.aliases` dependencies and
-  removes signal outputs from alias dictionaries.
+  removes signal outputs from alias dictionaries; revision 26 stores the
+  configurable `pipeline.alias_matching` section, removes duplicated literal
+  alias spellings across catalogs, lowers generic off-domain demand weights, and
+  keeps PUR lead examples passing while avoiding ordinary non-PUR provider-search
+  messages.
 - `RussianTextEnricher` now precompiles Yargy parsers once per enricher
   instance and shares one Yargy `MorphTokenizer` across compiled rules instead
   of creating a separate `pymorphy2` analyzer for every parser. This keeps

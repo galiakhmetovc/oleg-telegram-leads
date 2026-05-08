@@ -425,6 +425,77 @@ vendors:
     assert "ast" not in matched_texts
 
 
+def test_alias_matching_prefers_longest_overlapping_aliases(tmp_path: Path) -> None:
+    config_dir = tmp_path / "nlp"
+    config_dir.mkdir()
+    (config_dir / "pipeline.yaml").write_text(
+        """
+stages:
+  - name: facts
+    enabled: true
+alias_matching:
+  normalize_separators: true
+  normalize_yo: true
+  normalize_latin_confusables: true
+  fuzzy_enabled: true
+  fuzzy_min_length: 5
+  fuzzy_max_distance: 1
+  fuzzy_long_min_length: 10
+  fuzzy_long_max_distance: 2
+""",
+        encoding="utf-8",
+    )
+    (config_dir / "signals.yaml").write_text("signals: []\n", encoding="utf-8")
+    (config_dir / "facts.yaml").write_text("facts: []\n", encoding="utf-8")
+    (config_dir / "lead_scoring.yaml").write_text("lead_scoring: {}\n", encoding="utf-8")
+    (config_dir / "vendors.yaml").write_text(
+        """
+vendors:
+  - key: neptun
+    canonical: Neptun
+    type: vendor
+    aliases:
+      - Нептуп
+      - Нептуп ProW
+      - Profi Wi-Fi
+    fact_types:
+      - vendor
+      - model
+""",
+        encoding="utf-8",
+    )
+    (config_dir / "protocols.yaml").write_text(
+        """
+protocols:
+  - key: wifi
+    canonical: Wi-Fi
+    type: protocol
+    aliases:
+      - Wi-Fi
+      - WiFi
+    fact_types:
+      - protocol
+""",
+        encoding="utf-8",
+    )
+
+    result = RussianTextEnricher(load_nlp_config(config_dir)).enrich(
+        "Смотрим Нептуп ProW и Profi WI-Fi."
+    )
+
+    alias_facts = [
+        (fact.text, fact.type)
+        for fact in result.facts
+        if fact.source == "alias_catalog"
+    ]
+    assert ("Нептуп ProW", "vendor") in alias_facts
+    assert ("Нептуп ProW", "model") in alias_facts
+    assert ("Profi WI-Fi", "vendor") in alias_facts
+    assert ("Profi WI-Fi", "model") in alias_facts
+    assert not any(text == "Нептуп" for text, _type in alias_facts)
+    assert not any(text == "WI-Fi" for text, _type in alias_facts)
+
+
 def test_alias_separator_normalization_can_be_disabled(tmp_path: Path) -> None:
     config_dir = tmp_path / "nlp"
     config_dir.mkdir()
@@ -514,7 +585,8 @@ def test_default_config_detects_curated_rf_cis_smart_home_aliases(
     assert {"smart_home_platform", "protocol_gateway", "water_leak_protection"} <= signal_types
     assert {"vendor", "protocol", "automation_component", "software"} <= fact_types
     assert any(text.startswith("aqara") for text in matched_texts)
-    assert {"яндекс", "нептун", "sonoff", "wiren board", "tuya smart life"} <= matched_texts
+    assert any(text.startswith("яндекс") for text in matched_texts)
+    assert {"нептун", "sonoff", "wiren board", "tuya smart life"} <= matched_texts
     assert result.lead_assessment is not None
     assert result.lead_assessment.is_lead is True
     assert result.lead_assessment.temperature in {"warm", "hot"}
@@ -560,6 +632,26 @@ def test_default_config_keeps_neptun_spellings_only_in_alias_catalogs() -> None:
     assert {"neptun", "нептун", "нептуп"}.issubset(alias_spellings)
     assert any("prow" in alias for alias in alias_spellings)
     assert any("profi" in alias for alias in alias_spellings)
+
+
+def test_default_config_does_not_duplicate_alias_spellings_across_catalogs() -> None:
+    config = _lead_detection_config_without_heavy_natasha()
+    aliases_by_spelling: dict[str, set[tuple[str, str]]] = {}
+
+    for alias_rule in config.aliases:
+        for alias in alias_rule.aliases:
+            normalized_alias = " ".join(alias.casefold().replace("ё", "е").split())
+            aliases_by_spelling.setdefault(normalized_alias, set()).add(
+                (alias_rule.catalog, alias_rule.key)
+            )
+
+    duplicated = {
+        alias: sorted(owners)
+        for alias, owners in aliases_by_spelling.items()
+        if len(owners) > 1
+    }
+
+    assert duplicated == {}
 
 
 def test_default_config_marks_smart_home_automation_lead_text(
@@ -1024,3 +1116,16 @@ def test_default_config_does_not_mark_diy_equipment_sale_as_lead(
     assert result.lead_assessment.is_lead is False
     assert result.lead_assessment.temperature == "none"
     assert "diy_or_equipment_only" in {item.type for item in result.lead_assessment.noise_signals}
+
+
+def test_default_config_does_not_mark_off_domain_provider_search_as_pur_lead(
+    default_lead_enricher: RussianTextEnricher,
+) -> None:
+    result = default_lead_enricher.enrich(
+        "Подскажите, пожалуйста, где можно заказать обычный стол и "
+        "нужно проконсультироваться по доставке?"
+    )
+
+    assert result.lead_assessment is not None
+    assert result.lead_assessment.is_lead is False
+    assert result.lead_assessment.temperature == "none"

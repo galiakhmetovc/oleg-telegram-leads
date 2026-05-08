@@ -5,30 +5,30 @@ lead_scoring:
     hot: 90
   weights:
     signals:
-      need: 10
-      customer_intent: 25
-      provider_search: 35
-      installation_request: 30
+      need: 4
+      customer_intent: 15
+      provider_search: 12
+      installation_request: 15
       smart_home_automation: 35
       smart_home_platform: 25
       protocol_gateway: 20
       video_surveillance: 35
-      consultation_request: 20
-      solution_selection_request: 25
-      education_request: 15
+      consultation_request: 8
+      solution_selection_request: 18
+      education_request: 10
       smart_home_value_question: 25
       smart_relay_control: 25
       budget_constraint: 5
-      installation_context: 12
+      installation_context: 5
       water_leak_protection: 25
       leak_protection: 25
-      implementation_intent: 25
-      hot_lead_intent: 35
-      electrical_design_context: 15
+      implementation_intent: 15
+      hot_lead_intent: 25
+      electrical_design_context: 10
       developer_smart_home_context: 30
       renovation_modification_context: 25
       warranty_risk: 20
-      designer_context: 15
+      designer_context: 10
       access_control: 35
       intercom: 30
       security_alarm: 30
@@ -58,11 +58,12 @@ lead_scoring:
       model: 5
       design_scope: 10
       service_location: 5
-      work_type: 20
+      work_type: 8
       automation_component: 12
       installation_surface: 6
       wiring_output: 8
       controlled_device: 10
+      protocol: 5
       power_equipment: 12
       access_device: 12
       network_scope: 10

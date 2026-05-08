@@ -208,7 +208,6 @@ protocols:
     aliases:
       - IR
       - ИК
-      - ИК пульт
       - инфракрасный пульт
       - infrared
       - IrDA
