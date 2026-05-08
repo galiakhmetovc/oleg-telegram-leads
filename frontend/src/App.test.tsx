@@ -534,14 +534,27 @@ test("adds semantic pattern through backend lemmatization", async () => {
   expect(screen.getByText("нужный консультация")).toBeInTheDocument();
 });
 
-test("renders settings help page for rule matching modes", () => {
+test("renders expanded settings help page for all editable NLP settings", () => {
   render(<App />);
 
   fireEvent.click(screen.getByRole("tab", { name: /справка/i }));
 
   expect(screen.getByRole("heading", { name: "Справка по настройкам" })).toBeInTheDocument();
+  expect(screen.getByRole("heading", { name: "Pipeline" })).toBeInTheDocument();
+  expect(screen.getByRole("heading", { name: "Доменные сигналы" })).toBeInTheDocument();
+  expect(screen.getByRole("heading", { name: "Факты" })).toBeInTheDocument();
+  expect(screen.getByRole("heading", { name: "Словари" })).toBeInTheDocument();
+  expect(screen.getByRole("heading", { name: "Оценка лида" })).toBeInTheDocument();
   expect(screen.getAllByText("Точное совпадение").length).toBeGreaterThan(0);
   expect(screen.getAllByText("Лемматическое совпадение").length).toBeGreaterThan(0);
+  expect(screen.getByText(/type пишем латиницей в snake_case/i)).toBeInTheDocument();
+  expect(screen.getByText(/label - русское название/i)).toBeInTheDocument();
+  expect(screen.getByText(/confidence - доверие к правилу/i)).toBeInTheDocument();
+  expect(screen.getAllByText(/weights.signals/i).length).toBeGreaterThan(0);
+  expect(screen.getAllByText(/weights.facts/i).length).toBeGreaterThan(0);
+  expect(screen.getAllByText(/review_lanes/i).length).toBeGreaterThan(0);
+  expect(screen.getByText(/score = сумма весов/i)).toBeInTheDocument();
+  expect(screen.getByText(/negative weights/i)).toBeInTheDocument();
   expect(screen.getByText("нужна консультация")).toBeInTheDocument();
   expect(screen.getByText("нужный консультация")).toBeInTheDocument();
   expect(screen.queryByText(/caseless:/)).not.toBeInTheDocument();

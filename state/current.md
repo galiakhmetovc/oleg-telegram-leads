@@ -20,6 +20,10 @@
 - Settings Center is available in the UI. NLP/domain settings are viewed,
   previewed, and saved as active PostgreSQL revisions; YAML files are bootstrap
   defaults only. Runtime/env settings are shown read-only.
+- The UI Help tab now documents current editable NLP settings: pipeline stages,
+  exact and lemmatized matching, domain signals, facts, alias dictionaries, lead
+  scoring, thresholds, weights, solution areas, customer segments, intent/noise
+  signals, and review lanes.
 - Settings rule editing now presents operator-facing matching modes: exact
   phrases and lemmatized phrases. Exact/semantic rules are edited with explicit
   add/edit/delete actions. New lemmatized phrases are built by the backend from

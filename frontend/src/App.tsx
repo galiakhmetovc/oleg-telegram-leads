@@ -893,10 +893,53 @@ function SettingsHelpPage() {
               Справка по настройкам
             </Typography>
             <Typography variant="body2" color="text.secondary">
-              Правила поиска делятся на точные фразы и лемматические фразы. Это разные инструменты:
-              первый ищет устойчивую запись, второй ищет смысловую словоформу.
+              Настройки управляют тем, какие фрагменты текста найдёт pipeline, какие причины
+              попадут в объяснение и как из них получится оценка потенциального лида ПУР.
             </Typography>
           </Box>
+
+          <Paper variant="outlined" className="help-section">
+            <Typography variant="h6">Pipeline</Typography>
+            <Typography variant="body2" color="text.secondary">
+              Pipeline - список этапов обработки. Выключенный этап не запускается и не добавляет
+              данные в результат. Если выключить `domain_signals`, сообщение не получит доменные
+              сигналы; если выключить `facts`, не появятся факты; если выключить `lead_scoring`,
+              не будет verdict, score, температуры, причин и очереди разбора.
+            </Typography>
+            <TableContainer>
+              <Table size="small">
+                <TableHead>
+                  <TableRow>
+                    <TableCell>Этап</TableCell>
+                    <TableCell>Что добавляет</TableCell>
+                    <TableCell>Как влияет</TableCell>
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  <TableRow>
+                    <TableCell>segmentation / morphology / lemmatization</TableCell>
+                    <TableCell>предложения, токены, леммы, части речи</TableCell>
+                    <TableCell>нужны для лемматического совпадения и объяснимой разметки текста</TableCell>
+                  </TableRow>
+                  <TableRow>
+                    <TableCell>domain_signals</TableCell>
+                    <TableCell>смысловые признаки: умный дом, видеонаблюдение, протечки</TableCell>
+                    <TableCell>дают основные причины `weights.signals` для score</TableCell>
+                  </TableRow>
+                  <TableRow>
+                    <TableCell>facts</TableCell>
+                    <TableCell>структурные факты: устройство, город, тип работ, выводы</TableCell>
+                    <TableCell>добавляют контекст и причины `weights.facts` для score</TableCell>
+                  </TableRow>
+                  <TableRow>
+                    <TableCell>lead_scoring</TableCell>
+                    <TableCell>lead_assessment: score, temperature, reasons, segments, lanes</TableCell>
+                    <TableCell>превращает найденные сигналы и факты в решение "лид / не лид"</TableCell>
+                  </TableRow>
+                </TableBody>
+              </Table>
+            </TableContainer>
+          </Paper>
 
           <Box className="help-grid">
             <Paper variant="outlined" className="help-section">
@@ -950,13 +993,308 @@ function SettingsHelpPage() {
           </Box>
 
           <Paper variant="outlined" className="help-section">
-            <Typography variant="h6">Alias-словари</Typography>
+            <Typography variant="h6">Доменные сигналы</Typography>
             <Typography variant="body2" color="text.secondary">
-              Словари нужны для сущностей с множеством человеческих написаний: вендоры, протоколы,
-              устройства и приложения. Каждая запись хранит каноническое имя, варианты написания,
-              тип, связанные доменные сигналы и факты. Входной текст перед точным матчингом
-              приводится к нижнему регистру, поэтому регистр в alias не влияет на поиск.
+              Доменный сигнал - это смысловой маркер в сообщении. Он отвечает на вопрос:
+              "О чём здесь говорят с точки зрения бизнеса ПУР?". Например,
+              `smart_home_platform`, `video_surveillance`, `water_leak_protection`,
+              `access_control`. Один сигнал может быть найден точной фразой, лемматической
+              фразой или через словарь alias.
             </Typography>
+            <TableContainer>
+              <Table size="small">
+                <TableHead>
+                  <TableRow>
+                    <TableCell>Поле</TableCell>
+                    <TableCell>Что это</TableCell>
+                    <TableCell>Как настраивать</TableCell>
+                    <TableCell>Как влияет</TableCell>
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  <TableRow>
+                    <TableCell>type</TableCell>
+                    <TableCell>стабильный технический ключ сигнала</TableCell>
+                    <TableCell>type пишем латиницей в snake_case: `video_surveillance`, `smart_home_platform`</TableCell>
+                    <TableCell>по этому ключу считаются веса, зоны решений, intent/noise и фильтры аналитики</TableCell>
+                  </TableRow>
+                  <TableRow>
+                    <TableCell>label</TableCell>
+                    <TableCell>человеческое имя в интерфейсе</TableCell>
+                    <TableCell>label - русское название: "Видеонаблюдение", "Умный дом"</TableCell>
+                    <TableCell>показывается оператору, но не должен использоваться как стабильный идентификатор</TableCell>
+                  </TableRow>
+                  <TableRow>
+                    <TableCell>confidence</TableCell>
+                    <TableCell>доверие к самому правилу, число от 0 до 1</TableCell>
+                    <TableCell>confidence - доверие к правилу; ставь выше для точных терминов, ниже для широких формулировок</TableCell>
+                    <TableCell>попадает в разметку найденного span; score сейчас считается весами, а не confidence</TableCell>
+                  </TableRow>
+                  <TableRow>
+                    <TableCell>phrases</TableCell>
+                    <TableCell>точные фразы</TableCell>
+                    <TableCell>используй для брендов, протоколов, `Wi-Fi`, `220v`, `white box`</TableCell>
+                    <TableCell>если фраза найдена, в сообщении появляется сигнал с этим type</TableCell>
+                  </TableRow>
+                  <TableRow>
+                    <TableCell>patterns</TableCell>
+                    <TableCell>лемматические фразы</TableCell>
+                    <TableCell>оператор вводит обычный текст, backend сохраняет исходный текст и леммы</TableCell>
+                    <TableCell>находит формы слов: "умного дома", "умному дому", "систему видеонаблюдения"</TableCell>
+                  </TableRow>
+                </TableBody>
+              </Table>
+            </TableContainer>
+            <Alert severity="info">
+              `type` технически является строкой, но в рабочих настройках не пишем его по-русски.
+              Русский текст живёт в `label`. Это нужно, чтобы ключи были стабильными в API,
+              аналитике, весах, миграциях и будущих eval-наборах.
+            </Alert>
+          </Paper>
+
+          <Paper variant="outlined" className="help-section">
+            <Typography variant="h6">Факты</Typography>
+            <Typography variant="body2" color="text.secondary">
+              Факт - это структурная деталь, которую можно использовать в объяснении и scoring:
+              тип работ, устройство, город, помещение, вывод под оборудование, протокол, модель,
+              поверхность монтажа. Факт обычно отвечает не "о чём сообщение", а "какая конкретика
+              в нём есть".
+            </Typography>
+            <TableContainer>
+              <Table size="small">
+                <TableHead>
+                  <TableRow>
+                    <TableCell>Поле</TableCell>
+                    <TableCell>Что это</TableCell>
+                    <TableCell>Как влияет на сообщение</TableCell>
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  <TableRow>
+                    <TableCell>type</TableCell>
+                    <TableCell>технический ключ факта, тоже латиницей в snake_case</TableCell>
+                    <TableCell>`controlled_device`, `wiring_output`, `service_location` могут добавить score через `weights.facts`</TableCell>
+                  </TableRow>
+                  <TableRow>
+                    <TableCell>label</TableCell>
+                    <TableCell>русское имя факта для оператора</TableCell>
+                    <TableCell>показывается в таблицах фактов и в preview draft</TableCell>
+                  </TableRow>
+                  <TableRow>
+                    <TableCell>phrases / patterns</TableCell>
+                    <TableCell>такие же режимы совпадения, как у сигналов</TableCell>
+                    <TableCell>создают span в `facts`; затем scorer может учесть этот fact type</TableCell>
+                  </TableRow>
+                  <TableRow>
+                    <TableCell>confidence</TableCell>
+                    <TableCell>доверие к правилу извлечения факта</TableCell>
+                    <TableCell>помогает читать результат, но не заменяет вес в scoring</TableCell>
+                  </TableRow>
+                </TableBody>
+              </Table>
+            </TableContainer>
+          </Paper>
+
+          <Paper variant="outlined" className="help-section">
+            <Typography variant="h6">Словари</Typography>
+            <Typography variant="body2" color="text.secondary">
+              Словари нужны для сущностей с множеством человеческих написаний: vendors,
+              protocols, devices, software. Они ловят конкретные имена и варианты записи:
+              `Yandex/Яндекс`, `Aqara/Акара`, `Zigbee/Зигби`, `Home Assistant/Хоум Ассистант`.
+              Входной текст перед точным матчингом приводится к нижнему регистру, поэтому регистр
+              в alias не влияет на поиск.
+            </Typography>
+            <TableContainer>
+              <Table size="small">
+                <TableHead>
+                  <TableRow>
+                    <TableCell>Поле</TableCell>
+                    <TableCell>Что это</TableCell>
+                    <TableCell>Как настраивать</TableCell>
+                    <TableCell>Как влияет</TableCell>
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  <TableRow>
+                    <TableCell>key</TableCell>
+                    <TableCell>стабильный ключ записи словаря</TableCell>
+                    <TableCell>латиница snake_case: `yandex`, `aqara`, `neptun_prow`</TableCell>
+                    <TableCell>нужен для обслуживания словаря и будущих связей</TableCell>
+                  </TableRow>
+                  <TableRow>
+                    <TableCell>canonical</TableCell>
+                    <TableCell>каноническое имя</TableCell>
+                    <TableCell>`Yandex Smart Home`, `Aqara`, `Neptun ProW`</TableCell>
+                    <TableCell>показывает, что именно имелось в виду при любом alias</TableCell>
+                  </TableRow>
+                  <TableRow>
+                    <TableCell>aliases</TableCell>
+                    <TableCell>варианты написания</TableCell>
+                    <TableCell>латиница, кириллица, транслитерация, частые ошибки: `Нептун`, `Нептуп`</TableCell>
+                    <TableCell>каждый alias может создать связанные сигналы и факты</TableCell>
+                  </TableRow>
+                  <TableRow>
+                    <TableCell>signal_types</TableCell>
+                    <TableCell>какие доменные сигналы добавить при совпадении</TableCell>
+                    <TableCell>например `smart_home_platform`, `protocol_gateway`, `leak_protection`</TableCell>
+                    <TableCell>дальше эти сигналы участвуют в score и аналитике</TableCell>
+                  </TableRow>
+                  <TableRow>
+                    <TableCell>fact_types</TableCell>
+                    <TableCell>какие факты добавить при совпадении</TableCell>
+                    <TableCell>например `vendor`, `protocol`, `software`, `model`</TableCell>
+                    <TableCell>добавляет структурную конкретику и может дать вес через `weights.facts`</TableCell>
+                  </TableRow>
+                </TableBody>
+              </Table>
+            </TableContainer>
+          </Paper>
+
+          <Paper variant="outlined" className="help-section">
+            <Typography variant="h6">Оценка лида</Typography>
+            <Typography variant="body2" color="text.secondary">
+              Оценка лида - детерминированный слой поверх найденных сигналов и фактов. Он не
+              перечитывает текст заново и не использует LLM. Он берёт уже найденные `domain_signals`
+              и `facts`, суммирует настроенные веса, определяет температуру, зоны решений,
+              сегменты клиента, причины и очередь разбора.
+            </Typography>
+            <Stack spacing={2}>
+              <Alert severity="info">
+                score = сумма весов всех найденных типов из `weights.signals` и `weights.facts`.
+                Один type учитывается как причина, если он встретился хотя бы один раз; найденные
+                тексты сохраняются в `matched_texts`, чтобы было видно, почему правило сработало.
+              </Alert>
+              <TableContainer>
+                <Table size="small">
+                  <TableHead>
+                    <TableRow>
+                      <TableCell>Настройка</TableCell>
+                      <TableCell>Что означает</TableCell>
+                      <TableCell>Как влияет</TableCell>
+                    </TableRow>
+                  </TableHead>
+                  <TableBody>
+                    <TableRow>
+                      <TableCell>thresholds.lead</TableCell>
+                      <TableCell>минимальный score, с которого `is_lead = true`</TableCell>
+                      <TableCell>ниже порога сообщение остаётся не лидом, даже если есть отдельные признаки</TableCell>
+                    </TableRow>
+                    <TableRow>
+                      <TableCell>thresholds.warm / thresholds.hot</TableCell>
+                      <TableCell>пороги температуры</TableCell>
+                      <TableCell>дают `cold`, `warm`, `hot`; это не отдельные правила, а диапазоны score</TableCell>
+                    </TableRow>
+                    <TableRow>
+                      <TableCell>weights.signals</TableCell>
+                      <TableCell>веса доменных сигналов</TableCell>
+                      <TableCell>`video_surveillance: 35` добавит 35 баллов, если найден сигнал `video_surveillance`</TableCell>
+                    </TableRow>
+                    <TableRow>
+                      <TableCell>weights.facts</TableCell>
+                      <TableCell>веса фактов</TableCell>
+                      <TableCell>`wiring_output: 8` добавит 8 баллов, если найден факт вывода под оборудование</TableCell>
+                    </TableRow>
+                    <TableRow>
+                      <TableCell>negative weights</TableCell>
+                      <TableCell>отрицательные веса для шума</TableCell>
+                      <TableCell>`diy_or_equipment_only: -50` снижает score, если сообщение похоже на DIY или покупку железки без услуги</TableCell>
+                    </TableRow>
+                    <TableRow>
+                      <TableCell>solution_areas</TableCell>
+                      <TableCell>карта типов в направления решений ПУР</TableCell>
+                      <TableCell>показывает "Умный дом", "Безопасность", "Климат", "СКУД" и даёт фильтры аналитики</TableCell>
+                    </TableRow>
+                    <TableRow>
+                      <TableCell>customer_segments</TableCell>
+                      <TableCell>карта типов в сегменты клиентов</TableCell>
+                      <TableCell>выделяет дизайнеров, частное жильё, коммерческие объекты, активные запросы</TableCell>
+                    </TableRow>
+                    <TableRow>
+                      <TableCell>intent_signal_types</TableCell>
+                      <TableCell>какие сигналы считать намерением</TableCell>
+                      <TableCell>показывает, что пользователь ищет подрядчика, консультацию, установку или подбор решения</TableCell>
+                    </TableRow>
+                    <TableRow>
+                      <TableCell>noise_signal_types</TableCell>
+                      <TableCell>какие сигналы считать шумом</TableCell>
+                      <TableCell>объясняет, почему кандидат может быть слабым или нецелевым</TableCell>
+                    </TableRow>
+                    <TableRow>
+                      <TableCell>review_lanes</TableCell>
+                      <TableCell>очереди ручного разбора кандидатов</TableCell>
+                      <TableCell>после batch import кандидат получает lane: прямой лид, проектный контекст, доменный интерес, шум</TableCell>
+                    </TableRow>
+                  </TableBody>
+                </Table>
+              </TableContainer>
+              <TableContainer>
+                <Table size="small">
+                  <TableHead>
+                    <TableRow>
+                      <TableCell>Пример</TableCell>
+                      <TableCell>Что найдётся</TableCell>
+                      <TableCell>Почему станет лидом</TableCell>
+                    </TableRow>
+                  </TableHead>
+                  <TableBody>
+                    <TableRow>
+                      <TableCell>нужно подключить zigbee шлюз к Алисе</TableCell>
+                      <TableCell>protocol_gateway, smart_home_platform, work_type</TableCell>
+                      <TableCell>сумма весов проходит lead/hot threshold, появляются причины и smart_home area</TableCell>
+                    </TableRow>
+                    <TableRow>
+                      <TableCell>где заказать видеонаблюдение для квартиры</TableCell>
+                      <TableCell>provider_search, video_surveillance, apartment_context</TableCell>
+                      <TableCell>есть домен безопасности и активный поиск поставщика/подрядчика</TableCell>
+                    </TableRow>
+                    <TableRow>
+                      <TableCell>продам камеру, сам поставлю</TableCell>
+                      <TableCell>video_surveillance плюс noise/DIY или sale</TableCell>
+                      <TableCell>отрицательные веса и noise signals могут увести ниже порога или в lane "Шум"</TableCell>
+                    </TableRow>
+                  </TableBody>
+                </Table>
+              </TableContainer>
+            </Stack>
+          </Paper>
+
+          <Paper variant="outlined" className="help-section">
+            <Typography variant="h6">Очереди разбора</Typography>
+            <Typography variant="body2" color="text.secondary">
+              `review_lanes` - это не новая детекция текста, а способ разложить уже найденных
+              кандидатов по очередям для ручного анализа. Lane с большим `priority` проверяется
+              первой. `match_groups` работают как группы условий: внутри группы достаточно одного
+              совпадения, а группы между собой должны выполниться все. Excluded-поля убирают
+              кандидата из lane, даже если положительные условия совпали.
+            </Typography>
+            <TableContainer>
+              <Table size="small">
+                <TableHead>
+                  <TableRow>
+                    <TableCell>Поле lane</TableCell>
+                    <TableCell>Назначение</TableCell>
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  <TableRow>
+                    <TableCell>key / label / description</TableCell>
+                    <TableCell>технический ключ, русское имя и пояснение для аналитики</TableCell>
+                  </TableRow>
+                  <TableRow>
+                    <TableCell>priority</TableCell>
+                    <TableCell>чем выше число, тем раньше lane заберёт кандидата</TableCell>
+                  </TableRow>
+                  <TableRow>
+                    <TableCell>match_groups</TableCell>
+                    <TableCell>условия по signal_types, fact_types, reason_keys, solution_area_types, customer_segment_types</TableCell>
+                  </TableRow>
+                  <TableRow>
+                    <TableCell>excluded_* fields</TableCell>
+                    <TableCell>запреты по шуму, причинам, сигналам, сегментам или зонам решений</TableCell>
+                  </TableRow>
+                </TableBody>
+              </Table>
+            </TableContainer>
           </Paper>
 
           <Paper variant="outlined" className="help-section">
