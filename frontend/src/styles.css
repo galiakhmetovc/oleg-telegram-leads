@@ -278,7 +278,7 @@ body {
 }
 
 .analytics-candidate-table {
-  min-width: 920px;
+  min-width: 980px;
 }
 
 .candidate-text {
@@ -292,6 +292,30 @@ body {
   min-width: 260px;
 }
 
+.candidate-row-expanded {
+  background: #f8fbff;
+}
+
+.candidate-detail-row > .MuiTableCell-root {
+  border-bottom-color: #d9dee7;
+}
+
+.candidate-detail {
+  border-top: 1px solid #e6ebf3;
+  background: #fbfcfe;
+  padding: 16px;
+}
+
+.candidate-detail-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 0.95fr) minmax(0, 1.05fr);
+  gap: 16px;
+}
+
+.analytics-annotated-text {
+  background: #ffffff;
+}
+
 @media (max-width: 980px) {
   .workspace-grid {
     grid-template-columns: 1fr;
@@ -302,7 +326,8 @@ body {
   .settings-two-column,
   .rule-grid,
   .help-grid,
-  .analytics-grid {
+  .analytics-grid,
+  .candidate-detail-grid {
     grid-template-columns: 1fr;
   }
 

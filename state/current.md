@@ -61,6 +61,10 @@
   the analytics UI. Current bootstrap lanes split candidates into noise, direct
   PUR leads, project context, domain interest, off-domain demand, generic
   context, and other candidates.
+- Analytics candidate rows now expand into an enrichment-style review view with
+  highlighted message fragments, lead temperature/score, review lane, solution
+  areas, customer segments, intent/noise signals, score reasons, domain signals,
+  and facts.
 - Default NLP config recognizes the developer-provided smart-home apartment
   modification lead: apartments with smart home from a developer, socket/switch
   changes, electrical scheme changes, and warranty risk.

@@ -1,3 +1,5 @@
+import KeyboardArrowDownIcon from "@mui/icons-material/KeyboardArrowDown";
+import KeyboardArrowUpIcon from "@mui/icons-material/KeyboardArrowUp";
 import FilterAltIcon from "@mui/icons-material/FilterAlt";
 import RefreshIcon from "@mui/icons-material/Refresh";
 import {
@@ -6,7 +8,9 @@ import {
   Button,
   Chip,
   CircularProgress,
+  Collapse,
   Divider,
+  IconButton,
   LinearProgress,
   MenuItem,
   Paper,
@@ -21,7 +25,8 @@ import {
   TextField,
   Typography
 } from "@mui/material";
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { Fragment, FormEvent, useEffect, useMemo, useState } from "react";
+import type { ReactNode } from "react";
 
 type AnalyticsRun = {
   id: string;
@@ -91,6 +96,9 @@ type AnalyticsSpan = {
   type: string;
   label?: string;
   text?: string;
+  source?: string;
+  color?: string | null;
+  confidence?: number | null;
 };
 
 type CandidatePage = {
@@ -667,6 +675,7 @@ function CandidateTable({
   }
 
   const currentPage = Math.floor(page.offset / page.limit);
+  const [expandedMessageId, setExpandedMessageId] = useState<string | null>(null);
 
   return (
     <Box>
@@ -674,6 +683,7 @@ function CandidateTable({
         <Table size="small" className="analytics-candidate-table">
           <TableHead>
             <TableRow>
+              <TableCell />
               <TableCell>ID</TableCell>
               <TableCell>Score</TableCell>
               <TableCell>Температура</TableCell>
@@ -683,28 +693,53 @@ function CandidateTable({
             </TableRow>
           </TableHead>
           <TableBody>
-            {page.items.map((candidate) => (
-              <TableRow key={candidate.message_id}>
-                <TableCell>{candidate.message_id}</TableCell>
-                <TableCell>{candidate.score}</TableCell>
-                <TableCell>{candidate.temperature}</TableCell>
-                <TableCell>
-                  <Chip size="small" label={candidate.review_lane} variant="outlined" />
-                </TableCell>
-                <TableCell className="candidate-text">{candidate.text}</TableCell>
-                <TableCell className="candidate-reasons">
-                  <Stack direction="row" spacing={0.5} useFlexGap sx={{ flexWrap: "wrap" }}>
-                    {candidate.reasons.slice(0, 4).map((reason) => (
-                      <Chip
-                        key={`${candidate.message_id}-${reason.source}-${reason.key}`}
+            {page.items.map((candidate) => {
+              const expanded = expandedMessageId === candidate.message_id;
+              return (
+                <Fragment key={candidate.message_id}>
+                  <TableRow hover className={expanded ? "candidate-row-expanded" : undefined}>
+                    <TableCell>
+                      <IconButton
+                        aria-label={
+                          expanded
+                            ? `Скрыть разбор сообщения ${candidate.message_id}`
+                            : `Показать разбор сообщения ${candidate.message_id}`
+                        }
                         size="small"
-                        label={`${reason.label || reason.key} +${reason.weight}`}
-                      />
-                    ))}
-                  </Stack>
-                </TableCell>
-              </TableRow>
-            ))}
+                        onClick={() => setExpandedMessageId(expanded ? null : candidate.message_id)}
+                      >
+                        {expanded ? <KeyboardArrowUpIcon fontSize="small" /> : <KeyboardArrowDownIcon fontSize="small" />}
+                      </IconButton>
+                    </TableCell>
+                    <TableCell>{candidate.message_id}</TableCell>
+                    <TableCell>{candidate.score}</TableCell>
+                    <TableCell>{candidate.temperature}</TableCell>
+                    <TableCell>
+                      <Chip size="small" label={candidate.review_lane} variant="outlined" />
+                    </TableCell>
+                    <TableCell className="candidate-text">{candidate.text}</TableCell>
+                    <TableCell className="candidate-reasons">
+                      <Stack direction="row" spacing={0.5} useFlexGap sx={{ flexWrap: "wrap" }}>
+                        {candidate.reasons.slice(0, 4).map((reason) => (
+                          <Chip
+                            key={`${candidate.message_id}-${reason.source}-${reason.key}`}
+                            size="small"
+                            label={`${reason.label || reason.key} ${formatWeight(reason.weight)}`}
+                          />
+                        ))}
+                      </Stack>
+                    </TableCell>
+                  </TableRow>
+                  <TableRow className="candidate-detail-row">
+                    <TableCell colSpan={7} sx={{ p: 0 }}>
+                      <Collapse in={expanded} timeout="auto" unmountOnExit>
+                        <CandidateDetails candidate={candidate} />
+                      </Collapse>
+                    </TableCell>
+                  </TableRow>
+                </Fragment>
+              );
+            })}
           </TableBody>
         </Table>
       </TableContainer>
@@ -735,6 +770,262 @@ function CandidateTable({
       />
     </Box>
   );
+}
+
+function CandidateDetails({ candidate }: { candidate: AnalyticsCandidate }) {
+  return (
+    <Box className="candidate-detail">
+      <Stack spacing={2}>
+        <Stack direction="row" spacing={1} useFlexGap sx={{ alignItems: "center", flexWrap: "wrap" }}>
+          <Chip label={candidateTemperatureLabel(candidate)} color={candidateTemperatureColor(candidate)} />
+          <Chip label={`${candidate.score} баллов`} variant="outlined" />
+          <Chip label={candidate.review_lane} variant="outlined" />
+          <Typography variant="body2" color="text.secondary">
+            Сообщение {candidate.message_id}
+          </Typography>
+        </Stack>
+
+        <Stack spacing={1}>
+          <Typography variant="subtitle2">Раскрашенное сообщение</Typography>
+          <AnnotatedCandidateText candidate={candidate} />
+        </Stack>
+
+        <Box className="candidate-detail-grid">
+          <Stack spacing={1.25}>
+            <CandidateCategoryGroup title="Направления" items={candidate.solution_areas} />
+            <CandidateCategoryGroup title="Сегменты" items={candidate.customer_segments} />
+            <CandidateCategoryGroup title="Намерения" items={candidate.intent_signals} />
+            <CandidateCategoryGroup title="Шум" items={candidate.noise_signals} color="warning" />
+          </Stack>
+          <Stack spacing={1.25}>
+            <CandidateSpanGroup title="Доменные сигналы" items={candidate.domain_signals} />
+            <CandidateSpanGroup title="Факты" items={candidate.facts} />
+          </Stack>
+        </Box>
+
+        <CandidateReasonTable reasons={candidate.reasons} />
+      </Stack>
+    </Box>
+  );
+}
+
+function AnnotatedCandidateText({ candidate }: { candidate: AnalyticsCandidate }) {
+  const highlights = useMemo(() => collectCandidateHighlights(candidate), [candidate]);
+  const parts: ReactNode[] = [];
+  let cursor = 0;
+
+  for (const highlight of highlights) {
+    if (highlight.start > cursor) {
+      parts.push(<span key={`text-${cursor}`}>{candidate.text.slice(cursor, highlight.start)}</span>);
+    }
+    parts.push(
+      <mark
+        key={`${highlight.type}-${highlight.start}-${highlight.stop}`}
+        className="annotation"
+        style={{
+          borderColor: highlight.color,
+          backgroundColor: `${highlight.color}1a`
+        }}
+        title={`${highlight.label}: ${highlight.source}`}
+      >
+        {candidate.text.slice(highlight.start, highlight.stop)}
+      </mark>
+    );
+    cursor = highlight.stop;
+  }
+
+  if (cursor < candidate.text.length) {
+    parts.push(<span key={`text-${cursor}`}>{candidate.text.slice(cursor)}</span>);
+  }
+
+  return (
+    <Box className="annotated-text analytics-annotated-text">
+      <Typography component="div" variant="body2">
+        {parts.length > 0 ? parts : candidate.text}
+      </Typography>
+    </Box>
+  );
+}
+
+type CandidateHighlight = {
+  start: number;
+  stop: number;
+  type: string;
+  label: string;
+  source: string;
+  color: string;
+};
+
+function collectCandidateHighlights(candidate: AnalyticsCandidate): CandidateHighlight[] {
+  const candidates = [
+    ...candidate.domain_signals.map((span) => ({ ...span, fallbackSource: "domain_signal", fallbackColor: "#0b57d0" })),
+    ...candidate.facts.map((span) => ({ ...span, fallbackSource: "fact", fallbackColor: "#7b1fa2" }))
+  ];
+  const highlights: CandidateHighlight[] = [];
+  const seen = new Set<string>();
+
+  for (const span of candidates) {
+    const phrase = span.text?.trim();
+    if (!phrase) {
+      continue;
+    }
+    for (const [start, stop] of findTextOccurrences(candidate.text, phrase)) {
+      const key = `${span.type}-${start}-${stop}`;
+      if (seen.has(key)) {
+        continue;
+      }
+      seen.add(key);
+      highlights.push({
+        start,
+        stop,
+        type: span.type,
+        label: span.label || span.type,
+        source: span.source || span.fallbackSource,
+        color: span.color || span.fallbackColor
+      });
+    }
+  }
+
+  const sorted = highlights.sort((left, right) => left.start - right.start || right.stop - left.stop);
+  const accepted: CandidateHighlight[] = [];
+  let cursor = -1;
+  for (const highlight of sorted) {
+    if (highlight.start >= cursor) {
+      accepted.push(highlight);
+      cursor = highlight.stop;
+    }
+  }
+  return accepted;
+}
+
+function findTextOccurrences(text: string, phrase: string): Array<[number, number]> {
+  const haystack = text.toLocaleLowerCase("ru-RU");
+  const needle = phrase.toLocaleLowerCase("ru-RU");
+  const occurrences: Array<[number, number]> = [];
+  let start = haystack.indexOf(needle);
+  while (start !== -1) {
+    occurrences.push([start, start + phrase.length]);
+    start = haystack.indexOf(needle, start + Math.max(needle.length, 1));
+  }
+  return occurrences;
+}
+
+function CandidateCategoryGroup({
+  title,
+  items,
+  color = "default"
+}: {
+  title: string;
+  items: AnalyticsCategory[];
+  color?: "default" | "primary" | "secondary" | "error" | "info" | "success" | "warning";
+}) {
+  if (items.length === 0) {
+    return null;
+  }
+  return (
+    <Stack spacing={0.75}>
+      <Typography variant="subtitle2">{title}</Typography>
+      <Stack direction="row" spacing={0.75} useFlexGap sx={{ flexWrap: "wrap" }}>
+        {items.map((item) => (
+          <Chip
+            key={`${title}-${item.type}`}
+            label={item.label || item.type}
+            size="small"
+            color={color}
+            variant={color === "default" ? "outlined" : "filled"}
+          />
+        ))}
+      </Stack>
+    </Stack>
+  );
+}
+
+function CandidateSpanGroup({ title, items }: { title: string; items: AnalyticsSpan[] }) {
+  return (
+    <Stack spacing={0.75}>
+      <Typography variant="subtitle2">{title}</Typography>
+      {items.length === 0 ? (
+        <Typography variant="body2" color="text.secondary">
+          Не найдено.
+        </Typography>
+      ) : (
+        <Stack direction="row" spacing={0.75} useFlexGap sx={{ flexWrap: "wrap" }}>
+          {items.map((item, index) => (
+            <Chip
+              key={`${title}-${item.type}-${item.text ?? ""}-${index}`}
+              label={`${item.label || item.type}${item.text ? `: ${item.text}` : ""}`}
+              size="small"
+              variant="outlined"
+            />
+          ))}
+        </Stack>
+      )}
+    </Stack>
+  );
+}
+
+function CandidateReasonTable({ reasons }: { reasons: AnalyticsReason[] }) {
+  return (
+    <Stack spacing={1}>
+      <Typography variant="subtitle2">Причины score</Typography>
+      {reasons.length === 0 ? (
+        <Typography variant="body2" color="text.secondary">
+          Причин score нет.
+        </Typography>
+      ) : (
+        <TableContainer>
+          <Table size="small">
+            <TableHead>
+              <TableRow>
+                <TableCell>Причина</TableCell>
+                <TableCell>Источник</TableCell>
+                <TableCell>Вес</TableCell>
+                <TableCell>Совпадения</TableCell>
+              </TableRow>
+            </TableHead>
+            <TableBody>
+              {reasons.map((reason) => (
+                <TableRow key={`${reason.source}-${reason.key}`}>
+                  <TableCell>{reason.label || reason.key}</TableCell>
+                  <TableCell>{reason.source}</TableCell>
+                  <TableCell>{formatWeight(reason.weight)}</TableCell>
+                  <TableCell>{reason.matched_texts.join(", ")}</TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </TableContainer>
+      )}
+    </Stack>
+  );
+}
+
+function candidateTemperatureLabel(candidate: AnalyticsCandidate) {
+  if (candidate.temperature === "hot") {
+    return "Горячий лид";
+  }
+  if (candidate.temperature === "warm") {
+    return "Теплый лид";
+  }
+  if (candidate.temperature === "cold") {
+    return "Холодный лид";
+  }
+  return "Кандидат";
+}
+
+function candidateTemperatureColor(
+  candidate: AnalyticsCandidate
+): "default" | "primary" | "secondary" | "error" | "info" | "success" | "warning" {
+  if (candidate.temperature === "hot") {
+    return "error";
+  }
+  if (candidate.temperature === "warm") {
+    return "warning";
+  }
+  if (candidate.temperature === "cold") {
+    return "success";
+  }
+  return "default";
 }
 
 function candidateQuery(filters: CandidateFilters, limit: number, offset: number) {
@@ -774,6 +1065,10 @@ function formatInteger(value: number) {
 
 function formatPercent(value: number) {
   return `${value.toFixed(2)}%`;
+}
+
+function formatWeight(value: number) {
+  return value >= 0 ? `+${value}` : String(value);
 }
 
 function aggregateDetail(item: AnalyticsAggregate) {

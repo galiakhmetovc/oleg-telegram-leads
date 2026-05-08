@@ -274,25 +274,57 @@ test("loads analytics dashboard on demand", async () => {
         items: [
           {
             message_id: "672162",
-            text: "Подскажите на счет умного дома Яндекс, как подключить свет к Алисе?",
+            text: "Коллеги, такой запрос от клиента. К кому идти? Посоветуйте контакты по Москве 🙏🏻 Установить и подключить zigbee шлюз для управления через приложение/алису. Свет, розетки, входной замок, ТВ, кондиционер, электрокарниз (если будет), система защиты от протечек.",
             score: 454,
             temperature: "hot",
             review_lane: "direct_pur_lead",
-            solution_areas: [{ type: "automation", label: "Автоматизация", matched_types: ["smart_home_platform"] }],
-            customer_segments: [],
-            intent_signals: [],
+            solution_areas: [
+              { type: "automation", label: "Автоматизация", matched_types: ["protocol_gateway"] },
+              { type: "security", label: "Безопасность", matched_types: ["water_leak_protection"] }
+            ],
+            customer_segments: [{ type: "active_request", label: "Активный запрос", matched_types: ["provider_search"] }],
+            intent_signals: [{ type: "provider_search", label: "provider_search", matched_types: ["provider_search"] }],
             noise_signals: [],
             reasons: [
               {
                 source: "domain_signal",
-                key: "smart_home_platform",
-                label: "smart_home_platform",
+                key: "protocol_gateway",
+                label: "protocol_gateway",
+                weight: 20,
+                matched_texts: ["zigbee шлюз"]
+              },
+              {
+                source: "domain_signal",
+                key: "provider_search",
+                label: "provider_search",
                 weight: 35,
-                matched_texts: ["умного дома"]
+                matched_texts: ["Посоветуйте контакты"]
               }
             ],
-            domain_signals: [{ type: "smart_home_platform", label: "Умный дом", text: "умного дома" }],
-            facts: []
+            domain_signals: [
+              {
+                type: "protocol_gateway",
+                label: "Протоколы / шлюзы / интеграции",
+                text: "zigbee шлюз",
+                source: "yargy",
+                color: "#3949ab"
+              },
+              {
+                type: "water_leak_protection",
+                label: "Защита от протечек",
+                text: "система защиты от протечек",
+                source: "yargy",
+                color: "#00695c"
+              }
+            ],
+            facts: [
+              {
+                type: "controlled_device",
+                label: "Управляемое устройство",
+                text: "розетки",
+                source: "yargy"
+              }
+            ]
           }
         ]
       });
@@ -311,7 +343,18 @@ test("loads analytics dashboard on demand", async () => {
   expect(screen.getByText("3.03%")).toBeInTheDocument();
   expect(screen.getByText("designer_context")).toBeInTheDocument();
   expect(screen.getByText("Прямой лид ПУР")).toBeInTheDocument();
-  expect(screen.getByText(/Подскажите на счет умного дома Яндекс/i)).toBeInTheDocument();
+  expect(screen.getByText(/Коллеги, такой запрос от клиента/i)).toBeInTheDocument();
+  expect(screen.queryByText("Раскрашенное сообщение")).not.toBeInTheDocument();
+
+  fireEvent.click(screen.getByRole("button", { name: "Показать разбор сообщения 672162" }));
+
+  expect(await screen.findByText("Раскрашенное сообщение")).toBeInTheDocument();
+  expect(screen.getAllByText("Причины score").length).toBeGreaterThan(1);
+  expect(screen.getAllByText("Доменные сигналы").length).toBeGreaterThan(1);
+  expect(screen.getByText("Факты")).toBeInTheDocument();
+  expect(screen.getByText("protocol_gateway")).toBeInTheDocument();
+  expect(screen.getAllByText("zigbee шлюз").length).toBeGreaterThan(0);
+  expect(screen.getByText(/Управляемое устройство: розетки/)).toBeInTheDocument();
 });
 
 test("pages analytics candidates with backend limit and offset", async () => {
