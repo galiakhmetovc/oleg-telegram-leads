@@ -17,6 +17,7 @@ import {
   AccordionSummary,
   Alert,
   AppBar,
+  Autocomplete,
   Box,
   Button,
   Chip,
@@ -820,6 +821,7 @@ function SettingsCenter() {
                 <RuleCollectionEditor
                   title="Доменные сигналы"
                   collection="signals"
+                  settings={draft}
                   rules={draft.signals}
                   onAdd={addRule}
                   onRemove={removeRule}
@@ -830,6 +832,7 @@ function SettingsCenter() {
                 <RuleCollectionEditor
                   title="Факты"
                   collection="facts"
+                  settings={draft}
                   rules={draft.facts}
                   onAdd={addRule}
                   onRemove={removeRule}
@@ -1057,7 +1060,7 @@ function SettingsHelpPage() {
                   <TableRow>
                     <TableCell>phrases</TableCell>
                     <TableCell>точные фразы</TableCell>
-                    <TableCell>используй для брендов, протоколов, `Wi-Fi`, `220v`, `white box`</TableCell>
+                    <TableCell>используй для коротких устойчивых выражений; бренды, модели и протоколы держи в словарях</TableCell>
                     <TableCell>если фраза найдена, в сообщении появляется сигнал с этим type</TableCell>
                   </TableRow>
                   <TableRow>
@@ -1069,13 +1072,13 @@ function SettingsHelpPage() {
                   <TableRow>
                     <TableCell>match.aliases</TableCell>
                     <TableCell>явные зависимости сигнала от словарей</TableCell>
-                    <TableCell>`vendors:yandex, aqara`, `software:alice`, `devices:leak_sensor`</TableCell>
+                    <TableCell>в строке зависимости выбери каталог `vendors`, `software` или `devices`, затем конкретные alias-ключи</TableCell>
                     <TableCell>если найден alias с указанным ключом/каталогом, появляется этот доменный сигнал</TableCell>
                   </TableRow>
                   <TableRow>
                     <TableCell>match.facts</TableCell>
                     <TableCell>зависимости сигнала от уже найденных фактов</TableCell>
-                    <TableCell>`automation_component`, `vendor`, `service_location`</TableCell>
+                    <TableCell>выбери `automation_component`, `vendor`, `service_location` или другой fact_type из списка</TableCell>
                     <TableCell>позволяет строить сигнал поверх структурных фактов без повторного поиска текста</TableCell>
                   </TableRow>
                 </TableBody>
@@ -1205,7 +1208,7 @@ function SettingsHelpPage() {
                   </TableRow>
                   <TableRow>
                     <TableCell>`match.aliases` у `water_leak_protection`</TableCell>
-                    <TableCell>сигнал явно ссылается на `vendors:neptun`; "Нептун" не добавляем в `phrases`, но сигнал появляется с `source=alias_catalog`</TableCell>
+                    <TableCell>сигнал явно ссылается на каталог `vendors` и alias `neptun`; "Нептун" не добавляем в `phrases`, но сигнал появляется с `source=alias_catalog`</TableCell>
                     <TableCell>когда смысловой сигнал должен опираться на словарную сущность</TableCell>
                   </TableRow>
                   <TableRow>
@@ -1936,6 +1939,7 @@ function CategoryMappingEditor({
 function RuleCollectionEditor({
   title,
   collection,
+  settings,
   rules,
   onAdd,
   onRemove,
@@ -1943,6 +1947,7 @@ function RuleCollectionEditor({
 }: {
   title: string;
   collection: "signals" | "facts";
+  settings: NlpSettings;
   rules: RuleSetting[];
   onAdd: (collection: "signals" | "facts") => void;
   onRemove: (collection: "signals" | "facts", index: number) => void;
@@ -1984,6 +1989,7 @@ function RuleCollectionEditor({
                 <RuleEditor
                   key={`${rule.type}-${index}`}
                   collection={collection}
+                  settings={settings}
                   rule={rule}
                   onRemove={() => onRemove(collection, index)}
                   onUpdate={(nextRule) => onUpdate(collection, index, nextRule)}
@@ -1999,11 +2005,13 @@ function RuleCollectionEditor({
 
 function RuleEditor({
   collection,
+  settings,
   rule,
   onRemove,
   onUpdate
 }: {
   collection: "signals" | "facts";
+  settings: NlpSettings;
   rule: RuleSetting;
   onRemove: () => void;
   onUpdate: (rule: RuleSetting) => void;
@@ -2057,6 +2065,7 @@ function RuleEditor({
           {collection === "signals" && (
             <SignalMatchEditor
               match={normalizeRuleMatch(rule.match)}
+              settings={settings}
               onUpdate={(match) => onUpdate({ ...rule, match })}
             />
           )}
@@ -2300,39 +2309,200 @@ function SemanticPatternEditor({
 
 function SignalMatchEditor({
   match,
+  settings,
   onUpdate
 }: {
   match: RuleMatchSetting;
+  settings: NlpSettings;
   onUpdate: (match: RuleMatchSetting) => void;
 }) {
+  function updateAliasDependency(index: number, dependency: AliasMatchSetting) {
+    onUpdate({
+      ...match,
+      aliases: match.aliases.map((item, itemIndex) => (itemIndex === index ? dependency : item))
+    });
+  }
+
+  function updateFactDependency(index: number, dependency: FactMatchSetting) {
+    onUpdate({
+      ...match,
+      facts: match.facts.map((item, itemIndex) => (itemIndex === index ? dependency : item))
+    });
+  }
+
+  const allFactTypes = factTypeOptions(settings, match.facts.flatMap((dependency) => dependency.types));
+
   return (
-    <Stack spacing={1}>
-      <RuleListHeader
-        title="Зависимости сигнала"
-        description="Сигнал может срабатывать от записей словарей и уже найденных фактов. Формат alias: catalog:key1, key2."
-        addLabel="Добавить зависимость"
-        onAdd={() => onUpdate({ ...match, aliases: [...match.aliases, { catalog: "vendors", keys: [] }] })}
-      />
-      <Box className="settings-two-column">
-        <TextField
-          label="match.aliases"
-          helperText="Например: vendors:yandex, aqara"
-          value={aliasMatchesToText(match.aliases)}
-          onChange={(event) => onUpdate({ ...match, aliases: textToAliasMatches(event.target.value) })}
-          multiline
-          minRows={3}
-          fullWidth
+    <Stack spacing={2}>
+      <Stack spacing={1}>
+        <RuleListHeader
+          title="Зависимости от словарей"
+          description="Сигнал срабатывает от выбранных alias-записей: брендов, протоколов, устройств или ПО. Названия вроде Neptun держим здесь, в словарях."
+          addLabel="Добавить зависимость от словаря"
+          onAdd={() =>
+            onUpdate({
+              ...match,
+              aliases: [...match.aliases, { catalog: defaultAliasCatalog, keys: [], kinds: [] }]
+            })
+          }
         />
-        <TextField
-          label="match.facts"
-          helperText="Одна строка: fact_type или список через запятую"
-          value={factMatchesToText(match.facts)}
-          onChange={(event) => onUpdate({ ...match, facts: textToFactMatches(event.target.value) })}
-          multiline
-          minRows={3}
-          fullWidth
+        {match.aliases.length === 0 ? (
+          <Typography variant="body2" color="text.secondary">
+            Зависимостей от словарей нет.
+          </Typography>
+        ) : (
+          <Stack spacing={1}>
+            {match.aliases.map((dependency, index) => {
+              const catalog = aliasCatalogFromDependency(dependency);
+              const keys = dependency.keys ?? [];
+              const aliasOptions = aliasOptionsForCatalog(settings, catalog, keys);
+              const selectedAliases = selectedAliasOptions(settings, catalog, keys);
+              const kindOptions = uniqueStrings([...aliasKindOptions, ...(dependency.kinds ?? [])]);
+
+              return (
+                <Box className="rule-list-row" key={`alias-${catalog}-${index}`} sx={{ alignItems: "flex-start" }}>
+                  <Box
+                    sx={{
+                      alignItems: "start",
+                      display: "grid",
+                      flex: 1,
+                      gap: 1,
+                      gridTemplateColumns: { xs: "1fr", md: "180px minmax(220px, 1fr) minmax(180px, 0.6fr)" },
+                      minWidth: 0
+                    }}
+                  >
+                    <TextField
+                      label="Каталог зависимости"
+                      select
+                      value={catalog}
+                      onChange={(event) =>
+                        updateAliasDependency(index, {
+                          catalog: aliasCatalogFromText(event.target.value),
+                          catalogs: [],
+                          keys: [],
+                          kinds: []
+                        })
+                      }
+                      slotProps={{ select: { native: true } }}
+                      size="small"
+                      fullWidth
+                    >
+                      {aliasCatalogDefinitions.map((definition) => (
+                        <option key={definition.name} value={definition.name}>
+                          {definition.label}
+                        </option>
+                      ))}
+                    </TextField>
+                    <Autocomplete
+                      multiple
+                      size="small"
+                      options={aliasOptions}
+                      value={selectedAliases}
+                      isOptionEqualToValue={(option, value) => option.key === value.key}
+                      getOptionLabel={(option) => option.label}
+                      onChange={(_event, values) =>
+                        updateAliasDependency(index, {
+                          ...dependency,
+                          catalog,
+                          catalogs: [],
+                          keys: values.map((value) => value.key)
+                        })
+                      }
+                      renderInput={(params) => (
+                        <TextField
+                          {...params}
+                          label="Alias"
+                          helperText="Выбери конкретные записи словаря, которые должны включать этот сигнал."
+                        />
+                      )}
+                    />
+                    <Autocomplete
+                      multiple
+                      size="small"
+                      options={kindOptions}
+                      value={dependency.kinds ?? []}
+                      getOptionLabel={(option) => `type: ${option}`}
+                      onChange={(_event, values) =>
+                        updateAliasDependency(index, {
+                          ...dependency,
+                          catalog,
+                          catalogs: [],
+                          kinds: values
+                        })
+                      }
+                      renderInput={(params) => (
+                        <TextField
+                          {...params}
+                          label="Типы alias"
+                          helperText="Оставь пустым, если достаточно выбранного каталога и alias."
+                        />
+                      )}
+                    />
+                  </Box>
+                  <Tooltip title="Удалить">
+                    <IconButton
+                      aria-label={`Удалить зависимость от словаря: ${catalog}`}
+                      color="error"
+                      onClick={() =>
+                        onUpdate({ ...match, aliases: match.aliases.filter((_, itemIndex) => itemIndex !== index) })
+                      }
+                    >
+                      <DeleteIcon />
+                    </IconButton>
+                  </Tooltip>
+                </Box>
+              );
+            })}
+          </Stack>
+        )}
+      </Stack>
+
+      <Stack spacing={1}>
+        <RuleListHeader
+          title="Зависимости от фактов"
+          description="Сигнал может опираться на факты, которые уже нашел Yargy или alias-словари. Здесь выбираются технические fact_type."
+          addLabel="Добавить зависимость от факта"
+          onAdd={() => onUpdate({ ...match, facts: [...match.facts, { types: [] }] })}
         />
-      </Box>
+        {match.facts.length === 0 ? (
+          <Typography variant="body2" color="text.secondary">
+            Зависимостей от фактов нет.
+          </Typography>
+        ) : (
+          <Stack spacing={1}>
+            {match.facts.map((dependency, index) => (
+              <Box className="rule-list-row" key={`fact-${index}`} sx={{ alignItems: "flex-start" }}>
+                <Autocomplete
+                  multiple
+                  size="small"
+                  options={allFactTypes}
+                  value={dependency.types}
+                  onChange={(_event, values) => updateFactDependency(index, { types: values })}
+                  sx={{ flex: 1, minWidth: 0 }}
+                  renderInput={(params) => (
+                    <TextField
+                      {...params}
+                      label="Типы фактов"
+                      helperText="Выбери один или несколько fact_type, которые должны включать этот сигнал."
+                    />
+                  )}
+                />
+                <Tooltip title="Удалить">
+                  <IconButton
+                    aria-label="Удалить зависимость от факта"
+                    color="error"
+                    onClick={() =>
+                      onUpdate({ ...match, facts: match.facts.filter((_, itemIndex) => itemIndex !== index) })
+                    }
+                  >
+                    <DeleteIcon />
+                  </IconButton>
+                </Tooltip>
+              </Box>
+            ))}
+          </Stack>
+        )}
+      </Stack>
     </Stack>
   );
 }
@@ -2458,6 +2628,84 @@ const aliasCatalogDefinitions: AliasCatalogDefinition[] = [
   { name: "software", label: "ПО" }
 ];
 
+type AliasOption = {
+  key: string;
+  label: string;
+};
+
+const defaultAliasCatalog: AliasCatalogName = "vendors";
+const aliasKindOptions = ["vendor", "protocol", "device", "software", "model"];
+
+function isAliasCatalogName(value: string | null | undefined): value is AliasCatalogName {
+  return aliasCatalogDefinitions.some((definition) => definition.name === value);
+}
+
+function aliasCatalogFromText(value: string): AliasCatalogName {
+  return isAliasCatalogName(value) ? value : defaultAliasCatalog;
+}
+
+function aliasCatalogFromDependency(dependency: AliasMatchSetting): AliasCatalogName {
+  const candidates = [dependency.catalog, ...(dependency.catalogs ?? [])];
+  const catalog = candidates.find(isAliasCatalogName);
+  return catalog ?? defaultAliasCatalog;
+}
+
+function aliasOptionsForCatalog(
+  settings: NlpSettings,
+  catalog: AliasCatalogName,
+  selectedKeys: string[] = []
+): AliasOption[] {
+  const options = settings[catalog].map((alias) => ({
+    key: alias.key,
+    label: `${alias.key} — ${alias.canonical}`
+  }));
+  const knownKeys = new Set(options.map((option) => option.key));
+  selectedKeys
+    .filter((key) => !knownKeys.has(key))
+    .forEach((key) => {
+      knownKeys.add(key);
+      options.push({ key, label: key });
+    });
+  return options;
+}
+
+function selectedAliasOptions(
+  settings: NlpSettings,
+  catalog: AliasCatalogName,
+  selectedKeys: string[] = []
+): AliasOption[] {
+  const optionsByKey = new Map(
+    aliasOptionsForCatalog(settings, catalog, selectedKeys).map((option) => [option.key, option])
+  );
+  return uniqueStrings(selectedKeys).map((key) => optionsByKey.get(key) ?? { key, label: key });
+}
+
+function factTypeOptions(settings: NlpSettings, selectedTypes: string[] = []): string[] {
+  const aliasFactTypes = aliasCatalogDefinitions.flatMap((definition) =>
+    settings[definition.name].flatMap((alias) => alias.fact_types ?? [])
+  );
+  return uniqueStrings([
+    ...settings.facts.map((fact) => fact.type),
+    ...aliasFactTypes,
+    ...Object.keys(settings.lead_scoring.fact_weights),
+    ...selectedTypes
+  ]).sort((left, right) => left.localeCompare(right));
+}
+
+function uniqueStrings(items: string[]): string[] {
+  const seen = new Set<string>();
+  const result: string[] = [];
+  items.forEach((item) => {
+    const value = item.trim();
+    if (!value || seen.has(value)) {
+      return;
+    }
+    seen.add(value);
+    result.push(value);
+  });
+  return result;
+}
+
 function aliasTypeForCatalog(catalog: AliasCatalogName): AliasSetting["type"] {
   if (catalog === "vendors") {
     return "vendor";
@@ -2542,62 +2790,6 @@ function normalizeRuleMatch(match?: RuleMatchSetting): RuleMatchSetting {
     aliases: match?.aliases ?? [],
     facts: match?.facts ?? []
   };
-}
-
-function aliasMatchesToText(items?: AliasMatchSetting[]) {
-  return (items ?? []).map(aliasMatchToText).join("\n");
-}
-
-function aliasMatchToText(item: AliasMatchSetting) {
-  const catalogs = [item.catalog ?? "", ...(item.catalogs ?? [])].filter(Boolean);
-  const kindItems = (item.kinds ?? []).map((kind) => `kind=${kind}`);
-  const left = [...catalogs, ...kindItems].join(",");
-  const keys = item.keys ?? [];
-  const right = keys.length > 0 ? keys.join(", ") : "*";
-  return `${left || "*"}:${right}`;
-}
-
-function textToAliasMatches(value: string): AliasMatchSetting[] {
-  return value
-    .split("\n")
-    .map((line) => line.trim())
-    .filter(Boolean)
-    .map((line) => {
-      const separatorIndex = line.indexOf(":");
-      const leftRaw = separatorIndex >= 0 ? line.slice(0, separatorIndex) : line;
-      const rightRaw = separatorIndex >= 0 ? line.slice(separatorIndex + 1) : "";
-      const leftItems = commaListToStrings(leftRaw).filter((item) => item !== "*");
-      const kindItems = leftItems
-        .filter((item) => item.startsWith("kind=") || item.startsWith("kind:"))
-        .map((item) => item.slice(5));
-      const catalogItems = leftItems.filter((item) => !item.startsWith("kind=") && !item.startsWith("kind:"));
-      const keys = commaListToStrings(rightRaw).filter((item) => item !== "*");
-      return {
-        catalog: catalogItems[0] ?? null,
-        catalogs: catalogItems.slice(1),
-        keys,
-        kinds: kindItems
-      };
-    });
-}
-
-function factMatchesToText(items?: FactMatchSetting[]) {
-  return (items ?? []).map((item) => item.types.join(", ")).join("\n");
-}
-
-function textToFactMatches(value: string): FactMatchSetting[] {
-  return value
-    .split("\n")
-    .map((line) => commaListToStrings(line))
-    .filter((types) => types.length > 0)
-    .map((types) => ({ types }));
-}
-
-function commaListToStrings(value: string): string[] {
-  return value
-    .split(",")
-    .map((item) => item.trim())
-    .filter(Boolean);
 }
 
 function reviewLaneMatchGroupsToText(groups?: ReviewLaneMatchGroupSetting[]) {

@@ -48,6 +48,10 @@
   Latin/Cyrillic/transliterated/mistyped aliases, alias type, and fact type
   links. Domain signal dictionary dependencies are edited on the signal rule
   itself.
+- Domain signal dependencies in Settings Center are no longer edited through
+  mini-language text such as `vendors:neptun`. Operators add/remove dependency
+  rows with buttons, select the alias catalog, choose concrete alias entries,
+  and choose dependent fact types from existing facts and alias `fact_types`.
 - Default NLP config includes a broad curated first pass for РФ/СНГ smart-home
   market terms: Яндекс/Сбер/Aqara/Xiaomi/Tuya/Sonoff/Rubetek/Livicom/Wiren Board,
   leak protection brands, CCTV/access vendors, Matter/Zigbee/Z-Wave/KNX/Wi-Fi/

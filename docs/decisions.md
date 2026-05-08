@@ -231,8 +231,9 @@ Rationale:
 - `Нептун`, `Нептуп`, `Neptun ProW`, and `Profi Wi-Fi` are vendor/model aliases,
   not semantic signal phrases.
 - The durable relationship for signal detection is now stored on the signal:
-  `water_leak_protection.match.aliases -> vendors:neptun`. This makes the
-  inference layer explicit and avoids hidden reverse links inside dictionaries.
+  `water_leak_protection.match.aliases` selects the `vendors` catalog and
+  `neptun` alias key. This makes the inference layer explicit and avoids hidden
+  reverse links inside dictionaries.
 - Alias rows still emit facts such as `vendor`, `model`, `protocol`, `software`,
   or `automation_component`; signals can depend on those facts through
   `match.facts` when useful.
@@ -248,9 +249,9 @@ extracted facts. Alias catalogs no longer contain `signal_types`.
 
 Rationale:
 
-- The operator needs to understand why `smart_home_platform` depends on
-  `vendors:yandex`, `software:alice`, `protocols:knx`, and similar dictionaries
-  from the signal configuration itself.
+- The operator needs to understand why `smart_home_platform` depends on alias
+  keys such as `yandex`, `alice`, and `knx` from the signal configuration
+  itself.
 - Keeping dependencies on the signal side removes the second source of truth
   that existed when alias rows also declared signal outputs.
 - `Алиса` is modeled as `smart_home_platform`, not as both platform and broad

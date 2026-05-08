@@ -123,9 +123,10 @@ Domain signals are the inference layer over semantic phrases, alias catalogs,
 and facts. They remain semantic categories such as `smart_home_platform`,
 `protocol_gateway`, `leak_protection`, `lighting_automation`,
 `climate_automation`, `access_control`, `intercom`, `video_surveillance`, and
-`power_backup`. A signal may define `match.aliases` dependencies such as
-`vendors:yandex, aqara`, `software:alice`, or `devices:leak_sensor`. If a
-matching alias is found, the signal is emitted with `source=alias_catalog`.
+`power_backup`. A signal may define `match.aliases` dependencies by selecting an
+alias catalog (`vendors`, `software`, `devices`, etc.) and concrete alias keys
+such as `yandex`, `aqara`, `alice`, or `leak_sensor`. If a matching alias is
+found, the signal is emitted with `source=alias_catalog`.
 Signals may also define `match.facts` dependencies to build a higher-level
 signal from already extracted fact types.
 
@@ -224,12 +225,13 @@ The frontend Settings Center edits exact phrases and lemmatized phrases as
 separate lists with add/edit/delete actions. New lemmatized phrases are created
 from natural operator input through the backend semantic-pattern endpoint so the
 UI can show both the original text and the generated lemmas. Domain signals also
-expose editable `match.aliases` and `match.facts` dependencies. The UI has a
-Help page that explains these matching modes. The Settings Center also exposes
-the alias catalogs as editable lists for vended platforms, protocols, devices,
-and software. Lead scoring settings include review lanes, so review queue logic
-is visible and editable together with thresholds, weights, taxonomy mappings,
-intent signals, and noise signals.
+expose editable `match.aliases` and `match.facts` dependencies as add/remove
+rows with catalog, alias, and fact selectors rather than text mini-language. The
+UI has a Help page that explains these matching modes. The Settings Center also
+exposes the alias catalogs as editable lists for vended platforms, protocols,
+devices, and software. Lead scoring settings include review lanes, so review
+queue logic is visible and editable together with thresholds, weights, taxonomy
+mappings, intent signals, and noise signals.
 
 ## Frontend
 

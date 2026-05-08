@@ -188,7 +188,7 @@ test("loads settings center on demand", async () => {
   vi.stubGlobal("fetch", fetchMock);
   render(<App />);
 
-  fireEvent.click(screen.getByRole("tab", { name: /настройки/i }));
+  fireEvent.click(screen.getByText("Настройки"));
 
   await waitFor(() => expect(fetchMock).toHaveBeenCalledWith("/api/v1/settings"));
   await waitFor(() => expect(screen.getAllByText("Безопасность").length).toBeGreaterThan(0));
@@ -196,25 +196,34 @@ test("loads settings center on demand", async () => {
   fireEvent.click(screen.getByText("Видеонаблюдение"));
   expect(screen.getByLabelText("Папка")).toHaveValue("Безопасность");
   expect(screen.getByText("Точные фразы")).toBeInTheDocument();
-  expect(screen.getByRole("button", { name: "Добавить точную фразу" })).toBeInTheDocument();
-  expect(screen.getByRole("button", { name: "Редактировать точную фразу: с ндс" })).toBeInTheDocument();
-  expect(screen.getByRole("button", { name: "Удалить точную фразу: с ндс" })).toBeInTheDocument();
+  expect(screen.getByLabelText("Добавить точную фразу")).toBeInTheDocument();
+  expect(screen.getByLabelText("Редактировать точную фразу: с ндс")).toBeInTheDocument();
+  expect(screen.getByLabelText("Удалить точную фразу: с ндс")).toBeInTheDocument();
   expect(screen.getByText("Лемматические фразы")).toBeInTheDocument();
   expect(screen.getByText("Нужна консультация")).toBeInTheDocument();
   expect(screen.getByText("нужный консультация")).toBeInTheDocument();
-  expect(screen.getByLabelText("match.aliases")).toHaveValue("vendors,kind=vendor:aqara");
-  expect(screen.getByLabelText("match.facts")).toHaveValue("vendor");
+  expect(screen.getByText("Зависимости от словарей")).toBeInTheDocument();
+  expect(screen.getByLabelText("Добавить зависимость от словаря")).toBeInTheDocument();
+  expect(screen.getByLabelText("Удалить зависимость от словаря: vendors")).toBeInTheDocument();
+  expect(screen.getByLabelText("Каталог зависимости")).toHaveValue("vendors");
+  expect(screen.getByText("aqara — Aqara")).toBeInTheDocument();
+  expect(screen.getAllByText("vendor").length).toBeGreaterThan(0);
+  expect(screen.getByText("Зависимости от фактов")).toBeInTheDocument();
+  expect(screen.getByLabelText("Добавить зависимость от факта")).toBeInTheDocument();
+  expect(screen.getByLabelText("Удалить зависимость от факта")).toBeInTheDocument();
+  fireEvent.click(screen.getByLabelText("Добавить зависимость от словаря"));
+  expect(screen.getAllByLabelText(/Удалить зависимость от словаря/)).toHaveLength(2);
   expect(screen.queryByText(/normalized:/)).not.toBeInTheDocument();
-  fireEvent.click(screen.getByRole("button", { name: "Оценка лида" }));
+  fireEvent.click(screen.getByText("Оценка лида"));
   expect(screen.getByText("Пороги оценки")).toBeInTheDocument();
   expect(screen.getByText("Очереди разбора")).toBeInTheDocument();
   expect(screen.getByText("Прямой лид ПУР")).toBeInTheDocument();
-  fireEvent.click(screen.getByRole("button", { name: "Словари" }));
+  fireEvent.click(screen.getByText("Словари"));
   expect(screen.getByText("Alias-словари")).toBeInTheDocument();
   expect(screen.getAllByText("Aqara").length).toBeGreaterThan(0);
   expect(screen.getByText("Акара")).toBeInTheDocument();
-  expect(screen.getByRole("button", { name: "Добавить alias в Вендоры" })).toBeInTheDocument();
-  fireEvent.click(screen.getByRole("button", { name: "Runtime" }));
+  expect(screen.getByLabelText("Добавить alias в Вендоры")).toBeInTheDocument();
+  fireEvent.click(screen.getByText("Runtime"));
   expect(screen.getByText("environment")).toBeInTheDocument();
 });
 
@@ -603,7 +612,7 @@ test("renders expanded settings help page for all editable NLP settings", () => 
   expect(screen.getByText(/confidence - доверие к правилу/i)).toBeInTheDocument();
   expect(screen.getByText(/group - папка/i)).toBeInTheDocument();
   expect(screen.getByText(/Связь сигналов и словарей/i)).toBeInTheDocument();
-  expect(screen.getByText(/vendors:neptun/i)).toBeInTheDocument();
+  expect(screen.getByText(/каталог `vendors` и alias `neptun`/i)).toBeInTheDocument();
   expect(screen.getAllByText(/match.aliases/i).length).toBeGreaterThan(0);
   expect(screen.getByText(/source=alias_catalog/i)).toBeInTheDocument();
   expect(screen.getAllByText(/weights.signals/i).length).toBeGreaterThan(0);
