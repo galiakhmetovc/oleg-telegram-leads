@@ -14,9 +14,10 @@
   gating, and only then careful word/lemma caching if tests prove it does not
   reduce full enrichment quality.
 - Review workflow polish, remaining after the first queue pass:
-  persist constructor proposals from selected text, add `save + next` success
-  telemetry, bulk review actions, and review verdict/tag aggregates in
-  Analytics.
+  add full constructor flows for dictionary/fact/domain-signal targets, add
+  `save + next` success telemetry, bulk review actions, and review verdict/tag
+  aggregates in Analytics. The first active constructor action, `В шум`, already
+  writes selected text to `operator_noise` in PostgreSQL NLP revisions.
 - Scoring quality calibration from review labels: add hard veto/caps for clear
   noise such as sale/equipment-only/DIY, reduce vendor-only overheating,
   separate direct PUR leads from research/value questions, and add negative

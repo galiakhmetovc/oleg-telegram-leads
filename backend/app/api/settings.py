@@ -13,6 +13,8 @@ from app.api.notifications import read_notification_settings_snapshot
 from app.api.telegram_ingestion import TelegramIngestionSettingsSnapshot
 from app.api.telegram_ingestion import get_telegram_ingestion_repository
 from app.api.telegram_ingestion import read_telegram_ingestion_settings_snapshot
+from app.application.settings.use_cases import AddOperatorNoisePhrase
+from app.application.settings.use_cases import AddOperatorNoisePhraseCommand
 from app.core.config import Settings, get_settings
 from app.db.session import create_sessionmaker
 from app.domain.settings import NlpConfigRevision
@@ -234,6 +236,21 @@ class SemanticPatternResponse(BaseModel):
     tokens: list[PatternTokenSettings]
 
 
+class ConstructorNoiseRequest(BaseModel):
+    text: str = Field(min_length=1)
+    source_message_id: str | None = None
+
+
+class ConstructorNoiseResponse(BaseModel):
+    text: str
+    signal_type: str
+    signal_label: str
+    phrase: list[str]
+    created_rule: bool
+    created_phrase: bool
+    nlp: NlpSettingsSnapshot
+
+
 def get_nlp_config_dir(settings: Settings = Depends(get_settings)) -> Path:
     return settings.nlp_config_dir
 
@@ -310,6 +327,42 @@ async def build_semantic_pattern(
             PatternTokenSettings(predicate="normalized", value=lemma)
             for lemma in semantic_phrase.lemmas
         ],
+    )
+
+
+@router.post("/nlp/constructor/noise", response_model=ConstructorNoiseResponse)
+async def add_constructor_noise_phrase(
+    request: ConstructorNoiseRequest,
+    config_dir: Path = Depends(get_nlp_config_dir),
+    repository: PostgresNlpConfigRepository = Depends(get_nlp_config_repository),
+) -> ConstructorNoiseResponse:
+    defaults = read_nlp_config_documents(config_dir)
+
+    def validate_documents(documents: dict[str, dict[str, Any]]) -> None:
+        load_nlp_config_from_documents(documents)
+
+    use_case = AddOperatorNoisePhrase(
+        repository=repository,
+        default_documents=defaults,
+        validate_documents=validate_documents,
+    )
+    try:
+        result = await use_case.execute(
+            AddOperatorNoisePhraseCommand(
+                text=request.text,
+                source_message_id=request.source_message_id,
+            )
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return ConstructorNoiseResponse(
+        text=result.text,
+        signal_type=result.signal_type,
+        signal_label=result.signal_label,
+        phrase=result.phrase,
+        created_rule=result.created_rule,
+        created_phrase=result.created_phrase,
+        nlp=_nlp_snapshot_from_revision(result.revision),
     )
 
 

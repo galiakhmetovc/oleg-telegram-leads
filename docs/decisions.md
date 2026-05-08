@@ -588,9 +588,8 @@ rows for the same Telegram source message so a manual noise verdict cannot be
 sent later as a lead alert.
 
 The Review page combines the existing expanded Analytics evidence with manual
-actions: `Лид`, `Не лид`, `Сомнительно`, `Шум`, a comment field, and a first
-constructor panel that captures a selected source-text fragment for later
-dictionary/fact/signal/noise editing.
+actions: `Лид`, `Не лид`, `Сомнительно`, `Шум`, a comment field, and a
+text-selection constructor.
 
 Rationale:
 
@@ -600,6 +599,34 @@ Rationale:
   scanning view too dense and too easy to click accidentally.
 - A separate page gives enough room for evidence, comments, and the future
   settings constructor without duplicating the whole Analytics table.
+
+## 2026-05-08: First Constructor Action Writes Operator Noise
+
+The first active constructor action is `В шум` on the Review page. It sends the
+selected source-text fragment to `POST /api/v1/settings/nlp/constructor/noise`.
+The backend writes a new active PostgreSQL NLP config revision containing a
+normal editable domain signal:
+
+- `type`: `operator_noise`;
+- `label`: `Операторский шум`;
+- exact phrase tokens built from the selected fragment;
+- signal weight `-50` when the weight is absent;
+- membership in `noise_signal_types` and `lead_veto_signal_types`;
+- inclusion in the noise review lane and exclusion from non-noise lanes.
+
+The endpoint returns the updated NLP settings snapshot so the frontend updates
+its settings cache immediately. Dictionary, fact, and positive domain-signal
+constructor actions remain draft-only until their target selection UX is built.
+
+Rationale:
+
+- Operators need a fast way to convert observed false-positive text into
+  deterministic settings without editing YAML or losing context.
+- A noise constructor must create normal config data, not hidden code rules, so
+  later audits and Settings UI links show exactly why future messages were
+  vetoed.
+- Only the selected phrase is added automatically; broader rule design still
+  needs an explicit operator/config workflow.
 
 ## 2026-05-08: Analytics Is A Review Queue, Not Only A Report
 

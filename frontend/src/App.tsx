@@ -688,6 +688,18 @@ export function App() {
     setSettingsError(null);
   }
 
+  function updateNlpSettingsSnapshot(nlpSettings: unknown) {
+    const currentSnapshot = settingsSnapshotRef.current;
+    if (!currentSnapshot) {
+      void loadSettingsSnapshot({ force: true }).catch(() => undefined);
+      return;
+    }
+    updateSettingsSnapshot({
+      ...currentSnapshot,
+      nlp: nlpSettings as NlpSettings
+    });
+  }
+
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const text = inputText.trim();
@@ -1005,6 +1017,7 @@ export function App() {
                   setActivePage(0);
                   void startEnrichment(candidate.text);
                 }}
+                onNlpSettingsChange={updateNlpSettingsSnapshot}
               />
             ) : (
               <AnalyticsPage

@@ -33,8 +33,13 @@
   `message_reviews`. The route `#/analytics/review/{source_message_id}` opens a
   full review workspace where the operator can mark `Лид`, `Не лид`,
   `Сомнительно`, or `Шум`, add a comment, inspect the same evidence as in
-  Analytics, and select a text fragment for the future settings/entity
-  constructor.
+  Analytics, and select a text fragment for the settings/entity constructor.
+- Review constructor action `В шум` is now active. It sends the selected
+  fragment to `POST /api/v1/settings/nlp/constructor/noise`, creates or updates
+  the editable `operator_noise` signal in the active PostgreSQL NLP config
+  revision, adds it to noise/veto scoring lists and review-lane exclusions, and
+  refreshes the frontend settings cache from the response. Dictionary, fact,
+  and positive domain-signal constructor actions are still draft placeholders.
 - Analytics candidate lists now include saved review state, show a review chip
   (`Без ревью`, `Лид`, `Не лид`, `Сомнительно`, `Шум`), and can filter by
   `review_status` and `verdict`. Review links carry a return URL with the

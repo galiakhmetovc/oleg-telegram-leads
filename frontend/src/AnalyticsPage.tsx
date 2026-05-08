@@ -196,6 +196,17 @@ type AnalyticsReviewPageProps = {
   returnHash?: string | null;
   onBack?: () => void;
   onTestMessage?: (candidate: AnalyticsCandidate) => void;
+  onNlpSettingsChange?: (nlpSettings: unknown) => void;
+};
+
+type ConstructorNoiseResponse = {
+  text: string;
+  signal_type: string;
+  signal_label: string;
+  phrase: string[];
+  created_rule: boolean;
+  created_phrase: boolean;
+  nlp: unknown;
 };
 
 const numberFormatter = new Intl.NumberFormat("ru-RU");
@@ -796,13 +807,23 @@ export function AnalyticsPage({ apiBaseUrl, focusMessageId, onTestMessage }: Ana
   );
 }
 
-export function AnalyticsReviewPage({ apiBaseUrl, messageId, returnHash, onBack, onTestMessage }: AnalyticsReviewPageProps) {
+export function AnalyticsReviewPage({
+  apiBaseUrl,
+  messageId,
+  returnHash,
+  onBack,
+  onTestMessage,
+  onNlpSettingsChange
+}: AnalyticsReviewPageProps) {
   const [candidate, setCandidate] = useState<AnalyticsCandidate | null>(null);
   const [verdict, setVerdict] = useState<AnalyticsReviewVerdict | null>(null);
   const [comment, setComment] = useState("");
   const [tags, setTags] = useState<string[]>([]);
   const [selectedText, setSelectedText] = useState("");
   const [constructorDraft, setConstructorDraft] = useState<string | null>(null);
+  const [constructorSaving, setConstructorSaving] = useState(false);
+  const [constructorMessage, setConstructorMessage] = useState<string | null>(null);
+  const [constructorError, setConstructorError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -828,7 +849,10 @@ export function AnalyticsReviewPage({ apiBaseUrl, messageId, returnHash, onBack,
         setVerdict(nextCandidate.review?.verdict ?? null);
         setComment(nextCandidate.review?.comment ?? "");
         setTags(nextCandidate.review?.tags ?? []);
+        setSelectedText("");
         setConstructorDraft(null);
+        setConstructorMessage(null);
+        setConstructorError(null);
       } catch (caught) {
         if (active) {
           setError(caught instanceof Error ? caught.message : "Не удалось загрузить сообщение для ревью");
@@ -956,6 +980,8 @@ export function AnalyticsReviewPage({ apiBaseUrl, messageId, returnHash, onBack,
     if (text) {
       setSelectedText(text);
       setConstructorDraft(null);
+      setConstructorMessage(null);
+      setConstructorError(null);
     }
   }
 
@@ -968,6 +994,41 @@ export function AnalyticsReviewPage({ apiBaseUrl, messageId, returnHash, onBack,
       return;
     }
     setConstructorDraft(`${kind}: "${selectedText}"`);
+  }
+
+  async function saveSelectedTextAsNoise() {
+    if (!selectedText) {
+      return;
+    }
+    setConstructorSaving(true);
+    setConstructorError(null);
+    setConstructorMessage(null);
+    try {
+      const response = await fetch(`${apiBaseUrl}/api/v1/settings/nlp/constructor/noise`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          text: selectedText,
+          source_message_id: messageId
+        })
+      });
+      if (!response.ok) {
+        throw new Error(`Backend вернул ${response.status}`);
+      }
+      const payload = (await response.json()) as ConstructorNoiseResponse;
+      onNlpSettingsChange?.(payload.nlp);
+      const phraseText = payload.phrase.join(" ");
+      setConstructorDraft(`${payload.signal_type}: ${phraseText}`);
+      setConstructorMessage(
+        payload.created_phrase
+          ? `Добавлено в шумовой сигнал «${payload.signal_label}»: ${phraseText}`
+          : `Шумовой сигнал «${payload.signal_label}» уже содержит: ${phraseText}`
+      );
+    } catch (caught) {
+      setConstructorError(caught instanceof Error ? caught.message : "Не удалось добавить шумовое правило");
+    } finally {
+      setConstructorSaving(false);
+    }
   }
 
   return (
@@ -1098,7 +1159,10 @@ export function AnalyticsReviewPage({ apiBaseUrl, messageId, returnHash, onBack,
 
             <Paper variant="outlined" className="analytics-section">
               <Stack spacing={1.25}>
-                <SectionTitle title="Конструктор сущностей" subtitle="Черновик будущего изменения настроек из выделенного текста" />
+                <SectionTitle
+                  title="Конструктор сущностей"
+                  subtitle="Выделенный фрагмент можно превратить в правило настроек"
+                />
                 {selectedText ? (
                   <Alert severity="info">
                     Выделено: <strong>{selectedText}</strong>
@@ -1118,10 +1182,22 @@ export function AnalyticsReviewPage({ apiBaseUrl, messageId, returnHash, onBack,
                   <Button variant="outlined" disabled={!selectedText} onClick={() => chooseConstructorDraft("signal")}>
                     В доменный сигнал
                   </Button>
-                  <Button variant="outlined" disabled={!selectedText} onClick={() => chooseConstructorDraft("noise")}>
+                  <Button
+                    variant="outlined"
+                    disabled={!selectedText || constructorSaving}
+                    onClick={() => void saveSelectedTextAsNoise()}
+                    startIcon={constructorSaving ? <CircularProgress size={18} color="inherit" /> : undefined}
+                  >
                     В шум
                   </Button>
                 </Stack>
+                {constructorError && <Alert severity="error">{constructorError}</Alert>}
+                {constructorMessage && (
+                  <Alert severity="success">
+                    {constructorMessage}.{" "}
+                    <MuiLink href="#/settings/signals/operator_noise">Открыть настройку</MuiLink>
+                  </Alert>
+                )}
                 {constructorDraft && <Chip label={constructorDraft} variant="outlined" />}
               </Stack>
             </Paper>

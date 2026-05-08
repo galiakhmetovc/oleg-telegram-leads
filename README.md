@@ -175,8 +175,13 @@ The Review page is the detailed operator workspace for one message. It shows the
 source text, score/temperature/lane, reasons, facts, domain signals, and
 highlighted fragments, then lets the operator save one of `Лид`, `Не лид`,
 `Сомнительно`, or `Шум` with structured tags and a comment. The page also
-contains the first constructor panel: select a fragment in the source text to
-prepare a future dictionary/fact/signal/noise edit.
+contains the first constructor panel: select a fragment in the source text and
+click `В шум` to add that exact phrase to the PostgreSQL-backed
+`operator_noise` signal. The backend saves a new `nlp_config_revisions` row,
+adds the signal to noise/veto lead scoring lists, excludes it from non-noise
+review lanes, and returns the updated NLP snapshot so the Settings Center cache
+does not stay stale. Dictionary/fact/domain-signal constructor actions are still
+draft-only placeholders.
 
 The UI includes Logs and System Status tabs. These are based on durable backend
 state: enrichment events, enrichment task outbox rows, source messages, source

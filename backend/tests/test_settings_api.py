@@ -388,6 +388,45 @@ def test_update_nlp_settings_validates_and_writes_database_revision_not_yaml(tmp
     assert "Аккара" not in (config_dir / "vendors.yaml").read_text(encoding="utf-8")
 
 
+def test_constructor_noise_adds_selected_text_to_postgres_nlp_revision(tmp_path: Path) -> None:
+    config_dir = tmp_path / "nlp"
+    _write_config(config_dir)
+    repository = InMemoryNlpConfigRepository()
+    client = _app_with_settings_repo(config_dir, repository)
+
+    response = client.post(
+        "/api/v1/settings/nlp/constructor/noise",
+        json={
+            "text": "DSS Express",
+            "source_message_id": "focus-1",
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["text"] == "DSS Express"
+    assert payload["signal_type"] == "operator_noise"
+    assert payload["signal_label"] == "Операторский шум"
+    assert payload["phrase"] == ["dss", "express"]
+    assert payload["created_rule"] is True
+    assert payload["created_phrase"] is True
+    assert payload["nlp"]["source"]["revision"] == 2
+    assert repository.active is not None
+
+    operator_noise = next(
+        signal
+        for signal in repository.active["signals"]["signals"]
+        if signal["type"] == "operator_noise"
+    )
+    assert operator_noise["phrases"] == [["dss", "express"]]
+    scoring = repository.active["lead_scoring"]["lead_scoring"]
+    assert scoring["weights"]["signals"]["operator_noise"] == -50
+    assert "operator_noise" in scoring["noise_signal_types"]
+    assert "operator_noise" in scoring["lead_veto_signal_types"]
+    assert "operator_noise" in scoring["review_lanes"][0]["excluded_noise_signal_types"]
+    assert "DSS Express" not in (config_dir / "signals.yaml").read_text(encoding="utf-8")
+
+
 def test_preview_nlp_settings_uses_draft_without_saving(tmp_path: Path) -> None:
     config_dir = tmp_path / "nlp"
     _write_config(config_dir)

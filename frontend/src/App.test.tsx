@@ -1480,6 +1480,78 @@ test("opens analytics review page and saves verdict comment", async () => {
   expect(screen.queryByText("Горячий лид")).not.toBeInTheDocument();
 });
 
+test("review constructor saves selected text as noise setting", async () => {
+  window.history.replaceState(null, "", "/#/analytics/review/focus-1");
+  const candidate = {
+    message_id: "focus-1",
+    text: "DSS Express или DSS Professional с лицензиями на каналы видео и модуль управления парковкой",
+    score: 107,
+    temperature: "hot",
+    review_lane: "direct_pur_lead",
+    solution_areas: [{ type: "smart_home", label: "Умный дом / автоматизация" }],
+    customer_segments: [],
+    intent_signals: [],
+    noise_signals: [],
+    reasons: [],
+    domain_signals: [],
+    facts: [],
+    review: null
+  };
+  let noisePayload: unknown = null;
+  const updatedNlp = {
+    ...sampleSettingsSnapshot().nlp,
+    source: {
+      type: "postgres",
+      path: "nlp_config_revisions.config",
+      editable: true,
+      revision: 2
+    }
+  };
+  const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    if (url === "/api/v1/auth/me") {
+      return jsonResponse({ authenticated: true, username: "admin" });
+    }
+    if (url === "/api/v1/settings") {
+      return jsonResponse(sampleSettingsSnapshot());
+    }
+    if (url === "/api/v1/analytics/messages/focus-1" && !init) {
+      return jsonResponse(candidate);
+    }
+    if (url === "/api/v1/settings/nlp/constructor/noise" && init?.method === "POST") {
+      noisePayload = JSON.parse(String(init.body));
+      return jsonResponse({
+        text: "DSS Express",
+        signal_type: "operator_noise",
+        signal_label: "Операторский шум",
+        phrase: ["dss", "express"],
+        created_rule: true,
+        created_phrase: true,
+        nlp: updatedNlp
+      });
+    }
+    throw new Error(`Unhandled fetch: ${url}`);
+  });
+  vi.stubGlobal("fetch", fetchMock);
+  vi.spyOn(window, "getSelection").mockReturnValue({ toString: () => "DSS Express" } as Selection);
+
+  render(<App />);
+
+  expect(await screen.findByRole("heading", { name: "Ревью сообщения" })).toBeInTheDocument();
+  fireEvent.mouseUp(screen.getAllByText(candidate.text)[0]);
+  expect(await screen.findByText(/Выделено:/)).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "В шум" }));
+
+  await waitFor(() =>
+    expect(noisePayload).toEqual({
+      text: "DSS Express",
+      source_message_id: "focus-1"
+    })
+  );
+  expect(await screen.findByText(/Добавлено в шумовой сигнал/)).toBeInTheDocument();
+  expect(screen.getByText("operator_noise: dss express")).toBeInTheDocument();
+});
+
 test("review page supports hotkeys, structured tags, and save next", async () => {
   const run = sampleAnalyticsRun();
   const returnHash = `#/analytics?limit=50&offset=0&review_status=unreviewed&run=${run.id}`;
