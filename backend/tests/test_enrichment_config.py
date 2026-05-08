@@ -23,6 +23,7 @@ stages:
 signals:
   - type: demand
     label: Потребность
+    group: Спрос и намерение
     color: "#2e7d32"
     phrases:
       - ["нужна"]
@@ -35,6 +36,7 @@ signals:
 
     assert [stage.name for stage in config.enabled_stages] == ["segmentation", "domain_signals"]
     assert config.signals[0].type == "demand"
+    assert config.signals[0].group == "Спрос и намерение"
     assert config.signals[0].phrases == (("нужна",), ("ищем", "поставщика"))
 
 

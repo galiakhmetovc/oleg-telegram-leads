@@ -202,6 +202,21 @@ Rationale:
 - The curated bootstrap pass is intentionally broad but not final; production
   review and eval data should continue extending these catalogs.
 
+## 2026-05-08: Rule Groups Are Editable Configuration Metadata
+
+Domain signal and fact rules may carry a `group` display folder. The group is
+stored in PostgreSQL-backed NLP config revisions and in bootstrap YAML defaults,
+then rendered by the Settings Center as grouped accordions.
+
+Rationale:
+
+- The PUR domain signal list is already too large for one flat editor.
+- Grouping must be part of editable configuration, not hardcoded frontend logic.
+- `group` is navigation metadata only: it does not change extraction, confidence,
+  scoring, review lanes, or analytics semantics.
+- Russian group labels are acceptable because they are operator-facing folder
+  names, while stable scoring/filter keys remain English `type` values.
+
 ## 2026-05-07: Yargy Parsers Share Morphology Resources
 
 Compile Yargy parsers once per `RussianTextEnricher` instance and share one

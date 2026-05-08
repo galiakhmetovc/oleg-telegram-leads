@@ -142,6 +142,7 @@ test("loads settings center on demand", async () => {
           {
             type: "video_surveillance",
             label: "Видеонаблюдение",
+            group: "Безопасность",
             color: "#455a64",
             confidence: 0.84,
             phrases: [["с", "ндс"]],
@@ -187,8 +188,10 @@ test("loads settings center on demand", async () => {
   fireEvent.click(screen.getByRole("tab", { name: /настройки/i }));
 
   await waitFor(() => expect(fetchMock).toHaveBeenCalledWith("/api/v1/settings"));
+  await waitFor(() => expect(screen.getAllByText("Безопасность").length).toBeGreaterThan(0));
   expect(await screen.findByText("Видеонаблюдение")).toBeInTheDocument();
   fireEvent.click(screen.getByText("Видеонаблюдение"));
+  expect(screen.getByLabelText("Папка")).toHaveValue("Безопасность");
   expect(screen.getByText("Точные фразы")).toBeInTheDocument();
   expect(screen.getByRole("button", { name: "Добавить точную фразу" })).toBeInTheDocument();
   expect(screen.getByRole("button", { name: "Редактировать точную фразу: с ндс" })).toBeInTheDocument();
@@ -550,6 +553,10 @@ test("renders expanded settings help page for all editable NLP settings", () => 
   expect(screen.getByText(/type пишем латиницей в snake_case/i)).toBeInTheDocument();
   expect(screen.getByText(/label - русское название/i)).toBeInTheDocument();
   expect(screen.getByText(/confidence - доверие к правилу/i)).toBeInTheDocument();
+  expect(screen.getByText(/group - папка/i)).toBeInTheDocument();
+  expect(screen.getByText(/Связь сигналов и словарей/i)).toBeInTheDocument();
+  expect(screen.getByText(/Нептун как точная фраза/i)).toBeInTheDocument();
+  expect(screen.getByText(/source=alias_catalog/i)).toBeInTheDocument();
   expect(screen.getAllByText(/weights.signals/i).length).toBeGreaterThan(0);
   expect(screen.getAllByText(/weights.facts/i).length).toBeGreaterThan(0);
   expect(screen.getAllByText(/review_lanes/i).length).toBeGreaterThan(0);

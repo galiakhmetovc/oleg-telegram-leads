@@ -1,6 +1,7 @@
 facts:
   - type: volume
     label: Объем
+    group: Общие факты
     confidence: 0.55
     phrases:
       - ["тонн"]
@@ -10,6 +11,7 @@ facts:
 
   - type: deadline
     label: Срок
+    group: Общие факты
     confidence: 0.55
     phrases:
       - ["сегодня"]
@@ -19,6 +21,7 @@ facts:
 
   - type: solution_area
     label: Решение / направление
+    group: Объект и направление
     confidence: 0.72
     phrases:
       - ["скуд"]
@@ -84,6 +87,7 @@ facts:
 
   - type: property_type
     label: Тип объекта
+    group: Объект и направление
     confidence: 0.68
     phrases:
       - ["тц"]
@@ -108,6 +112,7 @@ facts:
 
   - type: vendor
     label: Вендор
+    group: Словари и бренды
     confidence: 0.7
     phrases:
       - ["neptun"]
@@ -128,6 +133,7 @@ facts:
 
   - type: design_scope
     label: Раздел проектирования
+    group: Проектирование и работы
     confidence: 0.64
     patterns:
       - tokens:
@@ -167,6 +173,7 @@ facts:
 
   - type: service_location
     label: Локация работ
+    group: Общие факты
     confidence: 0.72
     phrases:
       - ["спб"]
@@ -179,6 +186,7 @@ facts:
 
   - type: work_type
     label: Тип работ
+    group: Проектирование и работы
     confidence: 0.76
     patterns:
       - tokens:
@@ -228,6 +236,7 @@ facts:
 
   - type: automation_component
     label: Компонент автоматизации
+    group: Устройства и автоматизация
     confidence: 0.74
     phrases:
       - ["wi-fi", "модуль"]
@@ -287,6 +296,7 @@ facts:
 
   - type: installation_surface
     label: Место монтажа
+    group: Проектирование и работы
     confidence: 0.62
     patterns:
       - tokens:
@@ -300,6 +310,7 @@ facts:
 
   - type: wiring_output
     label: Выводы / подключение
+    group: Проектирование и работы
     confidence: 0.66
     phrases:
       - ["220v"]
@@ -318,6 +329,7 @@ facts:
 
   - type: controlled_device
     label: Управляемое устройство
+    group: Устройства и автоматизация
     confidence: 0.66
     phrases:
       - ["тв"]
@@ -384,6 +396,7 @@ facts:
 
   - type: power_equipment
     label: Оборудование электропитания
+    group: Электропитание
     confidence: 0.68
     phrases:
       - ["ибп"]
@@ -397,6 +410,7 @@ facts:
 
   - type: access_device
     label: Устройство доступа
+    group: СКУД и домофония
     confidence: 0.68
     phrases:
       - ["скуд"]
@@ -419,6 +433,7 @@ facts:
 
   - type: network_scope
     label: Сеть / слаботочный раздел
+    group: Сети и инженерка
     confidence: 0.66
     phrases:
       - ["скс"]

@@ -28,6 +28,7 @@ stages:
 signals:
   - type: demand
     label: Потребность
+    group: Спрос и намерение
     color: "#2e7d32"
     confidence: 0.72
     phrases:
@@ -43,6 +44,7 @@ signals:
 facts:
   - type: deadline
     label: Срок
+    group: Общие факты
     confidence: 0.55
     phrases:
       - ["завтра"]
@@ -218,11 +220,13 @@ def test_get_settings_returns_editable_nlp_and_readonly_system_settings(tmp_path
     assert payload["nlp"]["source"]["type"] == "postgres"
     assert payload["nlp"]["source"]["revision"] == 1
     assert payload["nlp"]["signals"][0]["type"] == "demand"
+    assert payload["nlp"]["signals"][0]["group"] == "Спрос и намерение"
     assert payload["nlp"]["signals"][0]["patterns"][0]["tokens"][0] == {
         "predicate": "normalized",
         "value": "нужный",
     }
     assert payload["nlp"]["facts"][0]["type"] == "deadline"
+    assert payload["nlp"]["facts"][0]["group"] == "Общие факты"
     assert payload["nlp"]["vendors"][0]["canonical"] == "Aqara"
     assert payload["nlp"]["vendors"][0]["aliases"] == ["Aqara", "Акара"]
     assert payload["nlp"]["protocols"][0]["fact_types"] == ["protocol"]
@@ -328,6 +332,7 @@ def test_update_nlp_settings_validates_and_writes_database_revision_not_yaml(tmp
             ],
         }
     )
+    updated["signals"][0]["group"] = "Активный спрос"
     updated["lead_scoring"]["signal_weights"]["demand"] = 25
     updated["lead_scoring"]["review_lanes"][0]["priority"] = 250
     updated["vendors"][0]["aliases"].append("Аккара")
@@ -339,8 +344,10 @@ def test_update_nlp_settings_validates_and_writes_database_revision_not_yaml(tmp
     assert payload["source"]["type"] == "postgres"
     assert payload["source"]["revision"] == 2
     assert payload["signals"][0]["patterns"][1]["source_text"] == "Нужна консультация"
+    assert payload["signals"][0]["group"] == "Активный спрос"
     assert repository.active is not None
     assert repository.active["signals"]["signals"][0]["patterns"][1]["source_text"] == "Нужна консультация"
+    assert repository.active["signals"]["signals"][0]["group"] == "Активный спрос"
     assert repository.active["lead_scoring"]["lead_scoring"]["weights"]["signals"]["demand"] == 25
     assert repository.active["lead_scoring"]["lead_scoring"]["review_lanes"][0]["priority"] == 250
     assert repository.active["vendors"]["vendors"][0]["aliases"] == ["Aqara", "Акара", "Аккара"]

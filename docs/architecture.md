@@ -81,6 +81,11 @@ when the database is empty.
 - `lead_scoring` defines PUR lead thresholds, signal/fact weights, solution area
   mappings, customer segment mappings, intent signals, and noise signals.
 
+Signal and fact rules may include a `group` display folder. The group is stored
+in the PostgreSQL config revision together with the rule and is used by the
+Settings Center to keep large rule lists navigable. It does not affect matching,
+lead scoring, analytics filters, or API identifiers.
+
 Yargy rules are externalized as configuration data, but the operator-facing
 model is intentionally simpler than Yargy internals:
 
@@ -114,6 +119,12 @@ canonical name, alias type (`vendor`, `protocol`, `device`, `software`, or
 semantic signal and fact types emitted when the alias matches. Exact alias
 matching lowercases the input text before matching and returns the original
 span text in enrichment output.
+
+The same written text can appear both as a direct phrase on a domain signal and
+as an alias catalog entry. For example, `Нептун` may emit a direct
+`water_leak_protection` domain signal, while the `neptun` vendor alias emits
+linked leak-protection signals plus `vendor`/`model` facts. Lead scoring uses
+the resulting signal/fact types, not the storage location of the rule.
 
 ## Lead Assessment
 

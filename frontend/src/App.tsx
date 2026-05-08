@@ -182,6 +182,7 @@ type SemanticPatternResponse = {
 type RuleSetting = {
   type: string;
   label: string;
+  group?: string | null;
   phrases: string[][];
   patterns: RulePatternSetting[];
   color?: string | null;
@@ -666,6 +667,7 @@ function SettingsCenter() {
     const rule: RuleSetting = {
       type: collection === "signals" ? "new_signal" : "new_fact",
       label: collection === "signals" ? "Новый сигнал" : "Новый факт",
+      group: collection === "signals" ? "Новые сигналы" : "Новые факты",
       color: collection === "signals" ? "#0b57d0" : null,
       confidence: 0.5,
       phrases: [["пример"]],
@@ -1031,6 +1033,12 @@ function SettingsHelpPage() {
                     <TableCell>попадает в разметку найденного span; score сейчас считается весами, а не confidence</TableCell>
                   </TableRow>
                   <TableRow>
+                    <TableCell>group</TableCell>
+                    <TableCell>папка для навигации по большому списку правил</TableCell>
+                    <TableCell>group - папка, можно писать по-русски: "Безопасность", "Спрос и намерение"</TableCell>
+                    <TableCell>не влияет на детекцию и score; только группирует правила в интерфейсе настроек</TableCell>
+                  </TableRow>
+                  <TableRow>
                     <TableCell>phrases</TableCell>
                     <TableCell>точные фразы</TableCell>
                     <TableCell>используй для брендов, протоколов, `Wi-Fi`, `220v`, `white box`</TableCell>
@@ -1148,6 +1156,50 @@ function SettingsHelpPage() {
                 </TableBody>
               </Table>
             </TableContainer>
+          </Paper>
+
+          <Paper variant="outlined" className="help-section">
+            <Typography variant="h6">Связь сигналов и словарей</Typography>
+            <Typography variant="body2" color="text.secondary">
+              Доменный сигнал и словарь не заменяют друг друга. Они являются разными источниками
+              совпадений и могут выпускать один и тот же `type`. Это сделано специально:
+              смысловая категория остаётся в доменных сигналах, а конкретные бренды, модели,
+              протоколы и приложения живут в словарях.
+            </Typography>
+            <TableContainer>
+              <Table size="small">
+                <TableHead>
+                  <TableRow>
+                    <TableCell>Где настроено</TableCell>
+                    <TableCell>Что произойдёт при тексте "Нептун"</TableCell>
+                    <TableCell>Когда использовать</TableCell>
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  <TableRow>
+                    <TableCell>phrases у `water_leak_protection`</TableCell>
+                    <TableCell>Нептун как точная фраза создаст доменный сигнал `water_leak_protection` с `source=yargy`</TableCell>
+                    <TableCell>когда сама фраза является прямым признаком бизнес-домена</TableCell>
+                  </TableRow>
+                  <TableRow>
+                    <TableCell>alias `neptun` в словаре vendors</TableCell>
+                    <TableCell>создаст связанные сигналы `leak_protection`, `water_leak_protection` с `source=alias_catalog` и факты `vendor`, `model`</TableCell>
+                    <TableCell>когда нужно хранить каноническое имя, варианты написания, ошибки и связи с несколькими типами</TableCell>
+                  </TableRow>
+                  <TableRow>
+                    <TableCell>lead_scoring</TableCell>
+                    <TableCell>score учитывает найденные типы, а не место настройки; один и тот же type в причинах считается один раз</TableCell>
+                    <TableCell>веса задаются в `weights.signals` и `weights.facts` по техническим ключам type</TableCell>
+                  </TableRow>
+                </TableBody>
+              </Table>
+            </TableContainer>
+            <Alert severity="info">
+              Практическое правило: бренды и модели лучше держать в словарях, а общие смысловые
+              формулировки - в доменных сигналах. Если бренд очень сильный признак домена, он может
+              временно быть и точной фразой сигнала, но словарь всё равно нужен для canonical name,
+              alias-ошибок и фактов.
+            </Alert>
           </Paper>
 
           <Paper variant="outlined" className="help-section">
@@ -1876,21 +1928,49 @@ function RuleCollectionEditor({
   onRemove: (collection: "signals" | "facts", index: number) => void;
   onUpdate: (collection: "signals" | "facts", index: number, rule: RuleSetting) => void;
 }) {
+  const groups = groupRulesByFolder(rules);
+
   return (
     <Stack spacing={1.5}>
       <Box sx={{ alignItems: "center", display: "flex", justifyContent: "space-between" }}>
-        <Typography variant="h6">{title}</Typography>
+        <Box sx={{ minWidth: 0 }}>
+          <Typography variant="h6">{title}</Typography>
+          <Typography variant="body2" color="text.secondary">
+            {rules.length} правил в {groups.length} папках
+          </Typography>
+        </Box>
         <Button startIcon={<AddIcon />} variant="outlined" onClick={() => onAdd(collection)}>
           Добавить
         </Button>
       </Box>
-      {rules.map((rule, index) => (
-        <RuleEditor
-          key={`${rule.type}-${index}`}
-          rule={rule}
-          onRemove={() => onRemove(collection, index)}
-          onUpdate={(nextRule) => onUpdate(collection, index, nextRule)}
-        />
+      {groups.map((group, groupIndex) => (
+        <Accordion
+          key={group.label}
+          variant="outlined"
+          disableGutters
+          defaultExpanded={groups.length === 1 || groupIndex === 0}
+        >
+          <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+            <Box sx={{ alignItems: "center", display: "flex", gap: 1, minWidth: 0, width: "100%" }}>
+              <Typography sx={{ flex: 1, fontWeight: 800 }} noWrap>
+                {group.label}
+              </Typography>
+              <Chip label={`${group.items.length} правил`} size="small" variant="outlined" />
+            </Box>
+          </AccordionSummary>
+          <AccordionDetails>
+            <Stack spacing={1}>
+              {group.items.map(({ rule, index }) => (
+                <RuleEditor
+                  key={`${rule.type}-${index}`}
+                  rule={rule}
+                  onRemove={() => onRemove(collection, index)}
+                  onUpdate={(nextRule) => onUpdate(collection, index, nextRule)}
+                />
+              ))}
+            </Stack>
+          </AccordionDetails>
+        </Accordion>
       ))}
     </Stack>
   );
@@ -1913,6 +1993,7 @@ function RuleEditor({
           <Typography sx={{ flex: 1, fontWeight: 700 }} noWrap>
             {rule.label}
           </Typography>
+          <Chip label={ruleFolderLabel(rule)} size="small" variant="outlined" />
           <Chip label={rule.type} size="small" variant="outlined" />
         </Box>
       </AccordionSummary>
@@ -1921,6 +2002,11 @@ function RuleEditor({
           <Box className="rule-grid">
             <TextField label="type" value={rule.type} onChange={(event) => onUpdate({ ...rule, type: event.target.value })} />
             <TextField label="label" value={rule.label} onChange={(event) => onUpdate({ ...rule, label: event.target.value })} />
+            <TextField
+              label="Папка"
+              value={rule.group ?? ""}
+              onChange={(event) => onUpdate({ ...rule, group: event.target.value || null })}
+            />
             <TextField
               label="confidence"
               type="number"
@@ -1954,6 +2040,27 @@ function RuleEditor({
       </AccordionDetails>
     </Accordion>
   );
+}
+
+type GroupedRule = {
+  label: string;
+  items: Array<{ rule: RuleSetting; index: number }>;
+};
+
+function groupRulesByFolder(rules: RuleSetting[]): GroupedRule[] {
+  const groups = new Map<string, GroupedRule>();
+  rules.forEach((rule, index) => {
+    const label = ruleFolderLabel(rule);
+    if (!groups.has(label)) {
+      groups.set(label, { label, items: [] });
+    }
+    groups.get(label)?.items.push({ rule, index });
+  });
+  return [...groups.values()];
+}
+
+function ruleFolderLabel(rule: RuleSetting) {
+  return rule.group?.trim() || "Без папки";
 }
 
 type RuleDialogState = {

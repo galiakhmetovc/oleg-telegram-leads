@@ -41,6 +41,7 @@ class PatternSettings(BaseModel):
 class RuleSettings(BaseModel):
     type: str = Field(min_length=1)
     label: str = Field(min_length=1)
+    group: str | None = None
     phrases: list[list[str]] = Field(default_factory=list)
     patterns: list[PatternSettings] = Field(default_factory=list)
     color: str | None = None
@@ -297,6 +298,8 @@ def _rule_to_document(rule: RuleSettings) -> dict[str, Any]:
         "type": rule.type,
         "label": rule.label,
     }
+    if rule.group:
+        payload["group"] = rule.group
     if rule.color:
         payload["color"] = rule.color
     if rule.confidence is not None:

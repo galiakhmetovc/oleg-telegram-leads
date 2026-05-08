@@ -32,6 +32,7 @@ class PhraseRuleConfig:
     label: str
     phrases: tuple[tuple[str, ...], ...]
     patterns: tuple[RulePatternConfig, ...]
+    group: str | None = None
     color: str | None = None
     confidence: float | None = None
 
@@ -156,6 +157,7 @@ def _parse_phrase_rule(raw: Any, collection_name: str) -> PhraseRuleConfig:
     return PhraseRuleConfig(
         type=str(raw["type"]),
         label=str(raw.get("label", raw["type"])),
+        group=str(raw["group"]) if raw.get("group") is not None else None,
         color=raw.get("color"),
         confidence=float(raw["confidence"]) if raw.get("confidence") is not None else None,
         phrases=tuple(parsed_phrases),

@@ -1,6 +1,7 @@
 signals:
   - type: need
     label: Потребность
+    group: Спрос и намерение
     color: "#2e7d32"
     confidence: 0.72
     patterns:
@@ -23,6 +24,7 @@ signals:
 
   - type: supply
     label: Предложение
+    group: Шум и продажи
     color: "#1565c0"
     confidence: 0.68
     phrases:
@@ -33,6 +35,7 @@ signals:
 
   - type: urgency
     label: Срочность
+    group: Спрос и намерение
     color: "#c62828"
     confidence: 0.64
     phrases:
@@ -42,6 +45,7 @@ signals:
 
   - type: commercial_terms
     label: Коммерческие условия
+    group: Коммерция
     color: "#6a1b9a"
     confidence: 0.6
     phrases:
@@ -52,6 +56,7 @@ signals:
 
   - type: customer_intent
     label: Запрос заказчика
+    group: Спрос и намерение
     color: "#ef6c00"
     confidence: 0.76
     patterns:
@@ -71,6 +76,7 @@ signals:
 
   - type: provider_search
     label: Поиск исполнителя / контактов
+    group: Спрос и намерение
     color: "#ad1457"
     confidence: 0.86
     patterns:
@@ -94,6 +100,7 @@ signals:
 
   - type: installation_request
     label: Запрос на установку / подключение
+    group: Спрос и намерение
     color: "#0277bd"
     confidence: 0.84
     patterns:
@@ -109,6 +116,7 @@ signals:
 
   - type: smart_home_automation
     label: Умный дом / автоматизация
+    group: Умный дом и интеграции
     color: "#00838f"
     confidence: 0.84
     patterns:
@@ -133,6 +141,7 @@ signals:
 
   - type: smart_home_platform
     label: Платформа / экосистема умного дома
+    group: Умный дом и интеграции
     color: "#006c9c"
     confidence: 0.78
     patterns:
@@ -158,6 +167,7 @@ signals:
 
   - type: protocol_gateway
     label: Протоколы / шлюзы / интеграции
+    group: Умный дом и интеграции
     color: "#3949ab"
     confidence: 0.76
     patterns:
@@ -181,6 +191,7 @@ signals:
 
   - type: video_surveillance
     label: Видеонаблюдение
+    group: Безопасность
     color: "#455a64"
     confidence: 0.84
     patterns:
@@ -192,6 +203,7 @@ signals:
 
   - type: consultation_request
     label: Нужна консультация
+    group: Спрос и намерение
     color: "#7b1fa2"
     confidence: 0.78
     patterns:
@@ -232,6 +244,7 @@ signals:
 
   - type: solution_selection_request
     label: Подбор полезных решений
+    group: Спрос и намерение
     color: "#00897b"
     confidence: 0.82
     patterns:
@@ -253,6 +266,7 @@ signals:
 
   - type: education_request
     label: Изучение темы / первый опыт
+    group: Спрос и намерение
     color: "#5e35b1"
     confidence: 0.74
     patterns:
@@ -283,6 +297,7 @@ signals:
 
   - type: smart_home_value_question
     label: Вопрос о ценности умного дома
+    group: Спрос и намерение
     color: "#ef6c00"
     confidence: 0.82
     phrases:
@@ -301,6 +316,7 @@ signals:
 
   - type: budget_constraint
     label: Бюджетное ограничение
+    group: Спрос и намерение
     color: "#795548"
     confidence: 0.72
     patterns:
@@ -311,6 +327,7 @@ signals:
 
   - type: installation_context
     label: Монтажный контекст
+    group: Проектирование и ремонт
     color: "#6d4c41"
     confidence: 0.72
     phrases:
@@ -333,6 +350,7 @@ signals:
 
   - type: water_leak_protection
     label: Защита от протечек
+    group: Защита от протечек
     color: "#00695c"
     confidence: 0.82
     phrases:
@@ -365,6 +383,7 @@ signals:
 
   - type: leak_protection
     label: Защита от протечек / контроль воды
+    group: Защита от протечек
     color: "#00796b"
     confidence: 0.82
     patterns:
@@ -385,6 +404,7 @@ signals:
 
   - type: implementation_intent
     label: Намерение реализовать
+    group: Спрос и намерение
     color: "#2e7d32"
     confidence: 0.78
     patterns:
@@ -396,6 +416,7 @@ signals:
 
   - type: hot_lead_intent
     label: Горячий лид
+    group: Спрос и намерение
     color: "#d32f2f"
     confidence: 0.9
     patterns:
@@ -413,6 +434,7 @@ signals:
 
   - type: electrical_design_context
     label: Контекст электрики
+    group: Проектирование и ремонт
     color: "#5d4037"
     confidence: 0.74
     patterns:
@@ -447,6 +469,7 @@ signals:
 
   - type: developer_smart_home_context
     label: Умный дом от застройщика
+    group: Умный дом и интеграции
     color: "#00695c"
     confidence: 0.82
     patterns:
@@ -456,6 +479,7 @@ signals:
 
   - type: smart_relay_control
     label: Реле / модули умного света
+    group: Умный дом и интеграции
     color: "#00897b"
     confidence: 0.78
     patterns:
@@ -483,6 +507,7 @@ signals:
 
   - type: renovation_modification_context
     label: Изменения в проекте / ремонте
+    group: Проектирование и ремонт
     color: "#ad1457"
     confidence: 0.78
     patterns:
@@ -514,6 +539,7 @@ signals:
 
   - type: warranty_risk
     label: Риск гарантии / проблем с системой
+    group: Проектирование и ремонт
     color: "#c62828"
     confidence: 0.8
     patterns:
@@ -530,6 +556,7 @@ signals:
 
   - type: designer_context
     label: Дизайнер / проектировщик
+    group: Проектирование и ремонт
     color: "#3949ab"
     confidence: 0.7
     patterns:
@@ -542,6 +569,7 @@ signals:
 
   - type: access_control
     label: СКУД / контроль доступа
+    group: СКУД и домофония
     color: "#00897b"
     confidence: 0.82
     phrases:
@@ -563,6 +591,7 @@ signals:
 
   - type: security_alarm
     label: Охранная / пожарная сигнализация
+    group: Безопасность
     color: "#c62828"
     confidence: 0.82
     patterns:
@@ -580,6 +609,7 @@ signals:
 
   - type: intercom
     label: Домофония
+    group: СКУД и домофония
     color: "#546e7a"
     confidence: 0.8
     patterns:
@@ -591,6 +621,7 @@ signals:
 
   - type: gate_automation
     label: Автоматизация ворот / шлагбаумов
+    group: СКУД и домофония
     color: "#6d4c41"
     confidence: 0.8
     patterns:
@@ -607,6 +638,7 @@ signals:
 
   - type: power_quality
     label: Электропитание / ИБП / стабилизаторы
+    group: Электропитание
     color: "#f57f17"
     confidence: 0.8
     phrases:
@@ -627,6 +659,7 @@ signals:
 
   - type: power_backup
     label: Резервное питание / защита электросети
+    group: Электропитание
     color: "#f9a825"
     confidence: 0.78
     patterns:
@@ -647,6 +680,7 @@ signals:
 
   - type: climate_control
     label: Управление климатом
+    group: Климат
     color: "#0277bd"
     confidence: 0.78
     patterns:
@@ -672,6 +706,7 @@ signals:
 
   - type: climate_automation
     label: Автоматизация климата
+    group: Климат
     color: "#0288d1"
     confidence: 0.78
     patterns:
@@ -690,6 +725,7 @@ signals:
 
   - type: lighting_control
     label: Управление освещением
+    group: Освещение и шторы
     color: "#afb42b"
     confidence: 0.78
     patterns:
@@ -718,6 +754,7 @@ signals:
 
   - type: lighting_automation
     label: Автоматизация освещения
+    group: Освещение и шторы
     color: "#9e9d24"
     confidence: 0.78
     patterns:
@@ -740,6 +777,7 @@ signals:
 
   - type: motion_lighting_automation
     label: Автоматизация света по движению
+    group: Освещение и шторы
     color: "#7cb342"
     confidence: 0.8
     patterns:
@@ -759,6 +797,7 @@ signals:
 
   - type: electric_curtain_control
     label: Электрические карнизы / шторы
+    group: Освещение и шторы
     color: "#8e24aa"
     confidence: 0.78
     phrases:
@@ -774,6 +813,7 @@ signals:
 
   - type: network_infrastructure
     label: СКС / слаботочные сети
+    group: Сети и инженерка
     color: "#5e35b1"
     confidence: 0.76
     phrases:
@@ -792,6 +832,7 @@ signals:
 
   - type: commercial_object
     label: Коммерческий объект
+    group: Объект и сегмент
     color: "#455a64"
     confidence: 0.68
     phrases:
@@ -813,6 +854,7 @@ signals:
 
   - type: country_house
     label: Загородный дом / дача
+    group: Объект и сегмент
     color: "#558b2f"
     confidence: 0.72
     patterns:
@@ -832,6 +874,7 @@ signals:
 
   - type: apartment_context
     label: Квартира
+    group: Объект и сегмент
     color: "#00838f"
     confidence: 0.68
     patterns:
@@ -840,6 +883,7 @@ signals:
 
   - type: family_apartment_context
     label: Семейная квартира
+    group: Объект и сегмент
     color: "#2e7d32"
     confidence: 0.68
     patterns:
@@ -851,6 +895,7 @@ signals:
 
   - type: diy_or_equipment_only
     label: DIY / только оборудование
+    group: Шум и продажи
     color: "#757575"
     confidence: 0.74
     patterns:
@@ -871,6 +916,7 @@ signals:
 
   - type: irrelevant_or_sale
     label: Нерелевантная продажа / объявление
+    group: Шум и продажи
     color: "#616161"
     confidence: 0.72
     phrases:
@@ -885,6 +931,7 @@ signals:
 
   - type: price_only
     label: Только цена / дешево
+    group: Шум и продажи
     color: "#8d6e63"
     confidence: 0.66
     patterns:
