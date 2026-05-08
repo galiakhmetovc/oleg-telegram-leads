@@ -635,13 +635,22 @@ resets the cursor deliberately.
 The userbot creates an enrichment job before saving a source message, but it
 publishes the Celery task only after `telegram_source_messages` is persisted.
 That ordering prevents the worker from completing before Telegram source
-context exists.
+context exists. If a concurrent ingester loses the unique source-message insert,
+it discards the unpublished enrichment job instead of leaving a queued job that
+will never be published.
 
 Notification outbox rows created from Telegram source messages carry
 `source_message_id` and `enrichment_job_id`. `(source_message_id, route_id)` is
 unique, so worker redelivery cannot enqueue the same route notification twice.
 The dispatcher claims rows by moving them to `sending` with `claimed_at` through
 `FOR UPDATE SKIP LOCKED`; stale claims can be picked up again after timeout.
+Rows claimed in a flush cycle but not sent because a partial batch is not due
+are released back to `pending` immediately.
+
+Telegram source cursors are monotonic. The listener sends the maximum seen
+message id per source, and the PostgreSQL update uses `greatest(existing,
+incoming)` so out-of-order live callbacks cannot move `last_message_id`
+backwards.
 
 Rationale:
 
@@ -651,6 +660,10 @@ Rationale:
   notification.
 - Telegram sends need at-least-once processing internally but at-most-once
   enqueueing per source message and route.
+- Non-due partial notification batches should wait as `pending`, not as
+  artificially claimed `sending` rows.
+- Telegram message delivery order is not a cursor guarantee; cursor state must
+  be protected at both application and persistence boundaries.
 
 ## 2026-05-08: Lead Score And Auto-Lead Verdict Are Separate
 

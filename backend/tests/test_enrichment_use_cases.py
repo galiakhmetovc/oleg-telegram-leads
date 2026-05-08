@@ -33,6 +33,9 @@ class InMemoryJobRepository:
             finished_at=None,
         )
 
+    async def discard_unpublished_job(self, job_id: UUID) -> None:
+        return None
+
     async def get_job(self, job_id: UUID) -> EnrichmentJobSnapshot | None:
         return None
 

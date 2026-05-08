@@ -63,6 +63,12 @@
   summary. Saving Telegram input settings preserves runtime cursor/error/
   cooldown state for unchanged sources and accounts, so ordinary settings edits
   do not reset `last_message_id`.
+- Telegram runtime now guards high-water marks and queues more defensively:
+  out-of-order live messages cannot move `last_message_id` backwards; PostgreSQL
+  cursor writes use `greatest(existing, incoming)`; a duplicate source-message
+  insert discards the losing unpublished enrichment job; and notification
+  outbox rows claimed but not ready for a 5-minute partial flush are released
+  back to `pending` immediately.
 - Default NLP config now recognizes the smart-home automation lead case with
   customer intent, vendor, solution area, and electrical design context signals.
 - Default NLP config also recognizes hot Zigbee installation requests with

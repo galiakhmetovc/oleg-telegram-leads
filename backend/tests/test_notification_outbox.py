@@ -33,6 +33,8 @@ class InMemoryNotificationOutboxRepository:
         self.items: list[NotificationOutboxItem] = []
         self.sent_ids: list[UUID] = []
         self.failed_ids: list[UUID] = []
+        self.released_ids: list[UUID] = []
+        self.claim_on_list = False
 
     async def enqueue(self, items: list[NotificationOutboxItem]) -> list[NotificationOutboxItem]:
         inserted: list[NotificationOutboxItem] = []
@@ -52,11 +54,33 @@ class InMemoryNotificationOutboxRepository:
         return inserted
 
     async def list_pending(self, *, limit: int) -> list[NotificationOutboxItem]:
-        return [
+        items = [
             item
             for item in sorted(self.items, key=lambda value: value.created_at)
             if item.status == "pending"
         ][:limit]
+        if self.claim_on_list:
+            claimed_ids = {item.id for item in items}
+            self.items = [
+                NotificationOutboxItem(
+                    id=item.id,
+                    route_id=item.route_id,
+                    bot_id=item.bot_id,
+                    chat_id=item.chat_id,
+                    source_message_id=item.source_message_id,
+                    enrichment_job_id=item.enrichment_job_id,
+                    text=item.text,
+                    status="sending",
+                    attempts=item.attempts,
+                    last_error=item.last_error,
+                    created_at=item.created_at,
+                    sent_at=item.sent_at,
+                )
+                if item.id in claimed_ids
+                else item
+                for item in self.items
+            ]
+        return items
 
     async def mark_sent(self, ids: list[UUID], *, sent_at: datetime) -> None:
         self.sent_ids.extend(ids)
@@ -69,6 +93,29 @@ class InMemoryNotificationOutboxRepository:
         self.failed_ids.extend(ids)
         self.items = [
             item.mark_failed(error) if item.id in set(ids) else item
+            for item in self.items
+        ]
+
+    async def release_pending(self, ids: list[UUID]) -> None:
+        self.released_ids.extend(ids)
+        pending_ids = set(ids)
+        self.items = [
+            NotificationOutboxItem(
+                id=item.id,
+                route_id=item.route_id,
+                bot_id=item.bot_id,
+                chat_id=item.chat_id,
+                source_message_id=item.source_message_id,
+                enrichment_job_id=item.enrichment_job_id,
+                text=item.text,
+                status="pending",
+                attempts=item.attempts,
+                last_error=item.last_error,
+                created_at=item.created_at,
+                sent_at=item.sent_at,
+            )
+            if item.id in pending_ids
+            else item
             for item in self.items
         ]
 
@@ -190,6 +237,33 @@ async def test_notification_dispatcher_sends_full_batches_before_five_minutes() 
     assert len(sender.sent[0][2]) <= 4096
     assert sender.sent[0][2] == f"{'A' * 2000}\n\n---\n\n{'B' * 2000}"
     assert [item.status for item in outbox.items] == ["sent", "sent", "pending"]
+    assert outbox.released_ids == [outbox.items[2].id]
+
+
+@pytest.mark.asyncio
+async def test_notification_dispatcher_releases_claimed_items_when_batch_is_not_due() -> None:
+    now = datetime(2026, 5, 8, 10, 2, tzinfo=UTC)
+    outbox = InMemoryNotificationOutboxRepository(now)
+    outbox.claim_on_list = True
+    outbox.items = [
+        _outbox_item(text="Лид 1", created_at=now - timedelta(minutes=1)),
+        _outbox_item(text="Лид 2", created_at=now - timedelta(seconds=30)),
+    ]
+    sender = RecordingTelegramMessageSender()
+
+    sent = await FlushNotificationOutbox(
+        settings_repository=InMemoryNotificationSettingsRepository(_notification_settings()),
+        outbox_repository=outbox,
+        sender=sender,
+        max_message_chars=4096,
+        flush_interval=timedelta(minutes=5),
+        min_chat_send_interval_seconds=0,
+    ).execute(now=now)
+
+    assert sent == []
+    assert sender.sent == []
+    assert outbox.released_ids == [item.id for item in outbox.items]
+    assert [item.status for item in outbox.items] == ["pending", "pending"]
 
 
 def _notification_settings() -> NotificationSettings:

@@ -61,6 +61,19 @@ class PostgresEnrichmentJobRepository:
             raise RuntimeError("created enrichment job is not readable")
         return snapshot
 
+    async def discard_unpublished_job(self, job_id: UUID) -> None:
+        async with self._session_factory() as session:
+            result = await session.execute(
+                sa.select(enrichment_jobs.c.id)
+                .where(enrichment_jobs.c.id == job_id)
+                .where(enrichment_jobs.c.status == EnrichmentStatus.QUEUED.value)
+                .where(enrichment_jobs.c.started_at.is_(None))
+            )
+            if result.scalar_one_or_none() is not None:
+                await session.execute(enrichment_events.delete().where(enrichment_events.c.job_id == job_id))
+                await session.execute(enrichment_jobs.delete().where(enrichment_jobs.c.id == job_id))
+            await session.commit()
+
     async def get_job(self, job_id: UUID) -> EnrichmentJobSnapshot | None:
         async with self._session_factory() as session:
             result = await session.execute(

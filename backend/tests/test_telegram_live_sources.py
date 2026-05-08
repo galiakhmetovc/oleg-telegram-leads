@@ -409,6 +409,44 @@ async def test_live_watch_recovers_once_then_processes_live_messages() -> None:
     ]
 
 
+@pytest.mark.asyncio
+async def test_live_watch_does_not_move_cursor_backwards_for_out_of_order_messages() -> None:
+    account = _authorized_account()
+    chat = _source_chat(account.id, telegram_chat_id="telegram-chat-1", last_message_id=500)
+    repository = InMemorySourceStateRepository(TelegramIngestionSettings(accounts=[account], chats=[chat]))
+    ingester = FakeIngester()
+    client = FakeLiveClient()
+    client.live_messages = [
+        (chat.id, _fetched_message(telegram_chat_id="telegram-chat-1", message_id=502, text="Live lead 502")),
+        (chat.id, _fetched_message(telegram_chat_id="telegram-chat-1", message_id=501, text="Live lead 501")),
+    ]
+
+    await WatchTelegramSources(
+        repository=repository,
+        ingester=ingester,
+        history_client_factory=FakeLiveClientFactory(client),
+        recovery_limit=100,
+    ).execute()
+
+    assert [message.telegram_message_id for message in ingester.messages] == [502, 501]
+    assert repository.state_updates[-2:] == [
+        {
+            "chat_id": chat.id,
+            "status": "resolved",
+            "telegram_chat_id": "telegram-chat-1",
+            "last_message_id": 502,
+            "last_error": None,
+        },
+        {
+            "chat_id": chat.id,
+            "status": "resolved",
+            "telegram_chat_id": "telegram-chat-1",
+            "last_message_id": 502,
+            "last_error": None,
+        },
+    ]
+
+
 def _authorized_account(cooldown_until: datetime | None = None) -> TelegramUserbotAccount:
     return TelegramUserbotAccount(
         id=uuid4(),

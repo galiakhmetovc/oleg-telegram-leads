@@ -129,6 +129,18 @@ class PostgresNotificationOutboxRepository:
             )
             await session.commit()
 
+    async def release_pending(self, ids: list[UUID]) -> None:
+        if not ids:
+            return
+        async with self._session_factory() as session:
+            await session.execute(
+                notification_outbox.update()
+                .where(notification_outbox.c.id.in_(ids))
+                .where(notification_outbox.c.status == "sending")
+                .values(status="pending", claimed_at=None)
+            )
+            await session.commit()
+
 
 def _item_to_row(item: NotificationOutboxItem) -> dict[str, Any]:
     return {

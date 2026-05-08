@@ -51,6 +51,7 @@ class IngestTelegramMessage:
             enrichment_job_id=job.id,
         )
         if saved.enrichment_job_id != job.id:
+            await self._job_creator.discard_unpublished(job.id)
             return TelegramIngestionResult(
                 status="duplicate",
                 message=saved,

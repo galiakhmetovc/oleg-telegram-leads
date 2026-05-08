@@ -59,6 +59,35 @@ class InMemoryTelegramIngestionRepository:
         return saved
 
 
+class ConflictingTelegramIngestionRepository(InMemoryTelegramIngestionRepository):
+    def __init__(self, existing: TelegramSourceMessage) -> None:
+        super().__init__()
+        self.messages = [existing]
+
+    async def get_source_message(
+        self,
+        *,
+        source_chat_id: UUID,
+        telegram_message_id: int,
+    ) -> TelegramSourceMessage | None:
+        if self.messages:
+            return None
+        return await super().get_source_message(
+            source_chat_id=source_chat_id,
+            telegram_message_id=telegram_message_id,
+        )
+
+    async def save_source_message(
+        self,
+        message: TelegramIncomingMessage,
+        *,
+        text: str,
+        enrichment_job_id: UUID,
+    ) -> TelegramSourceMessage:
+        self.events.append(f"save_conflict:{message.telegram_message_id}")
+        return self.messages[0]
+
+
 class InMemoryTelegramSettingsRepository:
     def __init__(self, settings: TelegramIngestionSettings) -> None:
         self.settings = settings
@@ -74,14 +103,18 @@ class InMemoryTelegramSettingsRepository:
 class FakeEnrichmentJobCreator:
     def __init__(self) -> None:
         self.created_texts: list[str] = []
+        self.created_ids: list[UUID] = []
         self.published_ids: list[UUID] = []
+        self.discarded_ids: list[UUID] = []
         self.events: list[str] = []
 
     async def create(self, input_text: str) -> EnrichmentJobSnapshot:
+        job_id = uuid4()
         self.created_texts.append(input_text)
+        self.created_ids.append(job_id)
         self.events.append(f"create_job:{input_text}")
         return EnrichmentJobSnapshot(
-            id=uuid4(),
+            id=job_id,
             input_text=input_text,
             status=EnrichmentStatus.QUEUED,
             progress_percent=0,
@@ -100,6 +133,10 @@ class FakeEnrichmentJobCreator:
     async def publish(self, job_id: UUID) -> None:
         self.published_ids.append(job_id)
         self.events.append(f"publish_job:{job_id}")
+
+    async def discard_unpublished(self, job_id: UUID) -> None:
+        self.discarded_ids.append(job_id)
+        self.events.append(f"discard_job:{job_id}")
 
     async def execute(self, input_text: str) -> EnrichmentJobSnapshot:
         job = await self.create(input_text)
@@ -160,6 +197,47 @@ async def test_ingestion_deduplicates_by_source_chat_and_telegram_message_id() -
     assert second.message == first.message
     assert job_creator.created_texts == ["Посоветуйте подрядчика по видеонаблюдению"]
     assert len(repository.messages) == 1
+
+
+@pytest.mark.asyncio
+async def test_ingestion_discards_unpublished_job_when_source_insert_loses_race() -> None:
+    source_chat_id = uuid4()
+    existing_job_id = uuid4()
+    existing = TelegramSourceMessage(
+        id=uuid4(),
+        account_id=uuid4(),
+        source_chat_id=source_chat_id,
+        telegram_message_id=105,
+        message_date=datetime(2026, 5, 8, 10, 5, tzinfo=UTC),
+        sender_id=None,
+        sender_username=None,
+        text="Посоветуйте подрядчика по видеонаблюдению",
+        raw_payload={},
+        enrichment_job_id=existing_job_id,
+        created_at=datetime(2026, 5, 8, tzinfo=UTC),
+    )
+    repository = ConflictingTelegramIngestionRepository(existing)
+    job_creator = FakeEnrichmentJobCreator()
+    use_case = IngestTelegramMessage(repository=repository, job_creator=job_creator)
+
+    result = await use_case.execute(
+        TelegramIncomingMessage(
+            account_id=uuid4(),
+            source_chat_id=source_chat_id,
+            telegram_message_id=105,
+            message_date=datetime(2026, 5, 8, 10, 5, tzinfo=UTC),
+            sender_id=None,
+            sender_username=None,
+            text="Посоветуйте подрядчика по видеонаблюдению",
+            raw_payload={},
+        )
+    )
+
+    assert result.status == "duplicate"
+    assert result.message == existing
+    assert result.enrichment_job_id == existing_job_id
+    assert job_creator.published_ids == []
+    assert job_creator.discarded_ids == job_creator.created_ids
 
 
 @pytest.mark.asyncio

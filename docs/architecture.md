@@ -97,7 +97,9 @@ existing enrichment worker:
 2. It persists each accepted source message in `telegram_source_messages`.
 3. It creates a normal enrichment job and publishes the existing Celery task
    only after the source message row is saved, so the worker can always resolve
-   Telegram context for notification routing.
+   Telegram context for notification routing. If a parallel worker loses the
+   unique source-message insert race, it discards its unpublished enrichment
+   job and returns the already persisted source row.
 4. The Celery `worker` enriches the text and writes the result.
 5. For Telegram-originated jobs, notification routing writes pending messages
    to `notification_outbox`. Each Telegram source message can enqueue at most
@@ -120,6 +122,8 @@ Telegram output batching follows Bot API constraints:
 - A full batch is sent as soon as adding the next item would exceed the limit.
 - A non-full batch is sent when the oldest pending item is at least 5 minutes
   old.
+- Claimed rows that are not ready in the current flush cycle are released back
+  to `pending` immediately.
 - Dispatcher sends at most one message per configured chat at a time and keeps a
   per-chat spacing guard for Telegram rate limits.
 
@@ -147,6 +151,12 @@ id as the cursor instead of importing the whole history. On listener startup,
 already resolved sources get one bounded recovery read after `last_message_id`
 to cover downtime, then live `NewMessage` updates drive ingestion. Historical
 channel exports should still be processed through batch tooling.
+
+Source cursors are monotonic. Live Telegram callbacks can arrive out of order,
+so the listener keeps the maximum seen message id per source during a run, and
+the PostgreSQL adapter writes `last_message_id` with `greatest(existing,
+incoming)`. A late older message can be deduplicated or enriched, but it cannot
+move the persisted cursor backwards.
 
 Source-chat status is runtime state, not form state. `draft` means the source
 row is saved but its `input_ref` has not yet been resolved by the userbot.

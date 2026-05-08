@@ -130,7 +130,10 @@ class PostgresTelegramIngestionRepository:
                 await session.execute(
                     telegram_source_chats.update()
                     .where(telegram_source_chats.c.id == message.source_chat_id)
-                    .values(last_message_id=message.telegram_message_id, updated_at=now)
+                    .values(
+                        last_message_id=_monotonic_last_message_id(message.telegram_message_id),
+                        updated_at=now,
+                    )
                 )
                 await session.commit()
                 return _source_message_from_row(row)
@@ -161,7 +164,7 @@ class PostgresTelegramIngestionRepository:
         if telegram_chat_id is not None:
             values["telegram_chat_id"] = telegram_chat_id
         if last_message_id is not None:
-            values["last_message_id"] = last_message_id
+            values["last_message_id"] = _monotonic_last_message_id(last_message_id)
         async with self._session_factory() as session:
             await session.execute(
                 telegram_source_chats.update()
@@ -246,6 +249,13 @@ def _upsert_chat(chat: TelegramSourceChat, now: datetime) -> Any:
                 "updated_at": now,
             },
         )
+    )
+
+
+def _monotonic_last_message_id(incoming_message_id: int) -> Any:
+    return sa.func.greatest(
+        sa.func.coalesce(telegram_source_chats.c.last_message_id, incoming_message_id),
+        incoming_message_id,
     )
 
 

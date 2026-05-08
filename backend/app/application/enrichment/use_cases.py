@@ -28,6 +28,9 @@ class CreateEnrichmentJob:
 
         return await self._repository.create_job(stripped_text)
 
+    async def discard_unpublished(self, job_id: UUID) -> None:
+        await self._repository.discard_unpublished_job(job_id)
+
     async def publish(self, job_id: UUID) -> None:
         await self._task_publisher.publish(job_id)
 

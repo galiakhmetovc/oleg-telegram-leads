@@ -171,6 +171,7 @@ class WatchTelegramSources:
         self._cooldown_recovery_limit = cooldown_recovery_limit
         self._cooldown_recovery_delay_seconds = cooldown_recovery_delay_seconds
         self._sleep = sleep
+        self._latest_message_ids: dict[Any, int] = {}
 
     async def execute(self) -> TelegramPollingSummary:
         settings = await self._repository.get_settings()
@@ -215,6 +216,7 @@ class WatchTelegramSources:
             ) as client:
                 subscriptions: list[TelegramSourceSubscription] = []
                 for index, chat in enumerate(chats):
+                    self._remember_latest_message_id(chat.id, chat.last_message_id)
                     delay_after_attempt = ready.resumed_after_cooldown and index < len(chats) - 1
                     try:
                         subscription, recovered = await self._prepare_source(
@@ -269,6 +271,7 @@ class WatchTelegramSources:
     ) -> tuple[TelegramSourceSubscription, TelegramPollingSummary]:
         if chat.last_message_id is None:
             telegram_chat_id, latest_message_id = await client.get_latest_message_id(chat.input_ref)
+            self._remember_latest_message_id(chat.id, latest_message_id)
             await self._repository.update_source_chat_state(
                 chat_id=chat.id,
                 status="resolved",
@@ -356,11 +359,15 @@ class WatchTelegramSources:
                 raw_payload=message.raw_payload,
             )
         )
+        last_message_id = self._advance_latest_message_id(
+            source_chat_id,
+            message.telegram_message_id,
+        )
         await self._repository.update_source_chat_state(
             chat_id=source_chat_id,
             status="resolved",
             telegram_chat_id=message.telegram_chat_id,
-            last_message_id=message.telegram_message_id,
+            last_message_id=last_message_id,
         )
         status = getattr(result, "status", None)
         if status == "created":
@@ -373,6 +380,22 @@ class WatchTelegramSources:
         if ready.resumed_after_cooldown:
             return max(1, min(self._recovery_limit, self._cooldown_recovery_limit))
         return self._recovery_limit
+
+    def _remember_latest_message_id(self, source_chat_id: Any, message_id: int | None) -> None:
+        if message_id is None:
+            return
+        self._latest_message_ids[source_chat_id] = max(
+            self._latest_message_ids.get(source_chat_id, 0),
+            message_id,
+        )
+
+    def _advance_latest_message_id(self, source_chat_id: Any, incoming_message_id: int) -> int:
+        latest_message_id = max(
+            self._latest_message_ids.get(source_chat_id, 0),
+            incoming_message_id,
+        )
+        self._latest_message_ids[source_chat_id] = latest_message_id
+        return latest_message_id
 
 
 def _merge_summary(

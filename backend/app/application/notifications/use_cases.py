@@ -5,7 +5,7 @@ import asyncio
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from app.application.notifications.batching import TELEGRAM_SEND_MESSAGE_CHAR_LIMIT
 from app.application.notifications.batching import pack_notification_batches
@@ -215,6 +215,7 @@ class FlushNotificationOutbox:
         chats = {chat.id: chat for chat in settings.chats if chat.enabled}
         sent: list[TelegramSendResult] = []
         sent_once_by_chat: set[str] = set()
+        handled_item_ids: set[UUID] = set()
 
         for group in _group_pending_items(pending):
             due = current_time - min(item.created_at for item in group) >= self._flush_interval
@@ -231,6 +232,7 @@ class FlushNotificationOutbox:
                         batch.item_ids,
                         error="Telegram bot or chat is not configured",
                     )
+                    handled_item_ids.update(batch.item_ids)
                     continue
                 if chat.id in sent_once_by_chat and self._min_chat_send_interval_seconds > 0:
                     await self._sleep(self._min_chat_send_interval_seconds)
@@ -247,10 +249,15 @@ class FlushNotificationOutbox:
                         batch.item_ids,
                         error=str(exc) or type(exc).__name__,
                     )
+                    handled_item_ids.update(batch.item_ids)
                     logger.exception("Failed to flush notification batch")
                     continue
                 await self._outbox_repository.mark_sent(batch.item_ids, sent_at=current_time)
+                handled_item_ids.update(batch.item_ids)
                 sent_once_by_chat.add(chat.id)
+        unhandled_ids = [item.id for item in pending if item.id not in handled_item_ids]
+        if unhandled_ids:
+            await self._outbox_repository.release_pending(unhandled_ids)
         return sent
 
 
