@@ -19,6 +19,11 @@
   `telegram_source_messages`, `enrichment_jobs`, and `enrichment_results`.
   Migration `0008_runtime_analytics_cleanup` cleared old batch analytics rows in
   the dev database.
+- Live Analytics candidate pagination and filters now run in PostgreSQL for the
+  Telegram live run instead of loading all completed enrichments into Python.
+  SQL filters cover score, temperature, signal, reason, solution area, customer
+  segment, review lane, source channel, received date, review status, verdict,
+  and text search. Live aggregates also include review status/verdict counts.
 - Analytics rows include links to the source Telegram message when derivable,
   an internal analytics permalink, a "Ревью" action, and a "Проверить" action
   that opens the text in Testing and starts enrichment. Notification messages

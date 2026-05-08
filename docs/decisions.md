@@ -687,3 +687,25 @@ Rationale:
   system should not hide the evidence by clamping score to zero.
 - Research questions are useful warm signals, but mixing them with direct
   contractor/order requests makes notification and review queues noisy.
+
+## 2026-05-08: Live Analytics Candidate Lists Are SQL-Backed
+
+The live Telegram analytics run still uses PostgreSQL runtime tables as the
+source of truth, but the main candidate list no longer loads every completed
+enrichment into Python before filtering. The repository now applies score,
+temperature, nested JSON evidence, source, date, review status, verdict, and
+text filters in SQL and returns only the requested page.
+
+Run counters for the virtual `Telegram live` run are also SQL-backed. Live
+aggregates still parse completed enrichment JSON because they need top lists
+from nested arrays, but they now include review status and verdict counts for
+calibration.
+
+Rationale:
+
+- The operator table is the hot path and must stay responsive as Telegram
+  history grows.
+- PostgreSQL JSONB containment is enough for current deterministic NLP arrays;
+  ClickHouse can wait until aggregate workloads outgrow this shape.
+- Review-quality metrics should be visible in Analytics without adding a second
+  analytics datastore.

@@ -196,7 +196,13 @@ The Analytics tab opens by default after login and uses a virtual run
   deterministic lead assessment.
 - `message_reviews` stores mutable operator ground truth for each source
   message: verdict, structured tags, comment, and timestamps.
-- Aggregates are computed from live completed enrichments.
+- The live run counters and candidate list are SQL-backed. Candidate filters for
+  score, temperature, signal, reason, solution area, customer segment, review
+  lane, source chat, received date, review status, verdict, and text are applied
+  in PostgreSQL with limit/offset pagination instead of loading the whole live
+  dataset into Python.
+- Aggregates are computed from live completed enrichments and include review
+  status/verdict counts for calibration.
 - App links use `#/analytics/message/{source_message_id}`.
 - Review links use `#/analytics/review/{source_message_id}` and open the full
   operator review workspace. Links from the candidate table include a `return`

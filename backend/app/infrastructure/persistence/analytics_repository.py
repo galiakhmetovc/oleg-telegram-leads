@@ -50,9 +50,19 @@ class PostgresAnalyticsRepository:
             return _run_from_row(row) if row is not None else None
 
     async def get_live_candidate_by_message_id(self, message_id: str) -> AnalyticsCandidate | None:
+        try:
+            source_message_id = UUID(message_id)
+        except ValueError:
+            return None
+        public_base_url = get_settings().public_base_url.rstrip("/")
         async with self._session_factory() as session:
-            candidates = await _live_candidates(session)
-        return next((candidate for candidate in candidates if candidate.message_id == message_id), None)
+            result = await session.execute(
+                _live_candidate_select()
+                .where(telegram_source_messages.c.id == source_message_id)
+                .limit(1)
+            )
+            row = result.mappings().first()
+        return _live_candidate_from_row(row, public_base_url) if row is not None else None
 
     async def get_message_review(self, message_id: str) -> AnalyticsMessageReview | None:
         async with self._session_factory() as session:
@@ -135,35 +145,48 @@ class PostgresAnalyticsRepository:
         received_from = _aware_utc(received_from)
         received_to = _aware_utc(received_to)
         if run_id == LIVE_TELEGRAM_RUN_ID:
+            public_base_url = get_settings().public_base_url.rstrip("/")
             async with self._session_factory() as session:
-                candidates = await _live_candidates(session)
-            filtered = _filter_live_candidates(
-                candidates,
-                score_min=score_min,
-                temperature=temperature,
-                signal=signal,
-                reason=reason,
-                solution_area=solution_area,
-                customer_segment=customer_segment,
-                lane=lane,
-                source_chat_id=source_chat_id,
-                received_from=received_from,
-                received_to=received_to,
-                review_status=review_status,
-                verdict=verdict,
-                q=q,
-            )
-            filtered.sort(
-                key=lambda item: (
-                    item.score,
-                    item.telegram_message_id or 0,
-                    item.message_id,
-                ),
-                reverse=True,
-            )
+                predicates = _live_candidate_filter_predicates(
+                    score_min=score_min,
+                    temperature=temperature,
+                    signal=signal,
+                    reason=reason,
+                    solution_area=solution_area,
+                    customer_segment=customer_segment,
+                    lane=lane,
+                    source_chat_id=source_chat_id,
+                    received_from=received_from,
+                    received_to=received_to,
+                    review_status=review_status,
+                    verdict=verdict,
+                    q=q,
+                )
+                total = int(
+                    await session.scalar(
+                        sa.select(sa.func.count())
+                        .select_from(_live_candidate_from_clause())
+                        .where(*predicates)
+                    )
+                    or 0
+                )
+                result = await session.execute(
+                    _live_candidate_select()
+                    .where(*predicates)
+                    .order_by(
+                        _live_score_expr().desc(),
+                        telegram_source_messages.c.telegram_message_id.desc(),
+                        telegram_source_messages.c.id.desc(),
+                    )
+                    .limit(limit)
+                    .offset(offset)
+                )
             return AnalyticsCandidatePage(
-                total=len(filtered),
-                items=filtered[offset : offset + limit],
+                total=total,
+                items=[
+                    _live_candidate_from_row(row, public_base_url)
+                    for row in result.mappings()
+                ],
             )
 
         predicates = [analytics_candidates.c.run_id == run_id]
@@ -193,7 +216,7 @@ class PostgresAnalyticsRepository:
             return AnalyticsCandidatePage(total=0, items=[])
 
         async with self._session_factory() as session:
-            total = await session.scalar(
+            imported_total = await session.scalar(
                 sa.select(sa.func.count()).select_from(analytics_candidates).where(*predicates)
             )
             result = await session.execute(
@@ -204,7 +227,7 @@ class PostgresAnalyticsRepository:
                 .offset(offset)
             )
             return AnalyticsCandidatePage(
-                total=int(total or 0),
+                total=int(imported_total or 0),
                 items=[_candidate_from_row(row) for row in result.mappings()],
             )
 
@@ -281,8 +304,30 @@ async def _live_run(session: AsyncSession) -> AnalyticsRun:
         )
         or 0
     )
-    candidates = await _live_candidates(session)
-    leads = sum(1 for candidate in candidates if candidate.is_lead)
+    completed = int(
+        await session.scalar(
+            sa.select(sa.func.count()).select_from(
+                telegram_source_messages.join(
+                    enrichment_results,
+                    telegram_source_messages.c.enrichment_job_id == enrichment_results.c.job_id,
+                )
+            )
+        )
+        or 0
+    )
+    leads = int(
+        await session.scalar(
+            sa.select(sa.func.count())
+            .select_from(
+                telegram_source_messages.join(
+                    enrichment_results,
+                    telegram_source_messages.c.enrichment_job_id == enrichment_results.c.job_id,
+                )
+            )
+            .where(sa.cast(_live_assessment_expr()["is_lead"].astext, sa.Boolean).is_(True))
+        )
+        or 0
+    )
     first_seen = await session.scalar(sa.select(sa.func.min(telegram_source_messages.c.created_at)))
     last_seen = await session.scalar(sa.select(sa.func.max(telegram_source_messages.c.created_at)))
     return AnalyticsRun(
@@ -292,7 +337,7 @@ async def _live_run(session: AsyncSession) -> AnalyticsRun:
         input_path="telegram_source_messages",
         run_dir="postgresql",
         processed=processed,
-        skipped=max(processed - len(candidates) - failed, 0),
+        skipped=max(processed - completed - failed, 0),
         failed=failed,
         leads=leads,
         started_at=first_seen,
@@ -300,53 +345,113 @@ async def _live_run(session: AsyncSession) -> AnalyticsRun:
         imported_at=datetime.now(UTC),
         summary={
             "mode": "live",
-            "completed": len(candidates),
+            "completed": completed,
             "source": "telegram_source_messages",
         },
     )
 
 
+def _live_candidate_select() -> Any:
+    return sa.select(
+        telegram_source_messages.c.id.label("source_message_id"),
+        telegram_source_messages.c.source_chat_id,
+        telegram_source_messages.c.telegram_message_id,
+        telegram_source_messages.c.created_at.label("received_at"),
+        telegram_source_messages.c.text,
+        telegram_source_messages.c.enrichment_job_id,
+        telegram_source_chats.c.title.label("source_chat_title"),
+        telegram_source_chats.c.input_ref,
+        telegram_source_chats.c.telegram_chat_id,
+        enrichment_results.c.result.label("enrichment_result"),
+        message_reviews.c.source_message_id.label("review_source_message_id"),
+        message_reviews.c.verdict.label("review_verdict"),
+        message_reviews.c.comment.label("review_comment"),
+        message_reviews.c.tags.label("review_tags"),
+        message_reviews.c.created_at.label("review_created_at"),
+        message_reviews.c.updated_at.label("review_updated_at"),
+    ).select_from(_live_candidate_from_clause())
+
+
+def _live_candidate_from_clause() -> Any:
+    return (
+        telegram_source_messages.join(
+            telegram_source_chats,
+            telegram_source_messages.c.source_chat_id == telegram_source_chats.c.id,
+        )
+        .join(
+            enrichment_results,
+            telegram_source_messages.c.enrichment_job_id == enrichment_results.c.job_id,
+        )
+        .outerjoin(
+            message_reviews,
+            telegram_source_messages.c.id == message_reviews.c.source_message_id,
+        )
+    )
+
+
+def _live_assessment_expr() -> Any:
+    return enrichment_results.c.result["lead_assessment"]
+
+
+def _live_score_expr() -> Any:
+    return sa.cast(_live_assessment_expr()["score"].astext, sa.Integer)
+
+
+def _live_candidate_filter_predicates(
+    *,
+    score_min: int | None,
+    temperature: str | None,
+    signal: str | None,
+    reason: str | None,
+    solution_area: str | None,
+    customer_segment: str | None,
+    lane: str | None,
+    source_chat_id: str | None,
+    received_from: datetime | None,
+    received_to: datetime | None,
+    review_status: str | None,
+    verdict: AnalyticsReviewVerdict | None,
+    q: str | None,
+) -> list[Any]:
+    assessment = _live_assessment_expr()
+    predicates: list[Any] = []
+    if score_min is not None:
+        predicates.append(_live_score_expr() >= score_min)
+    if temperature:
+        predicates.append(assessment["temperature"].astext == temperature)
+    if signal:
+        predicates.append(enrichment_results.c.result["domain_signals"].contains([{"type": signal}]))
+    if reason:
+        predicates.append(assessment["reasons"].contains([{"key": reason}]))
+    if solution_area:
+        predicates.append(assessment["solution_areas"].contains([{"type": solution_area}]))
+    if customer_segment:
+        predicates.append(assessment["customer_segments"].contains([{"type": customer_segment}]))
+    if lane:
+        predicates.append(assessment["review_lane"]["key"].astext == lane)
+    if source_chat_id:
+        try:
+            predicates.append(telegram_source_messages.c.source_chat_id == UUID(source_chat_id))
+        except ValueError:
+            predicates.append(sa.false())
+    if received_from is not None:
+        predicates.append(telegram_source_messages.c.created_at >= received_from)
+    if received_to is not None:
+        predicates.append(telegram_source_messages.c.created_at <= received_to)
+    if review_status == "reviewed":
+        predicates.append(message_reviews.c.source_message_id.is_not(None))
+    if review_status == "unreviewed":
+        predicates.append(message_reviews.c.source_message_id.is_(None))
+    if verdict is not None:
+        predicates.append(message_reviews.c.verdict == verdict)
+    if q:
+        predicates.append(telegram_source_messages.c.text.ilike(f"%{q}%"))
+    return predicates
+
+
 async def _live_candidates(session: AsyncSession) -> list[AnalyticsCandidate]:
     public_base_url = get_settings().public_base_url.rstrip("/")
-    result = await session.execute(
-        sa.select(
-            telegram_source_messages.c.id.label("source_message_id"),
-            telegram_source_messages.c.source_chat_id,
-            telegram_source_messages.c.telegram_message_id,
-            telegram_source_messages.c.created_at.label("received_at"),
-            telegram_source_messages.c.text,
-            telegram_source_messages.c.enrichment_job_id,
-            telegram_source_chats.c.title.label("source_chat_title"),
-            telegram_source_chats.c.input_ref,
-            telegram_source_chats.c.telegram_chat_id,
-            enrichment_results.c.result.label("enrichment_result"),
-            message_reviews.c.source_message_id.label("review_source_message_id"),
-            message_reviews.c.verdict.label("review_verdict"),
-            message_reviews.c.comment.label("review_comment"),
-            message_reviews.c.tags.label("review_tags"),
-            message_reviews.c.created_at.label("review_created_at"),
-            message_reviews.c.updated_at.label("review_updated_at"),
-        )
-        .select_from(
-            telegram_source_messages.join(
-                telegram_source_chats,
-                telegram_source_messages.c.source_chat_id == telegram_source_chats.c.id,
-            )
-            .join(
-                enrichment_jobs,
-                telegram_source_messages.c.enrichment_job_id == enrichment_jobs.c.id,
-            )
-            .outerjoin(
-                enrichment_results,
-                telegram_source_messages.c.enrichment_job_id == enrichment_results.c.job_id,
-            )
-            .outerjoin(
-                message_reviews,
-                telegram_source_messages.c.id == message_reviews.c.source_message_id,
-            )
-        )
-        .where(enrichment_results.c.result.is_not(None))
-    )
+    result = await session.execute(_live_candidate_select())
     return [_live_candidate_from_row(row, public_base_url) for row in result.mappings()]
 
 
@@ -414,6 +519,7 @@ def _live_aggregates(candidates: Sequence[AnalyticsCandidate]) -> list[Analytics
     aggregates.extend(_object_aggregates("solution_area", (item.solution_areas for item in candidates)))
     aggregates.extend(_object_aggregates("customer_segment", (item.customer_segments for item in candidates)))
     aggregates.extend(_source_chat_aggregates(candidates))
+    aggregates.extend(_review_aggregates(candidates))
     lane_counter = Counter(candidate.review_lane for candidate in candidates)
     aggregates.extend(
         AnalyticsAggregate(kind="review_lane", key=key, label=key, count=count)
@@ -481,67 +587,6 @@ def _object_aggregates(
         )
         for key, count in counter.most_common()
     ]
-
-
-def _filter_live_candidates(
-    candidates: Sequence[AnalyticsCandidate],
-    *,
-    score_min: int | None,
-    temperature: str | None,
-    signal: str | None,
-    reason: str | None,
-    solution_area: str | None,
-    customer_segment: str | None,
-    lane: str | None,
-    source_chat_id: str | None,
-    received_from: datetime | None,
-    received_to: datetime | None,
-    review_status: str | None,
-    verdict: AnalyticsReviewVerdict | None,
-    q: str | None,
-) -> list[AnalyticsCandidate]:
-    lowered_query = q.lower() if q else None
-    result: list[AnalyticsCandidate] = []
-    for candidate in candidates:
-        if score_min is not None and candidate.score < score_min:
-            continue
-        if temperature and candidate.temperature != temperature:
-            continue
-        if signal and not _has_object_key(candidate.domain_signals, signal, "type"):
-            continue
-        if reason and not _has_object_key(candidate.reasons, reason, "key"):
-            continue
-        if solution_area and not _has_object_key(candidate.solution_areas, solution_area, "type"):
-            continue
-        if customer_segment and not _has_object_key(candidate.customer_segments, customer_segment, "type"):
-            continue
-        if lane and candidate.review_lane != lane:
-            continue
-        if source_chat_id and candidate.source_chat_id != source_chat_id:
-            continue
-        candidate_received_at = _aware_utc(candidate.received_at)
-        if received_from is not None and (
-            candidate_received_at is None or candidate_received_at < received_from
-        ):
-            continue
-        if received_to is not None and (
-            candidate_received_at is None or candidate_received_at > received_to
-        ):
-            continue
-        if review_status == "reviewed" and candidate.review is None:
-            continue
-        if review_status == "unreviewed" and candidate.review is not None:
-            continue
-        if verdict is not None and (candidate.review is None or candidate.review.verdict != verdict):
-            continue
-        if lowered_query and lowered_query not in candidate.text.lower():
-            continue
-        result.append(candidate)
-    return result
-
-
-def _has_object_key(items: list[dict[str, Any]], expected: str, key_name: str) -> bool:
-    return any(item.get(key_name) == expected for item in items)
 
 
 def _run_to_values(run: AnalyticsRun, run_id: UUID) -> dict[str, Any]:
@@ -708,6 +753,48 @@ def _source_chat_aggregates(candidates: Sequence[AnalyticsCandidate]) -> list[An
             count=count,
         )
         for key, count in counter.most_common()
+    ]
+
+
+def _review_aggregates(candidates: Sequence[AnalyticsCandidate]) -> list[AnalyticsAggregate]:
+    status_counter: Counter[str] = Counter(
+        "reviewed" if candidate.review is not None else "unreviewed"
+        for candidate in candidates
+    )
+    verdict_counter: Counter[str] = Counter(
+        str(candidate.review.verdict)
+        for candidate in candidates
+        if candidate.review is not None and candidate.review.verdict
+    )
+    status_labels = {
+        "reviewed": "С ревью",
+        "unreviewed": "Без ревью",
+    }
+    verdict_labels = {
+        "lead": "Лид",
+        "not_lead": "Не лид",
+        "uncertain": "Сомнительно",
+        "noise": "Шум",
+    }
+    return [
+        *[
+            AnalyticsAggregate(
+                kind="review_status",
+                key=key,
+                label=status_labels.get(key, key),
+                count=count,
+            )
+            for key, count in status_counter.most_common()
+        ],
+        *[
+            AnalyticsAggregate(
+                kind="review_verdict",
+                key=key,
+                label=verdict_labels.get(key, key),
+                count=count,
+            )
+            for key, count in verdict_counter.most_common()
+        ],
     ]
 
 
