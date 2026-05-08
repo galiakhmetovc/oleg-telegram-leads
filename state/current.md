@@ -77,6 +77,14 @@
   the analytics UI. Current bootstrap lanes split candidates into noise, direct
   PUR leads, project context, domain interest, off-domain demand, generic
   context, and other candidates.
+- Enrichment overview now explains the deterministic result in operator terms:
+  dictionary entities, facts, and domain signals include source and why text;
+  lead score shows the arithmetic formula; solution areas, customer segments,
+  and review lanes show the configured matched labels/groups. Overview sections
+  include shortcuts to the relevant Settings Center sections.
+- Annotated source text converts backend Unicode code point ranges into browser
+  UTF-16 ranges before slicing, so matches after emoji are highlighted on the
+  intended fragment.
 - Analytics candidate rows now expand into an enrichment-style review view with
   highlighted message fragments, lead temperature/score, review lane, solution
   areas, customer segments, intent/noise signals, score reasons, domain signals,

@@ -55,6 +55,7 @@ class ExtractedFact:
     range: TextRange
     source: str
     confidence: float | None = None
+    explanation: str | None = None
 
 
 @dataclass(frozen=True)
@@ -67,6 +68,7 @@ class DomainSignal:
     source: str
     confidence: float | None = None
     color: str | None = None
+    explanation: str | None = None
 
 
 @dataclass(frozen=True)
@@ -86,6 +88,14 @@ class LeadReason:
 
 
 @dataclass(frozen=True)
+class LeadReviewLane:
+    key: str
+    label: str
+    description: str | None
+    matched_group_indexes: list[int]
+
+
+@dataclass(frozen=True)
 class LeadAssessment:
     is_lead: bool
     score: int
@@ -95,6 +105,7 @@ class LeadAssessment:
     intent_signals: list[LeadCategory]
     noise_signals: list[LeadCategory]
     reasons: list[LeadReason]
+    review_lane: LeadReviewLane | None = None
 
 
 @dataclass(frozen=True)
@@ -182,6 +193,7 @@ class TextEnrichmentResult:
                     range=TextRange(**item["range"]),
                     source=str(item["source"]),
                     confidence=item.get("confidence"),
+                    explanation=item.get("explanation"),
                 )
                 for item in data.get("facts", [])
             ],
@@ -195,6 +207,7 @@ class TextEnrichmentResult:
                     source=str(item["source"]),
                     confidence=item.get("confidence"),
                     color=item.get("color"),
+                    explanation=item.get("explanation"),
                 )
                 for item in data.get("domain_signals", [])
             ],
@@ -294,4 +307,16 @@ def _lead_assessment_from_dict(data: Any) -> LeadAssessment | None:
             )
             for item in data.get("reasons", [])
         ],
+        review_lane=_lead_review_lane_from_dict(data.get("review_lane")),
+    )
+
+
+def _lead_review_lane_from_dict(data: Any) -> LeadReviewLane | None:
+    if data is None:
+        return None
+    return LeadReviewLane(
+        key=str(data["key"]),
+        label=str(data["label"]),
+        description=data.get("description"),
+        matched_group_indexes=[int(value) for value in data.get("matched_group_indexes", [])],
     )

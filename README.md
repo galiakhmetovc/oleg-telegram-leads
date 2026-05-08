@@ -65,9 +65,11 @@ UI explains the matching modes. `backend/config/nlp` is only the bootstrap
 default when the database has no active NLP config revision yet.
 
 The enrichment result now includes `lead_assessment`: an explainable PUR lead
-verdict with score, temperature, solution areas, customer segments, positive
-reasons, and noise signals. Scoring thresholds, weights, and taxonomy mappings
-are edited through the same PostgreSQL-backed Settings Center.
+verdict with score, temperature, solution areas, customer segments, review lane,
+positive reasons, and noise signals. The Overview tab shows dictionary entities,
+facts, domain signals, the exact score arithmetic, and category/lane matches in
+operator-facing labels. Scoring thresholds, weights, review lanes, and taxonomy
+mappings are edited through the same PostgreSQL-backed Settings Center.
 
 ## Batch Enrichment
 

@@ -70,6 +70,7 @@ type SpanItem = {
   source: string;
   confidence?: number | null;
   color?: string | null;
+  explanation?: string | null;
 };
 
 type EnrichedToken = {
@@ -117,6 +118,14 @@ type LeadAssessment = {
   intent_signals: LeadCategory[];
   noise_signals: LeadCategory[];
   reasons: LeadReason[];
+  review_lane?: LeadReviewLane | null;
+};
+
+type LeadReviewLane = {
+  key: string;
+  label: string;
+  description?: string | null;
+  matched_group_indexes: number[];
 };
 
 type TextEnrichmentResult = {
@@ -344,6 +353,7 @@ export function App() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState(0);
+  const [settingsSection, setSettingsSection] = useState<SettingsSection>("signals");
   const eventSourceRef = useRef<EventSource | null>(null);
 
   const result = job?.result ?? null;
@@ -452,6 +462,11 @@ export function App() {
     setActivePage(value);
   }
 
+  function openSettingsSection(section: SettingsSection) {
+    setSettingsSection(section);
+    setActivePage(2);
+  }
+
   return (
     <ThemeProvider theme={theme}>
       <CssBaseline />
@@ -534,7 +549,7 @@ export function App() {
                     </Tabs>
                     <Divider />
                     <Box className="tab-body">
-                      {activeTab === 0 && <Overview result={result} />}
+                      {activeTab === 0 && <Overview result={result} onOpenSettings={openSettingsSection} />}
                       {activeTab === 1 && <SpanTable items={result.entities} fallbackLabel="Сущность" />}
                       {activeTab === 2 && <SpanTable items={result.facts} fallbackLabel="Факт" />}
                       {activeTab === 3 && <SpanTable items={result.domain_signals} fallbackLabel="Сигнал" />}
@@ -555,7 +570,7 @@ export function App() {
           ) : activePage === 1 ? (
             <AnalyticsPage apiBaseUrl={apiBaseUrl} />
           ) : activePage === 2 ? (
-            <SettingsCenter />
+            <SettingsCenter section={settingsSection} onSectionChange={setSettingsSection} />
           ) : (
             <SettingsHelpPage />
           )}
@@ -565,10 +580,15 @@ export function App() {
   );
 }
 
-function SettingsCenter() {
+function SettingsCenter({
+  section,
+  onSectionChange
+}: {
+  section: SettingsSection;
+  onSectionChange: (section: SettingsSection) => void;
+}) {
   const [settings, setSettings] = useState<SettingsSnapshot | null>(null);
   const [draft, setDraft] = useState<NlpSettings | null>(null);
-  const [section, setSection] = useState<SettingsSection>("signals");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [previewing, setPreviewing] = useState(false);
@@ -772,31 +792,43 @@ function SettingsCenter() {
         <Button
           fullWidth
           variant={section === "pipeline" ? "contained" : "text"}
-          onClick={() => setSection("pipeline")}
+          onClick={() => onSectionChange("pipeline")}
         >
           Pipeline
         </Button>
-        <Button fullWidth variant={section === "signals" ? "contained" : "text"} onClick={() => setSection("signals")}>
+        <Button
+          fullWidth
+          variant={section === "signals" ? "contained" : "text"}
+          onClick={() => onSectionChange("signals")}
+        >
           Доменные сигналы
         </Button>
-        <Button fullWidth variant={section === "facts" ? "contained" : "text"} onClick={() => setSection("facts")}>
+        <Button
+          fullWidth
+          variant={section === "facts" ? "contained" : "text"}
+          onClick={() => onSectionChange("facts")}
+        >
           Факты
         </Button>
         <Button
           fullWidth
           variant={section === "aliases" ? "contained" : "text"}
-          onClick={() => setSection("aliases")}
+          onClick={() => onSectionChange("aliases")}
         >
           Словари
         </Button>
         <Button
           fullWidth
           variant={section === "lead_scoring" ? "contained" : "text"}
-          onClick={() => setSection("lead_scoring")}
+          onClick={() => onSectionChange("lead_scoring")}
         >
           Оценка лида
         </Button>
-        <Button fullWidth variant={section === "system" ? "contained" : "text"} onClick={() => setSection("system")}>
+        <Button
+          fullWidth
+          variant={section === "system" ? "contained" : "text"}
+          onClick={() => onSectionChange("system")}
+        >
           Runtime
         </Button>
       </Paper>
@@ -3085,11 +3117,47 @@ function StatusPanel({
   );
 }
 
-function Overview({ result }: { result: TextEnrichmentResult }) {
+function Overview({
+  result,
+  onOpenSettings
+}: {
+  result: TextEnrichmentResult;
+  onOpenSettings: (section: SettingsSection) => void;
+}) {
+  const typeLabels = useMemo(() => typeLabelMap(result), [result]);
+  const dictionaryItems = result.facts.filter((item) => item.source === "alias_catalog");
+
   return (
     <Stack spacing={2}>
-      {result.lead_assessment && <LeadAssessmentPanel assessment={result.lead_assessment} />}
+      {result.lead_assessment && (
+        <LeadAssessmentPanel
+          assessment={result.lead_assessment}
+          typeLabels={typeLabels}
+          onOpenSettings={() => onOpenSettings("lead_scoring")}
+        />
+      )}
       <AnnotatedText result={result} />
+      <EvidenceTable
+        title="Словарные сущности"
+        items={dictionaryItems}
+        emptyText="Словарные alias не найдены."
+        settingsLabel="Открыть словари"
+        onOpenSettings={() => onOpenSettings("aliases")}
+      />
+      <EvidenceTable
+        title="Факты"
+        items={result.facts}
+        emptyText="Факты не найдены."
+        settingsLabel="Открыть факты"
+        onOpenSettings={() => onOpenSettings("facts")}
+      />
+      <EvidenceTable
+        title="Доменные сигналы"
+        items={result.domain_signals}
+        emptyText="Доменные сигналы не найдены."
+        settingsLabel="Открыть сигналы"
+        onOpenSettings={() => onOpenSettings("signals")}
+      />
       <Box sx={{ display: "flex", flexWrap: "wrap", gap: 1 }}>
         {Object.entries(result.metrics).map(([key, value]) => (
           <Chip key={key} label={`${key}: ${value}`} variant="outlined" />
@@ -3099,13 +3167,28 @@ function Overview({ result }: { result: TextEnrichmentResult }) {
   );
 }
 
-function LeadAssessmentPanel({ assessment }: { assessment: LeadAssessment }) {
+function LeadAssessmentPanel({
+  assessment,
+  typeLabels,
+  onOpenSettings
+}: {
+  assessment: LeadAssessment;
+  typeLabels: Map<string, string>;
+  onOpenSettings: () => void;
+}) {
   return (
     <Paper variant="outlined" className="lead-assessment-panel">
-      <Stack spacing={1.5}>
-        <LeadAssessmentSummary assessment={assessment} />
-        <ChipGroup title="Направления" items={assessment.solution_areas.map((item) => item.label)} />
-        <ChipGroup title="Сегменты" items={assessment.customer_segments.map((item) => item.label)} />
+      <Stack spacing={2}>
+        <Box sx={{ alignItems: "center", display: "flex", flexWrap: "wrap", gap: 1, justifyContent: "space-between" }}>
+          <LeadAssessmentSummary assessment={assessment} />
+          <Button size="small" startIcon={<SettingsIcon />} onClick={onOpenSettings}>
+            Настройки оценки
+          </Button>
+        </Box>
+        <ScoreFormula assessment={assessment} />
+        <CategoryCalculationGroup title="Расчет направления решения" items={assessment.solution_areas} typeLabels={typeLabels} />
+        <CategoryCalculationGroup title="Расчет сегмента клиентов" items={assessment.customer_segments} typeLabels={typeLabels} />
+        <ReviewLaneCalculation assessment={assessment} />
         <ChipGroup title="Шум" items={assessment.noise_signals.map((item) => item.label)} color="warning" />
         {assessment.reasons.length > 0 && (
           <TableContainer>
@@ -3131,6 +3214,94 @@ function LeadAssessmentPanel({ assessment }: { assessment: LeadAssessment }) {
         )}
       </Stack>
     </Paper>
+  );
+}
+
+function ScoreFormula({ assessment }: { assessment: LeadAssessment }) {
+  if (assessment.reasons.length === 0) {
+    return (
+      <Typography variant="body2" color="text.secondary">
+        Формула score: совпавших весов нет, score = 0.
+      </Typography>
+    );
+  }
+  const rawScore = assessment.reasons.reduce((sum, reason) => sum + reason.weight, 0);
+  const formula = assessment.reasons
+    .map((reason) => `${formatSignedWeight(reason.weight)} ${reason.label}`)
+    .join(" ");
+
+  return (
+    <Stack spacing={0.75}>
+      <Typography variant="subtitle2">Точный расчет оценки лида</Typography>
+      <Typography variant="body2">
+        score = max(0, {formula}) = max(0, {rawScore}) = {assessment.score}
+      </Typography>
+      <Typography variant="caption" color="text.secondary">
+        Порог лида применяется на backend; температура определяется по настроенным порогам lead/warm/hot.
+      </Typography>
+    </Stack>
+  );
+}
+
+function CategoryCalculationGroup({
+  title,
+  items,
+  typeLabels
+}: {
+  title: string;
+  items: LeadCategory[];
+  typeLabels: Map<string, string>;
+}) {
+  return (
+    <Stack spacing={0.75}>
+      <Typography variant="subtitle2">{title}</Typography>
+      {items.length === 0 ? (
+        <Typography variant="body2" color="text.secondary">
+          Совпадений по настроенным типам нет.
+        </Typography>
+      ) : (
+        <Stack spacing={0.75}>
+          {items.map((item) => (
+            <Box key={item.type}>
+              <Typography variant="body2" sx={{ fontWeight: 700 }}>
+                {item.label}
+              </Typography>
+              <Typography variant="caption" color="text.secondary">
+                Сработало, потому что найдены типы: {item.matched_types.map((type) => typeLabels.get(type) ?? type).join(", ")}
+              </Typography>
+            </Box>
+          ))}
+        </Stack>
+      )}
+    </Stack>
+  );
+}
+
+function ReviewLaneCalculation({ assessment }: { assessment: LeadAssessment }) {
+  const lane = assessment.review_lane;
+  return (
+    <Stack spacing={0.75}>
+      <Typography variant="subtitle2">Расчет очереди разбора</Typography>
+      {lane ? (
+        <>
+          <Box sx={{ display: "flex", flexWrap: "wrap", gap: 1 }}>
+            <Chip label={lane.label} size="small" variant="outlined" />
+            {lane.matched_group_indexes.map((index) => (
+              <Chip key={index} label={`match group ${index + 1}`} size="small" />
+            ))}
+          </Box>
+          <Typography variant="caption" color="text.secondary">
+            Очередь выбрана первым подходящим правилом `review_lanes` по priority: score/temperature прошли ограничения,
+            excluded-условия не сработали, все обязательные match groups совпали.
+            {lane.description ? ` ${lane.description}` : ""}
+          </Typography>
+        </>
+      ) : (
+        <Typography variant="body2" color="text.secondary">
+          Очереди разбора в активной конфигурации не заданы.
+        </Typography>
+      )}
+    </Stack>
   );
 }
 
@@ -3210,12 +3381,15 @@ function leadTemperatureColor(
 
 function AnnotatedText({ result }: { result: TextEnrichmentResult }) {
   const spans = useMemo(() => collectNonOverlappingSpans(result), [result]);
+  const codeUnitOffsets = useMemo(() => codePointToCodeUnitOffsets(result.original_text), [result.original_text]);
   const parts: ReactNode[] = [];
   let cursor = 0;
 
   for (const span of spans) {
-    if (span.range.start > cursor) {
-      parts.push(<span key={`text-${cursor}`}>{result.original_text.slice(cursor, span.range.start)}</span>);
+    const start = codePointOffsetToCodeUnit(span.range.start, codeUnitOffsets);
+    const stop = codePointOffsetToCodeUnit(span.range.stop, codeUnitOffsets);
+    if (start > cursor) {
+      parts.push(<span key={`text-${cursor}`}>{result.original_text.slice(cursor, start)}</span>);
     }
     parts.push(
       <mark
@@ -3224,10 +3398,10 @@ function AnnotatedText({ result }: { result: TextEnrichmentResult }) {
         style={{ borderColor: span.color ?? "#0b57d0", backgroundColor: `${span.color ?? "#0b57d0"}1a` }}
         title={`${span.label ?? span.type}: ${span.source}`}
       >
-        {result.original_text.slice(span.range.start, span.range.stop)}
+        {result.original_text.slice(start, stop)}
       </mark>
     );
-    cursor = span.range.stop;
+    cursor = stop;
   }
 
   if (cursor < result.original_text.length) {
@@ -3240,6 +3414,59 @@ function AnnotatedText({ result }: { result: TextEnrichmentResult }) {
         {parts}
       </Typography>
     </Box>
+  );
+}
+
+function EvidenceTable({
+  title,
+  items,
+  emptyText,
+  settingsLabel,
+  onOpenSettings
+}: {
+  title: string;
+  items: SpanItem[];
+  emptyText: string;
+  settingsLabel: string;
+  onOpenSettings: () => void;
+}) {
+  return (
+    <Stack spacing={1}>
+      <Box sx={{ alignItems: "center", display: "flex", flexWrap: "wrap", gap: 1, justifyContent: "space-between" }}>
+        <Typography variant="subtitle2">{title}</Typography>
+        <Button size="small" startIcon={<SettingsIcon />} onClick={onOpenSettings}>
+          {settingsLabel}
+        </Button>
+      </Box>
+      {items.length === 0 ? (
+        <Typography variant="body2" color="text.secondary">
+          {emptyText}
+        </Typography>
+      ) : (
+        <TableContainer>
+          <Table size="small">
+            <TableHead>
+              <TableRow>
+                <TableCell>Что найдено</TableCell>
+                <TableCell>Тип</TableCell>
+                <TableCell>Источник</TableCell>
+                <TableCell>Почему</TableCell>
+              </TableRow>
+            </TableHead>
+            <TableBody>
+              {items.map((item) => (
+                <TableRow key={`${title}-${item.id}`}>
+                  <TableCell>{item.text}</TableCell>
+                  <TableCell>{item.label ?? item.type}</TableCell>
+                  <TableCell>{sourceLabel(item.source)}</TableCell>
+                  <TableCell>{item.explanation ?? fallbackExplanation(item)}</TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </TableContainer>
+      )}
+    </Stack>
   );
 }
 
@@ -3258,6 +3485,72 @@ function collectNonOverlappingSpans(result: TextEnrichmentResult): SpanItem[] {
     }
   }
   return accepted;
+}
+
+function typeLabelMap(result: TextEnrichmentResult): Map<string, string> {
+  const labels = new Map<string, string>();
+  for (const item of [...result.entities, ...result.facts, ...result.domain_signals]) {
+    if (item.label) {
+      labels.set(item.type, item.label.includes(":") ? item.label.split(":", 1)[0] : item.label);
+    }
+  }
+  for (const reason of result.lead_assessment?.reasons ?? []) {
+    labels.set(reason.key, reason.label);
+  }
+  return labels;
+}
+
+function codePointToCodeUnitOffsets(text: string): number[] {
+  const offsets = [0];
+  let codeUnitOffset = 0;
+  for (const char of text) {
+    codeUnitOffset += char.length;
+    offsets.push(codeUnitOffset);
+  }
+  return offsets;
+}
+
+function codePointOffsetToCodeUnit(codePointOffset: number, offsets: number[]): number {
+  if (codePointOffset <= 0) {
+    return 0;
+  }
+  if (codePointOffset >= offsets.length) {
+    return offsets[offsets.length - 1] ?? 0;
+  }
+  return offsets[codePointOffset] ?? 0;
+}
+
+function sourceLabel(source: string): string {
+  if (source === "alias_catalog") {
+    return "Словарь";
+  }
+  if (source === "fact_dependency") {
+    return "Зависимость от факта";
+  }
+  if (source === "yargy") {
+    return "Правило Yargy";
+  }
+  if (source === "natasha") {
+    return "Natasha";
+  }
+  return source;
+}
+
+function fallbackExplanation(item: SpanItem): string {
+  if (item.source === "alias_catalog") {
+    return "Найдено совпадение в alias-словаре активной NLP-конфигурации.";
+  }
+  if (item.source === "fact_dependency") {
+    return "Сигнал построен из уже найденного факта по match.facts.";
+  }
+  if (item.source === "yargy") {
+    return "Сработало точное или лемматическое правило активной NLP-конфигурации.";
+  }
+  return "Источник вернул этот span без дополнительного объяснения.";
+}
+
+function formatSignedWeight(value: number): string {
+  return value >= 0 ? `+${value}` : String(value);
 }
 
 function SpanTable({ items, fallbackLabel }: { items: SpanItem[]; fallbackLabel: string }) {

@@ -129,7 +129,130 @@ test("renders lead assessment from completed enrichment event", async () => {
 
   expect(await screen.findByText("Горячий лид")).toBeInTheDocument();
   expect(screen.getByText("95 баллов")).toBeInTheDocument();
-  expect(screen.getByText("Умный дом / автоматизация")).toBeInTheDocument();
+  expect(screen.getAllByText("Умный дом / автоматизация").length).toBeGreaterThan(0);
+  expect(screen.getByText("Точный расчет оценки лида")).toBeInTheDocument();
+  expect(screen.getByText(/score = max/)).toBeInTheDocument();
+  expect(screen.getByText("Расчет очереди разбора")).toBeInTheDocument();
+  expect(screen.getByText("Прямой лид ПУР")).toBeInTheDocument();
+});
+
+test("renders annotation ranges correctly after emoji", async () => {
+  const fetchMock = vi
+    .fn()
+    .mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        id: "1e310b02-48b9-4652-ab32-e0d2a370d1f9",
+        status: "queued",
+        progress_percent: 0,
+        current_stage: null,
+        stage_index: 0,
+        stage_count: 0,
+        stage_progress_percent: 0,
+        message: "Задача поставлена в очередь",
+        result: null,
+        error: null
+      })
+    })
+    .mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        id: "1e310b02-48b9-4652-ab32-e0d2a370d1f9",
+        status: "completed",
+        progress_percent: 100,
+        current_stage: "metrics",
+        stage_index: 1,
+        stage_count: 1,
+        stage_progress_percent: 100,
+        message: "Готово",
+        result: sampleResultWithEmojiRange(),
+        error: null
+      })
+    });
+  vi.stubGlobal("fetch", fetchMock);
+  render(<App />);
+
+  fireEvent.click(screen.getAllByRole("button", { name: /запустить обогащение/i })[0]);
+  await waitFor(() => expect(FakeEventSource.instances.length).toBe(1));
+  FakeEventSource.instances[0].listeners.get("job_completed")?.(
+    new MessageEvent("job_completed", {
+      data: JSON.stringify({
+        event_type: "job_completed",
+        progress_percent: 100,
+        current_stage: "metrics",
+        stage_index: 1,
+        stage_count: 1,
+        stage_progress_percent: 100,
+        message: "Готово",
+        payload: { result: sampleResultWithEmojiRange() }
+      })
+    })
+  );
+
+  expect((await screen.findAllByText("электрокарниз")).length).toBeGreaterThan(0);
+  expect(screen.queryByText(", электрокарн")).not.toBeInTheDocument();
+});
+
+test("opens settings sections from enrichment overview shortcuts", async () => {
+  const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+    const url = String(input);
+    if (url === "/api/v1/enrichments") {
+      return jsonResponse({
+        id: "1e310b02-48b9-4652-ab32-e0d2a370d1f9",
+        status: "queued",
+        progress_percent: 0,
+        current_stage: null,
+        stage_index: 0,
+        stage_count: 0,
+        stage_progress_percent: 0,
+        message: "Задача поставлена в очередь",
+        result: null,
+        error: null
+      });
+    }
+    if (url === "/api/v1/enrichments/1e310b02-48b9-4652-ab32-e0d2a370d1f9") {
+      return jsonResponse({
+        id: "1e310b02-48b9-4652-ab32-e0d2a370d1f9",
+        status: "completed",
+        progress_percent: 100,
+        current_stage: "metrics",
+        stage_index: 1,
+        stage_count: 1,
+        stage_progress_percent: 100,
+        message: "Готово",
+        result: sampleResult(),
+        error: null
+      });
+    }
+    if (url === "/api/v1/settings") {
+      return jsonResponse(sampleSettingsSnapshot());
+    }
+    throw new Error(`Unhandled fetch: ${url}`);
+  });
+  vi.stubGlobal("fetch", fetchMock);
+  render(<App />);
+
+  fireEvent.click(screen.getAllByRole("button", { name: /запустить обогащение/i })[0]);
+  await waitFor(() => expect(FakeEventSource.instances.length).toBe(1));
+  FakeEventSource.instances[0].listeners.get("job_completed")?.(
+    new MessageEvent("job_completed", {
+      data: JSON.stringify({
+        event_type: "job_completed",
+        progress_percent: 100,
+        current_stage: "metrics",
+        stage_index: 1,
+        stage_count: 1,
+        stage_progress_percent: 100,
+        message: "Готово",
+        payload: { result: sampleResult() }
+      })
+    })
+  );
+
+  fireEvent.click(await screen.findByRole("button", { name: /открыть словари/i }));
+
+  await waitFor(() => expect(fetchMock).toHaveBeenCalledWith("/api/v1/settings"));
+  expect(await screen.findByText("Alias-словари")).toBeInTheDocument();
 });
 
 test("loads settings center on demand", async () => {
@@ -680,6 +803,47 @@ function sampleLeadScoringSettings() {
   };
 }
 
+function sampleSettingsSnapshot() {
+  return {
+    nlp: {
+      pipeline: { stages: [{ name: "segmentation", enabled: true }] },
+      alias_matching: {
+        normalize_separators: true,
+        normalize_yo: true,
+        normalize_latin_confusables: true,
+        fuzzy_enabled: true,
+        fuzzy_min_length: 5,
+        fuzzy_max_distance: 1,
+        fuzzy_long_min_length: 10,
+        fuzzy_long_max_distance: 2,
+        fuzzy_excluded_aliases: []
+      },
+      signals: [],
+      facts: [],
+      vendors: [
+        {
+          key: "aqara",
+          canonical: "Aqara",
+          type: "vendor",
+          aliases: ["Aqara"],
+          fact_types: ["vendor"]
+        }
+      ],
+      protocols: [],
+      devices: [],
+      software: [],
+      lead_scoring: sampleLeadScoringSettings(),
+      source: {
+        type: "postgres",
+        path: "nlp_config_revisions.config",
+        editable: true,
+        revision: 1
+      }
+    },
+    system: []
+  };
+}
+
 function sampleAnalyticsRun() {
   return {
     id: "1ce74b24-4b8a-4f65-ac1d-3649b9e1e226",
@@ -747,11 +911,61 @@ function sampleResult() {
         {
           source: "domain_signal",
           key: "smart_home_automation",
-          label: "smart_home_automation",
+          label: "Умный дом / автоматизация",
           weight: 35,
           matched_texts: ["умный дом"]
         }
-      ]
+      ],
+      review_lane: {
+        key: "direct_pur_lead",
+        label: "Прямой лид ПУР",
+        description: "Есть домен и активное намерение",
+        matched_group_indexes: [0, 1]
+      }
+    }
+  };
+}
+
+function sampleResultWithEmojiRange() {
+  const text =
+    "Коллеги 🙏🏻 Установить zigbee шлюз. Свет, розетки, входной замок, ТВ, кондиционер, электрокарниз.";
+  const start = Array.from(text).indexOf("э");
+  const stop = start + Array.from("электрокарниз").length;
+  return {
+    original_text: text,
+    normalized_text: text,
+    entities: [],
+    facts: [
+      {
+        id: "fact-electric-curtain",
+        text: "электрокарниз",
+        type: "automation_component",
+        label: "Компонент автоматизации",
+        source: "yargy",
+        range: { start, stop }
+      }
+    ],
+    domain_signals: [],
+    tokens: [],
+    syntax: [],
+    metrics: {
+      character_count: Array.from(text).length,
+      sentence_count: 2,
+      token_count: 10,
+      entity_count: 0,
+      fact_count: 1,
+      domain_signal_count: 0
+    },
+    pipeline_trace: [],
+    lead_assessment: {
+      is_lead: false,
+      score: 12,
+      temperature: "none",
+      solution_areas: [],
+      customer_segments: [],
+      intent_signals: [],
+      noise_signals: [],
+      reasons: []
     }
   };
 }

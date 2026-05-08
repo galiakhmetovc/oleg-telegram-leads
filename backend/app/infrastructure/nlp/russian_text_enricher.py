@@ -79,6 +79,11 @@ class RussianTextEnricher:
         self._compiled_signal_rules = self._compile_phrase_rules(config.signals)
         self._compiled_fact_rules = self._compile_phrase_rules(config.facts)
         self._compiled_alias_rules = self._compile_alias_rules(config.aliases)
+        self._lead_scorer = LeadScorer(
+            config.lead_scoring,
+            signal_labels={rule.type: rule.label for rule in config.signals},
+            fact_labels=_fact_type_labels(config),
+        )
 
     def enrich(
         self,
@@ -134,7 +139,7 @@ class RussianTextEnricher:
             mark("domain_signals", 90, "Найдены доменные сигналы-кандидаты")
 
         lead_assessment = (
-            LeadScorer(self._config.lead_scoring).assess(signals=signals, facts=facts)
+            self._lead_scorer.assess(signals=signals, facts=facts)
             if self._config.is_enabled("lead_scoring")
             else None
         )
@@ -244,6 +249,10 @@ class RussianTextEnricher:
                     source="yargy",
                     confidence=rule_config.confidence,
                     color=rule_config.color,
+                    explanation=(
+                        f"Сработало правило доменного сигнала «{rule_config.label}» "
+                        f"({rule_config.type}) через точную или лемматическую фразу."
+                    ),
                 )
                 for start, stop, match_text in self._find_phrase_matches(
                     text,
@@ -264,6 +273,11 @@ class RussianTextEnricher:
                         source="alias_catalog",
                         confidence=rule_config.confidence,
                         color=rule_config.color,
+                        explanation=(
+                            f"Сигнал «{rule_config.label}» зависит от alias "
+                            f"«{alias_match.config.canonical}» из каталога "
+                            f"{alias_match.config.catalog} ({alias_match.config.key})."
+                        ),
                     )
                 )
             for fact in facts:
@@ -279,6 +293,10 @@ class RussianTextEnricher:
                         source="fact_dependency",
                         confidence=rule_config.confidence,
                         color=rule_config.color,
+                        explanation=(
+                            f"Сигнал «{rule_config.label}» зависит от найденного факта "
+                            f"«{fact.label}»: «{fact.text}»."
+                        ),
                     )
                 )
         return _dedupe_signals(signals)
@@ -300,6 +318,10 @@ class RussianTextEnricher:
                     range=TextRange(start=start, stop=stop),
                     source="yargy",
                     confidence=rule_config.confidence,
+                    explanation=(
+                        f"Сработало правило факта «{rule_config.label}» "
+                        f"({rule_config.type}) через точную или лемматическую фразу."
+                    ),
                 )
                 for start, stop, match_text in self._find_phrase_matches(
                     text,
@@ -318,6 +340,11 @@ class RussianTextEnricher:
                     range=TextRange(start=alias_match.start, stop=alias_match.stop),
                     source="alias_catalog",
                     confidence=alias_config.confidence,
+                    explanation=(
+                        f"Найден alias «{alias_config.canonical}» в каталоге "
+                        f"{alias_config.catalog} ({alias_config.key}); он выпускает "
+                        f"fact_type «{fact_type}»."
+                    ),
                 )
                 for offset, fact_type in enumerate(alias_config.fact_types)
             )
@@ -756,6 +783,18 @@ def _alias_fact_label(alias_config: AliasRuleConfig, fact_type: str) -> str:
         "model": "Модель",
     }.get(fact_type, alias_config.kind)
     return f"{prefix}: {alias_config.canonical}"
+
+
+def _fact_type_labels(config: NlpPipelineConfig) -> dict[str, str]:
+    labels = {
+        "vendor": "Вендор",
+        "protocol": "Протокол",
+        "device": "Устройство",
+        "software": "ПО",
+        "model": "Модель",
+    }
+    labels.update({rule.type: rule.label for rule in config.facts})
+    return labels
 
 
 def _rule_matches_alias(rule_config: PhraseRuleConfig, alias_config: AliasRuleConfig) -> bool:

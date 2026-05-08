@@ -378,3 +378,22 @@ Rationale:
 - Analytics can still keep off-domain demand in its own review lane when needed,
   but the default deterministic `is_lead` verdict should require more than
   generic demand language.
+
+## 2026-05-08: Enrichment Overview Must Explain The Calculation
+
+The enrichment overview is the operator's primary debugging surface. It should
+show dictionary entities, facts, domain signals, exact lead-score arithmetic,
+solution-area matches, customer-segment matches, and review-lane selection with
+human labels and generated explanations.
+
+Rationale:
+
+- Operators should not have to reverse-engineer why a text became a lead by
+  jumping between JSON tabs and Settings Center.
+- Scoring is deterministic and configured, so the UI can show the same formula
+  the backend used instead of a prose approximation.
+- Review lanes are also configured rules over extracted arrays; showing the
+  selected lane and matched groups makes queue assignment auditable.
+- Backend ranges are Python Unicode code point offsets. Frontend highlighting
+  must convert them to JavaScript UTF-16 offsets so emoji and similar characters
+  do not shift highlighted source fragments.
