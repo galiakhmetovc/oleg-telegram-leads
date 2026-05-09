@@ -1010,3 +1010,27 @@ Rationale:
 - Domain-only evidence is capped below lead, and intent without a PUR domain is
   capped below lead, so isolated words like `камера` or off-domain requests like
   "где заказать обычный стол" do not become automatic PUR leads.
+
+## 2026-05-09: Workers Use Config Revisions, Not Restarts, For Settings Changes
+
+Operator settings changes are handled through PostgreSQL `nlp_config_revisions`,
+not by restarting workers. A worker resolves the active NLP config revision when
+it claims an enrichment job, records the revision used, and may cache compiled
+pipelines by revision. Jobs already running finish with the revision they
+claimed; later jobs use the new active revision.
+
+Python code changes are separate from settings changes. A running Celery worker
+has already imported Python modules, so development mode should autorestart the
+worker on backend `.py` changes or surface a stale-code warning in System
+Status. Production code changes require a normal deployment/rolling restart.
+
+Rationale:
+
+- Operators must be able to edit dictionaries, facts, signals, weights, caps,
+  and review lanes without pausing Telegram ingestion or Celery workers.
+- Enrichment results need an auditable answer to "which rules produced this?"
+- Existing analytics should not silently change when settings change; old
+  messages are reprocessed only by explicit operator action.
+- Config revisions solve settings freshness, but they do not solve stale Python
+  code in long-running worker processes; that needs runtime status and dev
+  autorestart.
