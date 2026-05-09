@@ -776,6 +776,35 @@ def test_default_config_marks_video_surveillance_apartment_lead_text(
     assert "security" in {item.type for item in result.lead_assessment.solution_areas}
 
 
+def test_default_config_marks_video_surveillance_kit_selection_help_as_lead(
+    default_lead_enricher: RussianTextEnricher,
+) -> None:
+    result = default_lead_enricher.enrich(
+        "Всем Добра!!! Уважаемые специалисты помогите собрать комплект "
+        "видеонаблюдения с определенными хотелками 🙏😞"
+    )
+
+    signal_types = {signal.type for signal in result.domain_signals}
+    fact_types = {fact.type for fact in result.facts}
+
+    assert {
+        "lead_active_intent",
+        "lead_consultation_intent",
+        "lead_research_intent",
+        "pur_video_surveillance",
+    } <= signal_types
+    assert {
+        "domain_video_surveillance",
+        "intent_consultation",
+        "intent_need",
+        "intent_solution_selection",
+    } <= fact_types
+    assert result.lead_assessment is not None
+    assert result.lead_assessment.is_lead is True
+    assert result.lead_assessment.score >= 80
+    assert "security" in {item.type for item in result.lead_assessment.solution_areas}
+
+
 def test_default_config_treats_single_camera_as_one_domain_signal_not_lead(
     default_lead_enricher: RussianTextEnricher,
 ) -> None:

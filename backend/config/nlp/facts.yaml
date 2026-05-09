@@ -11,6 +11,14 @@ facts:
         tokens:
           - normalized: "нужный"
           - normalized: "помощь"
+      - source_text: "помогите собрать"
+        tokens:
+          - normalized: "помочь"
+          - normalized: "собрать"
+      - source_text: "помогите подобрать"
+        tokens:
+          - normalized: "помочь"
+          - normalized: "подобрать"
       - source_text: "требуется"
         tokens:
           - normalized: "требоваться"
@@ -155,6 +163,16 @@ facts:
         tokens:
           - normalized: "помочь"
           - normalized: "решить"
+      - source_text: "помогите собрать комплект"
+        tokens:
+          - normalized: "помочь"
+          - normalized: "собрать"
+          - normalized: "комплект"
+      - source_text: "помогите подобрать комплект"
+        tokens:
+          - normalized: "помочь"
+          - normalized: "подобрать"
+          - normalized: "комплект"
       - source_text: "слышали про такое"
         tokens:
           - normalized: "слышать"
@@ -195,6 +213,24 @@ facts:
         tokens:
           - normalized: "хотеть"
           - normalized: "выбрать"
+      - source_text: "помогите собрать комплект"
+        tokens:
+          - normalized: "помочь"
+          - normalized: "собрать"
+          - normalized: "комплект"
+      - source_text: "собрать комплект"
+        tokens:
+          - normalized: "собрать"
+          - normalized: "комплект"
+      - source_text: "помогите подобрать комплект"
+        tokens:
+          - normalized: "помочь"
+          - normalized: "подобрать"
+          - normalized: "комплект"
+      - source_text: "подобрать комплект"
+        tokens:
+          - normalized: "подобрать"
+          - normalized: "комплект"
       - source_text: "хватит ли"
         tokens:
           - normalized: "хватить"
