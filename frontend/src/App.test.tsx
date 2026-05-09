@@ -1210,9 +1210,17 @@ test("loads analytics dashboard on demand", async () => {
 
   await waitFor(() => expect(fetchMock).toHaveBeenCalledWith("/api/v1/analytics/runs"));
   expect(await screen.findByRole("heading", { name: "Аналитика лидов" })).toBeInTheDocument();
-  expect(screen.getByText((content) => content.replace(/\s/g, "") === "528953")).toBeInTheDocument();
-  expect(screen.getByText((content) => content.replace(/\s/g, "") === "16001")).toBeInTheDocument();
-  expect(screen.getByText("3.03%")).toBeInTheDocument();
+  expect(screen.getByRole("tab", { name: "Кандидаты" })).toHaveAttribute("aria-selected", "true");
+  expect(screen.getByRole("tab", { name: "Обзор" })).toBeInTheDocument();
+  expect(screen.getByRole("tab", { name: "Качество ревью" })).toBeInTheDocument();
+  expect(screen.queryByText("Качество по ревью")).not.toBeInTheDocument();
+  expect(screen.queryByText("Доменные сигналы")).not.toBeInTheDocument();
+  expect(screen.getAllByText("Чат дизайнеров").length).toBeGreaterThan(0);
+  expect(screen.getByText((content) => content.includes("08.05.2026"))).toBeInTheDocument();
+  expect(screen.getByText(/Коллеги, такой запрос от клиента/i)).toBeInTheDocument();
+
+  fireEvent.click(screen.getByRole("tab", { name: "Качество ревью" }));
+  expect(window.location.hash).toMatch(/^#\/analytics\/quality/);
   expect(await screen.findByText("Качество по ревью")).toBeInTheDocument();
   expect(screen.getByText("Размечено: 2")).toBeInTheDocument();
   expect(screen.getByText("FP: 1")).toBeInTheDocument();
@@ -1220,6 +1228,13 @@ test("loads analytics dashboard on demand", async () => {
   expect(screen.getByText("False Positives")).toBeInTheDocument();
   expect(screen.getByText("Добро пожаловать в чат Dahua Support")).toBeInTheDocument();
   expect(screen.getByRole("link", { name: "479071" })).toHaveAttribute("href", "#/analytics/review/fp-1");
+  expect(screen.queryByText(/Коллеги, такой запрос от клиента/i)).not.toBeInTheDocument();
+
+  fireEvent.click(screen.getByRole("tab", { name: "Обзор" }));
+  expect(window.location.hash).toMatch(/^#\/analytics\/overview/);
+  expect(screen.getByText((content) => content.replace(/\s/g, "") === "528953")).toBeInTheDocument();
+  expect(screen.getByText((content) => content.replace(/\s/g, "") === "16001")).toBeInTheDocument();
+  expect(screen.getByText("3.03%")).toBeInTheDocument();
   expect(screen.getByText("Доменные сигналы")).toBeInTheDocument();
   expect(screen.getByText("Очереди разбора")).toBeInTheDocument();
   expect(screen.queryByText("designer_context")).not.toBeInTheDocument();
@@ -1233,17 +1248,19 @@ test("loads analytics dashboard on demand", async () => {
   expect(screen.getByText("designer_context")).toBeInTheDocument();
   fireEvent.click(screen.getByRole("button", { name: "Скрыть блок Доменные сигналы" }));
   await waitFor(() => expect(screen.queryByText("designer_context")).not.toBeInTheDocument());
-  expect(screen.getAllByText("Чат дизайнеров").length).toBeGreaterThan(0);
-  expect(screen.getByText((content) => content.includes("08.05.2026"))).toBeInTheDocument();
-  expect(screen.getByText(/Коллеги, такой запрос от клиента/i)).toBeInTheDocument();
+  expect(screen.queryByText(/Коллеги, такой запрос от клиента/i)).not.toBeInTheDocument();
+
+  fireEvent.click(screen.getByRole("tab", { name: "Кандидаты" }));
+  expect(window.location.hash).toMatch(/^#\/analytics(\?|$)/);
+  expect(await screen.findByText(/Коллеги, такой запрос от клиента/i)).toBeInTheDocument();
   expect(screen.queryByText("Раскрашенное сообщение")).not.toBeInTheDocument();
 
   fireEvent.click(screen.getByRole("button", { name: "Показать разбор сообщения 672162" }));
 
   expect(await screen.findByText("Раскрашенное сообщение")).toBeInTheDocument();
   expect(screen.getByText("Визуальная цепочка анализа")).toBeInTheDocument();
-  expect(screen.getAllByText("Причины score").length).toBeGreaterThan(1);
-  expect(screen.getAllByText("Доменные сигналы").length).toBeGreaterThan(1);
+  expect(screen.getAllByText("Причины score").length).toBeGreaterThan(0);
+  expect(screen.getAllByText("Доменные сигналы").length).toBeGreaterThan(0);
   expect(screen.getByText("Факты")).toBeInTheDocument();
   expect(screen.getAllByText("protocol_gateway").length).toBeGreaterThan(0);
   expect(screen.getAllByText("zigbee шлюз").length).toBeGreaterThan(0);

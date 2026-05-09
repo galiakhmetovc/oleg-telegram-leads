@@ -87,12 +87,17 @@
   `Сомнительно` keeps the automatic verdict. Saving `Шум` or `Не лид` cancels
   unsent pending/sending Telegram notification outbox rows for that source
   message.
+- Analytics is split into focused internal pages: `Кандидаты` is the default
+  operator queue, `Обзор` contains KPIs and aggregate distributions, and
+  `Качество ревью` contains the manual-review quality report. Existing
+  `#/analytics/message/{id}` and `#/analytics/review/{id}` deeplinks remain
+  stable.
 - Operator reviews can now be evaluated in the Analytics UI and from the backend
   CLI with `uv run python -m app.cli.eval_reviews --format markdown|json`. The
   shared report reads `message_reviews` plus persisted enrichment results and
   computes TP/FP/TN/FN, precision, recall, specificity, accuracy, F1, verdict
-  counts, and false-positive/false-negative examples. The web block
-  `Качество по ревью` calls `GET /api/v1/analytics/review-eval` and links FP/FN
+  counts, and false-positive/false-negative examples. The web page
+  `Качество ревью` calls `GET /api/v1/analytics/review-eval` and links FP/FN
   examples to the full Review page. Current dev DB has one reviewed `noise`
   row, and the eval reports it as a false positive with automatic `score=105`.
 - The UI now includes "Логи" and "Статус системы" tabs backed by durable

@@ -869,9 +869,34 @@ Update:
 
 - The report logic now lives in the application layer and is reused by both the
   CLI and `GET /api/v1/analytics/review-eval`.
-- The Analytics page surfaces it as `Качество по ревью`, with reviewed/evaluated
-  counts, precision/recall/F1/accuracy, FP/FN counts, and links from examples to
-  the full Review page.
+- The Analytics section surfaces it on a separate `Качество ревью` page as
+  `Качество по ревью`, with reviewed/evaluated counts,
+  precision/recall/F1/accuracy, FP/FN counts, and links from examples to the
+  full Review page. This keeps the candidate review queue from becoming a
+  mixed dashboard.
+
+## 2026-05-09: Analytics Is Split Into Focused Internal Pages
+
+The Analytics section had become overloaded after adding aggregate blocks,
+candidate filters/table, expanded evidence, and review-quality metrics to the
+same screen. It now has internal pages:
+
+- `Кандидаты` as the default operational queue.
+- `Обзор` for KPIs and aggregate distributions.
+- `Качество ревью` for eval metrics and FP/FN examples.
+
+Existing deeplinks remain stable: `#/analytics/message/{id}` still opens the
+candidate context, and `#/analytics/review/{id}` still opens the dedicated
+Review page.
+
+Rationale:
+
+- Operators reviewing messages need the queue first, without calibration panels
+  pushing it down.
+- Aggregate analytics and eval quality are different tasks and should not
+  compete with the review workflow.
+- Keeping the pages inside the same Analytics section preserves shared run
+  selection, filters, and existing links while reducing visual load.
 
 ## 2026-05-09: App Shell Should Not Own Feature UI
 

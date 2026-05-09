@@ -27,6 +27,8 @@ import {
   TableHead,
   TablePagination,
   TableRow,
+  Tab,
+  Tabs,
   TextField,
   Typography
 } from "@mui/material";
@@ -80,6 +82,7 @@ type AnalyticsReviewPageProps = {
 
 const numberFormatter = new Intl.NumberFormat("ru-RU");
 const candidatePageSize = 50;
+type AnalyticsSection = "candidates" | "overview" | "quality";
 const reviewVerdictOptions: Array<{
   value: AnalyticsReviewVerdict;
   label: string;
@@ -130,6 +133,7 @@ export function AnalyticsPage({ apiBaseUrl, focusMessageId, onTestMessage }: Ana
     initialAnalyticsStateRef.current = parseAnalyticsUrlState(window.location.hash);
   }
   const initialAnalyticsState = initialAnalyticsStateRef.current;
+  const [activeSection, setActiveSection] = useState<AnalyticsSection>(() => parseAnalyticsSection(window.location.hash));
   const [runs, setRuns] = useState<AnalyticsRun[]>([]);
   const [selectedRunId, setSelectedRunId] = useState(initialAnalyticsState.runId);
   const [summary, setSummary] = useState<AnalyticsSummary | null>(null);
@@ -151,7 +155,7 @@ export function AnalyticsPage({ apiBaseUrl, focusMessageId, onTestMessage }: Ana
   const focusedCandidatePanelRef = useRef<HTMLDivElement | null>(null);
   const filterDraftRef = useRef<CandidateFilters>(initialAnalyticsState.filters);
 
-  const loadingData = loadingSummary || loadingCandidates;
+  const loadingData = activeSection === "candidates" ? loadingSummary || loadingCandidates : loadingSummary;
   const selectedRun = useMemo(
     () => runs.find((run) => run.id === selectedRunId) ?? summary?.run ?? null,
     [runs, selectedRunId, summary]
@@ -160,6 +164,16 @@ export function AnalyticsPage({ apiBaseUrl, focusMessageId, onTestMessage }: Ana
     () => Boolean(focusMessageId && candidatePage?.items.some((candidate) => candidate.message_id === focusMessageId)),
     [candidatePage, focusMessageId]
   );
+
+  useEffect(() => {
+    function syncActiveSection() {
+      setActiveSection(parseAnalyticsSection(window.location.hash));
+    }
+
+    syncActiveSection();
+    window.addEventListener("hashchange", syncActiveSection);
+    return () => window.removeEventListener("hashchange", syncActiveSection);
+  }, []);
 
   useEffect(() => {
     let active = true;
@@ -204,6 +218,10 @@ export function AnalyticsPage({ apiBaseUrl, focusMessageId, onTestMessage }: Ana
   }, [apiBaseUrl]);
 
   useEffect(() => {
+    if (activeSection !== "quality") {
+      return;
+    }
+
     let active = true;
     async function loadReviewEval() {
       setLoadingReviewEval(true);
@@ -228,11 +246,14 @@ export function AnalyticsPage({ apiBaseUrl, focusMessageId, onTestMessage }: Ana
     return () => {
       active = false;
     };
-  }, [apiBaseUrl]);
+  }, [activeSection, apiBaseUrl]);
 
   useEffect(() => {
     if (!selectedRunId) {
       setSummary(null);
+      return;
+    }
+    if (activeSection === "quality") {
       return;
     }
 
@@ -264,11 +285,14 @@ export function AnalyticsPage({ apiBaseUrl, focusMessageId, onTestMessage }: Ana
     return () => {
       active = false;
     };
-  }, [apiBaseUrl, selectedRunId]);
+  }, [activeSection, apiBaseUrl, selectedRunId]);
 
   useEffect(() => {
     if (!selectedRunId) {
       setCandidatePage(null);
+      return;
+    }
+    if (activeSection !== "candidates") {
       return;
     }
 
@@ -306,7 +330,7 @@ export function AnalyticsPage({ apiBaseUrl, focusMessageId, onTestMessage }: Ana
     return () => {
       active = false;
     };
-  }, [apiBaseUrl, selectedRunId, appliedFilters, candidateOffset]);
+  }, [activeSection, apiBaseUrl, selectedRunId, appliedFilters, candidateOffset]);
 
   useEffect(() => {
     if (!focusMessageId) {
@@ -373,14 +397,16 @@ export function AnalyticsPage({ apiBaseUrl, focusMessageId, onTestMessage }: Ana
         setAnalyticsError(caught instanceof Error ? caught.message : "Не удалось обновить аналитику");
       })
       .finally(() => setLoadingRuns(false));
-    setLoadingReviewEval(true);
-    setReviewEvalError(null);
-    void fetchReviewEval(apiBaseUrl)
-      .then((nextReviewEval) => setReviewEval(nextReviewEval))
-      .catch((caught) => {
-        setReviewEvalError(caught instanceof Error ? caught.message : "Не удалось обновить качество по ревью");
-      })
-      .finally(() => setLoadingReviewEval(false));
+    if (activeSection === "quality") {
+      setLoadingReviewEval(true);
+      setReviewEvalError(null);
+      void fetchReviewEval(apiBaseUrl)
+        .then((nextReviewEval) => setReviewEval(nextReviewEval))
+        .catch((caught) => {
+          setReviewEvalError(caught instanceof Error ? caught.message : "Не удалось обновить качество по ревью");
+        })
+        .finally(() => setLoadingReviewEval(false));
+    }
   }
 
   function applyFilters(event: FormEvent<HTMLFormElement>) {
@@ -408,7 +434,7 @@ export function AnalyticsPage({ apiBaseUrl, focusMessageId, onTestMessage }: Ana
   function handleSelectedRunChange(nextRunId: string) {
     setCandidateOffset(0);
     setSelectedRunId(nextRunId);
-    replaceAnalyticsListHash(appliedFilters, 0, nextRunId);
+    replaceAnalyticsSectionHash(activeSection, appliedFilters, 0, nextRunId);
   }
 
   function handleCandidatePageChange(nextPage: number) {
@@ -420,6 +446,16 @@ export function AnalyticsPage({ apiBaseUrl, focusMessageId, onTestMessage }: Ana
 
   function toggleSummaryBlock(key: AnalyticsSummaryBlockKey) {
     setExpandedSummaryBlocks((current) => ({ ...current, [key]: !current[key] }));
+  }
+
+  function navigateAnalyticsSection(nextSection: AnalyticsSection) {
+    setActiveSection(nextSection);
+    const nextHash = analyticsSectionHash(nextSection, appliedFilters, candidateOffset, selectedRunId);
+    if (window.location.hash === nextHash) {
+      window.dispatchEvent(new Event("hashchange"));
+      return;
+    }
+    window.location.hash = nextHash;
   }
 
   const runForKpi = summary?.run ?? selectedRun;
@@ -474,6 +510,20 @@ export function AnalyticsPage({ apiBaseUrl, focusMessageId, onTestMessage }: Ana
 
       {analyticsError && <Alert severity="error">{analyticsError}</Alert>}
 
+      <Paper variant="outlined" className="analytics-section">
+        <Tabs
+          value={activeSection}
+          onChange={(_, nextSection) => navigateAnalyticsSection(nextSection as AnalyticsSection)}
+          variant="scrollable"
+          scrollButtons="auto"
+          aria-label="Разделы аналитики"
+        >
+          <Tab value="candidates" label="Кандидаты" />
+          <Tab value="overview" label="Обзор" />
+          <Tab value="quality" label="Качество ревью" />
+        </Tabs>
+      </Paper>
+
       {loadingRuns ? (
         <Paper variant="outlined" className="analytics-section">
           <Stack direction="row" spacing={1.5} sx={{ alignItems: "center" }}>
@@ -489,217 +539,229 @@ export function AnalyticsPage({ apiBaseUrl, focusMessageId, onTestMessage }: Ana
         </Paper>
       ) : (
         <>
-          <Box className="analytics-kpi-grid">
-            <Kpi label="Сообщений" value={formatInteger(runForKpi?.processed ?? 0)} />
-            <Kpi label="Кандидатов" value={formatInteger(runForKpi?.leads ?? 0)} />
-            <Kpi label="Доля кандидатов" value={formatPercent(runForKpi?.candidate_rate ?? 0)} />
-            <Kpi label="Ошибок" value={formatInteger(runForKpi?.failed ?? 0)} />
-          </Box>
+          {activeSection === "overview" && (
+            <>
+              <Box className="analytics-kpi-grid">
+                <Kpi label="Сообщений" value={formatInteger(runForKpi?.processed ?? 0)} />
+                <Kpi label="Кандидатов" value={formatInteger(runForKpi?.leads ?? 0)} />
+                <Kpi label="Доля кандидатов" value={formatPercent(runForKpi?.candidate_rate ?? 0)} />
+                <Kpi label="Ошибок" value={formatInteger(runForKpi?.failed ?? 0)} />
+              </Box>
 
-          <ReviewEvalPanel report={reviewEval} loading={loadingReviewEval} error={reviewEvalError} />
+              {loadingSummary && <LinearProgress />}
 
-          {loadingData && <LinearProgress />}
-
-          {focusedCandidate && !focusedCandidateInCurrentPage && (
-            <Paper ref={focusedCandidatePanelRef} variant="outlined" className="analytics-section candidate-row-focused">
-              <Stack spacing={1.5}>
-                <Stack direction={{ xs: "column", sm: "row" }} spacing={1} sx={{ justifyContent: "space-between" }}>
-                  <SectionTitle
-                    title="Сообщение из ссылки"
-                    subtitle={focusedCandidate.source_chat_title || focusedCandidate.message_id}
-                  />
-                  <Button variant="outlined" onClick={() => onTestMessage?.(focusedCandidate)}>
-                    Проверить
-                  </Button>
-                </Stack>
-                <CandidateDetails candidate={focusedCandidate} />
-              </Stack>
-            </Paper>
+              <Box className="analytics-grid">
+                <CollapsibleAnalyticsSection
+                  title="Score"
+                  subtitle={`${formatInteger(runForKpi?.leads ?? 0)} кандидатов`}
+                  expanded={expandedSummaryBlocks.score}
+                  onToggle={() => toggleSummaryBlock("score")}
+                >
+                  <ScoreBars buckets={scoreBuckets} total={runForKpi?.leads ?? 0} />
+                </CollapsibleAnalyticsSection>
+                <CollapsibleAnalyticsSection
+                  title="Доменные сигналы"
+                  subtitle="Самые частые причины попадания в лиды"
+                  expanded={expandedSummaryBlocks.signals}
+                  onToggle={() => toggleSummaryBlock("signals")}
+                >
+                  <AggregateList items={topSignals} />
+                </CollapsibleAnalyticsSection>
+                <CollapsibleAnalyticsSection
+                  title="Причины score"
+                  subtitle="Что сильнее всего поднимает оценку"
+                  expanded={expandedSummaryBlocks.reasons}
+                  onToggle={() => toggleSummaryBlock("reasons")}
+                >
+                  <AggregateList items={topReasons} />
+                </CollapsibleAnalyticsSection>
+                <CollapsibleAnalyticsSection
+                  title="Сегменты"
+                  subtitle="Зоны решений и типы клиентов"
+                  expanded={expandedSummaryBlocks.segments}
+                  onToggle={() => toggleSummaryBlock("segments")}
+                >
+                  <Stack spacing={1.5}>
+                    <AggregateChips items={solutionAreas} />
+                    <Divider />
+                    <AggregateChips items={customerSegments} />
+                  </Stack>
+                </CollapsibleAnalyticsSection>
+                <CollapsibleAnalyticsSection
+                  title="Очереди разбора"
+                  subtitle="Очереди ручной проверки кандидатов"
+                  expanded={expandedSummaryBlocks.lanes}
+                  onToggle={() => toggleSummaryBlock("lanes")}
+                >
+                  <AggregateList items={reviewLanes} />
+                </CollapsibleAnalyticsSection>
+              </Box>
+            </>
           )}
 
-          <Box className="analytics-grid">
-            <CollapsibleAnalyticsSection
-              title="Score"
-              subtitle={`${formatInteger(candidatePage?.total ?? 0)} в текущей выборке`}
-              expanded={expandedSummaryBlocks.score}
-              onToggle={() => toggleSummaryBlock("score")}
-            >
-              <ScoreBars buckets={scoreBuckets} total={runForKpi?.leads ?? 0} />
-            </CollapsibleAnalyticsSection>
-            <CollapsibleAnalyticsSection
-              title="Доменные сигналы"
-              subtitle="Самые частые причины попадания в лиды"
-              expanded={expandedSummaryBlocks.signals}
-              onToggle={() => toggleSummaryBlock("signals")}
-            >
-              <AggregateList items={topSignals} />
-            </CollapsibleAnalyticsSection>
-            <CollapsibleAnalyticsSection
-              title="Причины score"
-              subtitle="Что сильнее всего поднимает оценку"
-              expanded={expandedSummaryBlocks.reasons}
-              onToggle={() => toggleSummaryBlock("reasons")}
-            >
-              <AggregateList items={topReasons} />
-            </CollapsibleAnalyticsSection>
-            <CollapsibleAnalyticsSection
-              title="Сегменты"
-              subtitle="Зоны решений и типы клиентов"
-              expanded={expandedSummaryBlocks.segments}
-              onToggle={() => toggleSummaryBlock("segments")}
-            >
-              <Stack spacing={1.5}>
-                <AggregateChips items={solutionAreas} />
-                <Divider />
-                <AggregateChips items={customerSegments} />
-              </Stack>
-            </CollapsibleAnalyticsSection>
-            <CollapsibleAnalyticsSection
-              title="Очереди разбора"
-              subtitle="Очереди ручной проверки кандидатов"
-              expanded={expandedSummaryBlocks.lanes}
-              onToggle={() => toggleSummaryBlock("lanes")}
-            >
-              <AggregateList items={reviewLanes} />
-            </CollapsibleAnalyticsSection>
-          </Box>
+          {activeSection === "quality" && (
+            <ReviewEvalPanel report={reviewEval} loading={loadingReviewEval} error={reviewEvalError} />
+          )}
 
-          <Paper variant="outlined" className="analytics-section">
-            <Stack spacing={2}>
-              <Stack direction={{ xs: "column", md: "row" }} spacing={1.5} sx={{ justifyContent: "space-between" }}>
-                <SectionTitle
-                  title="Кандидаты"
-                  subtitle={`${formatInteger(candidatePage?.total ?? 0)} сообщений по текущим фильтрам`}
-                />
-                <Stack
-                  component="form"
-                  className="analytics-filter-row"
-                  direction={{ xs: "column", sm: "row" }}
-                  spacing={1}
-                  onSubmit={applyFilters}
-                >
-                  <TextField
-                    size="small"
-                    label="Min score"
-                    value={filters.scoreMin}
-                    onChange={(event) => updateFilterDraft("scoreMin", event.target.value)}
-                    sx={{ width: { sm: 120 } }}
+          {activeSection === "candidates" && (
+            <>
+              {loadingData && <LinearProgress />}
+
+              {focusedCandidate && !focusedCandidateInCurrentPage && (
+                <Paper ref={focusedCandidatePanelRef} variant="outlined" className="analytics-section candidate-row-focused">
+                  <Stack spacing={1.5}>
+                    <Stack direction={{ xs: "column", sm: "row" }} spacing={1} sx={{ justifyContent: "space-between" }}>
+                      <SectionTitle
+                        title="Сообщение из ссылки"
+                        subtitle={focusedCandidate.source_chat_title || focusedCandidate.message_id}
+                      />
+                      <Button variant="outlined" onClick={() => onTestMessage?.(focusedCandidate)}>
+                        Проверить
+                      </Button>
+                    </Stack>
+                    <CandidateDetails candidate={focusedCandidate} />
+                  </Stack>
+                </Paper>
+              )}
+
+              <Paper variant="outlined" className="analytics-section">
+                <Stack spacing={2}>
+                  <Stack direction={{ xs: "column", md: "row" }} spacing={1.5} sx={{ justifyContent: "space-between" }}>
+                    <SectionTitle
+                      title="Кандидаты"
+                      subtitle={`${formatInteger(candidatePage?.total ?? 0)} сообщений по текущим фильтрам`}
+                    />
+                    <Stack
+                      component="form"
+                      className="analytics-filter-row"
+                      direction={{ xs: "column", sm: "row" }}
+                      spacing={1}
+                      onSubmit={applyFilters}
+                    >
+                      <TextField
+                        size="small"
+                        label="Min score"
+                        value={filters.scoreMin}
+                        onChange={(event) => updateFilterDraft("scoreMin", event.target.value)}
+                        sx={{ width: { sm: 120 } }}
+                      />
+                      <TextField
+                        select
+                        size="small"
+                        label="Температура"
+                        value={filters.temperature}
+                        onChange={(event) => updateSelectFilter("temperature", event.target.value)}
+                        sx={{ width: { sm: 150 } }}
+                      >
+                        <MenuItem value="">Любая</MenuItem>
+                        <MenuItem value="hot">hot</MenuItem>
+                        <MenuItem value="warm">warm</MenuItem>
+                        <MenuItem value="cold">cold</MenuItem>
+                      </TextField>
+                      <AggregateFilterSelect
+                        label="Сигнал"
+                        value={filters.signal}
+                        options={signalOptions}
+                        onChange={(value) => updateSelectFilter("signal", value)}
+                      />
+                      <AggregateFilterSelect
+                        label="Причина score"
+                        value={filters.reason}
+                        options={reasonOptions}
+                        onChange={(value) => updateSelectFilter("reason", value)}
+                      />
+                      <AggregateFilterSelect
+                        label="Зона решения"
+                        value={filters.solutionArea}
+                        options={solutionAreaOptions}
+                        onChange={(value) => updateSelectFilter("solutionArea", value)}
+                      />
+                      <AggregateFilterSelect
+                        label="Сегмент клиента"
+                        value={filters.customerSegment}
+                        options={customerSegmentOptions}
+                        onChange={(value) => updateSelectFilter("customerSegment", value)}
+                      />
+                      <AggregateFilterSelect
+                        label="Очередь"
+                        value={filters.lane}
+                        options={laneOptions}
+                        onChange={(value) => updateSelectFilter("lane", value)}
+                      />
+                      <TextField
+                        select
+                        size="small"
+                        label="Статус ревью"
+                        value={filters.reviewStatus}
+                        onChange={(event) => updateSelectFilter("reviewStatus", event.target.value)}
+                        sx={{ width: { sm: 170 } }}
+                      >
+                        <MenuItem value="">Любой</MenuItem>
+                        <MenuItem value="unreviewed">Без ревью</MenuItem>
+                        <MenuItem value="reviewed">С ревью</MenuItem>
+                      </TextField>
+                      <TextField
+                        select
+                        size="small"
+                        label="Вердикт"
+                        value={filters.verdict}
+                        onChange={(event) => updateSelectFilter("verdict", event.target.value)}
+                        sx={{ width: { sm: 170 } }}
+                      >
+                        <MenuItem value="">Любой</MenuItem>
+                        {reviewVerdictOptions.map((option) => (
+                          <MenuItem key={option.value} value={option.value}>
+                            {option.label}
+                          </MenuItem>
+                        ))}
+                      </TextField>
+                      <AggregateFilterSelect
+                        label="Канал"
+                        value={filters.sourceChatId}
+                        options={sourceChatOptions}
+                        onChange={(value) => updateSelectFilter("sourceChatId", value)}
+                      />
+                      <TextField
+                        size="small"
+                        type="datetime-local"
+                        label="Дата с"
+                        value={filters.receivedFrom}
+                        onChange={(event) => updateFilterDraft("receivedFrom", event.target.value)}
+                        slotProps={{ inputLabel: { shrink: true } }}
+                        sx={{ width: { sm: 190 } }}
+                      />
+                      <TextField
+                        size="small"
+                        type="datetime-local"
+                        label="Дата по"
+                        value={filters.receivedTo}
+                        onChange={(event) => updateFilterDraft("receivedTo", event.target.value)}
+                        slotProps={{ inputLabel: { shrink: true } }}
+                        sx={{ width: { sm: 190 } }}
+                      />
+                      <TextField
+                        size="small"
+                        label="Текст"
+                        value={filters.q}
+                        onChange={(event) => updateFilterDraft("q", event.target.value)}
+                        sx={{ width: { sm: 220 } }}
+                      />
+                      <Button type="submit" variant="contained" startIcon={<FilterAltIcon />} disabled={!selectedRunId}>
+                        Применить
+                      </Button>
+                    </Stack>
+                  </Stack>
+                  <CandidateTable
+                    page={candidatePage}
+                    loading={loadingData}
+                    focusMessageId={focusMessageId}
+                    returnHash={analyticsReturnHash}
+                    onPageChange={handleCandidatePageChange}
                   />
-                  <TextField
-                    select
-                    size="small"
-                    label="Температура"
-                    value={filters.temperature}
-                    onChange={(event) => updateSelectFilter("temperature", event.target.value)}
-                    sx={{ width: { sm: 150 } }}
-                  >
-                    <MenuItem value="">Любая</MenuItem>
-                    <MenuItem value="hot">hot</MenuItem>
-                    <MenuItem value="warm">warm</MenuItem>
-                    <MenuItem value="cold">cold</MenuItem>
-                  </TextField>
-                  <AggregateFilterSelect
-                    label="Сигнал"
-                    value={filters.signal}
-                    options={signalOptions}
-                    onChange={(value) => updateSelectFilter("signal", value)}
-                  />
-                  <AggregateFilterSelect
-                    label="Причина score"
-                    value={filters.reason}
-                    options={reasonOptions}
-                    onChange={(value) => updateSelectFilter("reason", value)}
-                  />
-                  <AggregateFilterSelect
-                    label="Зона решения"
-                    value={filters.solutionArea}
-                    options={solutionAreaOptions}
-                    onChange={(value) => updateSelectFilter("solutionArea", value)}
-                  />
-                  <AggregateFilterSelect
-                    label="Сегмент клиента"
-                    value={filters.customerSegment}
-                    options={customerSegmentOptions}
-                    onChange={(value) => updateSelectFilter("customerSegment", value)}
-                  />
-                  <AggregateFilterSelect
-                    label="Очередь"
-                    value={filters.lane}
-                    options={laneOptions}
-                    onChange={(value) => updateSelectFilter("lane", value)}
-                  />
-                  <TextField
-                    select
-                    size="small"
-                    label="Статус ревью"
-                    value={filters.reviewStatus}
-                    onChange={(event) => updateSelectFilter("reviewStatus", event.target.value)}
-                    sx={{ width: { sm: 170 } }}
-                  >
-                    <MenuItem value="">Любой</MenuItem>
-                    <MenuItem value="unreviewed">Без ревью</MenuItem>
-                    <MenuItem value="reviewed">С ревью</MenuItem>
-                  </TextField>
-                  <TextField
-                    select
-                    size="small"
-                    label="Вердикт"
-                    value={filters.verdict}
-                    onChange={(event) => updateSelectFilter("verdict", event.target.value)}
-                    sx={{ width: { sm: 170 } }}
-                  >
-                    <MenuItem value="">Любой</MenuItem>
-                    {reviewVerdictOptions.map((option) => (
-                      <MenuItem key={option.value} value={option.value}>
-                        {option.label}
-                      </MenuItem>
-                    ))}
-                  </TextField>
-                  <AggregateFilterSelect
-                    label="Канал"
-                    value={filters.sourceChatId}
-                    options={sourceChatOptions}
-                    onChange={(value) => updateSelectFilter("sourceChatId", value)}
-                  />
-                  <TextField
-                    size="small"
-                    type="datetime-local"
-                    label="Дата с"
-                    value={filters.receivedFrom}
-                    onChange={(event) => updateFilterDraft("receivedFrom", event.target.value)}
-                    slotProps={{ inputLabel: { shrink: true } }}
-                    sx={{ width: { sm: 190 } }}
-                  />
-                  <TextField
-                    size="small"
-                    type="datetime-local"
-                    label="Дата по"
-                    value={filters.receivedTo}
-                    onChange={(event) => updateFilterDraft("receivedTo", event.target.value)}
-                    slotProps={{ inputLabel: { shrink: true } }}
-                    sx={{ width: { sm: 190 } }}
-                  />
-                  <TextField
-                    size="small"
-                    label="Текст"
-                    value={filters.q}
-                    onChange={(event) => updateFilterDraft("q", event.target.value)}
-                    sx={{ width: { sm: 220 } }}
-                  />
-                  <Button type="submit" variant="contained" startIcon={<FilterAltIcon />} disabled={!selectedRunId}>
-                    Применить
-                  </Button>
                 </Stack>
-              </Stack>
-              <CandidateTable
-                page={candidatePage}
-                loading={loadingData}
-                focusMessageId={focusMessageId}
-                returnHash={analyticsReturnHash}
-                onPageChange={handleCandidatePageChange}
-              />
-            </Stack>
-          </Paper>
+              </Paper>
+            </>
+          )}
         </>
       )}
     </Box>
@@ -1675,6 +1737,43 @@ function parseAnalyticsUrlState(hash: string): AnalyticsUrlState {
   };
 }
 
+function parseAnalyticsSection(hash: string): AnalyticsSection {
+  const route = stripHashQuery(hash);
+  const parts = route.replace(/^#\/?/, "").split("/").filter(Boolean);
+  if (parts[0] !== "analytics") {
+    return "candidates";
+  }
+  if (parts[1] === "overview") {
+    return "overview";
+  }
+  if (parts[1] === "quality") {
+    return "quality";
+  }
+  return "candidates";
+}
+
+function stripHashQuery(hash: string): string {
+  const queryIndex = hash.indexOf("?");
+  return queryIndex === -1 ? hash : hash.slice(0, queryIndex);
+}
+
+function analyticsSectionHash(
+  section: AnalyticsSection,
+  filters: CandidateFilters,
+  offset: number,
+  runId: string
+): string {
+  if (section === "candidates") {
+    return analyticsListHash(filters, offset, runId);
+  }
+  const params = new URLSearchParams();
+  if (runId) {
+    params.set("run", runId);
+  }
+  const route = section === "overview" ? "overview" : "quality";
+  return `#/analytics/${route}${params.toString() ? `?${params.toString()}` : ""}`;
+}
+
 function analyticsListHash(filters: CandidateFilters, offset: number, runId: string): string {
   const query = candidateQuery(filters, candidatePageSize, offset);
   const params = new URLSearchParams(query);
@@ -1682,6 +1781,18 @@ function analyticsListHash(filters: CandidateFilters, offset: number, runId: str
     params.set("run", runId);
   }
   return `#/analytics${params.toString() ? `?${params.toString()}` : ""}`;
+}
+
+function replaceAnalyticsSectionHash(
+  section: AnalyticsSection,
+  filters: CandidateFilters,
+  offset: number,
+  runId: string
+) {
+  if (!window.location.hash.startsWith("#/analytics")) {
+    return;
+  }
+  window.history.replaceState(null, "", analyticsSectionHash(section, filters, offset, runId));
 }
 
 function replaceAnalyticsListHash(filters: CandidateFilters, offset: number, runId: string) {

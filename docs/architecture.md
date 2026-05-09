@@ -223,7 +223,17 @@ from bursting through all configured chats at once.
 ## Live Analytics And Runtime UI
 
 The Analytics tab opens by default after login and uses a virtual run
-`Telegram live` backed by PostgreSQL runtime tables:
+`Telegram live` backed by PostgreSQL runtime tables. The section is split into
+focused internal pages:
+
+- `Кандидаты`: the default operator queue with filters, pagination, row
+  expansion, Testing links, and Review links.
+- `Обзор`: high-level KPIs and aggregate distributions for score buckets,
+  signals, reasons, solution areas, customer segments, and review lanes.
+- `Качество ревью`: the classifier quality report against saved operator
+  reviews.
+
+Live Analytics uses these tables:
 
 - `telegram_source_messages` provides source text and Telegram ids.
 - `enrichment_jobs` and `enrichment_results` provide processing state and
@@ -246,7 +256,7 @@ The Analytics tab opens by default after login and uses a virtual run
   message text before starting a fresh enrichment job.
 - Candidate list rows include saved `message_reviews` state and can be filtered
   by unreviewed/reviewed status and by operator verdict.
-- The Analytics page includes the `Качество по ревью` block backed by
+- The `Качество ревью` page includes the `Качество по ревью` block backed by
   `GET /api/v1/analytics/review-eval`. It compares saved operator verdicts with
   persisted `lead_assessment.is_lead`, shows precision/recall/F1/accuracy, and
   links false-positive/false-negative examples to the dedicated Review page.

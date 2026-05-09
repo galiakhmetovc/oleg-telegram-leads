@@ -95,16 +95,19 @@ settings detail pages through hash deeplinks like
 text in the SPA context. Scoring thresholds, weights, review lanes, and taxonomy
 mappings are edited through the same PostgreSQL-backed Settings Center.
 
-The default Analytics screen is now the live Telegram review surface. It reads
+The default Analytics section is now the live Telegram review surface. It reads
 from `telegram_source_messages` joined to enrichment jobs/results, not from old
 batch imports. Old batch analytics rows are cleared by migration
 `0008_runtime_analytics_cleanup`; batch tooling remains available for offline
 calibration, but does not feed the operator's default live analytics screen.
-Each row keeps quick Telegram/app/test links and has a dedicated `Ревью` action
-opening `#/analytics/review/{source_message_id}`. Review verdicts and comments
-are stored in `message_reviews`, separate from deterministic enrichment output,
-so operator ground truth can later drive calibration and rule edits. For
-operator workflow the review verdict becomes the effective lead status:
+Analytics is split into focused internal pages: `Кандидаты` for the review
+queue and filters, `Обзор` for KPIs and aggregate distributions, and
+`Качество ревью` for the manual-review eval report. Each candidate row keeps
+quick Telegram/app/test links and has a dedicated `Ревью` action opening
+`#/analytics/review/{source_message_id}`. Review verdicts and comments are
+stored in `message_reviews`, separate from deterministic enrichment output, so
+operator ground truth can later drive calibration and rule edits. For operator
+workflow the review verdict becomes the effective lead status:
 `Шум`/`Не лид` hide the row from lead status even if the automatic score stays
 visible, and they cancel unsent Telegram notification outbox rows for the same
 source message. The candidate list shows saved review chips, supports filters
@@ -261,10 +264,10 @@ revisions; YAML is only the bootstrap default.
 ## Review Eval
 
 Saved operator reviews can be evaluated against deterministic enrichment output.
-The web Analytics page shows the same report in the `Качество по ревью` block:
-reviewed/evaluated counts, TP/FP/TN/FN-derived metrics, and false-positive /
-false-negative examples linked to the message review page. The backend endpoint
-is:
+The web Analytics page `Качество ревью` shows the same report in the
+`Качество по ревью` block: reviewed/evaluated counts, TP/FP/TN/FN-derived
+metrics, and false-positive / false-negative examples linked to the message
+review page. The backend endpoint is:
 
 ```http
 GET /api/v1/analytics/review-eval
