@@ -1,4 +1,5 @@
-from app.cli.eval_reviews import ReviewEvalRow, build_review_eval_report, expected_lead_from_verdict
+from app.application.evaluation.review_eval import ReviewEvalRow
+from app.application.evaluation.review_eval import build_review_eval_report, expected_lead_from_verdict
 
 
 def test_expected_lead_from_verdict_maps_review_ground_truth() -> None:

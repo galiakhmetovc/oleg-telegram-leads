@@ -246,6 +246,10 @@ The Analytics tab opens by default after login and uses a virtual run
   message text before starting a fresh enrichment job.
 - Candidate list rows include saved `message_reviews` state and can be filtered
   by unreviewed/reviewed status and by operator verdict.
+- The Analytics page includes the `Качество по ревью` block backed by
+  `GET /api/v1/analytics/review-eval`. It compares saved operator verdicts with
+  persisted `lead_assessment.is_lead`, shows precision/recall/F1/accuracy, and
+  links false-positive/false-negative examples to the dedicated Review page.
 - The operator default queue is unreviewed candidates. The Review page can save
   the current verdict and then load the next candidate from the same return
   hash, which keeps the review flow sequential without creating a separate
@@ -282,11 +286,13 @@ and time filters in SQL with limit/offset pagination. API page size defaults to
 `PUR_RUNTIME_LOG_MAX_LIMIT=200`.
 
 Operator review labels are the first ground-truth source for deterministic
-classifier evaluation. The CLI `app.cli.eval_reviews` reads `message_reviews`
+classifier evaluation. The shared application report reads `message_reviews`
 joined to Telegram source messages and enrichment results, then computes a
 confusion matrix against `lead_assessment.is_lead`. Verdict `lead` is positive
 ground truth, `not_lead` and `noise` are negative ground truth, and `uncertain`
-is excluded from precision/recall until the operator resolves it.
+is excluded from precision/recall until the operator resolves it. The report is
+available both in the Analytics UI through `/api/v1/analytics/review-eval` and
+from the CLI `app.cli.eval_reviews`.
 
 Disk growth is controlled at the log-like table boundary:
 

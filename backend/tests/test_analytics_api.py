@@ -9,6 +9,7 @@ from app.api.analytics import get_analytics_repository
 from app.domain.analytics import AnalyticsAggregate, AnalyticsCandidate, AnalyticsCandidatePage
 from app.domain.analytics import AnalyticsMessageReview, AnalyticsRun
 from app.domain.analytics import AnalyticsReviewVerdict
+from app.application.evaluation.review_eval import ReviewEvalRow
 from app.main import create_app
 
 
@@ -98,6 +99,30 @@ class ApiInMemoryAnalyticsRepository:
         ]
         self.reviews: dict[str, AnalyticsMessageReview] = {}
         self.cancelled_notifications: list[tuple[str, str]] = []
+        self.review_eval_rows = [
+            ReviewEvalRow(
+                source_message_id="fp",
+                telegram_message_id=479071,
+                source_chat_title="Dahua Support",
+                verdict="noise",
+                predicted_is_lead=True,
+                score=105,
+                temperature="hot",
+                review_lane="domain_interest",
+                text="Добро пожаловать в чат Dahua Support. Бот создан в @botsbaseru",
+            ),
+            ReviewEvalRow(
+                source_message_id="fn",
+                telegram_message_id=479072,
+                source_chat_title="Designers",
+                verdict="lead",
+                predicted_is_lead=False,
+                score=10,
+                temperature="cold",
+                review_lane="other_candidate",
+                text="Нужен подрядчик на видеонаблюдение",
+            ),
+        ]
 
     async def list_runs(self) -> list[AnalyticsRun]:
         return self.runs
@@ -186,6 +211,11 @@ class ApiInMemoryAnalyticsRepository:
         self.cancelled_notifications.append((message_id, reason))
         return 1
 
+    async def list_review_eval_rows(self, *, limit: int | None = None) -> list[ReviewEvalRow]:
+        if limit is None:
+            return self.review_eval_rows
+        return self.review_eval_rows[:limit]
+
 
 def test_lists_analytics_runs() -> None:
     repository = ApiInMemoryAnalyticsRepository()
@@ -217,6 +247,27 @@ def test_returns_analytics_summary_with_grouped_aggregates() -> None:
     assert payload["aggregates"]["score_bucket"][0]["key"] == "35-59"
     assert payload["aggregates"]["signal"][0]["count"] == 3200
     assert payload["aggregates"]["review_lane"][0]["key"] == "direct_pur_lead"
+
+
+def test_returns_review_eval_report() -> None:
+    repository = ApiInMemoryAnalyticsRepository()
+    app = create_app()
+    app.dependency_overrides[get_analytics_repository] = lambda: repository
+    client = TestClient(app)
+
+    response = client.get("/api/v1/analytics/review-eval")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["reviewed"] == 2
+    assert payload["evaluated"] == 2
+    assert payload["false_positive"] == 1
+    assert payload["false_negative"] == 1
+    assert payload["precision"] == 0.0
+    assert payload["recall"] == 0.0
+    assert payload["by_verdict"] == {"noise": 1, "lead": 1}
+    assert payload["false_positives"][0]["source_message_id"] == "fp"
+    assert payload["false_negatives"][0]["source_message_id"] == "fn"
 
 
 def test_lists_analytics_candidates_with_filters() -> None:

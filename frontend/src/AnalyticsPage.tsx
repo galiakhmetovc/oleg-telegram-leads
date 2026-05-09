@@ -54,6 +54,8 @@ import type {
   AnalyticsCandidate,
   AnalyticsReviewVerdict,
   AnalyticsRun,
+  ReviewEvalExample,
+  ReviewEvalReport,
   AnalyticsSummary,
   AnalyticsSummaryBlockKey,
   CandidateFilters,
@@ -131,6 +133,7 @@ export function AnalyticsPage({ apiBaseUrl, focusMessageId, onTestMessage }: Ana
   const [runs, setRuns] = useState<AnalyticsRun[]>([]);
   const [selectedRunId, setSelectedRunId] = useState(initialAnalyticsState.runId);
   const [summary, setSummary] = useState<AnalyticsSummary | null>(null);
+  const [reviewEval, setReviewEval] = useState<ReviewEvalReport | null>(null);
   const [candidatePage, setCandidatePage] = useState<CandidatePage | null>(null);
   const [focusedCandidate, setFocusedCandidate] = useState<AnalyticsCandidate | null>(null);
   const [filters, setFilters] = useState<CandidateFilters>(initialAnalyticsState.filters);
@@ -138,8 +141,10 @@ export function AnalyticsPage({ apiBaseUrl, focusMessageId, onTestMessage }: Ana
   const [candidateOffset, setCandidateOffset] = useState(initialAnalyticsState.offset);
   const [loadingRuns, setLoadingRuns] = useState(true);
   const [loadingSummary, setLoadingSummary] = useState(false);
+  const [loadingReviewEval, setLoadingReviewEval] = useState(false);
   const [loadingCandidates, setLoadingCandidates] = useState(false);
   const [analyticsError, setAnalyticsError] = useState<string | null>(null);
+  const [reviewEvalError, setReviewEvalError] = useState<string | null>(null);
   const [expandedSummaryBlocks, setExpandedSummaryBlocks] = useState<Record<AnalyticsSummaryBlockKey, boolean>>(
     () => ({ ...collapsedSummaryBlocks })
   );
@@ -193,6 +198,33 @@ export function AnalyticsPage({ apiBaseUrl, focusMessageId, onTestMessage }: Ana
     }
 
     void loadRuns();
+    return () => {
+      active = false;
+    };
+  }, [apiBaseUrl]);
+
+  useEffect(() => {
+    let active = true;
+    async function loadReviewEval() {
+      setLoadingReviewEval(true);
+      setReviewEvalError(null);
+      try {
+        const nextReviewEval = await fetchReviewEval(apiBaseUrl);
+        if (active) {
+          setReviewEval(nextReviewEval);
+        }
+      } catch (caught) {
+        if (active) {
+          setReviewEvalError(caught instanceof Error ? caught.message : "Не удалось загрузить качество по ревью");
+        }
+      } finally {
+        if (active) {
+          setLoadingReviewEval(false);
+        }
+      }
+    }
+
+    void loadReviewEval();
     return () => {
       active = false;
     };
@@ -341,6 +373,14 @@ export function AnalyticsPage({ apiBaseUrl, focusMessageId, onTestMessage }: Ana
         setAnalyticsError(caught instanceof Error ? caught.message : "Не удалось обновить аналитику");
       })
       .finally(() => setLoadingRuns(false));
+    setLoadingReviewEval(true);
+    setReviewEvalError(null);
+    void fetchReviewEval(apiBaseUrl)
+      .then((nextReviewEval) => setReviewEval(nextReviewEval))
+      .catch((caught) => {
+        setReviewEvalError(caught instanceof Error ? caught.message : "Не удалось обновить качество по ревью");
+      })
+      .finally(() => setLoadingReviewEval(false));
   }
 
   function applyFilters(event: FormEvent<HTMLFormElement>) {
@@ -455,6 +495,8 @@ export function AnalyticsPage({ apiBaseUrl, focusMessageId, onTestMessage }: Ana
             <Kpi label="Доля кандидатов" value={formatPercent(runForKpi?.candidate_rate ?? 0)} />
             <Kpi label="Ошибок" value={formatInteger(runForKpi?.failed ?? 0)} />
           </Box>
+
+          <ReviewEvalPanel report={reviewEval} loading={loadingReviewEval} error={reviewEvalError} />
 
           {loadingData && <LinearProgress />}
 
@@ -1170,6 +1212,117 @@ function CollapsibleAnalyticsSection({
   );
 }
 
+function ReviewEvalPanel({
+  report,
+  loading,
+  error
+}: {
+  report: ReviewEvalReport | null;
+  loading: boolean;
+  error: string | null;
+}) {
+  return (
+    <Paper variant="outlined" className="analytics-section">
+      <Stack spacing={2}>
+        <Stack direction={{ xs: "column", md: "row" }} spacing={1.5} sx={{ justifyContent: "space-between" }}>
+          <SectionTitle
+            title="Качество по ревью"
+            subtitle="Сравнение ручных вердиктов с автоматической оценкой лида"
+          />
+          {loading && (
+            <Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
+              <CircularProgress size={18} />
+              <Typography variant="body2" color="text.secondary">
+                Обновление
+              </Typography>
+            </Stack>
+          )}
+        </Stack>
+        {error && <Alert severity="warning">{error}</Alert>}
+        {!report ? (
+          <Typography variant="body2" color="text.secondary">
+            Метрики появятся после загрузки ручных ревью.
+          </Typography>
+        ) : (
+          <>
+            <Stack direction="row" spacing={1} useFlexGap sx={{ flexWrap: "wrap" }}>
+              <Chip label={`Размечено: ${formatInteger(report.reviewed)}`} />
+              <Chip label={`В оценке: ${formatInteger(report.evaluated)}`} variant="outlined" />
+              <Chip label={`FP: ${formatInteger(report.false_positive)}`} color={report.false_positive > 0 ? "warning" : "default"} />
+              <Chip label={`FN: ${formatInteger(report.false_negative)}`} color={report.false_negative > 0 ? "error" : "default"} />
+              {report.skipped_uncertain > 0 && <Chip label={`Сомнительно: ${formatInteger(report.skipped_uncertain)}`} />}
+            </Stack>
+            <Box className="analytics-kpi-grid">
+              <Kpi label="Precision" value={formatRatioPercent(report.precision)} />
+              <Kpi label="Recall" value={formatRatioPercent(report.recall)} />
+              <Kpi label="F1" value={formatRatioPercent(report.f1)} />
+              <Kpi label="Accuracy" value={formatRatioPercent(report.accuracy)} />
+            </Box>
+            <Box sx={{ display: "grid", gap: 2, gridTemplateColumns: { xs: "1fr", lg: "1fr 1fr" } }}>
+              <ReviewEvalExamples title="False Positives" examples={report.false_positives} />
+              <ReviewEvalExamples title="False Negatives" examples={report.false_negatives} />
+            </Box>
+          </>
+        )}
+      </Stack>
+    </Paper>
+  );
+}
+
+function ReviewEvalExamples({ title, examples }: { title: string; examples: ReviewEvalExample[] }) {
+  return (
+    <Stack spacing={1}>
+      <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>
+        {title}
+      </Typography>
+      {examples.length === 0 ? (
+        <Typography variant="body2" color="text.secondary">
+          Нет примеров.
+        </Typography>
+      ) : (
+        <TableContainer>
+          <Table size="small">
+            <TableHead>
+              <TableRow>
+                <TableCell>Сообщение</TableCell>
+                <TableCell>Score</TableCell>
+                <TableCell>Текст</TableCell>
+              </TableRow>
+            </TableHead>
+            <TableBody>
+              {examples.map((example) => (
+                <TableRow key={example.source_message_id}>
+                  <TableCell>
+                    <MuiLink href={`#/analytics/review/${encodeURIComponent(example.source_message_id)}`}>
+                      {example.telegram_message_id ?? example.source_message_id}
+                    </MuiLink>
+                    {example.source_chat_title && (
+                      <Typography variant="caption" color="text.secondary" sx={{ display: "block" }}>
+                        {example.source_chat_title}
+                      </Typography>
+                    )}
+                  </TableCell>
+                  <TableCell>
+                    <Stack spacing={0.5}>
+                      <Typography variant="body2">{formatInteger(example.score)}</Typography>
+                      <Typography variant="caption" color="text.secondary">
+                        {example.review_lane || example.temperature}
+                      </Typography>
+                    </Stack>
+                  </TableCell>
+                  <TableCell>
+                    <Typography variant="body2">{example.text_preview}</Typography>
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </TableContainer>
+      )}
+    </Stack>
+  );
+}
+
 function ScoreBars({ buckets, total }: { buckets: AnalyticsAggregate[]; total: number }) {
   const maxCount = Math.max(...buckets.map((bucket) => bucket.count), 1);
 
@@ -1592,12 +1745,24 @@ function candidateQuery(filters: CandidateFilters, limit: number, offset: number
   return params.toString();
 }
 
+async function fetchReviewEval(apiBaseUrl: string): Promise<ReviewEvalReport> {
+  const response = await fetch(`${apiBaseUrl}/api/v1/analytics/review-eval`);
+  if (!response.ok) {
+    throw new Error(`Backend вернул ${response.status}`);
+  }
+  return await response.json() as ReviewEvalReport;
+}
+
 function formatInteger(value: number) {
   return numberFormatter.format(value);
 }
 
 function formatPercent(value: number) {
   return `${value.toFixed(2)}%`;
+}
+
+function formatRatioPercent(value: number) {
+  return `${(value * 100).toFixed(1)}%`;
 }
 
 function datetimeLocalToIso(value: string) {

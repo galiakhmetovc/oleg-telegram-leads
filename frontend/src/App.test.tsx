@@ -1083,6 +1083,9 @@ test("loads analytics dashboard on demand", async () => {
     if (url === "/api/v1/analytics/runs") {
       return jsonResponse({ runs: [run] });
     }
+    if (url === "/api/v1/analytics/review-eval") {
+      return jsonResponse(sampleReviewEvalReport());
+    }
     if (url === `/api/v1/analytics/runs/${run.id}/summary`) {
       return jsonResponse({
         run,
@@ -1210,6 +1213,13 @@ test("loads analytics dashboard on demand", async () => {
   expect(screen.getByText((content) => content.replace(/\s/g, "") === "528953")).toBeInTheDocument();
   expect(screen.getByText((content) => content.replace(/\s/g, "") === "16001")).toBeInTheDocument();
   expect(screen.getByText("3.03%")).toBeInTheDocument();
+  expect(await screen.findByText("Качество по ревью")).toBeInTheDocument();
+  expect(screen.getByText("Размечено: 2")).toBeInTheDocument();
+  expect(screen.getByText("FP: 1")).toBeInTheDocument();
+  expect(screen.getByText("FN: 1")).toBeInTheDocument();
+  expect(screen.getByText("False Positives")).toBeInTheDocument();
+  expect(screen.getByText("Добро пожаловать в чат Dahua Support")).toBeInTheDocument();
+  expect(screen.getByRole("link", { name: "479071" })).toHaveAttribute("href", "#/analytics/review/fp-1");
   expect(screen.getByText("Доменные сигналы")).toBeInTheDocument();
   expect(screen.getByText("Очереди разбора")).toBeInTheDocument();
   expect(screen.queryByText("designer_context")).not.toBeInTheDocument();
@@ -2352,6 +2362,51 @@ function sampleAnalyticsRun() {
     finished_at: "2026-05-07T19:15:43+00:00",
     imported_at: "2026-05-07T19:20:00+00:00",
     summary: {}
+  };
+}
+
+function sampleReviewEvalReport() {
+  return {
+    reviewed: 2,
+    evaluated: 2,
+    skipped_uncertain: 0,
+    skipped_missing_prediction: 0,
+    true_positive: 0,
+    false_positive: 1,
+    true_negative: 0,
+    false_negative: 1,
+    precision: 0,
+    recall: 0,
+    specificity: 0,
+    accuracy: 0,
+    f1: 0,
+    by_verdict: { noise: 1, lead: 1 },
+    false_positives: [
+      {
+        source_message_id: "fp-1",
+        telegram_message_id: 479071,
+        source_chat_title: "Dahua Support",
+        verdict: "noise",
+        predicted_is_lead: true,
+        score: 105,
+        temperature: "hot",
+        review_lane: "domain_interest",
+        text_preview: "Добро пожаловать в чат Dahua Support"
+      }
+    ],
+    false_negatives: [
+      {
+        source_message_id: "fn-1",
+        telegram_message_id: 479072,
+        source_chat_title: "Designers",
+        verdict: "lead",
+        predicted_is_lead: false,
+        score: 10,
+        temperature: "cold",
+        review_lane: "other_candidate",
+        text_preview: "Нужен подрядчик на видеонаблюдение"
+      }
+    ]
   };
 }
 

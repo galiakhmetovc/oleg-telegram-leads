@@ -260,7 +260,17 @@ revisions; YAML is only the bootstrap default.
 
 ## Review Eval
 
-Saved operator reviews can be evaluated against deterministic enrichment output:
+Saved operator reviews can be evaluated against deterministic enrichment output.
+The web Analytics page shows the same report in the `Качество по ревью` block:
+reviewed/evaluated counts, TP/FP/TN/FN-derived metrics, and false-positive /
+false-negative examples linked to the message review page. The backend endpoint
+is:
+
+```http
+GET /api/v1/analytics/review-eval
+```
+
+The CLI renders the same application report for terminal use:
 
 ```bash
 cd backend

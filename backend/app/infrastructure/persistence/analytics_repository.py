@@ -11,6 +11,7 @@ import sqlalchemy as sa
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from app.application.evaluation.review_eval import ReviewEvalRow, review_eval_row_from_mapping
 from app.domain.analytics import AnalyticsAggregate, AnalyticsCandidate, AnalyticsCandidatePage
 from app.domain.analytics import AnalyticsMessageReview
 from app.domain.analytics import AnalyticsReviewVerdict
@@ -138,6 +139,39 @@ class PostgresAnalyticsRepository:
                 .order_by(analytics_aggregates.c.kind.asc(), analytics_aggregates.c.count.desc())
             )
             return [_aggregate_from_row(row) for row in result.mappings()]
+
+    async def list_review_eval_rows(self, *, limit: int | None = None) -> list[ReviewEvalRow]:
+        statement = (
+            sa.select(
+                message_reviews.c.source_message_id,
+                message_reviews.c.verdict,
+                telegram_source_messages.c.telegram_message_id,
+                telegram_source_messages.c.text,
+                telegram_source_chats.c.title.label("source_chat_title"),
+                enrichment_results.c.result,
+            )
+            .select_from(
+                message_reviews.join(
+                    telegram_source_messages,
+                    telegram_source_messages.c.id == message_reviews.c.source_message_id,
+                )
+                .outerjoin(
+                    telegram_source_chats,
+                    telegram_source_chats.c.id == telegram_source_messages.c.source_chat_id,
+                )
+                .outerjoin(
+                    enrichment_results,
+                    enrichment_results.c.job_id == telegram_source_messages.c.enrichment_job_id,
+                )
+            )
+            .order_by(message_reviews.c.updated_at.desc())
+        )
+        if limit is not None:
+            statement = statement.limit(limit)
+
+        async with self._session_factory() as session:
+            result = await session.execute(statement)
+            return [review_eval_row_from_mapping(row._mapping) for row in result]
 
     async def list_candidates(
         self,

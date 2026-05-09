@@ -865,6 +865,14 @@ Rationale:
 - A small CLI is enough while the labeled set is small; the UI can surface the
   same metrics later after the workflow stabilizes.
 
+Update:
+
+- The report logic now lives in the application layer and is reused by both the
+  CLI and `GET /api/v1/analytics/review-eval`.
+- The Analytics page surfaces it as `Качество по ревью`, with reviewed/evaluated
+  counts, precision/recall/F1/accuracy, FP/FN counts, and links from examples to
+  the full Review page.
+
 ## 2026-05-09: App Shell Should Not Own Feature UI
 
 `frontend/src/App.tsx` remains the top-level shell for auth, theme, hash routing,

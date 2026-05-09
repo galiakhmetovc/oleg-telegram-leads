@@ -9,6 +9,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 
+from app.application.evaluation.review_eval import ReviewEvalReport, build_review_eval_report
 from app.db.session import create_sessionmaker
 from app.domain.analytics import AnalyticsAggregate, AnalyticsCandidate, AnalyticsMessageReview
 from app.domain.analytics import AnalyticsReviewVerdict
@@ -103,6 +104,37 @@ class AnalyticsCandidatePageResponse(BaseModel):
     items: list[AnalyticsCandidateResponse]
 
 
+class ReviewEvalExampleResponse(BaseModel):
+    source_message_id: str
+    telegram_message_id: int | None = None
+    source_chat_title: str | None = None
+    verdict: str | None = None
+    predicted_is_lead: bool | None = None
+    score: int
+    temperature: str
+    review_lane: str
+    text_preview: str
+
+
+class ReviewEvalReportResponse(BaseModel):
+    reviewed: int
+    evaluated: int
+    skipped_uncertain: int
+    skipped_missing_prediction: int
+    true_positive: int
+    false_positive: int
+    true_negative: int
+    false_negative: int
+    precision: float
+    recall: float
+    specificity: float
+    accuracy: float
+    f1: float
+    by_verdict: dict[str, int]
+    false_positives: list[ReviewEvalExampleResponse]
+    false_negatives: list[ReviewEvalExampleResponse]
+
+
 def get_analytics_repository() -> PostgresAnalyticsRepository:
     return PostgresAnalyticsRepository(create_sessionmaker())
 
@@ -130,6 +162,16 @@ async def get_analytics_summary(
         grouped[aggregate.kind].append(_aggregate_response(aggregate))
 
     return AnalyticsSummaryResponse(run=_run_response(run), aggregates=dict(grouped))
+
+
+@router.get("/review-eval", response_model=ReviewEvalReportResponse)
+async def get_review_eval_report(
+    limit: int | None = Query(default=None, ge=1, le=10000),
+    examples: int = Query(default=20, ge=0, le=100),
+    repository: PostgresAnalyticsRepository = Depends(get_analytics_repository),
+) -> ReviewEvalReportResponse:
+    rows = await repository.list_review_eval_rows(limit=limit)
+    return _review_eval_response(build_review_eval_report(rows, example_limit=examples))
 
 
 @router.get("/runs/{run_id}/candidates", response_model=AnalyticsCandidatePageResponse)
@@ -244,6 +286,10 @@ def _aggregate_response(aggregate: AnalyticsAggregate) -> AnalyticsAggregateResp
         count=aggregate.count,
         payload=aggregate.payload,
     )
+
+
+def _review_eval_response(report: ReviewEvalReport) -> ReviewEvalReportResponse:
+    return ReviewEvalReportResponse.model_validate(report.to_dict())
 
 
 def _candidate_response(

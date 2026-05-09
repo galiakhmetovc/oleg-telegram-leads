@@ -119,6 +119,37 @@ export type CandidatePage = {
   items: AnalyticsCandidate[];
 };
 
+export type ReviewEvalExample = {
+  source_message_id: string;
+  telegram_message_id?: number | null;
+  source_chat_title?: string | null;
+  verdict?: string | null;
+  predicted_is_lead?: boolean | null;
+  score: number;
+  temperature: string;
+  review_lane: string;
+  text_preview: string;
+};
+
+export type ReviewEvalReport = {
+  reviewed: number;
+  evaluated: number;
+  skipped_uncertain: number;
+  skipped_missing_prediction: number;
+  true_positive: number;
+  false_positive: number;
+  true_negative: number;
+  false_negative: number;
+  precision: number;
+  recall: number;
+  specificity: number;
+  accuracy: number;
+  f1: number;
+  by_verdict: Record<string, number>;
+  false_positives: ReviewEvalExample[];
+  false_negatives: ReviewEvalExample[];
+};
+
 export type CandidateFilters = {
   scoreMin: string;
   temperature: string;
