@@ -587,6 +587,8 @@ The frontend package lives in `frontend/src`.
   temperature/review-lane formatting.
 - `analytics/ReviewConstructor.tsx` owns the Review-page settings constructor:
   target dialogs, selected-fragment payload shaping, and constructor API calls.
+- `runtime/RuntimePages.tsx` owns runtime operator pages: durable logs, system
+  status, and the project documentation browser.
 - `main.tsx` mounts React.
 - `styles.css` holds application-level layout styles.
 

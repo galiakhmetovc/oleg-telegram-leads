@@ -53,6 +53,9 @@
   `frontend/src/analytics/types.ts`. Candidate evidence rendering, settings
   links, highlighting, and candidate label formatting live in
   `frontend/src/analytics/CandidateEvidence.tsx`.
+- Runtime operator pages for "Логи", "Статус системы", and "Проектная
+  документация" now live in `frontend/src/runtime/RuntimePages.tsx` instead of
+  the app shell.
 - Analytics candidate lists now include saved review state, show a review chip
   (`Без ревью`, `Лид`, `Не лид`, `Сомнительно`, `Шум`), and can filter by
   `review_status` and `verdict`. Review links carry a return URL with the

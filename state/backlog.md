@@ -30,6 +30,10 @@
   analytics/runtime surfaces into feature modules and shared evidence/highlight
   components. Analytics types, candidate evidence rendering, and the Review
   constructor have already been extracted into `frontend/src/analytics/`.
+  Runtime logs, system status, and project documentation pages have been
+  extracted into `frontend/src/runtime/RuntimePages.tsx`. Remaining large
+  surfaces are mostly the app shell, Testing/enrichment view, and Settings
+  Center.
 
 ## Later
 
