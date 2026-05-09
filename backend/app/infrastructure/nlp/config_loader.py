@@ -106,6 +106,10 @@ class LeadScoreCapConfig:
     fact_types: list[str] = field(default_factory=list)
     reason_keys: list[str] = field(default_factory=list)
     noise_signal_types: list[str] = field(default_factory=list)
+    excluded_signal_types: list[str] = field(default_factory=list)
+    excluded_fact_types: list[str] = field(default_factory=list)
+    excluded_reason_keys: list[str] = field(default_factory=list)
+    excluded_noise_signal_types: list[str] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -416,6 +420,22 @@ def _parse_score_caps(raw: Any) -> list[LeadScoreCapConfig]:
                 noise_signal_types=_parse_string_list(
                     item.get("noise_signal_types", []),
                     "score_caps.noise_signal_types",
+                ),
+                excluded_signal_types=_parse_string_list(
+                    item.get("excluded_signal_types", []),
+                    "score_caps.excluded_signal_types",
+                ),
+                excluded_fact_types=_parse_string_list(
+                    item.get("excluded_fact_types", []),
+                    "score_caps.excluded_fact_types",
+                ),
+                excluded_reason_keys=_parse_string_list(
+                    item.get("excluded_reason_keys", []),
+                    "score_caps.excluded_reason_keys",
+                ),
+                excluded_noise_signal_types=_parse_string_list(
+                    item.get("excluded_noise_signal_types", []),
+                    "score_caps.excluded_noise_signal_types",
                 ),
             )
         )

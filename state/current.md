@@ -302,9 +302,10 @@
 - Default lead scoring now separates additive score from auto-lead verdict:
   configured `lead_veto_signal_types` force `is_lead=false` and
   `temperature=none` for explicit supply/sale/DIY/price-only or ordinary
-  household or operator noise. Configured `score_caps` can also limit final
+  household/operator noise. Configured `score_caps` can also limit final
   score; bootstrap `hard_noise` caps these clear noise classes at `0` and emits
-  an explanatory `score_cap` reason.
+  an explanatory `score_cap` reason. Operator-created noise is added to that cap
+  by migration/constructor code when the operator noise rule exists.
 - Default device aliases no longer include the broad phrase `модуль управления`
   for relay modules. Migration `0018_lead_scoring_caps` patches the active
   PostgreSQL NLP config with `score_caps` and removes that alias from
@@ -323,6 +324,14 @@
   lead scoring. Migration `0021_signal_fact_dependencies` converts active
   signal alias dependencies to fact dependencies, and new API/config input with
   `match.aliases` is rejected.
+- Default scoring has a `domain_without_intent` score cap. Isolated domain words
+  and aliases such as `Нептун`, `хаб`, `шайба`, `кондиционер`, `умный дом`, and
+  `умный дом от застройщика` stay below the lead threshold unless the same
+  message also has an explicit intent signal. Migrations
+  `0023_domain_intent_guard`, `0024_config_guard_tuning`, and
+  `0025_domain_cap_intent_only` patch the active PostgreSQL config, remove stale
+  `бра`/`треки` smart-lighting patterns, and narrow `PoE`/climate/developer
+  cross-domain dependencies.
 - Review lane matching is centralized in `app.application.review_lanes`. The
   deterministic scorer and analytics import/list code use the same priority,
   exclusion, score/temperature, and match-group logic, including matched group

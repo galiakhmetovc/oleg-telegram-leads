@@ -254,17 +254,6 @@ signals:
       - alias:protocols:thread
       - alias:protocols:wifi
       - alias:protocols:rf_433
-      - alias:protocols:modbus
-      - alias:protocols:rs_485
-      - alias:protocols:mqtt
-      - alias:protocols:poe
-      - alias:protocols:ethernet
-      - alias:protocols:dali
-      - alias:protocols:one_wire
-      - alias:protocols:opentherm
-      - alias:protocols:ebus
-      - alias:protocols:rtsp
-      - alias:protocols:onvif
       - alias:devices:smart_home_hub
       - alias:devices:controller
       - alias:software:home_assistant
@@ -295,7 +284,6 @@ signals:
       - alias:vendors:trassir
       - alias:vendors:ivideon
       - alias:vendors:ajax
-      - alias:protocols:poe
       - alias:protocols:rtsp
       - alias:protocols:onvif
       - alias:devices:camera
@@ -582,6 +570,14 @@ signals:
   - tokens:
     - normalized: умный
     - normalized: дом
+    - normalized: от
+    - normalized: застройщик
+  - tokens:
+    - normalized: от
+    - normalized: застройщик
+  - tokens:
+    - normalized: застройщик
+    - normalized: говорить
 - type: smart_relay_control
   label: Реле / модули умного света
   group: Умный дом и интеграции
@@ -597,18 +593,6 @@ signals:
   - tokens:
     - normalized: подключить
     - normalized: свет
-  - tokens:
-    - normalized: устройство
-    - normalized: с
-    - normalized: пульт
-    - normalized: от
-    - normalized: застройщик
-  - tokens:
-    - normalized: от
-    - normalized: застройщик
-  - tokens:
-    - normalized: застройщик
-    - normalized: говорить
   match:
     facts:
     - types:
@@ -823,8 +807,6 @@ signals:
     - types:
       - alias:vendors:legrand_netatmo
       - alias:vendors:schneider
-      - alias:protocols:poe
-      - alias:devices:smart_socket
       - alias:devices:ups
       - alias:devices:voltage_stabilizer
 - type: climate_control
@@ -894,9 +876,7 @@ signals:
       - alias:protocols:one_wire
       - alias:protocols:opentherm
       - alias:protocols:ebus
-      - alias:devices:smoke_gas_sensor
       - alias:devices:thermostat
-      - alias:devices:climate_control_device
 - type: lighting_control
   label: Управление освещением
   group: Освещение и шторы

@@ -164,6 +164,10 @@ class LeadScoreCapSettings(BaseModel):
     fact_types: list[str] = Field(default_factory=list)
     reason_keys: list[str] = Field(default_factory=list)
     noise_signal_types: list[str] = Field(default_factory=list)
+    excluded_signal_types: list[str] = Field(default_factory=list)
+    excluded_fact_types: list[str] = Field(default_factory=list)
+    excluded_reason_keys: list[str] = Field(default_factory=list)
+    excluded_noise_signal_types: list[str] = Field(default_factory=list)
 
 
 class LeadScoringSettings(BaseModel):

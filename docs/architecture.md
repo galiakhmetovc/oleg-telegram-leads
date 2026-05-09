@@ -473,9 +473,11 @@ Built-in scoring mechanisms beyond summation are still configuration-driven.
 `is_lead=false` and `temperature=none`. `lead_scoring.score_caps` can also cap
 the final score when configured signal/fact/reason/noise evidence appears; the
 cap is emitted as a synthetic `score_cap` reason so the operator still sees why
-the arithmetic changed. The Review constructor keeps `operator_noise` connected
-to the hard-noise cap, because a manual "В шум" action should suppress an
-otherwise overheated score.
+the arithmetic changed. Caps can also define `excluded_*` lists; the default
+`domain_without_intent` cap limits domain-only evidence below the lead threshold
+and is skipped only when explicit intent signals are present. The Review
+constructor keeps `operator_noise` connected to the hard-noise cap, because a
+manual "В шум" action should suppress an otherwise overheated score.
 
 Generic demand signals such as `need`, `provider_search`, `consultation_request`,
 and generic `work_type` facts are intentionally low-weight. They explain intent,

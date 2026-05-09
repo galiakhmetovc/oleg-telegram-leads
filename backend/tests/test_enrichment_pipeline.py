@@ -809,6 +809,37 @@ def test_default_config_does_not_treat_bare_ir_as_climate_or_gateway_lead(
     assert result.lead_assessment.is_lead is False
 
 
+def test_default_config_caps_domain_only_aliases_without_intent(
+    default_lead_enricher: RussianTextEnricher,
+) -> None:
+    for text in ["PoE", "шайба", "кондиционер", "Нептун", "хаб", "умный дом", "умный дом от застройщика"]:
+        result = default_lead_enricher.enrich(text)
+
+        assert result.lead_assessment is not None, text
+        assert result.lead_assessment.is_lead is False, text
+        assert result.lead_assessment.score < 35, text
+        if text != "PoE":
+            assert any(
+                reason.source == "score_cap" and reason.key == "domain_without_intent"
+                for reason in result.lead_assessment.reasons
+            ), text
+
+
+def test_default_config_does_not_emit_cross_domain_signals_for_single_aliases(
+    default_lead_enricher: RussianTextEnricher,
+) -> None:
+    poe_result = default_lead_enricher.enrich("PoE")
+    climate_result = default_lead_enricher.enrich("кондиционер")
+    smart_home_result = default_lead_enricher.enrich("умный дом")
+    developer_result = default_lead_enricher.enrich("умный дом от застройщика")
+
+    assert {signal.type for signal in poe_result.domain_signals} == {"network_infrastructure"}
+    assert "climate_automation" not in {signal.type for signal in climate_result.domain_signals}
+    assert "developer_smart_home_context" not in {signal.type for signal in smart_home_result.domain_signals}
+    assert "developer_smart_home_context" in {signal.type for signal in developer_result.domain_signals}
+    assert "smart_relay_control" not in {signal.type for signal in developer_result.domain_signals}
+
+
 def test_default_config_marks_water_leak_sensor_design_lead_from_artifact(
     default_lead_enricher: RussianTextEnricher,
 ) -> None:

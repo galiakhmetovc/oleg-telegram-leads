@@ -224,7 +224,41 @@ lead_scoring:
         - irrelevant_or_sale
         - price_only
         - ordinary_household_system
-        - operator_noise
+    - key: domain_without_intent
+      label: Домен без явного намерения
+      max_score: 34
+      signal_types:
+        - smart_home_automation
+        - smart_home_platform
+        - protocol_gateway
+        - video_surveillance
+        - smart_relay_control
+        - water_leak_protection
+        - leak_protection
+        - access_control
+        - intercom
+        - security_alarm
+        - gate_automation
+        - power_quality
+        - power_backup
+        - climate_control
+        - climate_automation
+        - lighting_control
+        - lighting_automation
+        - motion_lighting_automation
+        - electric_curtain_control
+        - network_infrastructure
+      excluded_signal_types:
+        - need
+        - customer_intent
+        - provider_search
+        - installation_request
+        - consultation_request
+        - solution_selection_request
+        - education_request
+        - smart_home_value_question
+        - implementation_intent
+        - hot_lead_intent
   review_lanes:
     - key: noise
       label: Шум / нецелевое

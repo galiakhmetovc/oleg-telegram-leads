@@ -90,6 +90,10 @@ export type LeadScoreCapSetting = {
   fact_types: string[];
   reason_keys: string[];
   noise_signal_types: string[];
+  excluded_signal_types: string[];
+  excluded_fact_types: string[];
+  excluded_reason_keys: string[];
+  excluded_noise_signal_types: string[];
 };
 
 export type LeadScoringSettings = {

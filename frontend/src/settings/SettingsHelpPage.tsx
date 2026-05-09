@@ -491,7 +491,12 @@ export function SettingsHelpPage() {
                     <TableRow>
                       <TableCell>score_caps</TableCell>
                       <TableCell>какие совпадения ограничивают итоговый score сверху</TableCell>
-                      <TableCell>например явный шум может поставить `max_score: 0`, чтобы продажа железки не оставалась горячим кандидатом</TableCell>
+                      <TableCell>например явный шум может поставить `max_score: 0`, а доменные слова без намерения - ограничиться ниже порога лида</TableCell>
+                    </TableRow>
+                    <TableRow>
+                      <TableCell>score_caps.excluded_*</TableCell>
+                      <TableCell>условия, при которых cap не применяется</TableCell>
+                      <TableCell>например `domain_without_intent` сработает на `умный дом`, но не сработает на `подскажите умный дом`, потому что найден сигнал намерения</TableCell>
                     </TableRow>
                     <TableRow>
                       <TableCell>review_lanes</TableCell>

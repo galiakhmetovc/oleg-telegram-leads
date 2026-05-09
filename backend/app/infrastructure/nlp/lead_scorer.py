@@ -235,12 +235,22 @@ def _cap_matches(
     fact_matches: dict[str, list[str]],
 ) -> bool:
     reason_keys = {reason.key for reason in reasons}
-    return any(
+    included = any(
         (
             any(signal_type in signal_matches for signal_type in cap.signal_types),
             any(signal_type in signal_matches for signal_type in cap.noise_signal_types),
             any(fact_type in fact_matches for fact_type in cap.fact_types),
             any(reason_key in reason_keys for reason_key in cap.reason_keys),
+        )
+    )
+    if not included:
+        return False
+    return not any(
+        (
+            any(signal_type in signal_matches for signal_type in cap.excluded_signal_types),
+            any(signal_type in signal_matches for signal_type in cap.excluded_noise_signal_types),
+            any(fact_type in fact_matches for fact_type in cap.excluded_fact_types),
+            any(reason_key in reason_keys for reason_key in cap.excluded_reason_keys),
         )
     )
 

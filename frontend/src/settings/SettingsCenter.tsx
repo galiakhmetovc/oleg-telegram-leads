@@ -2180,7 +2180,11 @@ function LeadScoringSettingsEditor({
           signal_types: [],
           fact_types: [],
           reason_keys: [],
-          noise_signal_types: []
+          noise_signal_types: [],
+          excluded_signal_types: [],
+          excluded_fact_types: [],
+          excluded_reason_keys: [],
+          excluded_noise_signal_types: []
         }
       ]
     });
@@ -2399,6 +2403,46 @@ function LeadScoreCapsEditor({
                 label="reason_keys"
                 value={stringListToText(cap.reason_keys)}
                 onChange={(event) => onUpdate(index, { ...cap, reason_keys: textToStringList(event.target.value) })}
+                multiline
+                minRows={3}
+                fullWidth
+              />
+              <TextField
+                label="excluded_signal_types"
+                value={stringListToText(cap.excluded_signal_types)}
+                onChange={(event) =>
+                  onUpdate(index, { ...cap, excluded_signal_types: textToStringList(event.target.value) })
+                }
+                multiline
+                minRows={3}
+                fullWidth
+              />
+              <TextField
+                label="excluded_noise_signal_types"
+                value={stringListToText(cap.excluded_noise_signal_types)}
+                onChange={(event) =>
+                  onUpdate(index, { ...cap, excluded_noise_signal_types: textToStringList(event.target.value) })
+                }
+                multiline
+                minRows={3}
+                fullWidth
+              />
+              <TextField
+                label="excluded_fact_types"
+                value={stringListToText(cap.excluded_fact_types)}
+                onChange={(event) =>
+                  onUpdate(index, { ...cap, excluded_fact_types: textToStringList(event.target.value) })
+                }
+                multiline
+                minRows={3}
+                fullWidth
+              />
+              <TextField
+                label="excluded_reason_keys"
+                value={stringListToText(cap.excluded_reason_keys)}
+                onChange={(event) =>
+                  onUpdate(index, { ...cap, excluded_reason_keys: textToStringList(event.target.value) })
+                }
                 multiline
                 minRows={3}
                 fullWidth

@@ -771,10 +771,11 @@ negative adjustment, so the operator still sees the original positive evidence
 and the exact reason the final score was reduced.
 
 The bootstrap config uses `hard_noise` with `max_score: 0` for explicit
-supply/sale/equipment-only/price-only/ordinary-household/operator noise. The
-broad `модуль управления` relay alias was removed because it misclassified
-generic video software license text such as DSS parking management modules as
-smart-home automation.
+supply/sale/equipment-only/price-only/ordinary-household noise. Operator noise
+is connected to the same cap by the active-DB migration/constructor once the
+operator rule exists. The broad `модуль управления` relay alias was removed
+because it misclassified generic video software license text such as DSS
+parking management modules as smart-home automation.
 
 Rationale:
 
@@ -915,6 +916,31 @@ Rationale:
   under climate equipment instead of using a bare infrared protocol fact.
 - IR remotes can still be represented as devices, but they should not by
   themselves imply a gateway/integration or climate-automation need.
+
+## 2026-05-09: Domain Evidence Without Intent Is Capped Below Lead
+
+The default scoring config now includes `domain_without_intent`, a configurable
+score cap with `max_score: 34`. It matches domain signals but is skipped when an
+explicit intent signal is present: need, customer/provider search, installation,
+consultation, solution selection, education, value question, implementation
+intent, or hot-lead intent.
+
+The cap keeps isolated domain evidence such as `Нептун`, `хаб`, `шайба`,
+`кондиционер`, `умный дом`, or `умный дом от застройщика` out of automatic lead
+status unless the surrounding message contains a request, question, need, or
+action. Active DB migrations also clean stale config that made plain lighting
+fixtures (`бра`, `треки`) behave like smart-lighting automation, narrow
+developer-context matching to actual developer wording, and remove cross-domain
+protocol dependencies such as `PoE -> gateway/video/power`.
+
+Rationale:
+
+- Dictionaries should enrich evidence; they should not turn a lone brand,
+  device, protocol, or solution-area phrase into a Telegram lead notification.
+- The additive score remains auditable: the cap appears as a `score_cap` reason
+  with a negative adjustment instead of hiding the original matches.
+- Signals remain useful for analytics, but auto-lead status now requires domain
+  evidence plus explicit user intent.
 
 ## 2026-05-09: App Shell Should Not Own Feature UI
 

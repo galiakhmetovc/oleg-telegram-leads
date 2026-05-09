@@ -2254,7 +2254,11 @@ function sampleLeadScoringSettings() {
         signal_types: [],
         fact_types: [],
         reason_keys: [],
-        noise_signal_types: ["diy_or_equipment_only"]
+        noise_signal_types: ["diy_or_equipment_only"],
+        excluded_signal_types: [],
+        excluded_fact_types: [],
+        excluded_reason_keys: [],
+        excluded_noise_signal_types: []
       }
     ],
     review_lanes: [

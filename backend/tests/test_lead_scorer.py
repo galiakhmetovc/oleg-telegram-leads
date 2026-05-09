@@ -185,6 +185,51 @@ def test_score_cap_limits_overheated_noise_score() -> None:
     )
 
 
+def test_score_cap_can_be_skipped_by_excluded_signal_type() -> None:
+    scorer = LeadScorer(
+        LeadScoringConfig(
+            lead_threshold=35,
+            warm_threshold=60,
+            hot_threshold=90,
+            signal_weights={"video_surveillance": 40, "provider_search": 12},
+            fact_weights={},
+            solution_areas={},
+            customer_segments={},
+            intent_signal_types=["provider_search"],
+            noise_signal_types=[],
+            score_caps=[
+                LeadScoreCapConfig(
+                    key="domain_without_intent",
+                    label="Домен без намерения",
+                    max_score=34,
+                    signal_types=["video_surveillance"],
+                    excluded_signal_types=["provider_search"],
+                )
+            ],
+        ),
+        signal_labels={
+            "video_surveillance": "Видеонаблюдение",
+            "provider_search": "Поиск исполнителя",
+        },
+    )
+
+    capped = scorer.assess(signals=[_signal("video_surveillance", "камера")], facts=[])
+    with_intent = scorer.assess(
+        signals=[
+            _signal("video_surveillance", "камера"),
+            _signal("provider_search", "где заказать"),
+        ],
+        facts=[],
+    )
+
+    assert capped.score == 34
+    assert capped.is_lead is False
+    assert any(reason.source == "score_cap" and reason.key == "domain_without_intent" for reason in capped.reasons)
+    assert with_intent.score == 52
+    assert with_intent.is_lead is True
+    assert all(reason.key != "domain_without_intent" for reason in with_intent.reasons)
+
+
 def test_uses_human_labels_and_assigns_review_lane() -> None:
     scorer = LeadScorer(
         LeadScoringConfig(
