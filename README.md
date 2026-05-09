@@ -120,6 +120,17 @@ facts, signals, score reasons, taxonomy categories, alias dependencies, weights,
 and review lanes link to Settings detail targets. Left click opens the quick
 settings preview modal; Ctrl/Cmd or middle click follows the full hash deeplink.
 
+Golden examples live in PostgreSQL and are exposed in the separate `Golden`
+operator tab. A golden example stores the source text, optional expected review
+verdict, operator comment, optional Telegram source metadata, and the last
+enrichment job used to check it. The tab loads the example set, lets an operator
+create examples manually, selects one example, and runs it through the same
+Celery/SSE enrichment path as Testing, so all explainability tables and settings
+links are available. Analytics rows and the dedicated Review page include
+`В golden`; it creates the example idempotently from `telegram_source_messages`
+by `source_message_id`, preserving chat title, Telegram message id/link, current
+review verdict, and comment when available.
+
 The Settings Center also exposes Telegram runtime settings:
 
 - Notification routing: Telegram bots, Telegram chats, and routes are separate

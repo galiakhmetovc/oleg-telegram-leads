@@ -155,6 +155,34 @@ message_reviews = sa.Table(
     sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
 )
 
+golden_examples = sa.Table(
+    "golden_examples",
+    metadata,
+    sa.Column("id", UUID(as_uuid=True), primary_key=True),
+    sa.Column("title", sa.Text(), nullable=False),
+    sa.Column("text", sa.Text(), nullable=False),
+    sa.Column("expected_verdict", sa.Text(), nullable=True),
+    sa.Column("comment", sa.Text(), nullable=False),
+    sa.Column(
+        "source_message_id",
+        UUID(as_uuid=True),
+        sa.ForeignKey("telegram_source_messages.id", ondelete="SET NULL"),
+        nullable=True,
+        unique=True,
+    ),
+    sa.Column("source_chat_title", sa.Text(), nullable=True),
+    sa.Column("telegram_message_id", sa.BigInteger(), nullable=True),
+    sa.Column("telegram_message_url", sa.Text(), nullable=True),
+    sa.Column(
+        "last_enrichment_job_id",
+        UUID(as_uuid=True),
+        sa.ForeignKey("enrichment_jobs.id", ondelete="SET NULL"),
+        nullable=True,
+    ),
+    sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
+    sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
+)
+
 notification_outbox = sa.Table(
     "notification_outbox",
     metadata,

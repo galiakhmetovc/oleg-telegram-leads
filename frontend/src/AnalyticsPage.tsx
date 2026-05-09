@@ -6,6 +6,7 @@ import RateReviewIcon from "@mui/icons-material/RateReview";
 import RefreshIcon from "@mui/icons-material/Refresh";
 import SaveIcon from "@mui/icons-material/Save";
 import ScienceIcon from "@mui/icons-material/Science";
+import StarIcon from "@mui/icons-material/Star";
 import {
   Alert,
   Box,
@@ -149,6 +150,9 @@ export function AnalyticsPage({ apiBaseUrl, focusMessageId, onTestMessage }: Ana
   const [loadingCandidates, setLoadingCandidates] = useState(false);
   const [analyticsError, setAnalyticsError] = useState<string | null>(null);
   const [reviewEvalError, setReviewEvalError] = useState<string | null>(null);
+  const [goldenSavingId, setGoldenSavingId] = useState<string | null>(null);
+  const [goldenMessage, setGoldenMessage] = useState<string | null>(null);
+  const [goldenError, setGoldenError] = useState<string | null>(null);
   const [expandedSummaryBlocks, setExpandedSummaryBlocks] = useState<Record<AnalyticsSummaryBlockKey, boolean>>(
     () => ({ ...collapsedSummaryBlocks })
   );
@@ -444,6 +448,26 @@ export function AnalyticsPage({ apiBaseUrl, focusMessageId, onTestMessage }: Ana
     replaceAnalyticsListHash(appliedFilters, nextOffset, selectedRunId);
   }
 
+  async function addCandidateToGolden(candidate: AnalyticsCandidate) {
+    setGoldenSavingId(candidate.message_id);
+    setGoldenMessage(null);
+    setGoldenError(null);
+    try {
+      const response = await fetch(
+        `${apiBaseUrl}/api/v1/golden-examples/from-message/${encodeURIComponent(candidate.message_id)}`,
+        { method: "POST" }
+      );
+      if (!response.ok) {
+        throw new Error(`Backend вернул ${response.status}`);
+      }
+      setGoldenMessage("Сообщение добавлено в golden-примеры");
+    } catch (caught) {
+      setGoldenError(caught instanceof Error ? caught.message : "Не удалось добавить сообщение в golden");
+    } finally {
+      setGoldenSavingId(null);
+    }
+  }
+
   function toggleSummaryBlock(key: AnalyticsSummaryBlockKey) {
     setExpandedSummaryBlocks((current) => ({ ...current, [key]: !current[key] }));
   }
@@ -509,6 +533,8 @@ export function AnalyticsPage({ apiBaseUrl, focusMessageId, onTestMessage }: Ana
       </Paper>
 
       {analyticsError && <Alert severity="error">{analyticsError}</Alert>}
+      {goldenError && <Alert severity="error">{goldenError}</Alert>}
+      {goldenMessage && <Alert severity="success">{goldenMessage}</Alert>}
 
       <Paper variant="outlined" className="analytics-section">
         <Tabs
@@ -617,6 +643,15 @@ export function AnalyticsPage({ apiBaseUrl, focusMessageId, onTestMessage }: Ana
                       />
                       <Button variant="outlined" onClick={() => onTestMessage?.(focusedCandidate)}>
                         Проверить
+                      </Button>
+                      <Button
+                        variant="outlined"
+                        startIcon={<StarIcon />}
+                        disabled={goldenSavingId === focusedCandidate.message_id}
+                        onClick={() => void addCandidateToGolden(focusedCandidate)}
+                        aria-label={`Добавить в golden ${focusedCandidate.message_id}`}
+                      >
+                        В golden
                       </Button>
                     </Stack>
                     <CandidateDetails candidate={focusedCandidate} />
@@ -756,7 +791,9 @@ export function AnalyticsPage({ apiBaseUrl, focusMessageId, onTestMessage }: Ana
                     loading={loadingData}
                     focusMessageId={focusMessageId}
                     returnHash={analyticsReturnHash}
+                    goldenSavingId={goldenSavingId}
                     onPageChange={handleCandidatePageChange}
+                    onAddGolden={(candidate) => void addCandidateToGolden(candidate)}
                   />
                 </Stack>
               </Paper>
@@ -792,6 +829,9 @@ export function AnalyticsReviewPage({
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
   const [nextStatus, setNextStatus] = useState<string | null>(null);
+  const [goldenSaving, setGoldenSaving] = useState(false);
+  const [goldenMessage, setGoldenMessage] = useState<string | null>(null);
+  const [goldenError, setGoldenError] = useState<string | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -1010,6 +1050,29 @@ export function AnalyticsReviewPage({
     }
   }
 
+  async function addCurrentCandidateToGolden() {
+    if (!candidate) {
+      return;
+    }
+    setGoldenSaving(true);
+    setGoldenMessage(null);
+    setGoldenError(null);
+    try {
+      const response = await fetch(
+        `${apiBaseUrl}/api/v1/golden-examples/from-message/${encodeURIComponent(candidate.message_id)}`,
+        { method: "POST" }
+      );
+      if (!response.ok) {
+        throw new Error(`Backend вернул ${response.status}`);
+      }
+      setGoldenMessage("Сообщение добавлено в golden-примеры");
+    } catch (caught) {
+      setGoldenError(caught instanceof Error ? caught.message : "Не удалось добавить сообщение в golden");
+    } finally {
+      setGoldenSaving(false);
+    }
+  }
+
   return (
     <Box className="analytics-shell analytics-review-shell">
       <Paper variant="outlined" className="analytics-header">
@@ -1040,6 +1103,15 @@ export function AnalyticsReviewPage({
               >
                 Проверить
               </Button>
+              <Button
+                variant="outlined"
+                startIcon={goldenSaving ? <CircularProgress size={18} color="inherit" /> : <StarIcon />}
+                disabled={!candidate || goldenSaving}
+                onClick={() => void addCurrentCandidateToGolden()}
+                aria-label={candidate ? `Добавить в golden ${candidate.message_id}` : "Добавить в golden"}
+              >
+                В golden
+              </Button>
             </Stack>
           </Stack>
 
@@ -1052,6 +1124,8 @@ export function AnalyticsReviewPage({
             </Stack>
           )}
           {error && <Alert severity="error">{error}</Alert>}
+          {goldenError && <Alert severity="error">{goldenError}</Alert>}
+          {goldenMessage && <Alert severity="success">{goldenMessage}</Alert>}
           {saved && <Alert severity="success">Ревью сохранено</Alert>}
           {nextStatus && <Alert severity="info">{nextStatus}</Alert>}
         </Stack>
@@ -1514,13 +1588,17 @@ function CandidateTable({
   loading,
   focusMessageId,
   returnHash,
-  onPageChange
+  goldenSavingId,
+  onPageChange,
+  onAddGolden
 }: {
   page: CandidatePage | null;
   loading: boolean;
   focusMessageId?: string | null;
   returnHash: string;
+  goldenSavingId?: string | null;
   onPageChange: (nextPage: number) => void;
+  onAddGolden?: (candidate: AnalyticsCandidate) => void;
 }) {
   const [expandedMessageId, setExpandedMessageId] = useState<string | null>(null);
   const [dismissedFocusMessageId, setDismissedFocusMessageId] = useState<string | null>(null);
@@ -1662,6 +1740,18 @@ function CandidateTable({
                         <Button size="small" href={`#/testing?message_id=${encodeURIComponent(candidate.message_id)}`}>
                           Проверить
                         </Button>
+                        {onAddGolden && (
+                          <Button
+                            size="small"
+                            variant="outlined"
+                            startIcon={<StarIcon fontSize="small" />}
+                            disabled={goldenSavingId === candidate.message_id}
+                            aria-label={`Добавить в golden ${candidate.message_id}`}
+                            onClick={() => onAddGolden(candidate)}
+                          >
+                            В golden
+                          </Button>
+                        )}
                       </Stack>
                     </TableCell>
                   </TableRow>

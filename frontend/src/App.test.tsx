@@ -1267,6 +1267,187 @@ test("loads analytics dashboard on demand", async () => {
   expect(screen.getByText(/Управляемое устройство: розетки/)).toBeInTheDocument();
 });
 
+test("opens golden examples panel and runs selected example", async () => {
+  const exampleId = "7b353178-7b60-4f7e-a329-6f926a8ff1af";
+  const jobId = "6c49f5d2-a5bc-4d7b-bec8-51d8db0606d1";
+  const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    if (url === "/api/v1/settings") {
+      return jsonResponse(sampleSettingsSnapshot());
+    }
+    if (url === "/api/v1/analytics/runs") {
+      return jsonResponse({ runs: [] });
+    }
+    if (url === "/api/v1/golden-examples") {
+      return jsonResponse({
+        total: 1,
+        limit: 50,
+        offset: 0,
+        items: [
+          {
+            id: exampleId,
+            title: "Горячий smart home",
+            text: "Нужен подрядчик на zigbee шлюз",
+            expected_verdict: "lead",
+            comment: "Должен быть лидом",
+            source_message_id: null,
+            source_chat_title: null,
+            telegram_message_id: null,
+            telegram_message_url: null,
+            last_enrichment_job_id: null,
+            created_at: "2026-05-09T12:00:00Z",
+            updated_at: "2026-05-09T12:00:00Z"
+          }
+        ]
+      });
+    }
+    if (url === `/api/v1/golden-examples/${exampleId}/run` && init?.method === "POST") {
+      return jsonResponse({
+        example: {
+          id: exampleId,
+          title: "Горячий smart home",
+          text: "Нужен подрядчик на zigbee шлюз",
+          expected_verdict: "lead",
+          comment: "Должен быть лидом",
+          source_message_id: null,
+          source_chat_title: null,
+          telegram_message_id: null,
+          telegram_message_url: null,
+          last_enrichment_job_id: jobId,
+          created_at: "2026-05-09T12:00:00Z",
+          updated_at: "2026-05-09T12:01:00Z"
+        },
+        job: {
+          id: jobId,
+          status: "queued",
+          progress_percent: 0,
+          current_stage: null,
+          stage_index: 0,
+          stage_count: 0,
+          stage_progress_percent: 0,
+          message: "Задача поставлена в очередь",
+          result: null,
+          error: null
+        }
+      });
+    }
+    if (url === `/api/v1/enrichments/${jobId}`) {
+      return jsonResponse({
+        id: jobId,
+        status: "completed",
+        progress_percent: 100,
+        current_stage: "completed",
+        stage_index: 0,
+        stage_count: 0,
+        stage_progress_percent: 100,
+        message: "Обработка завершена",
+        result: sampleResult(),
+        error: null
+      });
+    }
+    throw new Error(`Unhandled fetch: ${url}`);
+  });
+  vi.stubGlobal("fetch", fetchMock);
+  render(<App />);
+
+  fireEvent.click(screen.getByRole("tab", { name: "Golden" }));
+
+  expect(await screen.findByRole("heading", { name: "Golden-примеры" })).toBeInTheDocument();
+  expect(screen.getByText("Горячий smart home")).toBeInTheDocument();
+  expect(screen.getByLabelText("Произвольный текст")).toHaveValue("Нужен подрядчик на zigbee шлюз");
+
+  fireEvent.click(screen.getByRole("button", { name: /запустить golden/i }));
+
+  await waitFor(() =>
+    expect(fetchMock).toHaveBeenCalledWith(`/api/v1/golden-examples/${exampleId}/run`, { method: "POST" })
+  );
+  await waitFor(() => expect(FakeEventSource.instances[0]?.url).toBe(`/api/v1/enrichments/${jobId}/events`));
+  FakeEventSource.instances[0].listeners.get("job_completed")?.(
+    new MessageEvent("job_completed", {
+      data: JSON.stringify({
+        event_type: "job_completed",
+        progress_percent: 100,
+        current_stage: "completed",
+        stage_index: 0,
+        stage_count: 0,
+        stage_progress_percent: 100,
+        message: "Обработка завершена",
+        payload: { result: sampleResult() }
+      })
+    })
+  );
+
+  expect(await screen.findByRole("table", { name: "Точный расчет оценки лида" })).toBeInTheDocument();
+});
+
+test("adds analytics candidate to golden examples", async () => {
+  const run = sampleAnalyticsRun();
+  const candidate = {
+    message_id: "38aee5ca-2604-4892-bafe-af01172711c2",
+    text: "Подскажите контакты по видеонаблюдению",
+    score: 95,
+    temperature: "hot",
+    review_lane: "direct_pur_lead",
+    solution_areas: [],
+    customer_segments: [],
+    intent_signals: [],
+    noise_signals: [],
+    reasons: [],
+    domain_signals: [],
+    facts: [],
+    received_at: "2026-05-08T12:30:00Z",
+    source_chat_id: "chat-designers",
+    source_chat_title: "Чат дизайнеров"
+  };
+  const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    if (url === "/api/v1/settings") {
+      return jsonResponse(sampleSettingsSnapshot());
+    }
+    if (url === "/api/v1/analytics/runs") {
+      return jsonResponse({ runs: [run] });
+    }
+    if (url === `/api/v1/analytics/runs/${run.id}/summary`) {
+      return jsonResponse({ run, aggregates: {} });
+    }
+    if (url.startsWith(`/api/v1/analytics/runs/${run.id}/candidates`)) {
+      return jsonResponse({ total: 1, limit: 50, offset: 0, items: [candidate] });
+    }
+    if (url === `/api/v1/golden-examples/from-message/${candidate.message_id}` && init?.method === "POST") {
+      return jsonResponse({
+        id: "7b353178-7b60-4f7e-a329-6f926a8ff1af",
+        title: "Чат дизайнеров #",
+        text: candidate.text,
+        expected_verdict: null,
+        comment: "",
+        source_message_id: candidate.message_id,
+        source_chat_title: "Чат дизайнеров",
+        telegram_message_id: null,
+        telegram_message_url: null,
+        last_enrichment_job_id: null,
+        created_at: "2026-05-09T12:00:00Z",
+        updated_at: "2026-05-09T12:00:00Z"
+      });
+    }
+    throw new Error(`Unhandled fetch: ${url}`);
+  });
+  vi.stubGlobal("fetch", fetchMock);
+  render(<App />);
+
+  fireEvent.click(screen.getByRole("tab", { name: /аналитика/i }));
+
+  expect(await screen.findByText("Подскажите контакты по видеонаблюдению")).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: `Добавить в golden ${candidate.message_id}` }));
+
+  await waitFor(() =>
+    expect(fetchMock).toHaveBeenCalledWith(
+      `/api/v1/golden-examples/from-message/${candidate.message_id}`,
+      { method: "POST" }
+    )
+  );
+  expect(await screen.findByText("Сообщение добавлено в golden-примеры")).toBeInTheDocument();
+});
+
 test("opens analytics deeplink by expanding and scrolling to candidate row", async () => {
   window.history.replaceState(null, "", "/#/analytics/message/focus-1");
   const scrollIntoView = vi.fn();

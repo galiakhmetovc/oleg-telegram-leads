@@ -64,7 +64,8 @@ export function TestingWorkspace({
   result,
   activeTab,
   onTabChange,
-  onOpenSettings
+  onOpenSettings,
+  submitLabel = "Запустить обогащение"
 }: {
   inputText: string;
   onInputTextChange: (value: string) => void;
@@ -79,6 +80,7 @@ export function TestingWorkspace({
   activeTab: number;
   onTabChange: (event: SyntheticEvent, value: number) => void;
   onOpenSettings: (section: SettingsSection) => void;
+  submitLabel?: string;
 }) {
   return (
     <Box className="workspace-grid">
@@ -101,7 +103,7 @@ export function TestingWorkspace({
             startIcon={isProcessing ? <CircularProgress size={18} color="inherit" /> : <PlayArrowIcon />}
             disabled={isProcessing}
           >
-            Запустить обогащение
+            {submitLabel}
           </Button>
           {error && (
             <Alert severity="error" icon={<ErrorIcon />}>

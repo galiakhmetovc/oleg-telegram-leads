@@ -45,6 +45,9 @@ Frontend shell boundaries:
 - `frontend/src/enrichment/TestingWorkspace.tsx` owns the Testing page UI:
   text input, enrichment status, result tabs, overview, visual evidence chain,
   and raw span/token/trace tables.
+- `frontend/src/golden/GoldenExamplesPage.tsx` owns the Golden examples panel:
+  curated examples, manual example creation, and golden runs through the same
+  enrichment/SSE UI as Testing.
 - `frontend/src/enrichment/types.ts` owns enrichment DTO types shared by the
   app shell and Testing UI.
 - `frontend/src/settings/types.ts` owns settings DTO types shared by Settings
@@ -85,6 +88,8 @@ The backend package lives in `backend/app`.
 - `app/api/runtime.py` exposes durable logs and system status for the UI.
 - `app/api/project_docs.py` exposes read-only project markdown documentation
   for the operator UI.
+- `app/api/golden_examples.py` exposes the PostgreSQL-backed golden example
+  API and golden run endpoint.
 
 All `/api/v1/*` routes are protected by a signed HttpOnly session cookie in dev
 runtime, except `/api/v1/auth/*`. `/health` stays open for service checks.
@@ -674,6 +679,7 @@ The frontend package lives in `frontend/src`.
   temperature/review-lane formatting.
 - `analytics/ReviewConstructor.tsx` owns the Review-page settings constructor:
   target dialogs, selected-fragment payload shaping, and constructor API calls.
+- `golden/GoldenExamplesPage.tsx` owns the curated golden examples workspace.
 - `runtime/RuntimePages.tsx` owns runtime operator pages: durable logs, system
   status, and the project documentation browser.
 - `main.tsx` mounts React.
@@ -716,6 +722,18 @@ calibration views:
   values instead of free-form operator input;
 - review links preserve queue context, while Testing links use stable
   `#/testing?message_id=...` hashes and reload the Telegram source text.
+- `В golden` creates an idempotent curated example from a live Telegram source
+  message. The separate Golden tab can run those examples through the regular
+  enrichment pipeline and show the same result tabs, score calculation, evidence
+  chain, and settings links as Testing.
+
+Golden examples are stored in table `golden_examples`. The table keeps
+operator-facing fields (`title`, `text`, `expected_verdict`, `comment`) and
+optional provenance (`source_message_id`, `source_chat_title`,
+`telegram_message_id`, `telegram_message_url`). `source_message_id` is unique
+when present, so repeated promotion from the same Analytics/Review message is a
+no-op. `last_enrichment_job_id` points at the most recent check run and is
+updated by `POST /api/v1/golden-examples/{id}/run`.
 
 ## Legacy Reference
 

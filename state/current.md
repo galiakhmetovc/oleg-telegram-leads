@@ -130,6 +130,11 @@
 - The UI now includes "Проектная документация": a read-only file browser for
   repository markdown docs from `README.md`, `AGENTS.md`, `docs/`, `notes/`,
   and `state/`, served through an allowlisted backend API.
+- The UI now includes "Golden": a separate panel for curated golden examples.
+  Examples are stored in PostgreSQL table `golden_examples`, can be created
+  manually or idempotently promoted from Analytics/Review messages, and run
+  through the regular enrichment/SSE pipeline with the same explainability UI as
+  Testing.
 - Telegram FloodWait is treated as a persisted temporary rate limit on the
   userbot account. The userbot stores `cooldown_until` and skips Telegram
   read/resolve calls for that account until the timestamp expires, including

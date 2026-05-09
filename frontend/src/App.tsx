@@ -6,6 +6,7 @@ import InsightsIcon from "@mui/icons-material/Insights";
 import LightModeIcon from "@mui/icons-material/LightMode";
 import LogoutIcon from "@mui/icons-material/Logout";
 import SettingsIcon from "@mui/icons-material/Settings";
+import StarIcon from "@mui/icons-material/Star";
 import {
   Alert,
   AppBar,
@@ -33,6 +34,7 @@ import { FormEvent, SyntheticEvent, startTransition, useCallback, useEffect, use
 import { AnalyticsPage, AnalyticsReviewPage } from "./AnalyticsPage";
 import { LeadAssessmentSummary, TestingWorkspace } from "./enrichment/TestingWorkspace";
 import type { EnrichmentEvent, EnrichmentJob, TextEnrichmentResult } from "./enrichment/types";
+import { GoldenExamplesPage } from "./golden/GoldenExamplesPage";
 import { ProjectDocumentationPage, RuntimeLogsPage, SystemStatusPage } from "./runtime/RuntimePages";
 import { SettingsCenter, SettingsTargetDialog, settingsSectionForTarget } from "./settings/SettingsCenter";
 import { SettingsHelpPage } from "./settings/SettingsHelpPage";
@@ -97,7 +99,9 @@ export function App() {
   const [themeMode, setThemeMode] = useState<AppThemeMode>(() => readStoredThemeMode());
   const theme = useMemo(() => createAppTheme(themeMode), [themeMode]);
   const [authState, setAuthState] = useState<AuthState>({ status: "authenticated", username: null });
-  const [activePage, setActivePage] = useState(() => (parseTestingMessageId(window.location.hash) ? 0 : 1));
+  const [activePage, setActivePage] = useState(() =>
+    parseTestingMessageId(window.location.hash) ? 0 : window.location.hash.startsWith("#/golden") ? 2 : 1
+  );
   const [inputText, setInputText] = useState(
     "Ищем поставщика в Москве. Нужно 20 тонн до 12 мая, желательно с НДС."
   );
@@ -134,7 +138,7 @@ export function App() {
   const result = job?.result ?? null;
   const isProcessing = isSubmitting || job?.status === "queued" || job?.status === "running";
   const isNarrowScreen = useMediaQuery(theme.breakpoints.down("sm"));
-  const currentPage = settingsTarget ? 2 : activePage;
+  const currentPage = settingsTarget ? 3 : activePage;
   const displayedPage = currentPage;
   const visibleSettingsSnapshot = settingsSnapshot ?? settingsSnapshotRef.current;
   const themeToggleLabel = themeMode === "dark" ? "Включить светлую тему" : "Включить темную тему";
@@ -194,9 +198,11 @@ export function App() {
       setAnalyticsMessageId(reviewMessageId ? null : parseAnalyticsMessageId(window.location.hash));
       if (target) {
         setSettingsSection(settingsSectionForTarget(target));
-        setActivePage(2);
+        setActivePage(3);
       } else if (window.location.hash.startsWith("#/analytics")) {
         setActivePage(1);
+      } else if (window.location.hash.startsWith("#/golden")) {
+        setActivePage(2);
       }
     }
     handleHashChange();
@@ -412,7 +418,7 @@ export function App() {
     clearSettingsHash();
     setSettingsTarget(null);
     setSettingsSection(section);
-    setActivePage(2);
+    setActivePage(3);
   }
 
   function handleSettingsSectionChange(section: SettingsSection) {
@@ -477,6 +483,7 @@ export function App() {
             >
               <Tab label="Тестирование" />
               <Tab icon={<InsightsIcon fontSize="small" />} iconPosition="start" label="Аналитика" />
+              <Tab icon={<StarIcon fontSize="small" />} iconPosition="start" label="Golden" />
               <Tab icon={<SettingsIcon fontSize="small" />} iconPosition="start" label="Настройки" />
               <Tab icon={<HelpOutlineIcon fontSize="small" />} iconPosition="start" label="Справка" />
               <Tab icon={<ArticleIcon fontSize="small" />} iconPosition="start" label="Проектная документация" />
@@ -570,6 +577,12 @@ export function App() {
               />
             )
           ) : currentPage === 2 ? (
+            <GoldenExamplesPage
+              apiBaseUrl={apiBaseUrl}
+              isNarrowScreen={isNarrowScreen}
+              onOpenSettings={openSettingsSection}
+            />
+          ) : currentPage === 3 ? (
             <SettingsCenter
               section={settingsSection}
               activeTarget={settingsTarget}
@@ -580,11 +593,11 @@ export function App() {
               onSettingsSnapshotChange={updateSettingsSnapshot}
               onSectionChange={handleSettingsSectionChange}
             />
-          ) : currentPage === 3 ? (
-            <SettingsHelpPage />
           ) : currentPage === 4 ? (
-            <ProjectDocumentationPage apiBaseUrl={apiBaseUrl} />
+            <SettingsHelpPage />
           ) : currentPage === 5 ? (
+            <ProjectDocumentationPage apiBaseUrl={apiBaseUrl} />
+          ) : currentPage === 6 ? (
             <RuntimeLogsPage apiBaseUrl={apiBaseUrl} />
           ) : (
             <SystemStatusPage apiBaseUrl={apiBaseUrl} />
@@ -736,7 +749,8 @@ function clearRoutedHash() {
   if (
     window.location.hash.startsWith("#/settings/") ||
     window.location.hash.startsWith("#/analytics") ||
-    window.location.hash.startsWith("#/testing")
+    window.location.hash.startsWith("#/testing") ||
+    window.location.hash.startsWith("#/golden")
   ) {
     window.history.pushState(null, "", `${window.location.pathname}${window.location.search}`);
   }
