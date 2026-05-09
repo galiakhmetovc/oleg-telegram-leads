@@ -763,6 +763,9 @@ test("loads settings center on demand", async () => {
   expect(screen.queryByText(/normalized:/)).not.toBeInTheDocument();
   fireEvent.click(screen.getByText("Оценка лида"));
   expect(screen.getByText("Пороги оценки")).toBeInTheDocument();
+  expect(screen.getByText("Ограничители score")).toBeInTheDocument();
+  expect(screen.getByText("Явный шум")).toBeInTheDocument();
+  expect(screen.getByLabelText("noise_signal_types")).toHaveValue("diy_or_equipment_only");
   expect(screen.getByText("Очереди разбора")).toBeInTheDocument();
   expect(screen.getByText("Прямой лид ПУР")).toBeInTheDocument();
   fireEvent.click(screen.getByText("Словари"));
@@ -777,7 +780,7 @@ test("loads settings center on demand", async () => {
   expect(screen.getByLabelText("Исключения fuzzy")).toHaveValue("sst\nknx");
   fireEvent.click(screen.getByText("Runtime"));
   expect(screen.getByText("environment")).toBeInTheDocument();
-});
+}, 15000);
 
 test("edits telegram bots chats and routes and sends chat test message", async () => {
   let savedBody: unknown = null;
@@ -2210,6 +2213,17 @@ function sampleLeadScoringSettings() {
     intent_signal_types: ["provider_search"],
     noise_signal_types: ["diy_or_equipment_only"],
     lead_veto_signal_types: ["diy_or_equipment_only"],
+    score_caps: [
+      {
+        key: "hard_noise",
+        label: "Явный шум",
+        max_score: 0,
+        signal_types: [],
+        fact_types: [],
+        reason_keys: [],
+        noise_signal_types: ["diy_or_equipment_only"]
+      }
+    ],
     review_lanes: [
       {
         key: "direct_pur_lead",

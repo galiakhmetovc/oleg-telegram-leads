@@ -283,6 +283,16 @@ type ReviewLaneSetting = {
   excluded_noise_signal_types: string[];
 };
 
+type LeadScoreCapSetting = {
+  key: string;
+  label: string;
+  max_score: number;
+  signal_types: string[];
+  fact_types: string[];
+  reason_keys: string[];
+  noise_signal_types: string[];
+};
+
 type LeadScoringSettings = {
   lead_threshold: number;
   warm_threshold: number;
@@ -294,6 +304,7 @@ type LeadScoringSettings = {
   intent_signal_types: string[];
   noise_signal_types: string[];
   lead_veto_signal_types: string[];
+  score_caps: LeadScoreCapSetting[];
   review_lanes: ReviewLaneSetting[];
 };
 
@@ -3214,6 +3225,8 @@ function SettingsHelpPage() {
                 score = сумма весов всех найденных типов из `weights.signals` и `weights.facts`.
                 Один type учитывается как причина, если он встретился хотя бы один раз; найденные
                 тексты сохраняются в `matched_texts`, чтобы было видно, почему правило сработало.
+                После суммы могут примениться `score_caps`: они добавляют отдельную отрицательную
+                причину `score_cap` и ограничивают итоговую оценку.
               </Alert>
               <TableContainer>
                 <Table size="small">
@@ -3274,6 +3287,11 @@ function SettingsHelpPage() {
                       <TableCell>lead_veto_signal_types</TableCell>
                       <TableCell>какой шум запрещает автолид</TableCell>
                       <TableCell>если найден такой сигнал, score сохраняется для разбора, но `is_lead=false` и температура `none`</TableCell>
+                    </TableRow>
+                    <TableRow>
+                      <TableCell>score_caps</TableCell>
+                      <TableCell>какие совпадения ограничивают итоговый score сверху</TableCell>
+                      <TableCell>например явный шум может поставить `max_score: 0`, чтобы продажа железки не оставалась горячим кандидатом</TableCell>
                     </TableRow>
                     <TableRow>
                       <TableCell>review_lanes</TableCell>
@@ -3837,6 +3855,38 @@ function LeadScoringSettingsEditor({
     });
   }
 
+  function updateScoreCap(index: number, cap: LeadScoreCapSetting) {
+    onUpdate({
+      ...settings,
+      score_caps: settings.score_caps.map((item, itemIndex) => (itemIndex === index ? cap : item))
+    });
+  }
+
+  function addScoreCap() {
+    onUpdate({
+      ...settings,
+      score_caps: [
+        ...settings.score_caps,
+        {
+          key: "new_score_cap",
+          label: "Новый cap score",
+          max_score: 0,
+          signal_types: [],
+          fact_types: [],
+          reason_keys: [],
+          noise_signal_types: []
+        }
+      ]
+    });
+  }
+
+  function removeScoreCap(index: number) {
+    onUpdate({
+      ...settings,
+      score_caps: settings.score_caps.filter((_, itemIndex) => itemIndex !== index)
+    });
+  }
+
   return (
     <Stack spacing={2}>
       <Typography variant="h6">Оценка лида</Typography>
@@ -3942,6 +3992,12 @@ function LeadScoringSettingsEditor({
           fullWidth
         />
       </Box>
+      <LeadScoreCapsEditor
+        caps={settings.score_caps}
+        onAdd={addScoreCap}
+        onRemove={removeScoreCap}
+        onUpdate={updateScoreCap}
+      />
       <ReviewLaneSettingsEditor
         lanes={settings.review_lanes}
         activeTarget={activeTarget?.kind === "review_lane" ? activeTarget : null}
@@ -3949,6 +4005,107 @@ function LeadScoringSettingsEditor({
         onRemove={removeLane}
         onUpdate={updateLane}
       />
+    </Stack>
+  );
+}
+
+function LeadScoreCapsEditor({
+  caps,
+  onAdd,
+  onRemove,
+  onUpdate
+}: {
+  caps: LeadScoreCapSetting[];
+  onAdd: () => void;
+  onRemove: (index: number) => void;
+  onUpdate: (index: number, cap: LeadScoreCapSetting) => void;
+}) {
+  return (
+    <Stack spacing={1}>
+      <Box className="rule-list-header">
+        <Box>
+          <Typography variant="subtitle1" sx={{ fontWeight: 700 }}>
+            Ограничители score
+          </Typography>
+          <Typography variant="body2" color="text.secondary">
+            Cap ограничивает итоговую оценку, когда найден явный шум или другой риск перегрева.
+          </Typography>
+        </Box>
+        <Button size="small" variant="outlined" startIcon={<AddIcon />} onClick={onAdd}>
+          Добавить cap
+        </Button>
+      </Box>
+      {caps.map((cap, index) => (
+        <Paper key={`${cap.key}-${index}`} variant="outlined" sx={{ p: 1.5 }}>
+          <Stack spacing={1.25}>
+            <Box className="rule-list-header">
+              <Typography variant="subtitle2">{cap.label || cap.key}</Typography>
+              <IconButton aria-label={`Удалить cap score: ${cap.key}`} onClick={() => onRemove(index)} size="small">
+                <DeleteIcon fontSize="small" />
+              </IconButton>
+            </Box>
+            <Box className="rule-grid">
+              <TextField
+                label="key"
+                value={cap.key}
+                onChange={(event) => onUpdate(index, { ...cap, key: event.target.value })}
+              />
+              <TextField
+                label="label"
+                value={cap.label}
+                onChange={(event) => onUpdate(index, { ...cap, label: event.target.value })}
+              />
+              <TextField
+                label="max score"
+                type="number"
+                value={cap.max_score}
+                onChange={(event) => onUpdate(index, { ...cap, max_score: numberInput(event.target.value) })}
+              />
+            </Box>
+            <Box className="settings-two-column">
+              <TextField
+                label="signal_types"
+                value={stringListToText(cap.signal_types)}
+                onChange={(event) => onUpdate(index, { ...cap, signal_types: textToStringList(event.target.value) })}
+                multiline
+                minRows={3}
+                fullWidth
+              />
+              <TextField
+                label="noise_signal_types"
+                value={stringListToText(cap.noise_signal_types)}
+                onChange={(event) =>
+                  onUpdate(index, { ...cap, noise_signal_types: textToStringList(event.target.value) })
+                }
+                multiline
+                minRows={3}
+                fullWidth
+              />
+              <TextField
+                label="fact_types"
+                value={stringListToText(cap.fact_types)}
+                onChange={(event) => onUpdate(index, { ...cap, fact_types: textToStringList(event.target.value) })}
+                multiline
+                minRows={3}
+                fullWidth
+              />
+              <TextField
+                label="reason_keys"
+                value={stringListToText(cap.reason_keys)}
+                onChange={(event) => onUpdate(index, { ...cap, reason_keys: textToStringList(event.target.value) })}
+                multiline
+                minRows={3}
+                fullWidth
+              />
+            </Box>
+          </Stack>
+        </Paper>
+      ))}
+      {caps.length === 0 && (
+        <Typography variant="body2" color="text.secondary">
+          Ограничители score не настроены.
+        </Typography>
+      )}
     </Stack>
   );
 }
@@ -6072,7 +6229,10 @@ function reasonTypeTarget(reason: LeadReason, result: TextEnrichmentResult): Set
   return null;
 }
 
-function reasonWeightTarget(reason: LeadReason): SettingsTarget {
+function reasonWeightTarget(reason: LeadReason): SettingsTarget | null {
+  if (reason.source === "score_cap") {
+    return null;
+  }
   return reason.source === "domain_signal"
     ? { kind: "lead_signal_weight", key: reason.key }
     : { kind: "lead_fact_weight", key: reason.key };
@@ -6159,6 +6319,9 @@ function sourceLabel(source: string): string {
   }
   if (source === "fact_dependency") {
     return "Зависимость от факта";
+  }
+  if (source === "score_cap") {
+    return "Ограничитель score";
   }
   if (source === "yargy") {
     return "Правило Yargy";

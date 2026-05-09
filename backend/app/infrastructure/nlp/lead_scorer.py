@@ -5,7 +5,7 @@ from typing import Any
 from app.application.review_lanes import assign_review_lane_from_fields
 from app.domain.enrichment import DomainSignal, ExtractedFact, LeadAssessment, LeadCategory, LeadReason
 from app.domain.enrichment import LeadReviewLane
-from app.infrastructure.nlp.config_loader import LeadScoringConfig
+from app.infrastructure.nlp.config_loader import LeadScoreCapConfig, LeadScoringConfig
 
 
 class LeadScorer:
@@ -29,7 +29,7 @@ class LeadScorer:
         signal_matches = _group_matches(signals)
         fact_matches = _group_matches(facts)
         reasons = self._reasons(signal_matches, fact_matches)
-        score = max(0, sum(reason.weight for reason in reasons))
+        score = self._score(reasons, signal_matches, fact_matches)
         temperature = self._temperature(score)
         solution_areas = self._categories(
             self._config.solution_areas,
@@ -78,6 +78,29 @@ class LeadScorer:
                 noise_signals=noise_signals,
             ),
         )
+
+    def _score(
+        self,
+        reasons: list[LeadReason],
+        signal_matches: dict[str, list[str]],
+        fact_matches: dict[str, list[str]],
+    ) -> int:
+        score = max(0, sum(reason.weight for reason in reasons))
+        for cap in self._config.score_caps:
+            if score <= cap.max_score or not _cap_matches(cap, reasons, signal_matches, fact_matches):
+                continue
+            adjustment = cap.max_score - score
+            reasons.append(
+                LeadReason(
+                    source="score_cap",
+                    key=cap.key,
+                    label=cap.label,
+                    weight=adjustment,
+                    matched_texts=_cap_matched_texts(cap, reasons, signal_matches, fact_matches),
+                )
+            )
+            score = cap.max_score
+        return max(0, score)
 
     def _reasons(
         self,
@@ -203,3 +226,47 @@ def _group_matches(items: list[DomainSignal] | list[ExtractedFact]) -> dict[str,
         if item.text not in grouped[item.type]:
             grouped[item.type].append(item.text)
     return grouped
+
+
+def _cap_matches(
+    cap: LeadScoreCapConfig,
+    reasons: list[LeadReason],
+    signal_matches: dict[str, list[str]],
+    fact_matches: dict[str, list[str]],
+) -> bool:
+    reason_keys = {reason.key for reason in reasons}
+    return any(
+        (
+            any(signal_type in signal_matches for signal_type in cap.signal_types),
+            any(signal_type in signal_matches for signal_type in cap.noise_signal_types),
+            any(fact_type in fact_matches for fact_type in cap.fact_types),
+            any(reason_key in reason_keys for reason_key in cap.reason_keys),
+        )
+    )
+
+
+def _cap_matched_texts(
+    cap: LeadScoreCapConfig,
+    reasons: list[LeadReason],
+    signal_matches: dict[str, list[str]],
+    fact_matches: dict[str, list[str]],
+) -> list[str]:
+    matched: list[str] = []
+    reason_lookup = {reason.key: reason for reason in reasons}
+    for signal_type in [*cap.signal_types, *cap.noise_signal_types]:
+        matched.extend(signal_matches.get(signal_type, []))
+    for fact_type in cap.fact_types:
+        matched.extend(fact_matches.get(fact_type, []))
+    for reason_key in cap.reason_keys:
+        reason = reason_lookup.get(reason_key)
+        if reason is not None:
+            matched.extend(reason.matched_texts)
+    return _unique_non_empty(matched)
+
+
+def _unique_non_empty(values: list[str]) -> list[str]:
+    unique: list[str] = []
+    for value in values:
+        if value and value not in unique:
+            unique.append(value)
+    return unique

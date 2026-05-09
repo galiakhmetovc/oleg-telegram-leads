@@ -262,10 +262,15 @@
   including the typo `Нептуп`, ProW/Profi product mentions, wired leak sensors,
   sensor-trigger monitoring, and smartphone information output.
 - Default lead scoring now separates additive score from auto-lead verdict:
-  configured `lead_veto_signal_types` keep the score visible but force
-  `is_lead=false` and `temperature=none` for explicit supply/sale/DIY/price-only
-  or ordinary household noise. Research/value smart-home questions now route to
-  `research_warm` instead of `direct_pur_lead`.
+  configured `lead_veto_signal_types` force `is_lead=false` and
+  `temperature=none` for explicit supply/sale/DIY/price-only or ordinary
+  household noise. Configured `score_caps` can also limit final score; bootstrap
+  `hard_noise` caps these clear noise classes at `0` and emits an explanatory
+  `score_cap` reason.
+- Default device aliases no longer include the broad phrase `модуль управления`
+  for relay modules. Migration `0018_lead_scoring_caps` patches the active
+  PostgreSQL NLP config with `score_caps` and removes that alias from
+  `devices.relay_module`.
 - Review lane matching is centralized in `app.application.review_lanes`. The
   deterministic scorer and analytics import/list code use the same priority,
   exclusion, score/temperature, and match-group logic, including matched group

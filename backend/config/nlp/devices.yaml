@@ -45,7 +45,6 @@ devices:
       - шайба
       - шайбы
       - умная шайба
-      - модуль управления
     fact_types:
       - automation_component
       - controlled_device

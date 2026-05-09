@@ -214,6 +214,16 @@ lead_scoring:
     - irrelevant_or_sale
     - price_only
     - ordinary_household_system
+  score_caps:
+    - key: hard_noise
+      label: Явный шум / нецелевой запрос
+      max_score: 0
+      noise_signal_types:
+        - supply
+        - diy_or_equipment_only
+        - irrelevant_or_sale
+        - price_only
+        - ordinary_household_system
   review_lanes:
     - key: noise
       label: Шум / нецелевое

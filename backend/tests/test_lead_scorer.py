@@ -1,6 +1,6 @@
 from app.application.review_lanes import ReviewLaneConfig, ReviewLaneMatchGroup
 from app.domain.enrichment import DomainSignal, ExtractedFact, TextRange
-from app.infrastructure.nlp.config_loader import LeadScoringConfig
+from app.infrastructure.nlp.config_loader import LeadScoreCapConfig, LeadScoringConfig
 from app.infrastructure.nlp.lead_scorer import LeadScorer
 
 
@@ -134,6 +134,55 @@ def test_hard_noise_signal_vetoes_positive_domain_score() -> None:
     assert assessment.is_lead is False
     assert assessment.temperature == "none"
     assert [item.type for item in assessment.noise_signals] == ["diy_or_equipment_only"]
+
+
+def test_score_cap_limits_overheated_noise_score() -> None:
+    scorer = LeadScorer(
+        LeadScoringConfig(
+            lead_threshold=35,
+            warm_threshold=55,
+            hot_threshold=80,
+            signal_weights={
+                "video_surveillance": 35,
+                "access_control": 35,
+                "diy_or_equipment_only": -10,
+            },
+            fact_weights={"automation_component": 12},
+            solution_areas={},
+            customer_segments={},
+            intent_signal_types=[],
+            noise_signal_types=["diy_or_equipment_only"],
+            lead_veto_signal_types=["diy_or_equipment_only"],
+            score_caps=[
+                LeadScoreCapConfig(
+                    key="hard_noise",
+                    label="Явный шум",
+                    max_score=0,
+                    signal_types=["diy_or_equipment_only"],
+                )
+            ],
+        )
+    )
+
+    assessment = scorer.assess(
+        signals=[
+            _signal("video_surveillance", "камера Dahua"),
+            _signal("access_control", "Dahua"),
+            _signal("diy_or_equipment_only", "без монтажа"),
+        ],
+        facts=[_fact("automation_component", "камера")],
+    )
+
+    assert assessment.score == 0
+    assert assessment.is_lead is False
+    assert assessment.temperature == "none"
+    assert any(
+        reason.source == "score_cap"
+        and reason.key == "hard_noise"
+        and reason.weight == -72
+        and reason.matched_texts == ["без монтажа"]
+        for reason in assessment.reasons
+    )
 
 
 def test_uses_human_labels_and_assigns_review_lane() -> None:

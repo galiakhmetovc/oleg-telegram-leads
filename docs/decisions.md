@@ -759,6 +759,29 @@ Rationale:
 - Research questions are useful warm signals, but mixing them with direct
   contractor/order requests makes notification and review queues noisy.
 
+## 2026-05-09: Hard Noise Can Cap Lead Score
+
+Lead scoring now supports configurable `lead_scoring.score_caps`. A cap matches
+configured signal, fact, reason, or noise types and limits the final score to
+`max_score`. The scorer records the cap as a synthetic `score_cap` reason with a
+negative adjustment, so the operator still sees the original positive evidence
+and the exact reason the final score was reduced.
+
+The bootstrap config uses `hard_noise` with `max_score: 0` for explicit
+supply/sale/equipment-only/price-only/ordinary-household noise. The broad
+`модуль управления` relay alias was removed because it misclassified generic
+video software license text such as DSS parking management modules as smart-home
+automation.
+
+Rationale:
+
+- Veto alone stopped notifications but still left obvious noise with hot-looking
+  scores in analytics.
+- Score caps keep the review queue closer to operator intuition while preserving
+  an auditable `score_cap` adjustment row.
+- Overbroad alias spellings should be removed from dictionaries instead of
+  compensated by code.
+
 ## 2026-05-08: Live Analytics Candidate Lists Are SQL-Backed
 
 The live Telegram analytics run still uses PostgreSQL runtime tables as the

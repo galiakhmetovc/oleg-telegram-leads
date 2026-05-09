@@ -406,9 +406,12 @@ The `lead_scoring` stage runs after Yargy fact and signal extraction. It does no
 contain hardcoded PUR business rules: the code sums configured signal/fact
 weights, applies configured thresholds, maps matched signal/fact types to
 solution areas and customer segments, and returns explanatory reasons.
-The only built-in scoring mechanism beyond summation is a configurable veto:
-`lead_scoring.lead_veto_signal_types` names noise signal types that preserve the
-visible score for review, but force `is_lead=false` and `temperature=none`.
+Built-in scoring mechanisms beyond summation are still configuration-driven.
+`lead_scoring.lead_veto_signal_types` names noise signal types that force
+`is_lead=false` and `temperature=none`. `lead_scoring.score_caps` can also cap
+the final score when configured signal/fact/reason/noise evidence appears; the
+cap is emitted as a synthetic `score_cap` reason so the operator still sees why
+the arithmetic changed.
 
 Generic demand signals such as `need`, `provider_search`, `consultation_request`,
 and generic `work_type` facts are intentionally low-weight. They explain intent,
@@ -422,11 +425,12 @@ enabled:
 
 - `is_lead`: whether the score reaches the configured lead threshold and no
   configured lead-veto noise signal was found.
-- `score`: non-negative deterministic score.
+- `score`: non-negative deterministic score after configured score caps.
 - `temperature`: `none`, `cold`, `warm`, or `hot`.
 - `solution_areas` and `customer_segments`: configured taxonomy matches.
 - `intent_signals` and `noise_signals`: configured positive/noise categories.
-- `reasons`: score contributions with source, key, weight, and matched texts.
+- `reasons`: score contributions with source, key, weight, and matched texts,
+  including any `score_cap` adjustment.
 - `review_lane`: the first configured review lane that matches the same
   extracted arrays, score, and temperature; it includes the lane label,
   description, and matched match-group indexes.

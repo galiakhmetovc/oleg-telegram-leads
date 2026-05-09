@@ -18,11 +18,12 @@
   telemetry, bulk review actions, and review verdict/tag aggregates in
   Analytics. Constructor flows for dictionary/fact/domain-signal/noise targets
   already write PostgreSQL NLP revisions.
-- Scoring quality calibration from review labels: add hard veto/caps for clear
-  noise such as sale/equipment-only/DIY, reduce vendor-only overheating,
-  separate direct PUR leads from research/value questions, and add negative
-  eval cases for vendor sale, ordinary HVAC, ordinary intercom, PoE/UPS purchase,
-  and equipment-only requests.
+- Scoring quality calibration from review labels: continue reducing
+  vendor-only overheating, refine the split between direct PUR leads and
+  research/value questions, and grow the negative eval set. Hard noise score
+  caps and first negative regressions for vendor sale, ordinary HVAC, ordinary
+  intercom, PoE/UPS purchase, equipment-only requests, and DSS parking software
+  license text are in place.
 - Telegram ingestion transactional completeness: close the remaining rare crash
   window between creating a blocked enrichment job and saving the source message,
   either with a combined repository unit of work or stale blocked-task cleanup.

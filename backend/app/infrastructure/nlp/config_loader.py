@@ -105,7 +105,19 @@ class LeadScoringConfig:
     intent_signal_types: list[str]
     noise_signal_types: list[str]
     lead_veto_signal_types: list[str] | None = None
+    score_caps: list[LeadScoreCapConfig] = field(default_factory=list)
     review_lanes: list[ReviewLaneConfig] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class LeadScoreCapConfig:
+    key: str
+    label: str
+    max_score: int
+    signal_types: list[str] = field(default_factory=list)
+    fact_types: list[str] = field(default_factory=list)
+    reason_keys: list[str] = field(default_factory=list)
+    noise_signal_types: list[str] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -415,8 +427,36 @@ def _parse_lead_scoring(raw: Any) -> LeadScoringConfig:
             if "lead_veto_signal_types" in raw
             else None
         ),
+        score_caps=_parse_score_caps(raw.get("score_caps", [])),
         review_lanes=_parse_review_lanes(raw.get("review_lanes", [])),
     )
+
+
+def _parse_score_caps(raw: Any) -> list[LeadScoreCapConfig]:
+    if raw is None:
+        return []
+    if not isinstance(raw, list):
+        raise ValueError("lead_scoring score_caps must be a list")
+
+    caps: list[LeadScoreCapConfig] = []
+    for item in raw:
+        if not isinstance(item, dict):
+            raise ValueError("lead_scoring score_caps item must be a mapping")
+        caps.append(
+            LeadScoreCapConfig(
+                key=str(item["key"]),
+                label=str(item.get("label", item["key"])),
+                max_score=int(item.get("max_score", 0)),
+                signal_types=_parse_string_list(item.get("signal_types", []), "score_caps.signal_types"),
+                fact_types=_parse_string_list(item.get("fact_types", []), "score_caps.fact_types"),
+                reason_keys=_parse_string_list(item.get("reason_keys", []), "score_caps.reason_keys"),
+                noise_signal_types=_parse_string_list(
+                    item.get("noise_signal_types", []),
+                    "score_caps.noise_signal_types",
+                ),
+            )
+        )
+    return caps
 
 
 def _parse_review_lanes(raw: Any) -> list[ReviewLaneConfig]:

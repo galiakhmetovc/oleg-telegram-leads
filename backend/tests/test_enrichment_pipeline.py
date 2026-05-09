@@ -1131,6 +1131,23 @@ def test_default_config_does_not_mark_diy_equipment_sale_as_lead(
     assert result.lead_assessment.is_lead is False
     assert result.lead_assessment.temperature == "none"
     assert "diy_or_equipment_only" in {item.type for item in result.lead_assessment.noise_signals}
+    assert result.lead_assessment.score == 0
+
+
+def test_default_config_does_not_overheat_dahua_software_license_text(
+    default_lead_enricher: RussianTextEnricher,
+) -> None:
+    result = default_lead_enricher.enrich(
+        "DSS Express или DSS Professional с лицензиями на каналы видео "
+        "и модуль управления парковкой"
+    )
+
+    assert result.lead_assessment is not None
+    assert result.lead_assessment.is_lead is False
+    assert result.lead_assessment.temperature == "none"
+    assert result.lead_assessment.score < 35
+    assert "smart_home_automation" not in {item.type for item in result.domain_signals}
+    assert "lighting_automation" not in {item.type for item in result.domain_signals}
 
 
 @pytest.mark.parametrize(

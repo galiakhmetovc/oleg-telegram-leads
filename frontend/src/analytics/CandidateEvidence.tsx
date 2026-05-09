@@ -421,7 +421,7 @@ function CandidateReasonTable({ candidate }: { candidate: AnalyticsCandidate }) 
                       {reason.label || reason.key}
                     </AnalyticsSettingLink>
                   </TableCell>
-                  <TableCell>{reason.source}</TableCell>
+                  <TableCell>{reasonSourceLabel(reason.source)}</TableCell>
                   <TableCell>
                     <AnalyticsSettingLink target={reasonWeightTarget(reason)}>
                       {formatWeight(reason.weight)}
@@ -541,10 +541,26 @@ function reasonTypeTarget(reason: AnalyticsReason, candidate: AnalyticsCandidate
   return null;
 }
 
-function reasonWeightTarget(reason: AnalyticsReason): AnalyticsSettingsTarget {
+function reasonWeightTarget(reason: AnalyticsReason): AnalyticsSettingsTarget | null {
+  if (reason.source === "score_cap") {
+    return null;
+  }
   return reason.source === "domain_signal"
     ? { kind: "lead_signal_weight", key: reason.key }
     : { kind: "lead_fact_weight", key: reason.key };
+}
+
+function reasonSourceLabel(source: string): string {
+  if (source === "domain_signal") {
+    return "Доменный сигнал";
+  }
+  if (source === "fact") {
+    return "Факт";
+  }
+  if (source === "score_cap") {
+    return "Ограничитель score";
+  }
+  return source;
 }
 
 function categoryTarget(kind: "solution_area" | "customer_segment", key: string): AnalyticsSettingsTarget {
