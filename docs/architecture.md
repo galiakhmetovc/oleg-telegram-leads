@@ -32,6 +32,18 @@ Everything currently runs in development mode.
 - Analytics defaults to live Telegram source messages and enrichment results.
   Batch analytics imports remain offline calibration tooling.
 
+Frontend shell boundaries:
+
+- `frontend/src/App.tsx` owns top-level routing, auth/session state, theme, and
+  cross-page state handoff.
+- `frontend/src/enrichment/TestingWorkspace.tsx` owns the Testing page UI:
+  text input, enrichment status, result tabs, overview, visual evidence chain,
+  and raw span/token/trace tables.
+- `frontend/src/enrichment/types.ts` owns enrichment DTO types shared by the
+  app shell and Testing UI.
+- `frontend/src/settings/navigation.ts` owns settings target hash/deeplink
+  types and helpers.
+
 ## Caddy Dev Access
 
 External dev access is provided by the host-level Caddy service, not by the

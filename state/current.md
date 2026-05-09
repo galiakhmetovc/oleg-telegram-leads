@@ -56,6 +56,11 @@
 - Runtime operator pages for "Логи", "Статус системы", and "Проектная
   документация" now live in `frontend/src/runtime/RuntimePages.tsx` instead of
   the app shell.
+- The Testing workspace was split out of `frontend/src/App.tsx` into
+  `frontend/src/enrichment/TestingWorkspace.tsx`; shared enrichment DTO types
+  live in `frontend/src/enrichment/types.ts`, and settings target hash/deeplink
+  helpers live in `frontend/src/settings/navigation.ts`. `App.tsx` remains the
+  top-level router/state shell.
 - The operator UI supports light and dark themes. The toggle lives in the top
   toolbar, applies MUI theme mode plus app CSS variables, and stores the
   operator-local preference in browser `localStorage`.

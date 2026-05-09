@@ -837,6 +837,24 @@ Rationale:
 - Every node that can map to a setting reuses the existing modal/deeplink
   behavior, so visual inspection and configuration audit stay connected.
 
+## 2026-05-09: App Shell Should Not Own Feature UI
+
+`frontend/src/App.tsx` remains the top-level shell for auth, theme, hash routing,
+and cross-page state. Feature-heavy UI is split into focused modules. The first
+large split moved Testing/enrichment rendering into
+`frontend/src/enrichment/TestingWorkspace.tsx`, enrichment DTO types into
+`frontend/src/enrichment/types.ts`, and settings target navigation helpers into
+`frontend/src/settings/navigation.ts`.
+
+Rationale:
+
+- The app shell had grown past 6000 lines and mixed routing, runtime state,
+  settings editors, Testing UI, and result explanation components.
+- Keeping feature UI outside the shell makes future refactors safer and keeps
+  `App.tsx` focused on composition.
+- Shared target/hash helpers prevent deeplink behavior from being duplicated
+  across Testing, Analytics, and Settings.
+
 ## 2026-05-08: Live Analytics Candidate Lists Are SQL-Backed
 
 The live Telegram analytics run still uses PostgreSQL runtime tables as the
