@@ -139,6 +139,7 @@ export function SettingsCenter({
   const [previewResult, setPreviewResult] = useState<TextEnrichmentResult | null>(null);
   const activeTargetElementId = activeTarget ? settingsTargetElementId(activeTarget) : null;
   const settingsReady = draft !== null;
+  const activeRevision = draft?.source?.revision ?? settings?.nlp.source?.revision ?? null;
 
   useEffect(() => {
     let active = true;
@@ -203,7 +204,11 @@ export function SettingsCenter({
       }
       setDraft(saved);
       setDraftDirty(false);
-      setSettingsMessage("NLP-настройки сохранены. Следующая обработка возьмет новую конфигурацию.");
+      setSettingsMessage(
+        saved.source?.revision
+          ? `NLP-настройки сохранены как ревизия #${saved.source.revision}. Следующая обработка возьмет новую конфигурацию.`
+          : "NLP-настройки сохранены. Следующая обработка возьмет новую конфигурацию."
+      );
     } catch (caught) {
       setSettingsError(caught instanceof Error ? caught.message : "Не удалось сохранить настройки");
     } finally {
@@ -431,6 +436,9 @@ export function SettingsCenter({
             </Typography>
           </Box>
           <Stack direction="row" spacing={1} className="settings-actions">
+            {activeRevision !== null && activeRevision !== undefined && (
+              <Chip label={`Активная NLP-ревизия #${activeRevision}`} size="small" variant="outlined" />
+            )}
             {dirty && <Chip label="Есть изменения" color="warning" size="small" />}
             <Button
               variant="contained"
@@ -452,7 +460,18 @@ export function SettingsCenter({
           </Paper>
         )}
         {(loadError || settingsError) && <Alert severity="error">{settingsError ?? loadError}</Alert>}
-        {settingsMessage && <Alert severity="success">{settingsMessage}</Alert>}
+        {settingsMessage && (
+          <Alert
+            severity="success"
+            action={
+              <Button color="inherit" size="small" href="#/golden">
+                Проверить Golden
+              </Button>
+            }
+          >
+            {settingsMessage}
+          </Alert>
+        )}
 
         {draft && !loading && (
           <Box className="settings-content-grid">

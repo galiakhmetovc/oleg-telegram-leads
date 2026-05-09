@@ -192,7 +192,12 @@ function StatusPanel({
               Статус: {statusLabel}
             </Typography>
           </Box>
-          <Chip label={`${progress}%`} color={job?.status === "failed" ? "error" : "primary"} size="small" />
+          <Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
+            {job?.nlp_config_revision !== null && job?.nlp_config_revision !== undefined && (
+              <Chip label={`NLP-ревизия #${job.nlp_config_revision}`} variant="outlined" size="small" />
+            )}
+            <Chip label={`${progress}%`} color={job?.status === "failed" ? "error" : "primary"} size="small" />
+          </Stack>
         </Box>
         <LinearProgress variant="determinate" value={progress} />
         <Typography variant="body2">

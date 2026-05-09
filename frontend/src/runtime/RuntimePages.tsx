@@ -311,6 +311,8 @@ export function SystemStatusPage({ apiBaseUrl }: RuntimePageProps) {
   const [services, setServices] = useState<ServiceStatusItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const backendService = useMemo(() => services.find((service) => service.service === "backend") ?? null, [services]);
+  const workerService = useMemo(() => services.find((service) => service.service === "worker") ?? null, [services]);
 
   const loadStatus = useCallback(async () => {
     setLoading(true);
@@ -352,6 +354,7 @@ export function SystemStatusPage({ apiBaseUrl }: RuntimePageProps) {
       </Paper>
       {loading && <LinearProgress />}
       {error && <Alert severity="error">{error}</Alert>}
+      <SystemFreshnessPanel backend={backendService} worker={workerService} />
       <Box className="system-status-grid">
         {services.map((service) => (
           <Paper key={service.service} variant="outlined" className="system-status-card">
@@ -368,6 +371,72 @@ export function SystemStatusPage({ apiBaseUrl }: RuntimePageProps) {
         ))}
       </Box>
     </Stack>
+  );
+}
+
+function SystemFreshnessPanel({
+  backend,
+  worker
+}: {
+  backend: ServiceStatusItem | null;
+  worker: ServiceStatusItem | null;
+}) {
+  if (!backend && !worker) {
+    return null;
+  }
+  const activeRevision = detailNumber(backend?.details.active_nlp_config_revision);
+  const workerRevision = detailNumber(worker?.details.latest_worker_nlp_config_revision);
+  const backendCodeVersion = stringDetail(
+    worker?.details.backend_code_version ?? backend?.details.code_version
+  );
+  const workerCodeVersion = stringDetail(worker?.details.latest_worker_code_version);
+  const workerConfigStale = worker?.details.worker_config_stale === true;
+  const workerCodeStale = worker?.details.worker_code_stale === true;
+
+  return (
+    <Paper variant="outlined" className="runtime-panel">
+      <Stack spacing={1.5}>
+        <Box>
+          <Typography variant="h6" component="h3" sx={{ fontWeight: 700 }}>
+            Свежесть правил и кода
+          </Typography>
+          <Typography variant="body2" color="text.secondary">
+            Контроль того, какой ревизией NLP-настроек и какой версией кода реально работает worker.
+          </Typography>
+        </Box>
+        <Stack direction={{ xs: "column", md: "row" }} spacing={1} sx={{ flexWrap: "wrap" }}>
+          <StatusMetric label="Активная NLP-ревизия" value={formatRevision(activeRevision)} />
+          <StatusMetric label="Последняя ревизия worker" value={formatRevision(workerRevision)} />
+          <StatusMetric label="Backend code" value={backendCodeVersion ?? "нет данных"} />
+          <StatusMetric label="Worker code" value={workerCodeVersion ?? "нет данных"} />
+        </Stack>
+        <Stack direction="row" spacing={1} sx={{ flexWrap: "wrap" }}>
+          <Chip
+            size="small"
+            color={workerConfigStale ? "warning" : "success"}
+            label={workerConfigStale ? "Worker еще не обработал активную ревизию" : "Worker использует активную ревизию"}
+          />
+          <Chip
+            size="small"
+            color={workerCodeStale ? "warning" : "success"}
+            label={workerCodeStale ? "Код worker отличается от backend" : "Код worker актуален"}
+          />
+        </Stack>
+      </Stack>
+    </Paper>
+  );
+}
+
+function StatusMetric({ label, value }: { label: string; value: string }) {
+  return (
+    <Box className="system-status-detail-row" sx={{ minWidth: { md: 190 } }}>
+      <Typography variant="caption" color="text.secondary">
+        {label}
+      </Typography>
+      <Typography variant="body2" sx={{ fontWeight: 700 }}>
+        {value}
+      </Typography>
+    </Box>
   );
 }
 
@@ -668,7 +737,17 @@ const systemStatusDetailLabels: Record<string, string> = {
   task_publish_latest_error: "Последняя ошибка отправки задач",
   telegram_messages_enriched: "Сообщений видно в аналитике",
   telegram_messages_failed_enrichment: "Сообщений с ошибкой enrichment",
-  telegram_messages_waiting_enrichment: "Сообщений ждут enrichment"
+  telegram_messages_waiting_enrichment: "Сообщений ждут enrichment",
+  active_nlp_config_revision: "Активная NLP-ревизия",
+  active_nlp_config_revision_id: "ID активной NLP-ревизии",
+  backend_code_version: "Версия кода backend",
+  code_version: "Версия кода",
+  latest_worker_code_version: "Версия кода worker",
+  latest_worker_nlp_config_revision: "Последняя NLP-ревизия worker",
+  latest_worker_nlp_config_revision_id: "ID последней NLP-ревизии worker",
+  process_role: "Роль процесса",
+  worker_code_stale: "Код worker устарел",
+  worker_config_stale: "Worker отстал от активной ревизии"
 };
 
 function systemStatusDetailLabel(key: string): string {
@@ -742,4 +821,16 @@ function formatDateTime(value: string): string {
     dateStyle: "short",
     timeStyle: "medium"
   }).format(new Date(value));
+}
+
+function detailNumber(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function stringDetail(value: unknown): string | null {
+  return typeof value === "string" && value.trim() ? value : null;
+}
+
+function formatRevision(value: number | null): string {
+  return value === null ? "нет данных" : `#${value}`;
 }

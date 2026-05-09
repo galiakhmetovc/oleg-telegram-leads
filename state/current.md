@@ -168,6 +168,12 @@
   active config revision, latest worker-used revision, backend code version,
   and latest worker code version; dev Compose restarts the worker on Python
   source changes through `watchfiles`.
+- The operator UI now makes config freshness visible: Settings Center shows the
+  active NLP revision and, after saving NLP settings, links directly to Golden
+  checks; Testing/Golden job status shows the NLP revision used by the completed
+  job; System Status has a dedicated "Свежесть правил и кода" block for active
+  revision, latest worker revision, backend code version, and worker code
+  version.
 - Default NLP config now recognizes the smart-home automation lead case with
   customer intent, vendor, solution area, and electrical design context signals.
 - Default NLP config also recognizes hot Zigbee installation requests with

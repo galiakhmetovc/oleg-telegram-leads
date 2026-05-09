@@ -206,8 +206,23 @@ test("renders runtime logs and system status tabs", async () => {
             status: "ok",
             details: {
               environment: "development",
+              code_version: "dev",
+              active_nlp_config_revision: 31,
+              active_nlp_config_revision_id: "6fad33ee-7cd2-49f0-92d3-1a21d07c6480",
               auth_enabled: true,
               public_base_url: "https://secclaw.qlbc.ru:19443"
+            }
+          },
+          {
+            service: "worker",
+            status: "ok",
+            details: {
+              backend_code_version: "dev",
+              latest_worker_code_version: "dev",
+              worker_code_stale: false,
+              active_nlp_config_revision: 31,
+              latest_worker_nlp_config_revision: 31,
+              worker_config_stale: false
             }
           },
           {
@@ -247,16 +262,63 @@ test("renders runtime logs and system status tabs", async () => {
   expect(await screen.findByText("Telegram FloodWait next page")).toBeInTheDocument();
 
   fireEvent.click(screen.getByRole("tab", { name: "Статус системы" }));
+  expect(await screen.findByText("Свежесть правил и кода")).toBeInTheDocument();
+  expect(screen.getAllByText("Активная NLP-ревизия").length).toBeGreaterThan(0);
+  expect(screen.getAllByText("#31").length).toBeGreaterThan(0);
+  expect(screen.getByText("Worker использует активную ревизию")).toBeInTheDocument();
+  expect(screen.getByText("Код worker актуален")).toBeInTheDocument();
   expect(await screen.findByText("backend")).toBeInTheDocument();
+  expect(screen.getByText("worker")).toBeInTheDocument();
   expect(screen.getByText("userbot")).toBeInTheDocument();
   expect(screen.getByText("Окружение")).toBeInTheDocument();
   expect(screen.getByText("development")).toBeInTheDocument();
+  expect(screen.getAllByText("Версия кода").length).toBeGreaterThan(0);
   expect(screen.getByText("Аккаунтов всего")).toBeInTheDocument();
   expect(screen.getByText("2")).toBeInTheDocument();
   expect(screen.getByText("Чаты по статусам")).toBeInTheDocument();
   expect(screen.getByText("resolved: 3, error: 1")).toBeInTheDocument();
   expect(screen.getByText("Проблемные источники")).toBeInTheDocument();
   expect(screen.getByText(/AeternalLead MessagesTest/)).toBeInTheDocument();
+});
+
+test("shows active NLP revision in settings and links saved settings to golden checks", async () => {
+  const savedSnapshot = {
+    ...sampleSettingsSnapshot().nlp,
+    source: {
+      type: "postgres",
+      path: "nlp_config_revisions.config",
+      editable: true,
+      revision: 2
+    }
+  };
+  const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    if (url === "/api/v1/auth/me") {
+      return jsonResponse({ authenticated: true, username: "admin" });
+    }
+    if (url === "/api/v1/settings") {
+      return jsonResponse(sampleSettingsSnapshot());
+    }
+    if (url === "/api/v1/analytics/runs") {
+      return jsonResponse({ runs: [] });
+    }
+    if (url === "/api/v1/settings/nlp" && init?.method === "PUT") {
+      return jsonResponse(savedSnapshot);
+    }
+    throw new Error(`Unhandled fetch: ${url}`);
+  });
+  vi.stubGlobal("fetch", fetchMock);
+  render(<App />);
+
+  fireEvent.click(screen.getByRole("tab", { name: "Настройки" }));
+  expect(await screen.findByText("Активная NLP-ревизия #1")).toBeInTheDocument();
+  fireEvent.click(screen.getByText("Pipeline"));
+  fireEvent.click(screen.getByLabelText("segmentation включен"));
+  fireEvent.click(screen.getByRole("button", { name: "Сохранить" }));
+
+  expect(await screen.findByText(/NLP-настройки сохранены как ревизия #2/)).toBeInTheDocument();
+  expect(screen.getByRole("link", { name: "Проверить Golden" })).toHaveAttribute("href", "#/golden");
+  expect(screen.getByText("Активная NLP-ревизия #2")).toBeInTheDocument();
 });
 
 test("renders project documentation grouped by files", async () => {
@@ -392,6 +454,8 @@ test("renders lead assessment from completed enrichment event", async () => {
         stage_count: 1,
         stage_progress_percent: 100,
         message: "Готово",
+        nlp_config_revision_id: "6fad33ee-7cd2-49f0-92d3-1a21d07c6480",
+        nlp_config_revision: 31,
         result: sampleResult(),
         error: null
       });
@@ -420,6 +484,7 @@ test("renders lead assessment from completed enrichment event", async () => {
   );
 
   expect((await screen.findAllByText("Горячий лид")).length).toBeGreaterThan(0);
+  expect(screen.getByText("NLP-ревизия #31")).toBeInTheDocument();
   expect(screen.getAllByText("95 баллов").length).toBeGreaterThan(0);
   expect(screen.getAllByText("Умный дом / автоматизация").length).toBeGreaterThan(0);
   expect(screen.getByText("Точный расчет оценки лида")).toBeInTheDocument();

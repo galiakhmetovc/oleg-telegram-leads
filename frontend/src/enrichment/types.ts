@@ -103,6 +103,8 @@ export type EnrichmentJob = {
   message: string;
   result?: TextEnrichmentResult | null;
   error?: { type?: string; message?: string } | null;
+  nlp_config_revision_id?: string | null;
+  nlp_config_revision?: number | null;
 };
 
 export type EnrichmentEvent = {
