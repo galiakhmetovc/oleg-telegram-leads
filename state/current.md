@@ -45,6 +45,12 @@
   revisions. Fact/signal constructors support exact and lemmatized phrases.
   Newly created domain signals get score weight `0` until scoring is tuned
   explicitly.
+- NLP/domain settings are now config v3. The active PostgreSQL config revision
+  is `31` from migration `0026_config_v3_taxonomy`; old semantic names are not
+  compatibility targets. The current chain is: dictionaries emit alias facts,
+  fact rules emit `intent_*`/`context_*`/`object_*`/`domain_*`/`noise_*` facts,
+  domain signals depend on facts through `match.facts`, and lead scoring maps
+  v3 types into score, solution areas, segments, caps, and review lanes.
 - Frontend review-constructor UI code now lives in
   `frontend/src/analytics/ReviewConstructor.tsx`, separate from the main
   Analytics page. `AnalyticsPage.tsx` keeps page state, review flow, and
@@ -313,46 +319,24 @@
 - Migration `0019_operator_noise_score_cap` appends `operator_noise` to the
   active hard-noise score cap. The Review "В шум" constructor also maintains
   that link for future operator-created noise phrases.
-- Camera and recorder aliases now emit the specific `video_device` fact instead
-  of broad `automation_component`/`controlled_device` facts. The
-  `video_surveillance` signal is below the lead threshold by itself, so a lone
-  word such as `камера` remains domain evidence, not a lead or smart-home area.
-  Migration `0020_camera_signal_scoring` patches active PostgreSQL config.
-- Alias matches also emit identity facts named `alias:<catalog>:<key>`.
-  Default domain signals now use `match.facts`, not direct alias dependencies,
-  so the rule chain is explicit: dictionary alias -> fact -> domain signal ->
-  lead scoring. Migration `0021_signal_fact_dependencies` converts active
-  signal alias dependencies to fact dependencies, and new API/config input with
-  `match.aliases` is rejected.
-- Default scoring has a `domain_without_intent` score cap. Isolated domain words
-  and aliases such as `Нептун`, `хаб`, `шайба`, `кондиционер`, `умный дом`, and
-  `умный дом от застройщика` stay below the lead threshold unless the same
-  message also has an explicit intent signal. Migrations
-  `0023_domain_intent_guard`, `0024_config_guard_tuning`, and
-  `0025_domain_cap_intent_only` patch the active PostgreSQL config, remove stale
-  `бра`/`треки` smart-lighting patterns, and narrow `PoE`/climate/developer
-  cross-domain dependencies.
+- Config v3 keeps alias/fact/signal layers explicit. Camera and recorder aliases
+  emit `video_device`; `камера` gives at most `pur_video_surveillance` and stays
+  below lead without intent. A bare `ИК` emits no high-level climate/gateway
+  signal. Plain fixtures such as `бра` remain controlled-device evidence only,
+  not smart-lighting automation.
+- Default scoring has `domain_without_intent` and `intent_without_pur_domain`
+  score caps. Isolated domain words and aliases such as `Нептун`, `хаб`,
+  `шайба`, `кондиционер`, `умный дом`, and `PoE` stay below lead without
+  intent; off-domain requests such as "где заказать обычный стол" stay below
+  lead without a PUR domain.
 - Review lane matching is centralized in `app.application.review_lanes`. The
   deterministic scorer and analytics import/list code use the same priority,
   exclusion, score/temperature, and match-group logic, including matched group
   indexes for explanations.
-- Dev PostgreSQL active NLP config has been refreshed through revision 27. The `need`
-  signal no longer stores Russian forms such as `нужно`, `нужна`, `нужен` as
-  exact phrases; they are represented as lemmatized phrase rules with preserved
-  operator source text. Revision 16 also includes the Neptun water leak
-  monitoring lead calibration, and revision 19 includes the smart-home alias
-  catalogs plus calibrated semantic signal/fact weights. Revision 20 was
-  reseeded from current bootstrap YAML after dropping `caseless` compatibility;
-  revision 22 adds rule-group folders to the active PostgreSQL config; revision
-  23 removes direct Neptun/ProW/Profi brand/model rules so those spellings are
-  emitted only through alias catalogs; revision 24 migrates alias
-  `signal_types` into explicit signal dependencies and removes signal outputs
-  from alias dictionaries; revision 26 stores the
-  configurable `pipeline.alias_matching` section, removes duplicated literal
-  alias spellings across catalogs, lowers generic off-domain demand weights, and
-  keeps PUR lead examples passing while avoiding ordinary non-PUR provider-search
-  messages. Revision 27 adds lead-veto noise signals, an
-  `ordinary_household_system` noise signal, and the `research_warm` review lane.
+- Dev PostgreSQL active NLP config revision is `31`, source
+  `migration_0026_config_v3_taxonomy`. It replaces active facts, signals, and
+  lead scoring with v3 defaults while preserving existing alias catalogs and
+  existing operator noise wiring when present.
 - `RussianTextEnricher` now precompiles Yargy parsers once per enricher
   instance and shares one Yargy `MorphTokenizer` across compiled rules instead
   of creating a separate `pymorphy2` analyzer for every parser. This keeps

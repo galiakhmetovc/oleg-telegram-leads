@@ -5,281 +5,233 @@ lead_scoring:
     hot: 90
   weights:
     signals:
-      need: 4
-      customer_intent: 15
-      provider_search: 12
-      installation_request: 15
-      smart_home_automation: 35
-      smart_home_platform: 25
-      protocol_gateway: 20
-      video_surveillance: 25
-      consultation_request: 8
-      solution_selection_request: 18
-      education_request: 10
-      smart_home_value_question: 25
-      smart_relay_control: 25
-      budget_constraint: 5
-      installation_context: 5
-      water_leak_protection: 25
-      leak_protection: 25
-      implementation_intent: 15
-      hot_lead_intent: 25
-      electrical_design_context: 10
-      developer_smart_home_context: 30
-      renovation_modification_context: 25
-      warranty_risk: 20
-      designer_context: 10
-      access_control: 35
-      intercom: 30
-      security_alarm: 30
-      gate_automation: 30
-      power_quality: 30
-      power_backup: 30
-      climate_control: 25
-      climate_automation: 25
-      lighting_control: 25
-      lighting_automation: 25
-      motion_lighting_automation: 20
-      electric_curtain_control: 25
-      network_infrastructure: 25
-      commercial_object: 20
-      country_house: 20
-      apartment_context: 8
-      family_apartment_context: 15
-      supply: -30
-      diy_or_equipment_only: -50
-      irrelevant_or_sale: -40
-      price_only: -20
-      ordinary_household_system: -50
+      lead_active_intent: 25
+      lead_consultation_intent: 10
+      lead_research_intent: 12
+      project_context: 12
+      segment_designer: 6
+      segment_private_residential: 4
+      segment_commercial: 6
+      segment_family: 4
+      pur_smart_home: 30
+      pur_leak_protection: 30
+      pur_video_surveillance: 25
+      pur_access_control: 30
+      pur_intercom: 25
+      pur_security_alarm: 30
+      pur_gate_automation: 25
+      pur_power_stability: 25
+      pur_climate_control: 25
+      pur_lighting_automation: 25
+      pur_curtain_control: 20
+      pur_network_infrastructure: 20
+      noise_supply: -50
+      noise_diy_equipment_only: -50
+      noise_price_only: -40
+      noise_ordinary_household: -50
     facts:
-      solution_area: 15
-      property_type: 8
-      vendor: 5
-      software: 5
-      model: 5
-      design_scope: 10
-      service_location: 5
-      work_type: 8
-      automation_component: 12
-      installation_surface: 6
-      wiring_output: 8
-      controlled_device: 10
-      protocol: 5
-      power_equipment: 12
-      access_device: 12
-      network_scope: 10
+      intent_customer_request: 8
+      intent_provider_search: 8
+      intent_install_connect: 6
+      intent_consultation: 4
+      intent_solution_selection: 5
+      intent_implementation: 5
+      context_design_project: 6
+      context_wiring_output: 6
+      context_renovation_modification: 6
+      context_developer_system: 6
+      context_warranty_risk: 6
+      service_location: 3
+      domain_smart_home: 5
+      domain_leak_protection: 5
+      domain_video_surveillance: 5
+      domain_access_control: 5
+      domain_security_alarm: 5
+      domain_gate_automation: 5
+      domain_power_stability: 5
+      domain_climate: 5
+      domain_lighting: 5
+      domain_curtain: 5
+      domain_network: 5
+      vendor: 2
+      protocol: 2
+      software: 2
+      model: 2
+      automation_component: 2
+      controlled_device: 2
+      access_device: 2
+      video_device: 2
+      power_equipment: 2
+      network_scope: 2
   solution_areas:
     smart_home:
       label: Умный дом / автоматизация
       signal_types:
-        - smart_home_automation
-        - smart_home_platform
-        - protocol_gateway
-        - developer_smart_home_context
-        - renovation_modification_context
-        - solution_selection_request
-        - smart_home_value_question
-        - smart_relay_control
-        - lighting_control
-        - motion_lighting_automation
-        - climate_control
-        - electric_curtain_control
-        - water_leak_protection
-        - leak_protection
-        - lighting_automation
-        - climate_automation
-      fact_types:
-        - controlled_device
-        - protocol
-        - software
+        - pur_smart_home
+        - pur_lighting_automation
+        - pur_curtain_control
+        - pur_climate_control
+        - pur_leak_protection
+      fact_types: []
     security:
       label: Безопасность / видеонаблюдение
       signal_types:
-        - video_surveillance
-        - access_control
-        - intercom
-        - security_alarm
-        - water_leak_protection
-        - leak_protection
-      fact_types:
-        - access_device
+        - pur_video_surveillance
+        - pur_access_control
+        - pur_intercom
+        - pur_security_alarm
+        - pur_leak_protection
+      fact_types: []
     access_control:
       label: СКУД / домофония / въездные группы
       signal_types:
-        - access_control
-        - intercom
-        - gate_automation
-      fact_types:
-        - access_device
+        - pur_access_control
+        - pur_intercom
+        - pur_gate_automation
+      fact_types: []
     power_stability:
       label: Бесперебойное электроснабжение
       signal_types:
-        - power_quality
-        - power_backup
-      fact_types:
-        - power_equipment
+        - pur_power_stability
+      fact_types: []
     engineering_networks:
       label: СКС / инженерные системы
       signal_types:
-        - network_infrastructure
-        - protocol_gateway
-      fact_types:
-        - network_scope
-        - protocol
+        - pur_network_infrastructure
+      fact_types: []
     climate:
       label: Управление климатом
       signal_types:
-        - climate_control
-        - climate_automation
-      fact_types:
-        - design_scope
+        - pur_climate_control
+      fact_types: []
   customer_segments:
-    designer_partner:
-      label: Дизайнер / проектировщик
-      signal_types:
-        - designer_context
-        - electrical_design_context
-      fact_types:
-        - design_scope
-    private_residential:
-      label: Частное жилье
-      signal_types:
-        - country_house
-        - apartment_context
-      fact_types: []
-    commercial_client:
-      label: Коммерческий объект
-      signal_types:
-        - commercial_object
-      fact_types: []
     active_request:
       label: Активный запрос на подрядчика
       signal_types:
-        - customer_intent
-        - provider_search
-        - installation_request
-        - hot_lead_intent
+        - lead_active_intent
       fact_types:
-        - work_type
-    renovation_project:
-      label: Ремонт / изменение проекта
-      signal_types:
-        - renovation_modification_context
-        - warranty_risk
-      fact_types: []
+        - intent_customer_request
+        - intent_provider_search
+        - intent_install_connect
     research_project:
-      label: Подбор решений для проекта
+      label: Подбор решений / консультация
       signal_types:
-        - solution_selection_request
-        - education_request
-        - smart_home_value_question
+        - lead_consultation_intent
+        - lead_research_intent
       fact_types:
-        - work_type
+        - intent_consultation
+        - intent_solution_selection
+        - intent_implementation
+    designer_partner:
+      label: Дизайнер / проектировщик
+      signal_types:
+        - segment_designer
+      fact_types:
+        - context_designer
+    private_residential:
+      label: Частное жилье
+      signal_types:
+        - segment_private_residential
+      fact_types:
+        - object_apartment
+        - object_country_house
+    commercial_client:
+      label: Коммерческий объект
+      signal_types:
+        - segment_commercial
+      fact_types:
+        - object_commercial
     family_residential:
       label: Семья в квартире / доме
       signal_types:
-        - family_apartment_context
-      fact_types: []
+        - segment_family
+      fact_types:
+        - object_family
+    renovation_project:
+      label: Ремонт / изменение проекта
+      signal_types:
+        - project_context
+      fact_types:
+        - context_renovation_modification
+        - context_developer_system
+        - context_warranty_risk
   intent_signal_types:
-    - need
-    - customer_intent
-    - provider_search
-    - installation_request
-    - smart_home_platform
-    - protocol_gateway
-    - consultation_request
-    - solution_selection_request
-    - education_request
-    - smart_home_value_question
-    - smart_relay_control
-    - budget_constraint
-    - implementation_intent
-    - hot_lead_intent
-    - developer_smart_home_context
-    - renovation_modification_context
-    - warranty_risk
-    - motion_lighting_automation
-    - lighting_automation
-    - climate_automation
-    - power_backup
+    - lead_active_intent
+    - lead_consultation_intent
+    - lead_research_intent
   noise_signal_types:
-    - supply
-    - diy_or_equipment_only
-    - irrelevant_or_sale
-    - price_only
-    - ordinary_household_system
+    - noise_supply
+    - noise_diy_equipment_only
+    - noise_price_only
+    - noise_ordinary_household
   lead_veto_signal_types:
-    - supply
-    - diy_or_equipment_only
-    - irrelevant_or_sale
-    - price_only
-    - ordinary_household_system
+    - noise_supply
+    - noise_diy_equipment_only
+    - noise_price_only
+    - noise_ordinary_household
   score_caps:
     - key: hard_noise
       label: Явный шум / нецелевой запрос
       max_score: 0
       noise_signal_types:
-        - supply
-        - diy_or_equipment_only
-        - irrelevant_or_sale
-        - price_only
-        - ordinary_household_system
+        - noise_supply
+        - noise_diy_equipment_only
+        - noise_price_only
+        - noise_ordinary_household
     - key: domain_without_intent
-      label: Домен без явного намерения
+      label: Домен ПУР без явного намерения
       max_score: 34
       signal_types:
-        - smart_home_automation
-        - smart_home_platform
-        - protocol_gateway
-        - video_surveillance
-        - smart_relay_control
-        - water_leak_protection
-        - leak_protection
-        - access_control
-        - intercom
-        - security_alarm
-        - gate_automation
-        - power_quality
-        - power_backup
-        - climate_control
-        - climate_automation
-        - lighting_control
-        - lighting_automation
-        - motion_lighting_automation
-        - electric_curtain_control
-        - network_infrastructure
+        - pur_smart_home
+        - pur_leak_protection
+        - pur_video_surveillance
+        - pur_access_control
+        - pur_intercom
+        - pur_security_alarm
+        - pur_gate_automation
+        - pur_power_stability
+        - pur_climate_control
+        - pur_lighting_automation
+        - pur_curtain_control
+        - pur_network_infrastructure
       excluded_signal_types:
-        - need
-        - customer_intent
-        - provider_search
-        - installation_request
-        - consultation_request
-        - solution_selection_request
-        - education_request
-        - smart_home_value_question
-        - implementation_intent
-        - hot_lead_intent
+        - lead_active_intent
+        - lead_consultation_intent
+        - lead_research_intent
+    - key: intent_without_pur_domain
+      label: Намерение без домена ПУР
+      max_score: 34
+      signal_types:
+        - lead_active_intent
+        - lead_consultation_intent
+        - lead_research_intent
+      excluded_signal_types:
+        - pur_smart_home
+        - pur_leak_protection
+        - pur_video_surveillance
+        - pur_access_control
+        - pur_intercom
+        - pur_security_alarm
+        - pur_gate_automation
+        - pur_power_stability
+        - pur_climate_control
+        - pur_lighting_automation
+        - pur_curtain_control
+        - pur_network_infrastructure
   review_lanes:
     - key: noise
       label: Шум / нецелевое
-      description: Кандидаты с явными шумовыми признаками, которые надо проверять отдельно от продажного потока.
+      description: Явные продажи, DIY-запросы, цена без потребности или бытовые вопросы вне ПУР.
       priority: 1000
       match_groups:
         - noise_signal_types:
-            - supply
-            - diy_or_equipment_only
-            - irrelevant_or_sale
-            - price_only
-            - ordinary_household_system
-          signal_types:
-            - supply
-            - diy_or_equipment_only
-            - irrelevant_or_sale
-            - price_only
-            - ordinary_household_system
+            - noise_supply
+            - noise_diy_equipment_only
+            - noise_price_only
+            - noise_ordinary_household
     - key: direct_pur_lead
       label: Прямой лид ПУР
-      description: "Есть домен ПУР и активное намерение: найти подрядчика, заказать, установить, подключить или подготовить конкретные выводы/схему."
+      description: Есть домен ПУР и активное намерение найти подрядчика, заказать, установить, подключить или подготовить проектные выводы.
       priority: 900
       match_groups:
         - solution_area_types:
@@ -289,41 +241,18 @@ lead_scoring:
             - power_stability
             - engineering_networks
             - climate
-          signal_types:
-            - smart_home_automation
-            - smart_home_platform
-            - protocol_gateway
-            - video_surveillance
-            - access_control
-            - intercom
-            - security_alarm
-            - gate_automation
-            - power_quality
-            - power_backup
-            - climate_control
-            - climate_automation
-            - lighting_control
-            - lighting_automation
-            - motion_lighting_automation
-            - electric_curtain_control
-            - water_leak_protection
-            - leak_protection
-            - network_infrastructure
         - reason_keys:
-            - customer_intent
-            - provider_search
-            - installation_request
-            - hot_lead_intent
-            - wiring_output
+            - intent_customer_request
+            - intent_provider_search
+            - intent_install_connect
       excluded_noise_signal_types:
-        - supply
-        - diy_or_equipment_only
-        - irrelevant_or_sale
-        - price_only
-        - ordinary_household_system
+        - noise_supply
+        - noise_diy_equipment_only
+        - noise_price_only
+        - noise_ordinary_household
     - key: research_warm
       label: Исследование / подбор решения
-      description: Есть домен ПУР и вопрос по выбору, пользе или изучению темы, но нет явного запроса на подрядчика.
+      description: Есть домен ПУР и вопрос по выбору, пользе, реализации или изучению темы.
       priority: 750
       match_groups:
         - solution_area_types:
@@ -333,44 +262,18 @@ lead_scoring:
             - power_stability
             - engineering_networks
             - climate
-          signal_types:
-            - smart_home_automation
-            - smart_home_platform
-            - protocol_gateway
-            - video_surveillance
-            - access_control
-            - intercom
-            - security_alarm
-            - gate_automation
-            - power_quality
-            - power_backup
-            - climate_control
-            - climate_automation
-            - lighting_control
-            - lighting_automation
-            - motion_lighting_automation
-            - electric_curtain_control
-            - water_leak_protection
-            - leak_protection
-            - network_infrastructure
-        - reason_keys:
-            - solution_selection_request
-            - smart_home_value_question
-            - education_request
-            - smart_relay_control
-            - implementation_intent
-          customer_segment_types:
-            - research_project
+        - intent_signal_types:
+            - lead_consultation_intent
+            - lead_research_intent
       excluded_noise_signal_types:
-        - supply
-        - diy_or_equipment_only
-        - irrelevant_or_sale
-        - price_only
-        - ordinary_household_system
+        - noise_supply
+        - noise_diy_equipment_only
+        - noise_price_only
+        - noise_ordinary_household
     - key: pur_design_context
       label: Проектный контекст ПУР
-      description: Домен ПУР в дизайне, ремонте, электрике, white box или проектной документации.
-      priority: 700
+      description: Домен ПУР связан с дизайном, ремонтом, электрикой, white box, гарантией или проектной документацией.
+      priority: 650
       match_groups:
         - solution_area_types:
             - smart_home
@@ -379,40 +282,16 @@ lead_scoring:
             - power_stability
             - engineering_networks
             - climate
-          signal_types:
-            - smart_home_automation
-            - smart_home_platform
-            - protocol_gateway
-            - video_surveillance
-            - access_control
-            - intercom
-            - climate_control
-            - climate_automation
-            - lighting_control
-            - lighting_automation
-            - water_leak_protection
-            - leak_protection
-        - reason_keys:
-            - designer_context
-            - electrical_design_context
-            - developer_smart_home_context
-            - renovation_modification_context
-            - warranty_risk
-            - design_scope
-            - wiring_output
-          customer_segment_types:
-            - designer_partner
-            - renovation_project
-            - research_project
+        - signal_types:
+            - project_context
       excluded_noise_signal_types:
-        - supply
-        - diy_or_equipment_only
-        - irrelevant_or_sale
-        - price_only
-        - ordinary_household_system
+        - noise_supply
+        - noise_diy_equipment_only
+        - noise_price_only
+        - noise_ordinary_household
     - key: domain_interest
-      label: Доменный интерес
-      description: Есть релевантная область ПУР, но намерение или проектный контекст слабее.
+      label: Доменный интерес ПУР
+      description: Есть релевантная область ПУР, но намерение или проектный контекст слабые.
       priority: 500
       match_groups:
         - solution_area_types:
@@ -422,47 +301,20 @@ lead_scoring:
             - power_stability
             - engineering_networks
             - climate
-          signal_types:
-            - smart_home_automation
-            - smart_home_platform
-            - protocol_gateway
-            - video_surveillance
-            - access_control
-            - intercom
-            - security_alarm
-            - gate_automation
-            - power_quality
-            - power_backup
-            - climate_control
-            - climate_automation
-            - lighting_control
-            - lighting_automation
-            - motion_lighting_automation
-            - electric_curtain_control
-            - water_leak_protection
-            - leak_protection
-            - network_infrastructure
       excluded_noise_signal_types:
-        - supply
-        - diy_or_equipment_only
-        - irrelevant_or_sale
-        - price_only
-        - ordinary_household_system
+        - noise_supply
+        - noise_diy_equipment_only
+        - noise_price_only
+        - noise_ordinary_household
     - key: off_domain_demand
       label: Спрос без домена ПУР
-      description: Есть активный запрос или поиск подрядчика, но релевантная область ПУР не проявилась.
+      description: Есть активный запрос или консультация, но релевантная область ПУР не проявилась.
       priority: 300
       match_groups:
-        - reason_keys:
-            - customer_intent
-            - provider_search
-            - installation_request
-            - consultation_request
-            - implementation_intent
-            - hot_lead_intent
-            - work_type
-          customer_segment_types:
-            - active_request
+        - intent_signal_types:
+            - lead_active_intent
+            - lead_consultation_intent
+            - lead_research_intent
       excluded_solution_area_types:
         - smart_home
         - security
@@ -471,24 +323,21 @@ lead_scoring:
         - engineering_networks
         - climate
       excluded_noise_signal_types:
-        - supply
-        - diy_or_equipment_only
-        - irrelevant_or_sale
-        - price_only
-        - ordinary_household_system
+        - noise_supply
+        - noise_diy_equipment_only
+        - noise_price_only
+        - noise_ordinary_household
     - key: generic_context
       label: Общий контекст
-      description: Слабые общие маркеры потребности, дизайна или консультации без уверенного домена.
+      description: Есть проектный или сегментный контекст без уверенного домена ПУР.
       priority: 100
       match_groups:
-        - reason_keys:
-            - need
-            - designer_context
-            - consultation_request
-            - design_scope
-            - work_type
-          customer_segment_types:
-            - designer_partner
+        - signal_types:
+            - project_context
+            - segment_designer
+            - segment_private_residential
+            - segment_commercial
+            - segment_family
       excluded_solution_area_types:
         - smart_home
         - security
@@ -497,13 +346,12 @@ lead_scoring:
         - engineering_networks
         - climate
       excluded_noise_signal_types:
-        - supply
-        - diy_or_equipment_only
-        - irrelevant_or_sale
-        - price_only
-        - ordinary_household_system
+        - noise_supply
+        - noise_diy_equipment_only
+        - noise_price_only
+        - noise_ordinary_household
     - key: other_candidate
       label: Прочий кандидат
-      description: Кандидат не попал в более конкретную lane и требует отдельного анализа качества правил.
+      description: Кандидат не попал в более конкретную очередь и требует анализа правил.
       priority: 0
       match_groups: []

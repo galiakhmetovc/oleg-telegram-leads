@@ -1,356 +1,535 @@
 facts:
-  - type: volume
-    label: Объем
-    group: Общие факты
-    confidence: 0.55
-    phrases:
-      - ["тонн"]
-      - ["паллет"]
-      - ["штук"]
-      - ["коробок"]
-
-  - type: deadline
-    label: Срок
-    group: Общие факты
-    confidence: 0.55
-    phrases:
-      - ["сегодня"]
-      - ["завтра"]
-      - ["на", "следующей", "неделе"]
-      - ["до", "конца", "недели"]
-
-  - type: solution_area
-    label: Решение / направление
-    group: Объект и направление
-    confidence: 0.72
-    phrases:
-      - ["скуд"]
-      - ["скс"]
-      - ["ибп"]
-    patterns:
-      - tokens:
-          - normalized: "система"
-          - normalized: "умный"
-          - normalized: "дом"
-      - tokens:
-          - normalized: "умный"
-          - normalized: "дом"
-      - tokens:
-          - normalized: "автоматизация"
-      - tokens:
-          - normalized: "система"
-          - normalized: "видеонаблюдение"
-      - tokens:
-          - normalized: "видеонаблюдение"
-      - tokens:
-          - normalized: "контроль"
-          - normalized: "доступ"
-      - tokens:
-          - normalized: "домофония"
-      - tokens:
-          - normalized: "домофон"
-      - tokens:
-          - normalized: "автоматизация"
-          - normalized: "ворота"
-      - tokens:
-          - normalized: "шлагбаум"
-      - tokens:
-          - normalized: "структурированный"
-          - normalized: "кабельный"
-          - normalized: "сеть"
-      - tokens:
-          - normalized: "стабилизатор"
-          - normalized: "напряжение"
-      - tokens:
-          - normalized: "управление"
-          - normalized: "климат"
-      - tokens:
-          - normalized: "управление"
-          - normalized: "освещение"
-      - tokens:
-          - normalized: "канальный"
-          - normalized: "кондиционирование"
-      - tokens:
-          - normalized: "кондиционирование"
-      - tokens:
-          - normalized: "умный"
-          - normalized: "функционал"
-      - tokens:
-          - normalized: "электрический"
-          - normalized: "карниз"
-      - tokens:
-          - normalized: "охранный"
-          - normalized: "сигнализация"
-      - tokens:
-          - normalized: "пожарный"
-          - normalized: "сигнализация"
-
-  - type: property_type
-    label: Тип объекта
-    group: Объект и направление
+  - type: intent_need
+    label: Потребность / нужно
+    group: "V3: намерение"
     confidence: 0.68
+    patterns:
+      - source_text: "нужно"
+        tokens:
+          - normalized: "нужный"
+      - source_text: "нужна помощь"
+        tokens:
+          - normalized: "нужный"
+          - normalized: "помощь"
+      - source_text: "требуется"
+        tokens:
+          - normalized: "требоваться"
+      - source_text: "хочу"
+        tokens:
+          - normalized: "хотеть"
+      - source_text: "нужен вывод"
+        tokens:
+          - normalized: "нужный"
+          - normalized: "вывод"
+
+  - type: intent_customer_request
+    label: Запрос заказчика / клиента
+    group: "V3: намерение"
+    confidence: 0.82
+    patterns:
+      - source_text: "заказчик хочет"
+        tokens:
+          - normalized: "заказчик"
+          - normalized: "хотеть"
+      - source_text: "клиент хочет"
+        tokens:
+          - normalized: "клиент"
+          - normalized: "хотеть"
+      - source_text: "заказчики хотят"
+        tokens:
+          - normalized: "заказчик"
+          - normalized: "хотеть"
+      - source_text: "запрос от клиента"
+        tokens:
+          - normalized: "запрос"
+          - normalized: "от"
+          - normalized: "клиент"
+      - source_text: "вопрос от заказчиков"
+        tokens:
+          - normalized: "вопрос"
+          - normalized: "от"
+          - normalized: "заказчик"
+
+  - type: intent_provider_search
+    label: Поиск исполнителя / контактов
+    group: "V3: намерение"
+    confidence: 0.88
+    patterns:
+      - source_text: "посоветуйте контакты"
+        tokens:
+          - normalized: "посоветовать"
+          - normalized: "контакт"
+      - source_text: "к кому идти"
+        tokens:
+          - normalized: "к"
+          - normalized: "кто"
+          - normalized: "идти"
+      - source_text: "где можно заказать"
+        tokens:
+          - normalized: "где"
+          - normalized: "можно"
+          - normalized: "заказать"
+      - source_text: "поделиться контактами"
+        tokens:
+          - normalized: "поделиться"
+          - normalized: "контакт"
+      - source_text: "хороший подрядчик"
+        tokens:
+          - normalized: "хороший"
+          - normalized: "подрядчик"
+      - source_text: "кто может помочь"
+        tokens:
+          - normalized: "кто"
+          - normalized: "мочь"
+          - normalized: "помочь"
+      - source_text: "готов поделиться контактами"
+        tokens:
+          - normalized: "готовый"
+          - normalized: "поделиться"
+          - normalized: "контакт"
+
+  - type: intent_install_connect
+    label: Установить / подключить
+    group: "V3: намерение"
+    confidence: 0.84
+    patterns:
+      - source_text: "установить и подключить"
+        tokens:
+          - normalized: "установить"
+          - normalized: "и"
+          - normalized: "подключить"
+      - source_text: "хочу установить"
+        tokens:
+          - normalized: "хотеть"
+          - normalized: "установить"
+      - source_text: "хотят установить"
+        tokens:
+          - normalized: "хотеть"
+          - normalized: "установить"
+      - source_text: "кто ставил"
+        tokens:
+          - normalized: "кто"
+          - normalized: "ставить"
+      - source_text: "ставил систему"
+        tokens:
+          - normalized: "ставить"
+          - normalized: "система"
+      - source_text: "установить"
+        tokens:
+          - normalized: "установить"
+      - source_text: "подключить"
+        tokens:
+          - normalized: "подключить"
+      - source_text: "монтаж"
+        tokens:
+          - normalized: "монтаж"
+
+  - type: intent_consultation
+    label: Консультация / вопрос
+    group: "V3: намерение"
+    confidence: 0.78
+    patterns:
+      - source_text: "подскажите"
+        tokens:
+          - normalized: "подсказать"
+      - source_text: "проконсультироваться"
+        tokens:
+          - normalized: "проконсультироваться"
+      - source_text: "хочу понять"
+        tokens:
+          - normalized: "хотеть"
+          - normalized: "понять"
+      - source_text: "поделитесь опытом"
+        tokens:
+          - normalized: "поделиться"
+          - normalized: "опыт"
+      - source_text: "кто сталкивался"
+        tokens:
+          - normalized: "кто"
+          - normalized: "сталкиваться"
+      - source_text: "как реализуется"
+        tokens:
+          - normalized: "как"
+          - normalized: "реализоваться"
+      - source_text: "помогите решить"
+        tokens:
+          - normalized: "помочь"
+          - normalized: "решить"
+      - source_text: "слышали про такое"
+        tokens:
+          - normalized: "слышать"
+          - normalized: "про"
+          - normalized: "такой"
+
+  - type: intent_solution_selection
+    label: Подбор / оценка решения
+    group: "V3: намерение"
+    confidence: 0.78
+    phrases:
+      - ["кому", "и", "зачем"]
+    patterns:
+      - source_text: "какие нужные и полезные"
+        tokens:
+          - normalized: "какой"
+          - normalized: "нужный"
+          - normalized: "и"
+          - normalized: "полезный"
+      - source_text: "можно внедрить"
+        tokens:
+          - normalized: "можно"
+          - normalized: "внедрить"
+      - source_text: "надо ли"
+        tokens:
+          - normalized: "надо"
+          - normalized: "ли"
+      - source_text: "какие плюшки"
+        tokens:
+          - normalized: "какой"
+          - normalized: "плюшка"
+      - source_text: "где можно изучить"
+        tokens:
+          - normalized: "где"
+          - normalized: "можно"
+          - normalized: "изучить"
+      - source_text: "хочу выбрать"
+        tokens:
+          - normalized: "хотеть"
+          - normalized: "выбрать"
+      - source_text: "хватит ли"
+        tokens:
+          - normalized: "хватить"
+          - normalized: "ли"
+      - source_text: "хватит"
+        tokens:
+          - normalized: "хватить"
+
+  - type: intent_implementation
+    label: Намерение внедрить / реализовать
+    group: "V3: намерение"
+    confidence: 0.76
+    patterns:
+      - source_text: "хочу реализовать"
+        tokens:
+          - normalized: "хотеть"
+          - normalized: "реализовать"
+      - source_text: "хочу сделать"
+        tokens:
+          - normalized: "хотеть"
+          - normalized: "сделать"
+      - source_text: "внедрить в проект"
+        tokens:
+          - normalized: "внедрить"
+          - normalized: "в"
+          - normalized: "проект"
+      - source_text: "отобразить решение"
+        tokens:
+          - normalized: "отобразить"
+
+  - type: context_design_project
+    label: Проектирование / дизайн
+    group: "V3: контекст"
+    confidence: 0.72
+    patterns:
+      - source_text: "чертежи электрики"
+        tokens:
+          - normalized: "чертеж"
+          - normalized: "электрика"
+      - source_text: "план розеток"
+        tokens:
+          - normalized: "план"
+          - normalized: "розетка"
+      - source_text: "схема"
+        tokens:
+          - normalized: "схема"
+      - source_text: "чертежах схему"
+        tokens:
+          - normalized: "чертеж"
+          - normalized: "схема"
+      - source_text: "проектировать дизайн"
+        tokens:
+          - normalized: "проектировать"
+          - normalized: "дизайн"
+      - source_text: "технический проект"
+        tokens:
+          - normalized: "технический"
+          - normalized: "проект"
+      - source_text: "проект умного дома"
+        tokens:
+          - normalized: "проект"
+          - normalized: "умный"
+          - normalized: "дом"
+      - source_text: "в проект"
+        tokens:
+          - normalized: "в"
+          - normalized: "проект"
+      - source_text: "проект по умному дому"
+        tokens:
+          - normalized: "проект"
+          - normalized: "по"
+          - normalized: "умный"
+          - normalized: "дом"
+      - source_text: "примечание"
+        tokens:
+          - normalized: "примечание"
+      - source_text: "альбом проекта"
+        tokens:
+          - normalized: "альбом"
+          - normalized: "проект"
+      - source_text: "white box"
+        tokens:
+          - normalized: "white"
+          - normalized: "box"
+
+  - type: context_wiring_output
+    label: Выводы / кабели / розетки
+    group: "V3: контекст"
+    confidence: 0.7
+    phrases:
+      - ["220v"]
+    patterns:
+      - source_text: "вывод"
+        tokens:
+          - normalized: "вывод"
+      - source_text: "вывести"
+        tokens:
+          - normalized: "вывести"
+      - source_text: "проконсультироваться по выводам"
+        tokens:
+          - normalized: "проконсультироваться"
+          - normalized: "по"
+          - normalized: "вывод"
+      - source_text: "кабель канал"
+        tokens:
+          - normalized: "кабель"
+          - normalized: "канал"
+      - source_text: "розетка"
+        tokens:
+          - normalized: "розетка"
+      - source_text: "слаботочный щит"
+        tokens:
+          - normalized: "слаботочный"
+          - normalized: "щит"
+      - source_text: "мелкоточный щит"
+        tokens:
+          - normalized: "мелкоточный"
+          - normalized: "щит"
+
+  - type: context_renovation_modification
+    label: Ремонт / изменение схемы
+    group: "V3: контекст"
+    confidence: 0.76
+    patterns:
+      - source_text: "добавление розеток"
+        tokens:
+          - normalized: "добавление"
+          - normalized: "розетка"
+      - source_text: "в схему добавить"
+        tokens:
+          - normalized: "в"
+          - normalized: "схема"
+          - normalized: "добавить"
+      - source_text: "брать в работу"
+        tokens:
+          - normalized: "брать"
+          - normalized: "в"
+          - normalized: "работа"
+      - source_text: "делать с нуля"
+        tokens:
+          - normalized: "делать"
+          - normalized: "с"
+          - normalized: "нуль"
+      - source_text: "конец ремонта"
+        tokens:
+          - normalized: "конец"
+          - normalized: "ремонт"
+      - source_text: "не сделали выводы"
+        tokens:
+          - normalized: "не"
+          - normalized: "сделать"
+          - normalized: "вывод"
+
+  - type: context_developer_system
+    label: Система от застройщика
+    group: "V3: контекст"
+    confidence: 0.8
+    patterns:
+      - source_text: "умный дом от застройщика"
+        tokens:
+          - normalized: "умный"
+          - normalized: "дом"
+          - normalized: "от"
+          - normalized: "застройщик"
+      - source_text: "от застройщика"
+        tokens:
+          - normalized: "от"
+          - normalized: "застройщик"
+      - source_text: "застройщик говорит"
+        tokens:
+          - normalized: "застройщик"
+          - normalized: "говорить"
+
+  - type: context_warranty_risk
+    label: Гарантия / риск сломать систему
+    group: "V3: контекст"
+    confidence: 0.8
+    patterns:
+      - source_text: "слетает гарантия"
+        tokens:
+          - normalized: "слетать"
+          - normalized: "гарантия"
+      - source_text: "опасаются проблем"
+        tokens:
+          - normalized: "опасаться"
+          - normalized: "проблема"
+      - source_text: "проблема с системой"
+        tokens:
+          - normalized: "проблема"
+          - normalized: "с"
+          - normalized: "система"
+
+  - type: context_designer
+    label: Дизайнер / проектировщик
+    group: "V3: сегмент"
+    confidence: 0.68
+    patterns:
+      - source_text: "дизайнер"
+        tokens:
+          - normalized: "дизайнер"
+      - source_text: "проектировщик"
+        tokens:
+          - normalized: "проектировщик"
+      - source_text: "проект"
+        tokens:
+          - normalized: "проект"
+      - source_text: "дизайн"
+        tokens:
+          - normalized: "дизайн"
+
+  - type: object_apartment
+    label: Квартира
+    group: "V3: объект"
+    confidence: 0.68
+    patterns:
+      - source_text: "квартира"
+        tokens:
+          - normalized: "квартира"
+      - source_text: "детская"
+        tokens:
+          - normalized: "детская"
+
+  - type: object_family
+    label: Семья / дети
+    group: "V3: объект"
+    confidence: 0.66
+    patterns:
+      - source_text: "родители"
+        tokens:
+          - normalized: "родитель"
+      - source_text: "двое детей"
+        tokens:
+          - normalized: "двое"
+          - normalized: "ребенок"
+      - source_text: "дети"
+        tokens:
+          - normalized: "дети"
+
+  - type: object_commercial
+    label: Коммерческий объект
+    group: "V3: объект"
+    confidence: 0.7
     phrases:
       - ["тц"]
     patterns:
-      - tokens:
-          - normalized: "квартира"
-      - tokens:
-          - normalized: "частный"
-          - normalized: "дом"
-      - tokens:
-          - normalized: "коттедж"
-      - tokens:
-          - normalized: "дача"
-      - tokens:
-          - normalized: "офис"
-      - tokens:
+      - source_text: "коммерческий объект"
+        tokens:
           - normalized: "коммерческий"
           - normalized: "объект"
-      - tokens:
+      - source_text: "коммерческое помещение"
+        tokens:
           - normalized: "коммерческий"
           - normalized: "помещение"
+      - source_text: "офис"
+        tokens:
+          - normalized: "офис"
+      - source_text: "медицинское учреждение"
+        tokens:
+          - normalized: "медицинский"
+          - normalized: "учреждение"
 
-  - type: design_scope
-    label: Раздел проектирования
-    group: Проектирование и работы
-    confidence: 0.64
+  - type: object_country_house
+    label: Дом / дача / коттедж
+    group: "V3: объект"
+    confidence: 0.7
     patterns:
-      - tokens:
-          - normalized: "чертеж"
-          - normalized: "электрика"
-      - tokens:
-          - normalized: "план"
-          - normalized: "розетка"
-      - tokens:
-          - normalized: "освещение"
-      - tokens:
-          - normalized: "чертеж"
-          - normalized: "схема"
-      - tokens:
-          - normalized: "примечание"
-      - tokens:
-          - normalized: "схема"
-      - tokens:
-          - normalized: "проектировать"
-          - normalized: "дизайн"
-      - tokens:
-          - normalized: "технический"
-          - normalized: "проект"
-      - tokens:
-          - normalized: "проект"
-          - normalized: "по"
-          - normalized: "умный"
+      - source_text: "частный дом"
+        tokens:
+          - normalized: "частный"
           - normalized: "дом"
-      - tokens:
-          - normalized: "проект"
-          - normalized: "по"
-          - normalized: "умный"
-          - normalized: "функционал"
-      - tokens:
-          - normalized: "канальный"
-          - normalized: "кондиционирование"
+      - source_text: "коттедж"
+        tokens:
+          - normalized: "коттедж"
+      - source_text: "дача"
+        tokens:
+          - normalized: "дача"
+      - source_text: "загородный дом"
+        tokens:
+          - normalized: "загородный"
+          - normalized: "дом"
 
   - type: service_location
     label: Локация работ
-    group: Общие факты
+    group: "V3: объект"
     confidence: 0.72
     phrases:
       - ["спб"]
     patterns:
-      - tokens:
+      - source_text: "Москва"
+        tokens:
           - normalized: "москва"
-      - tokens:
+      - source_text: "Санкт-Петербург"
+        tokens:
           - normalized: "санкт"
           - normalized: "петербург"
 
-  - type: work_type
-    label: Тип работ
-    group: Проектирование и работы
-    confidence: 0.76
+  - type: domain_smart_home
+    label: "Домен: умный дом"
+    group: "V3: домен"
+    confidence: 0.82
     patterns:
-      - tokens:
-          - normalized: "установить"
-          - normalized: "и"
-          - normalized: "подключить"
-      - tokens:
-          - normalized: "управление"
-          - normalized: "через"
-          - normalized: "приложение"
-      - tokens:
-          - normalized: "заказать"
+      - source_text: "умный дом"
+        tokens:
+          - normalized: "умный"
+          - normalized: "дом"
+      - source_text: "система умного дома"
+        tokens:
           - normalized: "система"
-          - normalized: "видеонаблюдение"
-      - tokens:
-          - normalized: "проконсультироваться"
-      - tokens:
-          - normalized: "проектирование"
-      - tokens:
-          - normalized: "монтаж"
-      - tokens:
-          - normalized: "обслуживание"
-      - tokens:
-          - normalized: "под"
-          - normalized: "ключ"
-      - tokens:
-          - normalized: "внедрить"
-      - tokens:
-          - normalized: "внедрить"
-          - normalized: "в"
-          - normalized: "проект"
-      - tokens:
-          - normalized: "добавление"
-          - normalized: "розетка"
-      - tokens:
-          - normalized: "в"
-          - normalized: "схема"
-          - normalized: "добавить"
-      - tokens:
-          - normalized: "делать"
-          - normalized: "с"
-          - normalized: "нуль"
-      - tokens:
-          - normalized: "разработать"
-          - normalized: "технический"
-          - normalized: "проект"
+          - normalized: "умный"
+          - normalized: "дом"
+      - source_text: "автоматизация"
+        tokens:
+          - normalized: "автоматизация"
+      - source_text: "умный функционал"
+        tokens:
+          - normalized: "умный"
+          - normalized: "функционал"
 
-  - type: automation_component
-    label: Компонент автоматизации
-    group: Устройства и автоматизация
-    confidence: 0.74
-    phrases:
-      - ["wi-fi", "модуль"]
+  - type: domain_leak_protection
+    label: "Домен: защита от протечек"
+    group: "V3: домен"
+    confidence: 0.84
     patterns:
-      - tokens:
-          - normalized: "zigbee"
-          - normalized: "шлюз"
-      - tokens:
-          - normalized: "приложение"
-      - tokens:
-          - normalized: "алиса"
-      - tokens:
-          - normalized: "камера"
-          - normalized: "на"
-          - normalized: "стена"
-      - tokens:
-          - normalized: "установить"
-          - normalized: "камера"
-      - tokens:
+      - source_text: "датчик протечки"
+        tokens:
           - normalized: "датчик"
           - normalized: "протечка"
-      - source_text: "проводной датчик"
+      - source_text: "защита от протечек"
         tokens:
-          - normalized: "проводной"
-          - normalized: "датчик"
-      - source_text: "датчик сработал"
-        tokens:
-          - normalized: "датчик"
-          - normalized: "сработать"
-      - tokens:
-          - normalized: "домофон"
-      - tokens:
-          - normalized: "вызывной"
-          - normalized: "панель"
-      - tokens:
-          - normalized: "замок"
-      - tokens:
-          - normalized: "ворота"
-      - tokens:
-          - normalized: "шлагбаум"
-      - tokens:
-          - normalized: "электрический"
-          - normalized: "карниз"
-      - tokens:
-          - normalized: "датчик"
-          - normalized: "движение"
-      - tokens:
-          - normalized: "устройство"
-          - normalized: "с"
-          - normalized: "пульт"
-      - tokens:
-          - normalized: "шайба"
-
-  - type: installation_surface
-    label: Место монтажа
-    group: Проектирование и работы
-    confidence: 0.62
-    patterns:
-      - tokens:
-          - normalized: "камера"
-          - normalized: "на"
-          - normalized: "стена"
-      - tokens:
-          - normalized: "стена"
-      - tokens:
-          - normalized: "керамогранит"
-
-  - type: wiring_output
-    label: Выводы / подключение
-    group: Проектирование и работы
-    confidence: 0.66
-    phrases:
-      - ["220v"]
-    patterns:
-      - tokens:
-          - normalized: "проконсультироваться"
-          - normalized: "по"
-          - normalized: "вывод"
-      - tokens:
-          - normalized: "вывод"
-      - tokens:
-          - normalized: "вывести"
-      - tokens:
-          - normalized: "кабель"
-          - normalized: "канал"
-
-  - type: controlled_device
-    label: Управляемое устройство
-    group: Устройства и автоматизация
-    confidence: 0.66
-    phrases:
-      - ["тв"]
-    patterns:
-      - tokens:
-          - normalized: "свет"
-      - tokens:
-          - normalized: "розетка"
-      - tokens:
-          - normalized: "выключатель"
-      - tokens:
-          - normalized: "входной"
-          - normalized: "замок"
-      - tokens:
-          - normalized: "кондиционер"
-      - tokens:
-          - normalized: "электрокарниз"
-      - tokens:
-          - normalized: "система"
           - normalized: "защита"
           - normalized: "от"
           - normalized: "протечка"
-      - tokens:
-          - normalized: "теплый"
-          - normalized: "пол"
-      - tokens:
-          - normalized: "отопление"
-      - tokens:
-          - normalized: "сценарий"
-          - normalized: "освещение"
-      - tokens:
-          - normalized: "ночной"
-          - normalized: "свет"
-      - tokens:
-          - normalized: "бра"
-      - tokens:
-          - normalized: "трек"
-      - tokens:
-          - normalized: "электромагнитный"
-          - normalized: "замок"
-      - tokens:
-          - normalized: "кнопка"
-          - normalized: "открывание"
-      - tokens:
-          - normalized: "датчик"
-          - normalized: "движение"
+      - source_text: "протечка"
+        tokens:
+          - normalized: "протечка"
       - source_text: "проводной датчик"
         tokens:
           - normalized: "проводной"
@@ -359,63 +538,320 @@ facts:
         tokens:
           - normalized: "датчик"
           - normalized: "сработать"
-      - tokens:
-          - normalized: "дежурный"
-          - normalized: "свет"
-      - tokens:
-          - normalized: "закарнизный"
-          - normalized: "подсветка"
-      - tokens:
-          - normalized: "электрический"
-          - normalized: "карниз"
+      - source_text: "перекрывать воду"
+        tokens:
+          - normalized: "перекрывать"
+          - normalized: "вода"
+      - source_text: "вывод информации на смартфон"
+        tokens:
+          - normalized: "вывод"
+          - normalized: "информация"
+          - normalized: "на"
+          - normalized: "смартфон"
 
-  - type: power_equipment
-    label: Оборудование электропитания
-    group: Электропитание
-    confidence: 0.68
-    phrases:
-      - ["ибп"]
+  - type: domain_video_surveillance
+    label: "Домен: видеонаблюдение"
+    group: "V3: домен"
+    confidence: 0.84
     patterns:
-      - tokens:
-          - normalized: "стабилизатор"
-          - normalized: "напряжение"
-      - tokens:
-          - normalized: "бесперебойный"
-          - normalized: "питание"
+      - source_text: "система видеонаблюдения"
+        tokens:
+          - normalized: "система"
+          - normalized: "видеонаблюдение"
+      - source_text: "видеонаблюдение"
+        tokens:
+          - normalized: "видеонаблюдение"
+      - source_text: "камера на стену"
+        tokens:
+          - normalized: "камера"
+          - normalized: "на"
+          - normalized: "стена"
+      - source_text: "следить за няней"
+        tokens:
+          - normalized: "следить"
+          - normalized: "за"
+          - normalized: "няня"
 
-  - type: access_device
-    label: Устройство доступа
-    group: СКУД и домофония
-    confidence: 0.68
+  - type: domain_access_control
+    label: "Домен: СКУД / доступ"
+    group: "V3: домен"
+    confidence: 0.82
     phrases:
       - ["скуд"]
     patterns:
-      - tokens:
-          - normalized: "домофон"
-      - tokens:
-          - normalized: "вызывной"
-          - normalized: "панель"
-      - tokens:
-          - normalized: "шлагбаум"
-      - tokens:
-          - normalized: "ворота"
-      - tokens:
+      - source_text: "контроль доступа"
+        tokens:
+          - normalized: "контроль"
+          - normalized: "доступ"
+      - source_text: "электромагнитный замок"
+        tokens:
           - normalized: "электромагнитный"
           - normalized: "замок"
-      - tokens:
+      - source_text: "входной замок"
+        tokens:
+          - normalized: "входной"
+          - normalized: "замок"
+      - source_text: "кнопка открывания"
+        tokens:
           - normalized: "кнопка"
           - normalized: "открывание"
+      - source_text: "домофон"
+        tokens:
+          - normalized: "домофон"
+      - source_text: "вызывная панель"
+        tokens:
+          - normalized: "вызывной"
+          - normalized: "панель"
 
-  - type: network_scope
-    label: Сеть / слаботочный раздел
-    group: Сети и инженерка
-    confidence: 0.66
+  - type: domain_security_alarm
+    label: "Домен: охранная / пожарная сигнализация"
+    group: "V3: домен"
+    confidence: 0.82
+    patterns:
+      - source_text: "охранная сигнализация"
+        tokens:
+          - normalized: "охранный"
+          - normalized: "сигнализация"
+      - source_text: "пожарная сигнализация"
+        tokens:
+          - normalized: "пожарный"
+          - normalized: "сигнализация"
+
+  - type: domain_gate_automation
+    label: "Домен: ворота / шлагбаумы"
+    group: "V3: домен"
+    confidence: 0.78
+    patterns:
+      - source_text: "автоматизация ворот"
+        tokens:
+          - normalized: "автоматизация"
+          - normalized: "ворота"
+      - source_text: "ворота"
+        tokens:
+          - normalized: "ворота"
+      - source_text: "шлагбаум"
+        tokens:
+          - normalized: "шлагбаум"
+      - source_text: "въездная группа"
+        tokens:
+          - normalized: "въездной"
+          - normalized: "группа"
+
+  - type: domain_power_stability
+    label: "Домен: электропитание"
+    group: "V3: домен"
+    confidence: 0.78
+    phrases:
+      - ["ибп"]
+    patterns:
+      - source_text: "бесперебойное питание"
+        tokens:
+          - normalized: "бесперебойный"
+          - normalized: "питание"
+      - source_text: "стабилизатор напряжения"
+        tokens:
+          - normalized: "стабилизатор"
+          - normalized: "напряжение"
+      - source_text: "нестабильное электроснабжение"
+        tokens:
+          - normalized: "нестабильный"
+          - normalized: "электроснабжение"
+      - source_text: "скачки напряжения"
+        tokens:
+          - normalized: "скачок"
+          - normalized: "напряжение"
+
+  - type: domain_climate
+    label: "Домен: климат"
+    group: "V3: домен"
+    confidence: 0.78
+    patterns:
+      - source_text: "управление климатом"
+        tokens:
+          - normalized: "управление"
+          - normalized: "климат"
+      - source_text: "кондиционер"
+        tokens:
+          - normalized: "кондиционер"
+      - source_text: "теплый пол"
+        tokens:
+          - normalized: "теплый"
+          - normalized: "пол"
+      - source_text: "отопление"
+        tokens:
+          - normalized: "отопление"
+      - source_text: "канальное кондиционирование"
+        tokens:
+          - normalized: "канальный"
+          - normalized: "кондиционирование"
+      - source_text: "статическое давление"
+        tokens:
+          - normalized: "статический"
+          - normalized: "давление"
+
+  - type: domain_lighting
+    label: "Домен: освещение / сценарии"
+    group: "V3: домен"
+    confidence: 0.76
+    patterns:
+      - source_text: "управление освещением"
+        tokens:
+          - normalized: "управление"
+          - normalized: "освещение"
+      - source_text: "сценарий освещения"
+        tokens:
+          - normalized: "сценарий"
+          - normalized: "освещение"
+      - source_text: "ночной свет"
+        tokens:
+          - normalized: "ночной"
+          - normalized: "свет"
+      - source_text: "дежурный свет"
+        tokens:
+          - normalized: "дежурный"
+          - normalized: "свет"
+      - source_text: "датчик движения"
+        tokens:
+          - normalized: "датчик"
+          - normalized: "движение"
+      - source_text: "при движении"
+        tokens:
+          - normalized: "при"
+          - normalized: "движение"
+      - source_text: "подключить свет"
+        tokens:
+          - normalized: "подключить"
+          - normalized: "свет"
+      - source_text: "умный свет"
+        tokens:
+          - normalized: "умный"
+          - normalized: "свет"
+
+  - type: domain_curtain
+    label: "Домен: электрокарнизы / шторы"
+    group: "V3: домен"
+    confidence: 0.78
+    patterns:
+      - source_text: "электрический карниз"
+        tokens:
+          - normalized: "электрический"
+          - normalized: "карниз"
+      - source_text: "электрокарниз"
+        tokens:
+          - normalized: "электрокарниз"
+      - source_text: "карниз с Wi-Fi"
+        tokens:
+          - normalized: "карниз"
+          - normalized: "с"
+          - normalized: "wi"
+          - normalized: "fi"
+      - source_text: "работа с Алисой"
+        tokens:
+          - normalized: "работа"
+          - normalized: "с"
+          - normalized: "алиса"
+
+  - type: domain_network
+    label: "Домен: СКС / слаботочные сети"
+    group: "V3: домен"
+    confidence: 0.74
     phrases:
       - ["скс"]
     patterns:
-      - tokens:
+      - source_text: "структурированная кабельная сеть"
+        tokens:
+          - normalized: "структурированный"
           - normalized: "кабельный"
           - normalized: "сеть"
-      - tokens:
+      - source_text: "слаботочная сеть"
+        tokens:
           - normalized: "слаботочный"
           - normalized: "сеть"
+      - source_text: "инженерная система"
+        tokens:
+          - normalized: "инженерный"
+          - normalized: "система"
+
+  - type: noise_supply_sale
+    label: "Шум: продажа / наличие"
+    group: "V3: шум"
+    confidence: 0.8
+    phrases:
+      - ["продаем"]
+      - ["предлагаем"]
+      - ["есть", "в", "наличии"]
+      - ["самовывоз"]
+    patterns:
+      - source_text: "продам"
+        tokens:
+          - normalized: "продать"
+
+  - type: noise_diy_equipment_only
+    label: "Шум: DIY / только оборудование"
+    group: "V3: шум"
+    confidence: 0.78
+    patterns:
+      - source_text: "без монтажа"
+        tokens:
+          - normalized: "без"
+          - normalized: "монтаж"
+      - source_text: "сам поставить"
+        tokens:
+          - normalized: "сам"
+          - normalized: "поставить"
+      - source_text: "своими руками"
+        tokens:
+          - normalized: "своими"
+          - normalized: "рука"
+      - source_text: "какой купить"
+        tokens:
+          - normalized: "какой"
+          - normalized: "купить"
+      - source_text: "только оборудование"
+        tokens:
+          - normalized: "только"
+          - normalized: "оборудование"
+
+  - type: noise_price_only
+    label: "Шум: только цена"
+    group: "V3: шум"
+    confidence: 0.7
+    patterns:
+      - source_text: "сколько стоит"
+        tokens:
+          - normalized: "сколько"
+          - normalized: "стоить"
+      - source_text: "дешево"
+        tokens:
+          - normalized: "дешево"
+      - source_text: "самый дешевый"
+        tokens:
+          - normalized: "самый"
+          - normalized: "дешевый"
+
+  - type: noise_ordinary_household
+    label: "Шум: обычная бытовая система"
+    group: "V3: шум"
+    confidence: 0.74
+    patterns:
+      - source_text: "обычный кондиционер"
+        tokens:
+          - normalized: "обычный"
+          - normalized: "кондиционер"
+      - source_text: "обычный домофон"
+        tokens:
+          - normalized: "обычный"
+          - normalized: "домофон"
+      - source_text: "без умного дома"
+        tokens:
+          - normalized: "без"
+          - normalized: "умный"
+          - normalized: "дом"
+      - source_text: "для компьютера"
+        tokens:
+          - normalized: "для"
+          - normalized: "компьютер"
+      - source_text: "в подъезде"
+        tokens:
+          - normalized: "в"
+          - normalized: "подъезд"

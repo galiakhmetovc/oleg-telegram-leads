@@ -433,34 +433,44 @@ literal spelling is not duplicated across catalogs; choose the most specific
 catalog (`vendors`, `software`, `devices`, or `protocols`) and make domain
 signals depend on that catalog explicitly.
 
-Domain signals are the inference layer over semantic phrases, alias catalogs,
-and facts. They remain semantic categories such as `smart_home_platform`,
-`protocol_gateway`, `leak_protection`, `lighting_automation`,
-`climate_automation`, `access_control`, `intercom`, `video_surveillance`, and
-`power_backup`. Signals depend on facts, not directly on alias catalogs. Every
-alias match emits an identity fact with type `alias:<catalog>:<key>` in addition
-to its configured semantic facts; for example `devices.camera` emits
-`alias:devices:camera` and `video_device`. A signal then uses `match.facts`
-dependencies such as `alias:devices:camera` or `video_device`, and the emitted
-signal has `source=fact_dependency`.
+NLP config v3 separates the model into explicit layers:
+
+1. Alias catalogs (`vendors`, `protocols`, `devices`, `software`) find concrete
+   market entities and emit identity facts such as `alias:vendors:neptun` plus
+   generic fact types such as `vendor`, `model`, `protocol`, or
+   `automation_component`.
+2. Fact rules extract meaning from text into `intent_*`, `context_*`,
+   `object_*`, `domain_*`, and `noise_*` fact types.
+3. Domain signals contain no direct phrases or Yargy patterns. They depend only
+   on facts through `match.facts`, for example `pur_leak_protection` depends on
+   `domain_leak_protection`, `alias:vendors:neptun`,
+   `alias:devices:leak_sensor`, and `alias:devices:leak_valve`.
+4. Lead scoring maps signal/fact types to score reasons, solution areas,
+   customer segments, intent/noise categories, score caps, and review lanes.
+
+The current semantic signal taxonomy is v3 and intentionally does not preserve
+old v2 names as compatibility targets. Examples are `lead_active_intent`,
+`lead_consultation_intent`, `project_context`, `segment_designer`,
+`pur_smart_home`, `pur_video_surveillance`, `pur_leak_protection`,
+`pur_access_control`, `pur_climate_control`, `pur_lighting_automation`, and
+`pur_network_infrastructure`.
 
 Dependencies must stay narrow. A generic word such as `камера` may emit the
-specific fact `video_device` and the domain signal `video_surveillance`, but it
-must not emit broad automation facts such as `automation_component` or
+specific fact `video_device` and the domain signal `pur_video_surveillance`, but
+it must not emit broad automation facts such as `automation_component` or
 `controlled_device`. Broad facts feed score and solution-area inference, so they
 are reserved for genuinely controlled automation components. Domain evidence
 alone is intentionally below the lead threshold; an auto-lead should normally
-combine a PUR domain with intent such as provider search, installation,
-consultation, customer request, or project context.
+combine a PUR domain with explicit intent such as provider search, installation,
+customer request, consultation, or solution selection.
 
 Brand/model spellings must not be duplicated in domain signal or fact phrase
 rules. For example, `Нептун`, `Нептуп`, `Neptun ProW`, and `Profi Wi-Fi` live in
-the `neptun` vendor alias. The `water_leak_protection` and `leak_protection`
-signals explicitly reference that alias through fact dependencies such as
-`alias:vendors:neptun`; the alias itself emits identity/vendor/model facts.
-Domain signal rules keep only semantic language such as `датчик протечки` or
-`защита от протечек`. Lead scoring uses the resulting signal/fact types, not
-the storage location of the rule.
+the `neptun` vendor alias. The `pur_leak_protection` signal references that
+alias through fact dependencies such as `alias:vendors:neptun`; the alias itself
+emits identity/vendor/model facts. Domain facts keep semantic language such as
+`датчик протечки` or `защита от протечек`. Lead scoring uses the resulting
+signal/fact types, not the storage location of the rule.
 
 ## Lead Assessment
 
@@ -475,16 +485,18 @@ the final score when configured signal/fact/reason/noise evidence appears; the
 cap is emitted as a synthetic `score_cap` reason so the operator still sees why
 the arithmetic changed. Caps can also define `excluded_*` lists; the default
 `domain_without_intent` cap limits domain-only evidence below the lead threshold
-and is skipped only when explicit intent signals are present. The Review
-constructor keeps `operator_noise` connected to the hard-noise cap, because a
-manual "В шум" action should suppress an otherwise overheated score.
+and is skipped only when explicit intent signals are present. The
+`intent_without_pur_domain` cap limits off-domain requests such as "где заказать
+обычный стол" below the lead threshold even when provider-search facts are
+found. The Review constructor keeps `operator_noise` connected to the
+hard-noise cap, because a manual "В шум" action should suppress an otherwise
+overheated score.
 
-Generic demand signals such as `need`, `provider_search`, `consultation_request`,
-and generic `work_type` facts are intentionally low-weight. They explain intent,
-but should not by themselves turn an off-domain message into a PUR lead. A strong
-lead should normally combine intent with PUR domain signals or facts such as
-smart home, video surveillance, access control, leak protection, lighting,
-climate, power backup, or engineering network context.
+Generic intent is intentionally not enough by itself. A strong lead should
+normally combine intent signals (`lead_active_intent`,
+`lead_consultation_intent`, `lead_research_intent`) with PUR domain signals or
+facts such as smart home, video surveillance, access control, leak protection,
+lighting, climate, power backup, or engineering network context.
 
 `lead_assessment` is part of every new enrichment result when the stage is
 enabled:
@@ -507,10 +519,10 @@ score/temperature bounds, excluded types, and all match groups, then returns the
 same matched group indexes used for operator explanations.
 
 Bootstrap review lanes distinguish direct PUR leads from research/value
-questions. `direct_pur_lead` requires a PUR domain plus active order/provider/
-installation evidence. Research signals such as "что выбрать", "зачем нужен
-умный дом", or "где изучить тему" go to `research_warm` unless a stronger
-active-intent rule also matches.
+questions. `direct_pur_lead` requires a PUR domain plus concrete order/provider/
+installation facts such as `intent_provider_search`, `intent_customer_request`,
+or `intent_install_connect`. Research signals such as "что выбрать", "зачем
+нужен умный дом", or "где изучить тему" go to `research_warm`.
 
 Older persisted results without `lead_assessment` remain readable and return the
 field as `null`.
@@ -526,7 +538,7 @@ Extracted `facts` and `domain_signals` also include `settings_refs` when the
 pipeline can identify the responsible editable setting. A reference points to a
 rule (`signals` or `facts`) or an alias catalog row (`aliases` with `catalog`
 and `key`). The frontend turns these references into stable hash deeplinks such
-as `#/settings/signals/smart_home_automation` and
+as `#/settings/signals/pur_smart_home` and
 `#/settings/aliases/devices/electric_curtain`.
 
 ## Batch Analytics

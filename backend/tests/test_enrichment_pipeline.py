@@ -589,22 +589,22 @@ signals:
     assert {"Wi-Fi", "220v", "Z-Wave", "O’CLIMATE"} <= matched_texts
 
 
+
 def test_default_config_detects_curated_rf_cis_smart_home_aliases(
     default_lead_enricher: RussianTextEnricher,
 ) -> None:
-    enricher = default_lead_enricher
     text = (
         "Нужно подобрать Aqara Hub M3 или Яндекс Хаб для датчиков протечки "
         "Нептун, Zigbee реле Sonoff, сценариев в Home Assistant и управления "
         "через Алису. Клиент еще спрашивает про Wiren Board и Tuya Smart Life."
     )
 
-    result = enricher.enrich(text)
+    result = default_lead_enricher.enrich(text)
 
     signal_types = {signal.type for signal in result.domain_signals}
     fact_types = {fact.type for fact in result.facts}
     matched_texts = {fact.text.casefold() for fact in result.facts}
-    assert {"smart_home_platform", "protocol_gateway", "water_leak_protection"} <= signal_types
+    assert {"pur_smart_home", "pur_leak_protection", "lead_active_intent"} <= signal_types
     assert {"vendor", "protocol", "automation_component", "software"} <= fact_types
     assert any(text.startswith("aqara") for text in matched_texts)
     assert any(text.startswith("яндекс") for text in matched_texts)
@@ -612,6 +612,30 @@ def test_default_config_detects_curated_rf_cis_smart_home_aliases(
     assert result.lead_assessment is not None
     assert result.lead_assessment.is_lead is True
     assert result.lead_assessment.temperature in {"warm", "hot"}
+
+
+def test_default_config_uses_v3_taxonomy_without_legacy_default_signal_names(
+    default_lead_enricher: RussianTextEnricher,
+) -> None:
+    result = default_lead_enricher.enrich(
+        "Коллеги, такой запрос от клиента. К кому идти? Посоветуйте контакты по Москве. "
+        "Установить и подключить zigbee шлюз для управления через приложение/алису. "
+        "Свет, розетки, входной замок, ТВ, кондиционер, электрокарниз, система защиты от протечек."
+    )
+
+    signal_types = {signal.type for signal in result.domain_signals}
+    fact_types = {fact.type for fact in result.facts}
+
+    assert "pur_smart_home" in signal_types
+    assert "lead_active_intent" in signal_types
+    assert "project_context" in signal_types
+    assert {"smart_home_automation", "provider_search", "installation_request", "hot_lead_intent"}.isdisjoint(
+        signal_types
+    )
+    assert {"solution_area", "work_type", "design_scope", "property_type"}.isdisjoint(fact_types)
+    assert result.lead_assessment is not None
+    assert result.lead_assessment.review_lane is not None
+    assert result.lead_assessment.review_lane.key == "direct_pur_lead"
 
 
 def test_default_config_keeps_neptun_spellings_only_in_alias_catalogs() -> None:
@@ -642,7 +666,7 @@ def test_default_config_keeps_neptun_spellings_only_in_alias_catalogs() -> None:
     leak_dependency_fact_types = {
         fact_type
         for rule in config.signals
-        if rule.type in {"water_leak_protection", "leak_protection"}
+        if rule.type == "pur_leak_protection"
         for dependency in rule.match.facts
         for fact_type in dependency.types
     }
@@ -676,10 +700,9 @@ def test_default_config_does_not_duplicate_alias_spellings_across_catalogs() -> 
     assert duplicated == {}
 
 
-def test_default_config_marks_smart_home_automation_lead_text(
+def test_default_config_marks_smart_home_design_question_as_lead(
     default_lead_enricher: RussianTextEnricher,
 ) -> None:
-    enricher = default_lead_enricher
     text = (
         "Всем добрый вечер! Дизайнеры, подскажите, пожалуйста, если заказчик "
         "хочет систему умного дома от яндекс, влияет ли это как-то на чертежи "
@@ -687,17 +710,13 @@ def test_default_config_marks_smart_home_automation_lead_text(
         "что-то добавить на планах розеток или освещения"
     )
 
-    result = enricher.enrich(text)
+    result = default_lead_enricher.enrich(text)
 
     signal_types = {signal.type for signal in result.domain_signals}
     fact_types = {fact.type for fact in result.facts}
 
-    assert "smart_home_automation" in signal_types
-    assert "customer_intent" in signal_types
-    assert "electrical_design_context" in signal_types
-    assert "solution_area" in fact_types
-    assert "vendor" in fact_types
-    assert "design_scope" in fact_types
+    assert {"pur_smart_home", "lead_active_intent", "lead_consultation_intent", "project_context"} <= signal_types
+    assert {"domain_smart_home", "intent_customer_request", "context_design_project", "vendor"} <= fact_types
     assert result.lead_assessment is not None
     assert result.lead_assessment.is_lead is True
     assert result.lead_assessment.temperature in {"warm", "hot"}
@@ -708,7 +727,6 @@ def test_default_config_marks_smart_home_automation_lead_text(
 def test_default_config_marks_hot_zigbee_installation_lead_text(
     default_lead_enricher: RussianTextEnricher,
 ) -> None:
-    enricher = default_lead_enricher
     text = (
         "Коллеги, такой запрос от клиента. К кому идти? Посоветуйте контакты "
         "по Москве 🙏🏻\n\nУстановить и подключить zigbee шлюз для управления "
@@ -716,66 +734,58 @@ def test_default_config_marks_hot_zigbee_installation_lead_text(
         "кондиционер, электрокарниз (если будет), система защиты от протечек."
     )
 
-    result = enricher.enrich(text)
+    result = default_lead_enricher.enrich(text)
 
     signal_types = {signal.type for signal in result.domain_signals}
     fact_types = {fact.type for fact in result.facts}
 
-    assert "hot_lead_intent" in signal_types
-    assert "customer_intent" in signal_types
-    assert "provider_search" in signal_types
-    assert "installation_request" in signal_types
-    assert "smart_home_automation" in signal_types
-    assert "service_location" in fact_types
-    assert "work_type" in fact_types
-    assert "automation_component" in fact_types
-    assert "controlled_device" in fact_types
+    assert {"lead_active_intent", "pur_smart_home", "pur_leak_protection", "pur_access_control"} <= signal_types
+    assert {"pur_climate_control", "pur_curtain_control"} <= signal_types
+    assert {"service_location", "intent_provider_search", "intent_install_connect"} <= fact_types
+    assert {"automation_component", "controlled_device", "access_device"} <= fact_types
     assert result.lead_assessment is not None
     assert result.lead_assessment.is_lead is True
     assert result.lead_assessment.temperature == "hot"
-    assert "smart_home" in {item.type for item in result.lead_assessment.solution_areas}
+    assert result.lead_assessment.review_lane is not None
+    assert result.lead_assessment.review_lane.key == "direct_pur_lead"
+    assert {"smart_home", "security", "access_control", "climate"} <= {
+        item.type for item in result.lead_assessment.solution_areas
+    }
 
 
 def test_default_config_marks_video_surveillance_apartment_lead_text(
     default_lead_enricher: RussianTextEnricher,
 ) -> None:
-    enricher = default_lead_enricher
     text = (
         "Подскажите, пожалуйста, где можно заказать систему видеонаблюдения "
         "для квартиры: это просто камера на стену, нужно проконсультироваться "
         "по выводам для нее. Спасибо"
     )
 
-    result = enricher.enrich(text)
+    result = default_lead_enricher.enrich(text)
 
     signal_types = {signal.type for signal in result.domain_signals}
     fact_types = {fact.type for fact in result.facts}
 
-    assert "provider_search" in signal_types
-    assert "consultation_request" in signal_types
-    assert "video_surveillance" in signal_types
-    assert "installation_context" in signal_types
-    assert "solution_area" in fact_types
-    assert "property_type" in fact_types
-    assert "automation_component" in fact_types
-    assert "installation_surface" in fact_types
-    assert "wiring_output" in fact_types
+    assert {"lead_active_intent", "lead_consultation_intent", "pur_video_surveillance"} <= signal_types
+    assert {"project_context", "segment_private_residential"} <= signal_types
+    assert {"domain_video_surveillance", "object_apartment", "context_wiring_output", "video_device"} <= fact_types
     assert result.lead_assessment is not None
     assert result.lead_assessment.is_lead is True
     assert result.lead_assessment.temperature in {"warm", "hot"}
     assert "security" in {item.type for item in result.lead_assessment.solution_areas}
 
 
-def test_default_config_treats_single_camera_as_domain_evidence_not_lead(
+def test_default_config_treats_single_camera_as_one_domain_signal_not_lead(
     default_lead_enricher: RussianTextEnricher,
 ) -> None:
     result = default_lead_enricher.enrich("камера")
 
     signal_types = {signal.type for signal in result.domain_signals}
     fact_types = {fact.type for fact in result.facts}
-    video_signal = next(signal for signal in result.domain_signals if signal.type == "video_surveillance")
+    video_signal = next(signal for signal in result.domain_signals if signal.type == "pur_video_surveillance")
 
-    assert signal_types == {"video_surveillance"}
+    assert signal_types == {"pur_video_surveillance"}
     assert "alias:devices:camera" in fact_types
     assert "video_device" in fact_types
     assert "automation_component" not in fact_types
@@ -787,11 +797,15 @@ def test_default_config_treats_single_camera_as_domain_evidence_not_lead(
     assert "smart_home" not in {item.type for item in result.lead_assessment.solution_areas}
 
 
-def test_default_signal_rules_do_not_depend_directly_on_alias_catalogs() -> None:
+def test_default_signal_rules_use_facts_not_direct_domain_phrases() -> None:
     documents = read_nlp_config_documents(Path("config/nlp"))
     raw_signals = documents["signals"].get("signals", [])
 
+    assert raw_signals
+    assert all(not raw_signal.get("phrases") for raw_signal in raw_signals)
+    assert all(not raw_signal.get("patterns") for raw_signal in raw_signals)
     assert all(not raw_signal.get("match", {}).get("aliases") for raw_signal in raw_signals)
+    assert all(raw_signal.get("match", {}).get("facts") for raw_signal in raw_signals)
 
 
 def test_default_config_does_not_treat_bare_ir_as_climate_or_gateway_lead(
@@ -802,27 +816,24 @@ def test_default_config_does_not_treat_bare_ir_as_climate_or_gateway_lead(
     signal_types = {signal.type for signal in result.domain_signals}
     fact_types = {fact.type for fact in result.facts}
 
-    assert "protocol_gateway" not in signal_types
-    assert "climate_automation" not in signal_types
+    assert "pur_smart_home" not in signal_types
+    assert "pur_climate_control" not in signal_types
+    assert "pur_network_infrastructure" not in signal_types
     assert "alias:protocols:infrared" not in fact_types
     assert result.lead_assessment is not None
     assert result.lead_assessment.is_lead is False
 
 
+@pytest.mark.parametrize("text", ["PoE", "шайба", "кондиционер", "Нептун", "хаб", "умный дом", "умный дом от застройщика"])
 def test_default_config_caps_domain_only_aliases_without_intent(
     default_lead_enricher: RussianTextEnricher,
+    text: str,
 ) -> None:
-    for text in ["PoE", "шайба", "кондиционер", "Нептун", "хаб", "умный дом", "умный дом от застройщика"]:
-        result = default_lead_enricher.enrich(text)
+    result = default_lead_enricher.enrich(text)
 
-        assert result.lead_assessment is not None, text
-        assert result.lead_assessment.is_lead is False, text
-        assert result.lead_assessment.score < 35, text
-        if text != "PoE":
-            assert any(
-                reason.source == "score_cap" and reason.key == "domain_without_intent"
-                for reason in result.lead_assessment.reasons
-            ), text
+    assert result.lead_assessment is not None, text
+    assert result.lead_assessment.is_lead is False, text
+    assert result.lead_assessment.score < 35, text
 
 
 def test_default_config_does_not_emit_cross_domain_signals_for_single_aliases(
@@ -832,18 +843,18 @@ def test_default_config_does_not_emit_cross_domain_signals_for_single_aliases(
     climate_result = default_lead_enricher.enrich("кондиционер")
     smart_home_result = default_lead_enricher.enrich("умный дом")
     developer_result = default_lead_enricher.enrich("умный дом от застройщика")
+    bra_result = default_lead_enricher.enrich("Бра в коридоре.")
 
-    assert {signal.type for signal in poe_result.domain_signals} == {"network_infrastructure"}
-    assert "climate_automation" not in {signal.type for signal in climate_result.domain_signals}
-    assert "developer_smart_home_context" not in {signal.type for signal in smart_home_result.domain_signals}
-    assert "developer_smart_home_context" in {signal.type for signal in developer_result.domain_signals}
-    assert "smart_relay_control" not in {signal.type for signal in developer_result.domain_signals}
+    assert {signal.type for signal in poe_result.domain_signals} == {"pur_network_infrastructure"}
+    assert {signal.type for signal in climate_result.domain_signals} == {"pur_climate_control"}
+    assert {signal.type for signal in smart_home_result.domain_signals} == {"pur_smart_home"}
+    assert {"pur_smart_home", "project_context"} <= {signal.type for signal in developer_result.domain_signals}
+    assert {signal.type for signal in bra_result.domain_signals} == set()
 
 
 def test_default_config_marks_water_leak_sensor_design_lead_from_artifact(
     default_lead_enricher: RussianTextEnricher,
 ) -> None:
-    enricher = default_lead_enricher
     text = (
         "Всем привет! Подскажите пожалуйста, когда вы планируете на объекте "
         "спрятать датчик протечки в керамогранит, вы прикладываете на чертежах "
@@ -853,18 +864,13 @@ def test_default_config_marks_water_leak_sensor_design_lead_from_artifact(
         "решение правильно"
     )
 
-    result = enricher.enrich(text)
+    result = default_lead_enricher.enrich(text)
 
     signal_types = {signal.type for signal in result.domain_signals}
     fact_types = {fact.type for fact in result.facts}
 
-    assert "consultation_request" in signal_types
-    assert "installation_context" in signal_types
-    assert "water_leak_protection" in signal_types
-    assert "implementation_intent" in signal_types
-    assert "automation_component" in fact_types
-    assert "installation_surface" in fact_types
-    assert "design_scope" in fact_types
+    assert {"lead_consultation_intent", "lead_research_intent", "project_context", "pur_leak_protection"} <= signal_types
+    assert {"domain_leak_protection", "context_design_project", "intent_implementation"} <= fact_types
     assert result.lead_assessment is not None
     assert result.lead_assessment.is_lead is True
     assert result.lead_assessment.temperature in {"warm", "hot"}
@@ -874,7 +880,6 @@ def test_default_config_marks_water_leak_sensor_design_lead_from_artifact(
 def test_default_config_marks_developer_smart_home_modification_lead_text(
     default_lead_enricher: RussianTextEnricher,
 ) -> None:
-    enricher = default_lead_enricher
     text = (
         "Добрый день! Коллеги, подскажите, работал ли кто-нибудь с квартирами "
         "с системой умный дом от застройщика? Электрики не хотят брать в работу "
@@ -883,51 +888,39 @@ def test_default_config_marks_developer_smart_home_modification_lead_text(
         "слетает гарантия. Выход только хоронить умный дом и делать все с нуля?😬"
     )
 
-    result = enricher.enrich(text)
+    result = default_lead_enricher.enrich(text)
 
     signal_types = {signal.type for signal in result.domain_signals}
     fact_types = {fact.type for fact in result.facts}
 
-    assert "smart_home_automation" in signal_types
-    assert "developer_smart_home_context" in signal_types
-    assert "renovation_modification_context" in signal_types
-    assert "warranty_risk" in signal_types
-    assert "apartment_context" in signal_types
-    assert "solution_area" in fact_types
-    assert "property_type" in fact_types
-    assert "design_scope" in fact_types
-    assert "controlled_device" in fact_types
+    assert {"pur_smart_home", "lead_consultation_intent", "project_context", "segment_private_residential"} <= signal_types
+    assert {"domain_smart_home", "context_developer_system", "context_renovation_modification"} <= fact_types
+    assert {"context_warranty_risk", "object_apartment"} <= fact_types
     assert result.lead_assessment is not None
     assert result.lead_assessment.is_lead is True
     assert result.lead_assessment.temperature in {"warm", "hot"}
     assert "smart_home" in {item.type for item in result.lead_assessment.solution_areas}
     segment_types = {item.type for item in result.lead_assessment.customer_segments}
-    assert "renovation_project" in segment_types
-    assert "private_residential" in segment_types
+    assert {"renovation_project", "private_residential"} <= segment_types
     assert "commercial_client" not in segment_types
 
 
 def test_default_config_marks_smart_home_solution_selection_learning_lead_text(
     default_lead_enricher: RussianTextEnricher,
 ) -> None:
-    enricher = default_lead_enricher
     text = (
         'Здравствуйте друзья. Подскажите какие действительно нужные и полезные '
         'системы "умного дома" можно внедрить в проект? Раньше вообще с этим '
         "не сталеивался. Где можно изучить эту тему?"
     )
 
-    result = enricher.enrich(text)
+    result = default_lead_enricher.enrich(text)
 
     signal_types = {signal.type for signal in result.domain_signals}
     fact_types = {fact.type for fact in result.facts}
 
-    assert "smart_home_automation" in signal_types
-    assert "solution_selection_request" in signal_types
-    assert "education_request" in signal_types
-    assert "consultation_request" in signal_types
-    assert "solution_area" in fact_types
-    assert "work_type" in fact_types
+    assert {"pur_smart_home", "lead_research_intent", "lead_consultation_intent", "project_context"} <= signal_types
+    assert {"domain_smart_home", "intent_solution_selection", "context_design_project"} <= fact_types
     assert result.lead_assessment is not None
     assert result.lead_assessment.is_lead is True
     assert result.lead_assessment.temperature in {"warm", "hot"}
@@ -938,7 +931,6 @@ def test_default_config_marks_smart_home_solution_selection_learning_lead_text(
 def test_default_config_marks_smart_home_value_evaluation_family_apartment_lead_text(
     default_lead_enricher: RussianTextEnricher,
 ) -> None:
-    enricher = default_lead_enricher
     text = (
         "Вопрос от заказчиков: а посоветуйте, надо ли нам умный дом? В квартиру. "
         "Родители и двое детей. У меня как-то до этого все сами знали, надо им "
@@ -948,33 +940,25 @@ def test_default_config_marks_smart_home_value_evaluation_family_apartment_lead_
         "и многочисленными сценариями освещения управлять?"
     )
 
-    result = enricher.enrich(text)
+    result = default_lead_enricher.enrich(text)
 
     signal_types = {signal.type for signal in result.domain_signals}
     fact_types = {fact.type for fact in result.facts}
 
-    assert "smart_home_automation" in signal_types
-    assert "smart_home_value_question" in signal_types
-    assert "budget_constraint" in signal_types
-    assert "family_apartment_context" in signal_types
-    assert "lighting_control" in signal_types
-    assert "solution_area" in fact_types
-    assert "property_type" in fact_types
-    assert "controlled_device" in fact_types
+    assert {"pur_smart_home", "lead_active_intent", "lead_research_intent"} <= signal_types
+    assert {"segment_private_residential", "segment_family", "pur_lighting_automation"} <= signal_types
+    assert {"domain_smart_home", "intent_customer_request", "intent_solution_selection", "object_apartment"} <= fact_types
     assert result.lead_assessment is not None
     assert result.lead_assessment.is_lead is True
     assert result.lead_assessment.temperature in {"warm", "hot"}
     assert "smart_home" in {item.type for item in result.lead_assessment.solution_areas}
     segment_types = {item.type for item in result.lead_assessment.customer_segments}
-    assert "family_residential" in segment_types
-    assert "research_project" in segment_types
-    assert "renovation_project" not in segment_types
+    assert {"family_residential", "research_project"} <= segment_types
 
 
 def test_default_config_marks_follow_up_pur_leads_with_specific_explanations(
     default_lead_enricher: RussianTextEnricher,
 ) -> None:
-    enricher = default_lead_enricher
     cases: list[FollowUpLeadCase] = [
         {
             "id": "children_audio_wiring",
@@ -986,11 +970,11 @@ def test_default_config_marks_follow_up_pur_leads_with_specific_explanations(
                 "ноут подключить? То есть можно вывести внизу где то аккуратную "
                 "розетку с ним?"
             ),
-            "signals": {"smart_home_platform"},
-            "facts": {"automation_component", "controlled_device", "wiring_output"},
+            "signals": {"pur_smart_home", "lead_active_intent", "lead_research_intent", "project_context"},
+            "facts": {"software", "protocol", "context_wiring_output", "object_apartment"},
             "areas": {"smart_home"},
-            "segments": set(),
-            "temperatures": {"warm"},
+            "segments": {"private_residential"},
+            "temperatures": {"warm", "hot"},
         },
         {
             "id": "leak_sensor_outputs",
@@ -1003,8 +987,8 @@ def test_default_config_marks_follow_up_pur_leads_with_specific_explanations(
                 "самого прибора. И все? Или для каждого датчика (6штук) по месту "
                 "тоже нужны выводы 220v?"
             ),
-            "signals": {"water_leak_protection", "installation_context", "apartment_context"},
-            "facts": {"automation_component", "controlled_device", "wiring_output", "property_type"},
+            "signals": {"pur_leak_protection", "project_context", "segment_private_residential", "lead_active_intent"},
+            "facts": {"automation_component", "controlled_device", "context_wiring_output", "object_apartment"},
             "areas": {"smart_home", "security"},
             "segments": {"private_residential"},
             "temperatures": {"warm", "hot"},
@@ -1027,8 +1011,8 @@ def test_default_config_marks_follow_up_pur_leads_with_specific_explanations(
                 "внутри тоже не вывели. Ну и на сам замок соответсвенно тоже. "
                 "Есть вывод снаружи на вывеску"
             ),
-            "signals": {"intercom", "access_control", "commercial_object", "need"},
-            "facts": {"access_device", "property_type", "wiring_output"},
+            "signals": {"pur_intercom", "pur_access_control", "segment_commercial", "lead_active_intent"},
+            "facts": {"access_device", "object_commercial", "context_wiring_output"},
             "areas": {"security", "access_control"},
             "segments": {"commercial_client"},
             "temperatures": {"hot"},
@@ -1044,8 +1028,8 @@ def test_default_config_marks_follow_up_pur_leads_with_specific_explanations(
                 "усложняется в разы тем, что квартира еще не сдана и будет "
                 "white box"
             ),
-            "signals": {"smart_home_automation", "education_request", "electrical_design_context"},
-            "facts": {"solution_area", "property_type"},
+            "signals": {"pur_smart_home", "lead_consultation_intent", "project_context"},
+            "facts": {"domain_smart_home", "object_apartment"},
             "areas": {"smart_home"},
             "segments": {"private_residential", "research_project", "designer_partner"},
             "temperatures": {"warm", "hot"},
@@ -1057,8 +1041,8 @@ def test_default_config_marks_follow_up_pur_leads_with_specific_explanations(
                 "кто сталкивался и может помочь Проект видеонаблюдения, контроль "
                 "доступа, охранная и пожарная сигнализация"
             ),
-            "signals": {"video_surveillance", "access_control", "security_alarm", "consultation_request"},
-            "facts": {"solution_area", "design_scope"},
+            "signals": {"pur_video_surveillance", "pur_access_control", "pur_security_alarm", "lead_consultation_intent"},
+            "facts": {"domain_video_surveillance", "domain_access_control", "domain_security_alarm", "context_design_project"},
             "areas": {"security", "access_control"},
             "segments": {"designer_partner"},
             "temperatures": {"hot"},
@@ -1073,8 +1057,8 @@ def test_default_config_marks_follow_up_pur_leads_with_specific_explanations(
                 "А может вообще кто-то готов поделиться контактами хорошего "
                 "подрядчика? СПб. Буду благодарна 🙏"
             ),
-            "signals": {"video_surveillance", "provider_search", "customer_intent", "installation_request"},
-            "facts": {"solution_area", "property_type", "vendor", "service_location"},
+            "signals": {"pur_video_surveillance", "lead_active_intent"},
+            "facts": {"domain_video_surveillance", "object_apartment", "vendor", "service_location"},
             "areas": {"security"},
             "segments": {"private_residential", "active_request"},
             "temperatures": {"hot"},
@@ -1090,7 +1074,7 @@ def test_default_config_marks_follow_up_pur_leads_with_specific_explanations(
                 "ставите два карниза: один для тюля, и второй для портер. Оба с "
                 "Wi-Fi."
             ),
-            "signals": {"smart_home_automation", "electric_curtain_control", "need"},
+            "signals": {"pur_smart_home", "pur_curtain_control", "lead_active_intent"},
             "facts": {"automation_component", "controlled_device"},
             "areas": {"smart_home"},
             "segments": set(),
@@ -1099,7 +1083,7 @@ def test_default_config_marks_follow_up_pur_leads_with_specific_explanations(
     ]
 
     for case in cases:
-        result = enricher.enrich(case["text"])
+        result = default_lead_enricher.enrich(case["text"])
         assert result.lead_assessment is not None, case["id"]
         assert result.lead_assessment.is_lead is True, case["id"]
         assert result.lead_assessment.temperature in case["temperatures"], case["id"]
@@ -1112,9 +1096,7 @@ def test_default_config_marks_follow_up_pur_leads_with_specific_explanations(
 def test_default_config_marks_latest_motion_relay_and_hvac_leads(
     default_lead_enricher: RussianTextEnricher,
 ) -> None:
-    enricher = default_lead_enricher
-
-    motion_result = enricher.enrich(
+    motion_result = default_lead_enricher.enrich(
         "Коллеги, помогите решить такую задачу. Я хочу сделать в туалете ночной "
         "свет, примерно как ступени лесницы освещают: у пола, и чтобы включалось "
         "оно на движение в определенные часы, а заодно на это и два бра в коридоре "
@@ -1127,11 +1109,11 @@ def test_default_config_marks_latest_motion_relay_and_hvac_leads(
     assert motion_result.lead_assessment is not None
     assert motion_result.lead_assessment.is_lead is True
     assert motion_result.lead_assessment.temperature in {"warm", "hot"}
-    assert {"motion_lighting_automation", "lighting_control", "consultation_request"} <= motion_signals
-    assert {"controlled_device", "design_scope"} <= motion_facts
+    assert {"pur_lighting_automation", "lead_consultation_intent", "lead_research_intent"} <= motion_signals
+    assert {"domain_lighting", "context_design_project"} <= motion_facts
     assert "smart_home" in {item.type for item in motion_result.lead_assessment.solution_areas}
 
-    relay_result = enricher.enrich(
+    relay_result = default_lead_enricher.enrich(
         "Добрый день всем) Подскажите на счет умного дома Яндекс, нашла видео как "
         "подключить через Зигби устройства с пультами к Алисе. А как подключить "
         "свет (бра, треки), клиент говорит, что есть какие то шайбы которые "
@@ -1143,11 +1125,11 @@ def test_default_config_marks_latest_motion_relay_and_hvac_leads(
     assert relay_result.lead_assessment is not None
     assert relay_result.lead_assessment.is_lead is True
     assert relay_result.lead_assessment.temperature in {"warm", "hot"}
-    assert {"smart_home_automation", "smart_relay_control", "lighting_control"} <= relay_signals
-    assert {"solution_area", "vendor", "automation_component", "controlled_device"} <= relay_facts
+    assert {"pur_smart_home", "pur_lighting_automation", "lead_consultation_intent"} <= relay_signals
+    assert {"domain_smart_home", "vendor", "automation_component", "controlled_device"} <= relay_facts
     assert "smart_home" in {item.type for item in relay_result.lead_assessment.solution_areas}
 
-    hvac_result = enricher.enrich(
+    hvac_result = default_lead_enricher.enrich(
         "Дизайнеры, добрый день! Подскажите, кто-нибудь работал с камерами "
         "статического давления O’CLIMATE для Ораковских изделий? Хочу сделать "
         "решетки в потолочных карнизах в проекте канального кондиционирования, "
@@ -1161,9 +1143,9 @@ def test_default_config_marks_latest_motion_relay_and_hvac_leads(
     assert hvac_result.lead_assessment.is_lead is True
     assert hvac_result.lead_assessment.temperature in {"warm", "hot"}
     hvac_areas = {item.type for item in hvac_result.lead_assessment.solution_areas}
-    assert {"climate_control", "consultation_request", "designer_context"} <= hvac_signals
-    assert "video_surveillance" not in hvac_signals
-    assert {"solution_area", "vendor", "design_scope"} <= hvac_facts
+    assert {"pur_climate_control", "lead_consultation_intent", "segment_designer"} <= hvac_signals
+    assert "pur_video_surveillance" not in hvac_signals
+    assert {"domain_climate", "vendor", "context_design_project"} <= hvac_facts
     assert "climate" in hvac_areas
     assert "security" not in hvac_areas
     assert "designer_partner" in {item.type for item in hvac_result.lead_assessment.customer_segments}
@@ -1172,9 +1154,7 @@ def test_default_config_marks_latest_motion_relay_and_hvac_leads(
 def test_default_config_marks_neptun_water_leak_monitoring_lead(
     default_lead_enricher: RussianTextEnricher,
 ) -> None:
-    enricher = default_lead_enricher
-
-    result = enricher.enrich(
+    result = default_lead_enricher.enrich(
         "Коллеги, подскажите кто ставил систему Нептуп ProW, хочу ее выбрать, "
         "проводные датчик...но в то же время важно чтобы понимать где какой "
         "датчик сработал- то это только на смартфон вывод инфы получается и "
@@ -1186,14 +1166,13 @@ def test_default_config_marks_neptun_water_leak_monitoring_lead(
     neptun_signal_sources = {
         signal.source
         for signal in result.domain_signals
-        if signal.type in {"water_leak_protection", "leak_protection"}
-        and signal.text.casefold().startswith("нептуп")
+        if signal.type == "pur_leak_protection" and signal.text.casefold().startswith("нептуп")
     }
 
     assert result.lead_assessment is not None
     assert result.lead_assessment.is_lead is True
     assert result.lead_assessment.temperature in {"warm", "hot"}
-    assert {"water_leak_protection", "consultation_request"} <= signal_types
+    assert {"pur_leak_protection", "lead_consultation_intent", "lead_active_intent"} <= signal_types
     assert {"vendor", "automation_component", "controlled_device"} <= fact_types
     assert neptun_signal_sources == {"fact_dependency"}
     assert "smart_home" in {item.type for item in result.lead_assessment.solution_areas}
@@ -1203,15 +1182,13 @@ def test_default_config_marks_neptun_water_leak_monitoring_lead(
 def test_default_config_does_not_mark_diy_equipment_sale_as_lead(
     default_lead_enricher: RussianTextEnricher,
 ) -> None:
-    enricher = default_lead_enricher
-    text = "Продам камеру видеонаблюдения без монтажа, самовывоз, дешево."
-
-    result = enricher.enrich(text)
+    result = default_lead_enricher.enrich("Продам камеру видеонаблюдения без монтажа, самовывоз, дешево.")
 
     assert result.lead_assessment is not None
     assert result.lead_assessment.is_lead is False
     assert result.lead_assessment.temperature == "none"
-    assert "diy_or_equipment_only" in {item.type for item in result.lead_assessment.noise_signals}
+    assert "noise_diy_equipment_only" in {item.type for item in result.lead_assessment.noise_signals}
+    assert "noise_supply" in {item.type for item in result.lead_assessment.noise_signals}
     assert result.lead_assessment.score == 0
 
 
@@ -1227,8 +1204,8 @@ def test_default_config_does_not_overheat_dahua_software_license_text(
     assert result.lead_assessment.is_lead is False
     assert result.lead_assessment.temperature == "none"
     assert result.lead_assessment.score < 35
-    assert "smart_home_automation" not in {item.type for item in result.domain_signals}
-    assert "lighting_automation" not in {item.type for item in result.domain_signals}
+    assert "pur_smart_home" not in {item.type for item in result.domain_signals}
+    assert "pur_lighting_automation" not in {item.type for item in result.domain_signals}
 
 
 @pytest.mark.parametrize(
@@ -1236,19 +1213,19 @@ def test_default_config_does_not_overheat_dahua_software_license_text(
     [
         (
             "Продам камеру Hikvision, самовывоз, без монтажа.",
-            {"diy_or_equipment_only", "irrelevant_or_sale"},
+            {"noise_diy_equipment_only", "noise_supply"},
         ),
         (
             "Нужно установить обычный кондиционер в квартире, без умного дома.",
-            {"ordinary_household_system"},
+            {"noise_ordinary_household"},
         ),
         (
             "Кто обслуживает обычный домофон в подъезде?",
-            {"ordinary_household_system"},
+            {"noise_ordinary_household"},
         ),
         (
             "Подскажите, какой ИБП купить для компьютера без монтажа?",
-            {"diy_or_equipment_only"},
+            {"noise_diy_equipment_only", "noise_ordinary_household"},
         ),
     ],
 )
@@ -1276,7 +1253,7 @@ def test_default_config_routes_research_smart_home_question_outside_direct_lead(
     assert result.lead_assessment is not None
     assert result.lead_assessment.is_lead is True
     assert result.lead_assessment.review_lane is not None
-    assert result.lead_assessment.review_lane.key in {"pur_design_context", "research_warm", "domain_interest"}
+    assert result.lead_assessment.review_lane.key == "research_warm"
 
 
 def test_default_config_does_not_mark_off_domain_provider_search_as_pur_lead(

@@ -981,3 +981,32 @@ Rationale:
   ClickHouse can wait until aggregate workloads outgrow this shape.
 - Review-quality metrics should be visible in Analytics without adding a second
   analytics datastore.
+
+## 2026-05-09: NLP Config V3 Replaces The Old Semantic Taxonomy
+
+The default NLP/domain configuration is rewritten as config v3 without
+preserving old semantic names as compatibility targets. The model now uses four
+explicit layers:
+
+- dictionaries emit alias identity facts and generic fact types;
+- fact rules emit `intent_*`, `context_*`, `object_*`, `domain_*`, and
+  `noise_*` facts;
+- domain signals depend only on facts through `match.facts`;
+- lead scoring maps v3 signal/fact types to score, solution areas, customer
+  segments, caps, and review lanes.
+
+Active PostgreSQL settings are migrated by `0026_config_v3_taxonomy` to replace
+facts, signals, and lead scoring with the v3 bootstrap documents. Existing alias
+catalogs remain in the active config so operator-curated spellings are not
+discarded, and an existing `operator_noise` signal is carried into hard-noise
+scoring if present.
+
+Rationale:
+
+- The previous model had accumulated mixed layers: the same setting could mean
+  intent, fact, dictionary dependency, domain, or score reason.
+- V3 makes the evidence chain auditable in the UI: dictionary/fact first,
+  signal second, score third.
+- Domain-only evidence is capped below lead, and intent without a PUR domain is
+  capped below lead, so isolated words like `камера` or off-domain requests like
+  "где заказать обычный стол" do not become automatic PUR leads.
