@@ -70,9 +70,11 @@ PostgreSQL for persisted job state, and SSE for progress updates.
 The operator UI also includes a Configurator and a Settings Center. The
 Configurator is the primary visual workspace for the causal rule model:
 dictionaries -> facts -> domain signals -> lead assessment. It reuses the
-active PostgreSQL NLP settings snapshot, shows domain/layer navigation,
-selected entity cards, and dependency/impact inspection. The Settings Center
-remains the advanced editor. It shows editable NLP/domain settings from
+active PostgreSQL NLP settings snapshot and is laid out as a Rule IDE: a left
+explorer for domain folders and rule layers, a central graph that shows
+dictionary -> fact -> signal -> score chains, and a right panel for compact
+editing plus draft preview. The Settings Center remains the advanced editor.
+It shows editable NLP/domain settings from
 PostgreSQL config revisions and read-only runtime settings from the backend
 environment. Draft NLP settings can be previewed on text before saving. Rule
 editing separates exact phrases from lemmatized phrases; new lemmatized phrases

@@ -330,6 +330,126 @@ body {
   overflow-wrap: anywhere;
 }
 
+.rule-ide-header,
+.rule-ide-panel {
+  background: var(--app-surface);
+  border-radius: 8px;
+  padding: 16px;
+}
+
+.rule-ide-shell {
+  align-items: start;
+  display: grid;
+  gap: 16px;
+  grid-template-columns: minmax(220px, 280px) minmax(0, 1fr) minmax(300px, 380px);
+  min-width: 0;
+}
+
+.rule-ide-explorer,
+.rule-ide-side-panel {
+  max-height: calc(100vh - 210px);
+  overflow: auto;
+  position: sticky;
+  top: 16px;
+}
+
+.rule-ide-graph-panel {
+  min-width: 0;
+}
+
+.rule-ide-explorer-button {
+  justify-content: flex-start;
+  min-height: 48px;
+  text-align: left;
+  text-transform: none;
+  width: 100%;
+}
+
+.rule-ide-explorer-button-content {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  width: 100%;
+}
+
+.rule-ide-node-grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: minmax(150px, 1fr) minmax(150px, 1fr) minmax(180px, 1fr) minmax(110px, 0.55fr);
+  min-width: 0;
+}
+
+.rule-ide-graph-head {
+  color: var(--app-text-muted);
+  font-weight: 700;
+  padding: 0 6px;
+  text-transform: uppercase;
+}
+
+.rule-ide-graph-row {
+  border: 1px solid var(--app-border-soft);
+  border-radius: 8px;
+  background: var(--app-surface-muted);
+  padding: 10px;
+}
+
+.rule-ide-node {
+  border: 1px solid var(--app-border-soft);
+  border-radius: 8px;
+  background: var(--app-surface);
+  justify-content: flex-start;
+  min-height: 64px;
+  padding: 8px 10px;
+  text-align: left;
+  text-transform: none;
+  width: 100%;
+}
+
+.rule-ide-node-selected {
+  border-color: var(--app-primary);
+  box-shadow: 0 0 0 2px rgba(11, 87, 208, 0.14);
+}
+
+.rule-ide-empty-node {
+  border: 1px dashed var(--app-border-soft);
+  border-radius: 8px;
+  min-height: 64px;
+  padding: 10px;
+}
+
+.rule-ide-empty-hint {
+  border: 1px dashed var(--app-border-soft);
+  border-radius: 8px;
+  background: var(--app-surface-muted);
+  padding: 12px;
+}
+
+.rule-ide-form-grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.rule-ide-preview-summary,
+.rule-ide-metric-list {
+  border: 1px solid var(--app-border-soft);
+  border-radius: 8px;
+  background: var(--app-surface-muted);
+  padding: 12px;
+}
+
+.rule-ide-metric-list {
+  display: grid;
+  gap: 8px;
+}
+
+.rule-ide-metric-row {
+  align-items: center;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+}
+
 .help-shell {
   max-width: 1180px;
 }
@@ -667,6 +787,9 @@ body {
   .rule-grid,
   .configurator-shell,
   .configurator-form-grid,
+  .rule-ide-shell,
+  .rule-ide-node-grid,
+  .rule-ide-form-grid,
   .help-grid,
   .evidence-flow-row,
   .analytics-grid,
@@ -691,7 +814,9 @@ body {
   }
 
   .configurator-nav,
-  .configurator-inspector {
+  .configurator-inspector,
+  .rule-ide-explorer,
+  .rule-ide-side-panel {
     max-height: none;
     position: static;
   }

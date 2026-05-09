@@ -11,7 +11,7 @@ describe("ConfiguratorPage", () => {
     vi.unstubAllGlobals();
   });
 
-  test("shows a domain workspace with dependent facts, signals, and dictionary aliases", () => {
+  test("shows a Rule IDE workspace with explorer graph and test mode", () => {
     render(
       <ConfiguratorPage
         settings={sampleSettingsSnapshot()}
@@ -22,14 +22,23 @@ describe("ConfiguratorPage", () => {
       />
     );
 
-    expect(screen.getByRole("heading", { name: "Конфигуратор правил" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Rule IDE" })).toBeInTheDocument();
+    expect(screen.getByText("Конфигуратор правил")).toBeInTheDocument();
     expect(screen.getByText("NLP-ревизия #1")).toBeInTheDocument();
+    expect(screen.getByText("EXPLORER")).toBeInTheDocument();
+    expect(screen.getByText("GRAPH")).toBeInTheDocument();
+    expect(screen.getByText("TEST MODE")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Умный дом 1 сигнал 0 фактов/i })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Умный дом" })).toBeInTheDocument();
+    expect(screen.getByText("Словари")).toBeInTheDocument();
+    expect(screen.getByText("Факты")).toBeInTheDocument();
+    expect(screen.getByText("Сигналы")).toBeInTheDocument();
+    expect(screen.getByText("Score")).toBeInTheDocument();
     expect(screen.getByText("Умный дом / автоматизация")).toBeInTheDocument();
-    expect(screen.getAllByText("alias:devices:smart_home_hub").length).toBeGreaterThan(0);
     expect(screen.getByText("Хаб умного дома")).toBeInTheDocument();
     expect(screen.getByText("zigbee шлюз")).toBeInTheDocument();
+    expect(screen.getByText("controlled_device")).toBeInTheDocument();
+    expect(screen.getByText("+35")).toBeInTheDocument();
   });
 
   test("saves selected signal edits through the active NLP settings endpoint", async () => {
@@ -85,6 +94,73 @@ describe("ConfiguratorPage", () => {
     );
   });
 
+  test("runs draft preview from the right test panel", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input) === "/api/v1/settings/nlp/preview" && init?.method === "POST") {
+        return jsonResponse({
+          original_text: "Установить zigbee шлюз",
+          normalized_text: "установить zigbee шлюз",
+          entities: [],
+          facts: [],
+          domain_signals: [],
+          tokens: [],
+          syntax: [],
+          metrics: {},
+          pipeline_trace: [],
+          lead_assessment: {
+            is_lead: true,
+            score: 35,
+            temperature: "warm",
+            solution_areas: [],
+            customer_segments: [],
+            intent_signals: [],
+            noise_signals: [],
+            reasons: [
+              {
+                source: "signal",
+                key: "smart_home_automation",
+                label: "Умный дом / автоматизация",
+                weight: 35,
+                matched_texts: ["zigbee шлюз"]
+              }
+            ],
+            review_lane: { key: "direct_pur_lead", label: "Прямой лид ПУР", matched_group_indexes: [0] }
+          }
+        });
+      }
+      throw new Error(`Unhandled fetch: ${String(input)}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <ConfiguratorPage
+        settings={sampleSettingsSnapshot()}
+        loading={false}
+        loadError={null}
+        loadSettings={vi.fn()}
+        onSettingsSnapshotChange={vi.fn()}
+      />
+    );
+
+    fireEvent.change(screen.getByLabelText("Текст для проверки"), {
+      target: { value: "Установить zigbee шлюз" }
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Run" }));
+
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/v1/settings/nlp/preview",
+        expect.objectContaining({
+          method: "POST",
+          body: expect.stringContaining("Установить zigbee шлюз")
+        })
+      )
+    );
+    expect(await screen.findByText("lead")).toBeInTheDocument();
+    expect(screen.getByText("35")).toBeInTheDocument();
+    expect(screen.getByText("Умный дом / автоматизация")).toBeInTheDocument();
+  });
+
   test("opens detailed settings through a real settings hash deeplink", () => {
     render(
       <ConfiguratorPage
@@ -97,7 +173,7 @@ describe("ConfiguratorPage", () => {
     );
 
     fireEvent.click(screen.getByRole("button", { name: /Умный дом \/ автоматизация/i }));
-    fireEvent.click(screen.getByRole("button", { name: "Детально в настройках" }));
+    fireEvent.click(screen.getByRole("button", { name: "Advanced" }));
 
     expect(window.location.hash).toBe("#/settings/signals/smart_home_automation");
   });

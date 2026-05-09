@@ -39,11 +39,17 @@ workspace for understanding and safely editing a selected rule, alias, or scorin
 
 ## UX Shape
 
-The page is a dense operational workspace:
+The current page is a Rule IDE inspired by the cube/data-flow workspace pattern:
 
-- left: tree-like navigator;
-- center: selected entity and editable fields;
-- right: dependency/impact inspector.
+- left: `EXPLORER` with domain folders and rule layers;
+- center: `GRAPH` with dictionary -> fact -> signal -> score chains for the selected domain;
+- right: `DETAILS` for compact selected-node editing and `TEST MODE` for previewing the current draft NLP config.
+
+The graph intentionally shows alias-emitted facts. If a signal depends on
+`alias:devices:smart_home_hub`, the operator sees the dictionary node, the emitted
+fact types such as `controlled_device`, the signal node, and the score weight in
+one row. The Settings Center remains the full editor for deep changes, reached
+through `Advanced` deeplinks from selected nodes.
 
 Operators should be able to answer:
 

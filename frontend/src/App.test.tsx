@@ -93,7 +93,8 @@ test("opens the rule configurator from the top navigation", async () => {
 
   fireEvent.click(screen.getByRole("tab", { name: "Конфигуратор" }));
 
-  expect(await screen.findByRole("heading", { name: "Конфигуратор правил" })).toBeInTheDocument();
+  expect(await screen.findByRole("heading", { name: "Rule IDE" })).toBeInTheDocument();
+  expect(screen.getByText("Конфигуратор правил")).toBeInTheDocument();
   expect(screen.getByText("NLP-ревизия #1")).toBeInTheDocument();
   expect(screen.getByRole("button", { name: /Умный дом 1 сигнал 0 фактов/i })).toBeInTheDocument();
 });

@@ -135,6 +135,12 @@
   manually or idempotently promoted from Analytics/Review messages, and run
   through the regular enrichment/SSE pipeline with the same explainability UI as
   Testing.
+- The Configurator is now a Rule IDE rather than another dense settings form:
+  the left explorer selects domain folders or rule layers, the central graph
+  visualizes dictionary -> fact -> signal -> score chains, and the right panel
+  combines compact selected-node editing with draft preview through
+  `/api/v1/settings/nlp/preview`. `Advanced` links still open the full Settings
+  Center deeplink for the selected signal, fact, or dictionary entity.
 - Telegram FloodWait is treated as a persisted temporary rate limit on the
   userbot account. The userbot stores `cooldown_until` and skips Telegram
   read/resolve calls for that account until the timestamp expires, including
