@@ -204,9 +204,13 @@ export function App() {
     return () => window.removeEventListener("hashchange", handleHashChange);
   }, []);
 
-  const loadSettingsSnapshot = useCallback(async (options: { force?: boolean } = {}): Promise<SettingsSnapshot> => {
+  const loadSettingsSnapshot = useCallback(async (options: { commit?: boolean; force?: boolean } = {}): Promise<SettingsSnapshot> => {
     if (!options.force && settingsSnapshotRef.current) {
-      return settingsSnapshotRef.current;
+      const cachedSnapshot = settingsSnapshotRef.current;
+      if (options.commit !== false) {
+        startTransition(() => setSettingsSnapshot(cachedSnapshot));
+      }
+      return cachedSnapshot;
     }
     if (!options.force && settingsRequestRef.current) {
       return settingsRequestRef.current;
@@ -224,7 +228,9 @@ export function App() {
         }
         const snapshot = (await response.json()) as SettingsSnapshot;
         settingsSnapshotRef.current = snapshot;
-        startTransition(() => setSettingsSnapshot(snapshot));
+        if (options.commit !== false) {
+          startTransition(() => setSettingsSnapshot(snapshot));
+        }
         return snapshot;
       } catch (caught) {
         const message = caught instanceof Error ? caught.message : "Не удалось загрузить настройки";
@@ -251,7 +257,7 @@ export function App() {
 
   useEffect(() => {
     if (authState.status === "authenticated") {
-      void loadSettingsSnapshot().catch(() => undefined);
+      void loadSettingsSnapshot({ commit: false }).catch(() => undefined);
     }
   }, [authState.status, loadSettingsSnapshot]);
 

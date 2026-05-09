@@ -6,6 +6,9 @@ from app.domain.settings import NlpConfigRevision
 
 
 class NlpConfigRepository(Protocol):
+    async def get_active(self) -> NlpConfigRevision | None:
+        ...
+
     async def get_active_or_seed(
         self,
         default_documents: dict[str, dict[str, Any]],

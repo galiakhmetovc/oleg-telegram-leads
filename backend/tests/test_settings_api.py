@@ -160,6 +160,17 @@ class InMemoryNlpConfigRepository:
         self.active: dict[str, dict[str, Any]] | None = None
         self.revision = 0
 
+    async def get_active(self) -> NlpConfigRevision | None:
+        if self.active is None:
+            return None
+        return NlpConfigRevision(
+            id=uuid4(),
+            revision=self.revision,
+            documents=self.active,
+            source="bootstrap" if self.revision == 1 else "ui",
+            created_at=None,
+        )
+
     async def get_active_or_seed(
         self,
         default_documents: dict[str, dict[str, Any]],

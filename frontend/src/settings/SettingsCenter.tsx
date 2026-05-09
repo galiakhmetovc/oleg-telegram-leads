@@ -132,6 +132,7 @@ export function SettingsCenter({
   const [previewing, setPreviewing] = useState(false);
   const [settingsError, setSettingsError] = useState<string | null>(null);
   const [settingsMessage, setSettingsMessage] = useState<string | null>(null);
+  const [draftDirty, setDraftDirty] = useState(false);
   const [previewText, setPreviewText] = useState(
     "Подскажите, где можно заказать систему видеонаблюдения для квартиры?"
   );
@@ -147,6 +148,7 @@ export function SettingsCenter({
         const snapshot = await loadSettingsSnapshot();
         if (active) {
           setDraft(snapshot.nlp);
+          setDraftDirty(false);
         }
       } catch (caught) {
         if (active) {
@@ -200,6 +202,7 @@ export function SettingsCenter({
         onSettingsSnapshotChange({ ...snapshot, nlp: saved });
       }
       setDraft(saved);
+      setDraftDirty(false);
       setSettingsMessage("NLP-настройки сохранены. Следующая обработка возьмет новую конфигурацию.");
     } catch (caught) {
       setSettingsError(caught instanceof Error ? caught.message : "Не удалось сохранить настройки");
@@ -234,6 +237,7 @@ export function SettingsCenter({
 
   function updateDraft(next: NlpSettings) {
     setDraft(next);
+    setDraftDirty(true);
     setSettingsMessage(null);
   }
 
@@ -352,7 +356,7 @@ export function SettingsCenter({
     });
   }
 
-  const dirty = draft !== null && JSON.stringify(settings?.nlp ?? null) !== JSON.stringify(draft);
+  const dirty = draft !== null && draftDirty;
 
   return (
     <Box className="settings-shell">
@@ -2055,59 +2059,61 @@ function AliasEditor({
           <Chip label={alias.key} size="small" variant="outlined" />
         </Box>
       </AccordionSummary>
-      <AccordionDetails>
-        <Stack spacing={2}>
-          <Box className="rule-grid">
-            <TextField label="key" value={alias.key} onChange={(event) => onUpdate({ ...alias, key: event.target.value })} />
-            <TextField
-              label="canonical"
-              value={alias.canonical}
-              onChange={(event) => onUpdate({ ...alias, canonical: event.target.value })}
-            />
-            <TextField
-              label="type"
-              value={alias.type}
-              onChange={(event) => onUpdate({ ...alias, type: aliasTypeFromText(event.target.value) })}
-            />
-            <TextField
-              label="confidence"
-              type="number"
-              value={alias.confidence ?? ""}
-              onChange={(event) =>
-                onUpdate({ ...alias, confidence: event.target.value === "" ? null : Number(event.target.value) })
-              }
-              slotProps={{ htmlInput: { min: 0, max: 1, step: 0.01 } }}
-            />
-          </Box>
-          <Box className="settings-two-column">
-            <TextField
-              label="aliases"
-              helperText="Один вариант написания в строке"
-              value={stringListToText(alias.aliases)}
-              onChange={(event) => onUpdate({ ...alias, aliases: textToStringList(event.target.value) })}
-              multiline
-              minRows={5}
-              fullWidth
-            />
-            <Stack spacing={2}>
+      {expanded && (
+        <AccordionDetails>
+          <Stack spacing={2}>
+            <Box className="rule-grid">
+              <TextField label="key" value={alias.key} onChange={(event) => onUpdate({ ...alias, key: event.target.value })} />
               <TextField
-                label="fact_types"
-                value={stringListToText(alias.fact_types)}
-                onChange={(event) => onUpdate({ ...alias, fact_types: textToStringList(event.target.value) })}
-                multiline
-                minRows={2}
+                label="canonical"
+                value={alias.canonical}
+                onChange={(event) => onUpdate({ ...alias, canonical: event.target.value })}
               />
-            </Stack>
-          </Box>
-          <Box>
-            <Tooltip title="Удалить">
-              <IconButton aria-label={`Удалить alias: ${alias.canonical}`} color="error" onClick={onRemove}>
-                <DeleteIcon />
-              </IconButton>
-            </Tooltip>
-          </Box>
-        </Stack>
-      </AccordionDetails>
+              <TextField
+                label="type"
+                value={alias.type}
+                onChange={(event) => onUpdate({ ...alias, type: aliasTypeFromText(event.target.value) })}
+              />
+              <TextField
+                label="confidence"
+                type="number"
+                value={alias.confidence ?? ""}
+                onChange={(event) =>
+                  onUpdate({ ...alias, confidence: event.target.value === "" ? null : Number(event.target.value) })
+                }
+                slotProps={{ htmlInput: { min: 0, max: 1, step: 0.01 } }}
+              />
+            </Box>
+            <Box className="settings-two-column">
+              <TextField
+                label="aliases"
+                helperText="Один вариант написания в строке"
+                value={stringListToText(alias.aliases)}
+                onChange={(event) => onUpdate({ ...alias, aliases: textToStringList(event.target.value) })}
+                multiline
+                minRows={5}
+                fullWidth
+              />
+              <Stack spacing={2}>
+                <TextField
+                  label="fact_types"
+                  value={stringListToText(alias.fact_types)}
+                  onChange={(event) => onUpdate({ ...alias, fact_types: textToStringList(event.target.value) })}
+                  multiline
+                  minRows={2}
+                />
+              </Stack>
+            </Box>
+            <Box>
+              <Tooltip title="Удалить">
+                <IconButton aria-label={`Удалить alias: ${alias.canonical}`} color="error" onClick={onRemove}>
+                  <DeleteIcon />
+                </IconButton>
+              </Tooltip>
+            </Box>
+          </Stack>
+        </AccordionDetails>
+      )}
     </Accordion>
   );
 }
@@ -2539,85 +2545,87 @@ function ReviewLaneEditor({
           <Chip label={`priority ${lane.priority}`} size="small" variant="outlined" />
         </Box>
       </AccordionSummary>
-      <AccordionDetails>
-        <Stack spacing={2}>
-          <Box className="rule-grid">
-            <TextField label="key" value={lane.key} onChange={(event) => onUpdate({ ...lane, key: event.target.value })} />
+      {expanded && (
+        <AccordionDetails>
+          <Stack spacing={2}>
+            <Box className="rule-grid">
+              <TextField label="key" value={lane.key} onChange={(event) => onUpdate({ ...lane, key: event.target.value })} />
+              <TextField
+                label="label"
+                value={lane.label}
+                onChange={(event) => onUpdate({ ...lane, label: event.target.value })}
+              />
+              <TextField
+                label="priority"
+                type="number"
+                value={lane.priority}
+                onChange={(event) => onUpdate({ ...lane, priority: numberInput(event.target.value) })}
+              />
+              <TextField
+                label="temperatures"
+                helperText="Одна температура в строке"
+                value={stringListToText(lane.temperatures)}
+                onChange={(event) => onUpdate({ ...lane, temperatures: textToStringList(event.target.value) })}
+              />
+            </Box>
             <TextField
-              label="label"
-              value={lane.label}
-              onChange={(event) => onUpdate({ ...lane, label: event.target.value })}
-            />
-            <TextField
-              label="priority"
-              type="number"
-              value={lane.priority}
-              onChange={(event) => onUpdate({ ...lane, priority: numberInput(event.target.value) })}
-            />
-            <TextField
-              label="temperatures"
-              helperText="Одна температура в строке"
-              value={stringListToText(lane.temperatures)}
-              onChange={(event) => onUpdate({ ...lane, temperatures: textToStringList(event.target.value) })}
-            />
-          </Box>
-          <TextField
-            label="description"
-            value={lane.description ?? ""}
-            onChange={(event) => onUpdate({ ...lane, description: event.target.value || null })}
-            fullWidth
-          />
-          <Box className="settings-two-column">
-            <TextField
-              label="match_groups JSON"
-              helperText="Каждый объект - группа OR; группы между собой работают как AND."
-              value={reviewLaneMatchGroupsToText(lane.match_groups)}
-              onChange={(event) =>
-                onUpdate({ ...lane, match_groups: textToReviewLaneMatchGroups(event.target.value, lane.match_groups) })
-              }
-              multiline
-              minRows={8}
+              label="description"
+              value={lane.description ?? ""}
+              onChange={(event) => onUpdate({ ...lane, description: event.target.value || null })}
               fullWidth
             />
-            <Stack spacing={2}>
+            <Box className="settings-two-column">
               <TextField
-                label="excluded_signal_types"
-                value={stringListToText(lane.excluded_signal_types)}
+                label="match_groups JSON"
+                helperText="Каждый объект - группа OR; группы между собой работают как AND."
+                value={reviewLaneMatchGroupsToText(lane.match_groups)}
                 onChange={(event) =>
-                  onUpdate({ ...lane, excluded_signal_types: textToStringList(event.target.value) })
+                  onUpdate({ ...lane, match_groups: textToReviewLaneMatchGroups(event.target.value, lane.match_groups) })
                 }
                 multiline
-                minRows={2}
+                minRows={8}
+                fullWidth
               />
-              <TextField
-                label="excluded_noise_signal_types"
-                value={stringListToText(lane.excluded_noise_signal_types)}
-                onChange={(event) =>
-                  onUpdate({ ...lane, excluded_noise_signal_types: textToStringList(event.target.value) })
-                }
-                multiline
-                minRows={2}
-              />
-              <TextField
-                label="excluded_solution_area_types"
-                value={stringListToText(lane.excluded_solution_area_types)}
-                onChange={(event) =>
-                  onUpdate({ ...lane, excluded_solution_area_types: textToStringList(event.target.value) })
-                }
-                multiline
-                minRows={2}
-              />
-            </Stack>
-          </Box>
-          <Box>
-            <Tooltip title="Удалить">
-              <IconButton aria-label={`Удалить lane: ${lane.label}`} color="error" onClick={onRemove}>
-                <DeleteIcon />
-              </IconButton>
-            </Tooltip>
-          </Box>
-        </Stack>
-      </AccordionDetails>
+              <Stack spacing={2}>
+                <TextField
+                  label="excluded_signal_types"
+                  value={stringListToText(lane.excluded_signal_types)}
+                  onChange={(event) =>
+                    onUpdate({ ...lane, excluded_signal_types: textToStringList(event.target.value) })
+                  }
+                  multiline
+                  minRows={2}
+                />
+                <TextField
+                  label="excluded_noise_signal_types"
+                  value={stringListToText(lane.excluded_noise_signal_types)}
+                  onChange={(event) =>
+                    onUpdate({ ...lane, excluded_noise_signal_types: textToStringList(event.target.value) })
+                  }
+                  multiline
+                  minRows={2}
+                />
+                <TextField
+                  label="excluded_solution_area_types"
+                  value={stringListToText(lane.excluded_solution_area_types)}
+                  onChange={(event) =>
+                    onUpdate({ ...lane, excluded_solution_area_types: textToStringList(event.target.value) })
+                  }
+                  multiline
+                  minRows={2}
+                />
+              </Stack>
+            </Box>
+            <Box>
+              <Tooltip title="Удалить">
+                <IconButton aria-label={`Удалить lane: ${lane.label}`} color="error" onClick={onRemove}>
+                  <DeleteIcon />
+                </IconButton>
+              </Tooltip>
+            </Box>
+          </Stack>
+        </AccordionDetails>
+      )}
     </Accordion>
   );
 }
@@ -2694,44 +2702,46 @@ function CategoryMappingItem({
           <Chip label={itemKey} size="small" variant="outlined" />
         </Box>
       </AccordionSummary>
-      <AccordionDetails>
-        <Stack spacing={2}>
-          <TextField
-            label="label"
-            value={mapping.label}
-            onChange={(event) =>
-              onUpdate({
-                ...mappings,
-                [itemKey]: { ...mapping, label: event.target.value }
-              })
-            }
-          />
-          <TextField
-            label="signal_types"
-            value={stringListToText(mapping.signal_types)}
-            onChange={(event) =>
-              onUpdate({
-                ...mappings,
-                [itemKey]: { ...mapping, signal_types: textToStringList(event.target.value) }
-              })
-            }
-            multiline
-            minRows={3}
-          />
-          <TextField
-            label="fact_types"
-            value={stringListToText(mapping.fact_types)}
-            onChange={(event) =>
-              onUpdate({
-                ...mappings,
-                [itemKey]: { ...mapping, fact_types: textToStringList(event.target.value) }
-              })
-            }
-            multiline
-            minRows={3}
-          />
-        </Stack>
-      </AccordionDetails>
+      {expanded && (
+        <AccordionDetails>
+          <Stack spacing={2}>
+            <TextField
+              label="label"
+              value={mapping.label}
+              onChange={(event) =>
+                onUpdate({
+                  ...mappings,
+                  [itemKey]: { ...mapping, label: event.target.value }
+                })
+              }
+            />
+            <TextField
+              label="signal_types"
+              value={stringListToText(mapping.signal_types)}
+              onChange={(event) =>
+                onUpdate({
+                  ...mappings,
+                  [itemKey]: { ...mapping, signal_types: textToStringList(event.target.value) }
+                })
+              }
+              multiline
+              minRows={3}
+            />
+            <TextField
+              label="fact_types"
+              value={stringListToText(mapping.fact_types)}
+              onChange={(event) =>
+                onUpdate({
+                  ...mappings,
+                  [itemKey]: { ...mapping, fact_types: textToStringList(event.target.value) }
+                })
+              }
+              multiline
+              minRows={3}
+            />
+          </Stack>
+        </AccordionDetails>
+      )}
     </Accordion>
   );
 }
@@ -2832,21 +2842,23 @@ function RuleGroupAccordion({
           <Chip label={`${group.items.length} правил`} size="small" variant="outlined" />
         </Box>
       </AccordionSummary>
-      <AccordionDetails>
-        <Stack spacing={1}>
-          {group.items.map(({ rule, index }) => (
-            <RuleEditor
-              key={`${rule.type}-${index}`}
-              collection={collection}
-              settings={settings}
-              rule={rule}
-              isTarget={rule.type === activeRuleKey}
-              onRemove={() => onRemove(collection, index)}
-              onUpdate={(nextRule) => onUpdate(collection, index, nextRule)}
-            />
-          ))}
-        </Stack>
-      </AccordionDetails>
+      {expanded && (
+        <AccordionDetails>
+          <Stack spacing={1}>
+            {group.items.map(({ rule, index }) => (
+              <RuleEditor
+                key={`${rule.type}-${index}`}
+                collection={collection}
+                settings={settings}
+                rule={rule}
+                isTarget={rule.type === activeRuleKey}
+                onRemove={() => onRemove(collection, index)}
+                onUpdate={(nextRule) => onUpdate(collection, index, nextRule)}
+              />
+            ))}
+          </Stack>
+        </AccordionDetails>
+      )}
     </Accordion>
   );
 }
@@ -2897,7 +2909,8 @@ function RuleEditor({
           <Chip label={rule.type} size="small" variant="outlined" />
         </Box>
       </AccordionSummary>
-      <AccordionDetails>
+      {expanded && (
+        <AccordionDetails>
         <Stack spacing={2}>
           <Box className="rule-grid">
             <TextField label="type" value={rule.type} onChange={(event) => onUpdate({ ...rule, type: event.target.value })} />
@@ -2944,7 +2957,8 @@ function RuleEditor({
             </IconButton>
           </Box>
         </Stack>
-      </AccordionDetails>
+        </AccordionDetails>
+      )}
     </Accordion>
   );
 }

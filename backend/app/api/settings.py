@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+from copy import deepcopy
 from functools import lru_cache
 from pathlib import Path
 from typing import Any, Literal
@@ -339,12 +341,15 @@ async def get_all_settings(
     ),
     settings: Settings = Depends(get_settings),
 ) -> SettingsSnapshot:
+    nlp_snapshot, notification_snapshot, telegram_ingestion_snapshot = await asyncio.gather(
+        _read_nlp_snapshot(config_dir, repository),
+        read_notification_settings_snapshot(notification_repository),
+        read_telegram_ingestion_settings_snapshot(telegram_ingestion_repository),
+    )
     return SettingsSnapshot(
-        nlp=await _read_nlp_snapshot(config_dir, repository),
-        notifications=await read_notification_settings_snapshot(notification_repository),
-        telegram_ingestion=await read_telegram_ingestion_settings_snapshot(
-            telegram_ingestion_repository
-        ),
+        nlp=nlp_snapshot,
+        notifications=notification_snapshot,
+        telegram_ingestion=telegram_ingestion_snapshot,
         system=_system_settings(settings),
     )
 
@@ -578,9 +583,21 @@ async def _read_nlp_snapshot(
     config_dir: Path,
     repository: PostgresNlpConfigRepository,
 ) -> NlpSettingsSnapshot:
-    bootstrap_documents = read_nlp_config_documents(config_dir)
-    revision = await repository.get_active_or_seed(bootstrap_documents)
+    revision = await repository.get_active()
+    if revision is not None:
+        return _nlp_snapshot_from_revision(revision)
+
+    revision = await repository.get_active_or_seed(_read_bootstrap_nlp_documents(config_dir))
     return _nlp_snapshot_from_revision(revision)
+
+
+@lru_cache(maxsize=4)
+def _read_bootstrap_nlp_documents_cached(config_dir: str) -> dict[str, dict[str, Any]]:
+    return read_nlp_config_documents(Path(config_dir))
+
+
+def _read_bootstrap_nlp_documents(config_dir: Path) -> dict[str, dict[str, Any]]:
+    return deepcopy(_read_bootstrap_nlp_documents_cached(str(config_dir)))
 
 
 def _constructor_settings_ref(reference: SettingsReferenceResult) -> ConstructorSettingsRef:

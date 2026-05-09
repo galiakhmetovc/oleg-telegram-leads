@@ -74,6 +74,13 @@
   section routing helpers. Shared settings DTO types live in
   `frontend/src/settings/types.ts`; the settings help page lives in
   `frontend/src/settings/SettingsHelpPage.tsx`.
+- Settings load is optimized for operator responsiveness: the app preloads the
+  settings snapshot into an in-memory ref without forcing a full React state
+  update on non-settings pages, NLP draft dirty-state no longer does full
+  `JSON.stringify` comparisons on every render, collapsed settings accordions
+  do not mount heavy editors until opened, and the backend reads active NLP
+  revisions through the fast PostgreSQL path while caching bootstrap YAML for
+  the rare seed case.
 - The operator UI supports light and dark themes. The toggle lives in the top
   toolbar, applies MUI theme mode plus app CSS variables, and stores the
   operator-local preference in browser `localStorage`.
