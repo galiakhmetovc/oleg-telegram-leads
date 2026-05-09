@@ -40,6 +40,10 @@ Frontend shell boundaries:
   settings tabs, NLP rule editors, alias dictionaries, lead scoring, notification
   routing, Telegram input, the settings target modal, and settings section
   routing helpers.
+- `frontend/src/configurator/ConfiguratorPage.tsx` owns the operator
+  Configurator workspace over the same PostgreSQL-backed NLP settings snapshot:
+  domain/layer navigation, selected entity editing, and dependency/impact
+  inspection across dictionaries, facts, domain signals, and lead scoring.
 - `frontend/src/settings/SettingsHelpPage.tsx` owns the operator-facing help for
   editable settings.
 - `frontend/src/enrichment/TestingWorkspace.tsx` owns the Testing page UI:

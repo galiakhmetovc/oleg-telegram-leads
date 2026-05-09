@@ -239,6 +239,97 @@ body {
   scroll-margin-top: 88px;
 }
 
+.configurator-page {
+  display: grid;
+  gap: 16px;
+  min-width: 0;
+}
+
+.configurator-header,
+.configurator-panel {
+  background: var(--app-surface);
+  border-radius: 8px;
+  padding: 16px;
+}
+
+.configurator-shell {
+  align-items: start;
+  display: grid;
+  gap: 16px;
+  grid-template-columns: minmax(220px, 280px) minmax(0, 1fr) minmax(280px, 360px);
+  min-width: 0;
+}
+
+.configurator-empty {
+  grid-template-columns: minmax(0, 720px);
+}
+
+.configurator-nav,
+.configurator-inspector {
+  max-height: calc(100vh - 210px);
+  overflow: auto;
+  position: sticky;
+  top: 16px;
+}
+
+.configurator-workspace {
+  min-width: 0;
+}
+
+.configurator-actions {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.configurator-nav-button,
+.configurator-entity-button,
+.configurator-usage-button {
+  justify-content: flex-start;
+  text-align: left;
+  text-transform: none;
+  width: 100%;
+}
+
+.configurator-nav-button-content {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  width: 100%;
+}
+
+.configurator-section {
+  border: 1px solid var(--app-border-soft);
+  border-radius: 8px;
+  background: var(--app-surface-muted);
+  padding: 12px;
+}
+
+.configurator-entity-button {
+  border: 1px solid var(--app-border-soft);
+  border-radius: 8px;
+  background: var(--app-surface);
+  min-height: 58px;
+  padding: 10px 12px;
+}
+
+.configurator-usage-button {
+  border: 1px solid var(--app-border-soft);
+  border-radius: 8px;
+  background: var(--app-surface);
+  padding: 8px 10px;
+}
+
+.configurator-form-grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.configurator-mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  overflow-wrap: anywhere;
+}
+
 .help-shell {
   max-width: 1180px;
 }
@@ -574,6 +665,8 @@ body {
   .settings-content-grid,
   .settings-two-column,
   .rule-grid,
+  .configurator-shell,
+  .configurator-form-grid,
   .help-grid,
   .evidence-flow-row,
   .analytics-grid,
@@ -593,6 +686,12 @@ body {
   }
 
   .project-docs-sidebar {
+    max-height: none;
+    position: static;
+  }
+
+  .configurator-nav,
+  .configurator-inspector {
     max-height: none;
     position: static;
   }

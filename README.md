@@ -67,17 +67,22 @@ PostgreSQL enrichment task outbox, an enrichment dispatcher that publishes
 Celery tasks, a Celery worker to run the NLP pipeline, Redis as the broker,
 PostgreSQL for persisted job state, and SSE for progress updates.
 
-The operator UI also includes a Settings Center. It shows editable NLP/domain
-settings from PostgreSQL config revisions and read-only runtime settings from
-the backend environment. Draft NLP settings can be previewed on text before
-saving. Rule editing separates exact phrases from lemmatized phrases; new
-lemmatized phrases are built from operator-entered text by the backend and show
-both the original input and generated lemmas. Exact phrases use lowercased
-token-sequence matching for technical spellings such as `Wi-Fi`, `220v`, and
-abbreviations; punctuation, mentions, and other non-word separators may appear
-between tokens. Lemmatized phrases use normalized Yargy tokens. A Help tab in
-the UI explains the matching modes. `backend/config/nlp` is only the bootstrap
-default when the database has no active NLP config revision yet.
+The operator UI also includes a Configurator and a Settings Center. The
+Configurator is the primary visual workspace for the causal rule model:
+dictionaries -> facts -> domain signals -> lead assessment. It reuses the
+active PostgreSQL NLP settings snapshot, shows domain/layer navigation,
+selected entity cards, and dependency/impact inspection. The Settings Center
+remains the advanced editor. It shows editable NLP/domain settings from
+PostgreSQL config revisions and read-only runtime settings from the backend
+environment. Draft NLP settings can be previewed on text before saving. Rule
+editing separates exact phrases from lemmatized phrases; new lemmatized phrases
+are built from operator-entered text by the backend and show both the original
+input and generated lemmas. Exact phrases use lowercased token-sequence matching
+for technical spellings such as `Wi-Fi`, `220v`, and abbreviations;
+punctuation, mentions, and other non-word separators may appear between tokens.
+Lemmatized phrases use normalized Yargy tokens. A Help tab in the UI explains
+the matching modes. `backend/config/nlp` is only the bootstrap default when the
+database has no active NLP config revision yet.
 
 The enrichment result now includes `lead_assessment`: an explainable PUR lead
 verdict with score, temperature, solution areas, customer segments, review lane,

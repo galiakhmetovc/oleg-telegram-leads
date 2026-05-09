@@ -174,6 +174,15 @@
   job; System Status has a dedicated "Свежесть правил и кода" block for active
   revision, latest worker revision, backend code version, and worker code
   version.
+- The operator UI now includes a top-level "Конфигуратор" page. It is a
+  frontend workspace over the active PostgreSQL NLP settings revision: left
+  navigation by domain groups and rule layers, a central selected entity editor,
+  and a dependency/impact inspector for the chain dictionaries -> facts ->
+  domain signals -> lead scoring. The first slice supports simple edits for
+  rule labels/groups/confidence/weights, dictionary aliases/fact outputs, and
+  lead thresholds, then saves the full NLP draft through the existing
+  `PUT /api/v1/settings/nlp` revision endpoint. Settings Center remains the
+  advanced editor for full CRUD and detailed rule phrase management.
 - Frontend Vitest now uses verbose reporting and a 30-second test timeout. The
   full `App.test.tsx` suite is currently a heavy integration suite: it passes,
   but takes roughly 2.5 minutes on the dev host and should be split/optimized in

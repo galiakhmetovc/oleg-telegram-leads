@@ -88,6 +88,16 @@ test("uses scrollable top navigation for narrow screens", () => {
   expect(tabList.closest(".MuiTabs-scroller")).toHaveClass("MuiTabs-scrollableX");
 });
 
+test("opens the rule configurator from the top navigation", async () => {
+  render(<App />);
+
+  fireEvent.click(screen.getByRole("tab", { name: "Конфигуратор" }));
+
+  expect(await screen.findByRole("heading", { name: "Конфигуратор правил" })).toBeInTheDocument();
+  expect(screen.getByText("NLP-ревизия #1")).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: /Умный дом 1 сигнал 0 фактов/i })).toBeInTheDocument();
+});
+
 test("toggles dark theme and persists the operator preference", async () => {
   const { unmount } = render(<App />);
 
