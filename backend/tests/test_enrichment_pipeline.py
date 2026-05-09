@@ -632,18 +632,18 @@ def test_default_config_keeps_neptun_spellings_only_in_alias_catalogs() -> None:
         for alias_rule in config.aliases
         if getattr(alias_rule, "signal_types", ())
     }
-    leak_dependency_keys = {
-        key
+    leak_dependency_fact_types = {
+        fact_type
         for rule in config.signals
         if rule.type in {"water_leak_protection", "leak_protection"}
-        for dependency in rule.match.aliases
-        for key in dependency.keys
+        for dependency in rule.match.facts
+        for fact_type in dependency.types
     }
 
     assert forbidden_spellings.isdisjoint(direct_signal_phrases)
     assert forbidden_spellings.isdisjoint(direct_fact_phrases)
     assert alias_signal_types == {}
-    assert "neptun" in leak_dependency_keys
+    assert "alias:vendors:neptun" in leak_dependency_fact_types
     assert {"neptun", "нептун", "нептуп"}.issubset(alias_spellings)
     assert any("prow" in alias for alias in alias_spellings)
     assert any("profi" in alias for alias in alias_spellings)
@@ -766,15 +766,24 @@ def test_default_config_treats_single_camera_as_domain_evidence_not_lead(
 
     signal_types = {signal.type for signal in result.domain_signals}
     fact_types = {fact.type for fact in result.facts}
+    video_signal = next(signal for signal in result.domain_signals if signal.type == "video_surveillance")
 
     assert signal_types == {"video_surveillance"}
+    assert "alias:devices:camera" in fact_types
     assert "video_device" in fact_types
     assert "automation_component" not in fact_types
     assert "controlled_device" not in fact_types
+    assert video_signal.source == "fact_dependency"
     assert result.lead_assessment is not None
     assert result.lead_assessment.is_lead is False
     assert result.lead_assessment.score < 35
     assert "smart_home" not in {item.type for item in result.lead_assessment.solution_areas}
+
+
+def test_default_signal_rules_do_not_depend_directly_on_alias_catalogs() -> None:
+    config = _lead_detection_config_without_heavy_natasha()
+
+    assert all(rule.match.aliases == () for rule in config.signals)
 
 
 def test_default_config_marks_water_leak_sensor_design_lead_from_artifact(
@@ -1132,7 +1141,7 @@ def test_default_config_marks_neptun_water_leak_monitoring_lead(
     assert result.lead_assessment.temperature in {"warm", "hot"}
     assert {"water_leak_protection", "consultation_request"} <= signal_types
     assert {"vendor", "automation_component", "controlled_device"} <= fact_types
-    assert neptun_signal_sources == {"alias_catalog"}
+    assert neptun_signal_sources == {"fact_dependency"}
     assert "smart_home" in {item.type for item in result.lead_assessment.solution_areas}
     assert "security" in {item.type for item in result.lead_assessment.solution_areas}
 

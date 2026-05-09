@@ -345,6 +345,22 @@ class RussianTextEnricher:
             )
         for alias_match in alias_matches:
             alias_config = alias_match.config
+            facts.append(
+                ExtractedFact(
+                    id=f"fact-{len(facts) + 1}",
+                    text=alias_match.text,
+                    type=_alias_identity_fact_type(alias_config),
+                    label=_alias_ref_label(alias_config),
+                    range=TextRange(start=alias_match.start, stop=alias_match.stop),
+                    source="alias_catalog",
+                    confidence=alias_config.confidence,
+                    explanation=(
+                        f"Найдена словарная сущность «{alias_config.canonical}» "
+                        f"из каталога {alias_config.catalog} ({alias_config.key})."
+                    ),
+                    settings_refs=[_alias_settings_ref(alias_config)],
+                )
+            )
             facts.extend(
                 ExtractedFact(
                     id=f"fact-{len(facts) + offset + 1}",
@@ -798,6 +814,10 @@ def _alias_fact_label(alias_config: AliasRuleConfig, fact_type: str) -> str:
         "model": "Модель",
     }.get(fact_type, alias_config.kind)
     return f"{prefix}: {alias_config.canonical}"
+
+
+def _alias_identity_fact_type(alias_config: AliasRuleConfig) -> str:
+    return f"alias:{alias_config.catalog}:{alias_config.key}"
 
 
 def _rule_settings_ref(section: str, key: str, label: str) -> SettingsReference:

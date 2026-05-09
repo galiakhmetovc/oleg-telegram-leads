@@ -280,6 +280,11 @@
   `video_surveillance` signal is below the lead threshold by itself, so a lone
   word such as `камера` remains domain evidence, not a lead or smart-home area.
   Migration `0020_camera_signal_scoring` patches active PostgreSQL config.
+- Alias matches also emit identity facts named `alias:<catalog>:<key>`.
+  Default domain signals now use `match.facts`, not `match.aliases`, so the
+  rule chain is explicit: dictionary alias -> fact -> domain signal -> lead
+  scoring. Migration `0021_signal_fact_dependencies` converts active signal
+  alias dependencies to fact dependencies.
 - Review lane matching is centralized in `app.application.review_lanes`. The
   deterministic scorer and analytics import/list code use the same priority,
   exclusion, score/temperature, and match-group logic, including matched group

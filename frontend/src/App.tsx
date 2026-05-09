@@ -2999,14 +2999,14 @@ function SettingsHelpPage() {
                   </TableRow>
                   <TableRow>
                     <TableCell>match.aliases</TableCell>
-                    <TableCell>явные зависимости сигнала от словарей</TableCell>
-                    <TableCell>в строке зависимости выбери каталог `vendors`, `software` или `devices`, затем конкретные alias-ключи</TableCell>
-                    <TableCell>если найден alias с указанным ключом/каталогом, появляется этот доменный сигнал</TableCell>
+                    <TableCell>устаревший прямой путь от словаря к сигналу</TableCell>
+                    <TableCell>для доменных сигналов не используем; вместо этого словарь выпускает факт `alias:catalog:key`</TableCell>
+                    <TableCell>старые зависимости мигрируются в `match.facts`, чтобы цепочка была словарь, факт, сигнал</TableCell>
                   </TableRow>
                   <TableRow>
                     <TableCell>match.facts</TableCell>
                     <TableCell>зависимости сигнала от уже найденных фактов</TableCell>
-                    <TableCell>выбери `automation_component`, `vendor`, `service_location` или другой fact_type из списка</TableCell>
+                    <TableCell>выбери `alias:devices:camera`, `video_device`, `automation_component` или другой fact_type из списка</TableCell>
                     <TableCell>позволяет строить сигнал поверх структурных фактов без повторного поиска текста</TableCell>
                   </TableRow>
                 </TableBody>
@@ -3019,7 +3019,7 @@ function SettingsHelpPage() {
             </Alert>
             <Alert severity="warning">
               Зависимости должны быть узкими. Например, `камера` может дать словарную сущность,
-              факт `video_device` и сигнал `video_surveillance`, но не должна давать
+              факт `alias:devices:camera`, факт `video_device` и сигнал `video_surveillance`, но не должна давать
               `automation_component`, `controlled_device` или зону "Умный дом". Иначе одно
               слово начинает разгонять score сразу несколькими независимыми причинами.
             </Alert>

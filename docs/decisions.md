@@ -802,6 +802,23 @@ Rationale:
   order/provider search, installation, consultation, customer request, project
   context, or similar evidence.
 
+## 2026-05-09: Domain Signals Depend On Facts, Not Alias Catalogs
+
+Alias matches now emit identity facts named `alias:<catalog>:<key>`. Domain
+signals in the default config use `match.facts` and no longer use
+`match.aliases`. For example, `devices.camera` emits `alias:devices:camera` and
+`video_device`; `video_surveillance` depends on those facts and is emitted with
+`source=fact_dependency`.
+
+Rationale:
+
+- The operator mental model is one pipeline: text -> dictionaries/rules -> facts
+  -> domain signals -> lead scoring.
+- Direct `dictionary -> signal` links made the UI hard to explain and hid which
+  intermediate evidence actually caused a signal.
+- Identity facts preserve exact alias-key dependencies without broadening facts
+  such as `vendor`, `software`, or `controlled_device`.
+
 ## 2026-05-08: Live Analytics Candidate Lists Are SQL-Backed
 
 The live Telegram analytics run still uses PostgreSQL runtime tables as the

@@ -388,12 +388,12 @@ Domain signals are the inference layer over semantic phrases, alias catalogs,
 and facts. They remain semantic categories such as `smart_home_platform`,
 `protocol_gateway`, `leak_protection`, `lighting_automation`,
 `climate_automation`, `access_control`, `intercom`, `video_surveillance`, and
-`power_backup`. A signal may define `match.aliases` dependencies by selecting an
-alias catalog (`vendors`, `software`, `devices`, etc.) and concrete alias keys
-such as `yandex`, `aqara`, `alice`, or `leak_sensor`. If a matching alias is
-found, the signal is emitted with `source=alias_catalog`.
-Signals may also define `match.facts` dependencies to build a higher-level
-signal from already extracted fact types.
+`power_backup`. Signals depend on facts, not directly on alias catalogs. Every
+alias match emits an identity fact with type `alias:<catalog>:<key>` in addition
+to its configured semantic facts; for example `devices.camera` emits
+`alias:devices:camera` and `video_device`. A signal then uses `match.facts`
+dependencies such as `alias:devices:camera` or `video_device`, and the emitted
+signal has `source=fact_dependency`.
 
 Dependencies must stay narrow. A generic word such as `камера` may emit the
 specific fact `video_device` and the domain signal `video_surveillance`, but it
@@ -407,10 +407,11 @@ consultation, customer request, or project context.
 Brand/model spellings must not be duplicated in domain signal or fact phrase
 rules. For example, `Нептун`, `Нептуп`, `Neptun ProW`, and `Profi Wi-Fi` live in
 the `neptun` vendor alias. The `water_leak_protection` and `leak_protection`
-signals explicitly reference that alias through `match.aliases`; the alias
-itself emits `vendor`/`model` facts. Domain signal rules keep only semantic
-language such as `датчик протечки` or `защита от протечек`. Lead scoring uses
-the resulting signal/fact types, not the storage location of the rule.
+signals explicitly reference that alias through fact dependencies such as
+`alias:vendors:neptun`; the alias itself emits identity/vendor/model facts.
+Domain signal rules keep only semantic language such as `датчик протечки` or
+`защита от протечек`. Lead scoring uses the resulting signal/fact types, not
+the storage location of the rule.
 
 ## Lead Assessment
 
