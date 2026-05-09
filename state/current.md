@@ -61,6 +61,13 @@
   live in `frontend/src/enrichment/types.ts`, and settings target hash/deeplink
   helpers live in `frontend/src/settings/navigation.ts`. `App.tsx` remains the
   top-level router/state shell.
+- The Settings Center was split out of the app shell into
+  `frontend/src/settings/SettingsCenter.tsx`. It owns the settings tabs,
+  NLP rule editors, alias dictionaries, lead scoring editor, notification
+  routing editor, Telegram input editor, settings target modal, and settings
+  section routing helpers. Shared settings DTO types live in
+  `frontend/src/settings/types.ts`; the settings help page lives in
+  `frontend/src/settings/SettingsHelpPage.tsx`.
 - The operator UI supports light and dark themes. The toggle lives in the top
   toolbar, applies MUI theme mode plus app CSS variables, and stores the
   operator-local preference in browser `localStorage`.

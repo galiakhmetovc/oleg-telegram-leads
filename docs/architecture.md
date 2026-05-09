@@ -36,11 +36,19 @@ Frontend shell boundaries:
 
 - `frontend/src/App.tsx` owns top-level routing, auth/session state, theme, and
   cross-page state handoff.
+- `frontend/src/settings/SettingsCenter.tsx` owns the Settings Center feature:
+  settings tabs, NLP rule editors, alias dictionaries, lead scoring, notification
+  routing, Telegram input, the settings target modal, and settings section
+  routing helpers.
+- `frontend/src/settings/SettingsHelpPage.tsx` owns the operator-facing help for
+  editable settings.
 - `frontend/src/enrichment/TestingWorkspace.tsx` owns the Testing page UI:
   text input, enrichment status, result tabs, overview, visual evidence chain,
   and raw span/token/trace tables.
 - `frontend/src/enrichment/types.ts` owns enrichment DTO types shared by the
   app shell and Testing UI.
+- `frontend/src/settings/types.ts` owns settings DTO types shared by Settings
+  Center and the app shell.
 - `frontend/src/settings/navigation.ts` owns settings target hash/deeplink
   types and helpers.
 
