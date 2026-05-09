@@ -267,8 +267,7 @@ devices:
       - видеоглазок
       - дверной глазок
     fact_types:
-      - automation_component
-      - controlled_device
+      - video_device
   - key: nvr_dvr
     canonical: Видеорегистратор
     type: device
@@ -282,8 +281,7 @@ devices:
       - архив видеонаблюдения
       - запись видео
     fact_types:
-      - automation_component
-      - controlled_device
+      - video_device
   - key: intercom
     canonical: Домофон / вызывная панель
     type: device

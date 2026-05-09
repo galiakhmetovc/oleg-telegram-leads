@@ -759,6 +759,24 @@ def test_default_config_marks_video_surveillance_apartment_lead_text(
     assert "security" in {item.type for item in result.lead_assessment.solution_areas}
 
 
+def test_default_config_treats_single_camera_as_domain_evidence_not_lead(
+    default_lead_enricher: RussianTextEnricher,
+) -> None:
+    result = default_lead_enricher.enrich("камера")
+
+    signal_types = {signal.type for signal in result.domain_signals}
+    fact_types = {fact.type for fact in result.facts}
+
+    assert signal_types == {"video_surveillance"}
+    assert "video_device" in fact_types
+    assert "automation_component" not in fact_types
+    assert "controlled_device" not in fact_types
+    assert result.lead_assessment is not None
+    assert result.lead_assessment.is_lead is False
+    assert result.lead_assessment.score < 35
+    assert "smart_home" not in {item.type for item in result.lead_assessment.solution_areas}
+
+
 def test_default_config_marks_water_leak_sensor_design_lead_from_artifact(
     default_lead_enricher: RussianTextEnricher,
 ) -> None:

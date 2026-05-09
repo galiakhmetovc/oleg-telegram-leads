@@ -784,6 +784,24 @@ Rationale:
 - Overbroad alias spellings should be removed from dictionaries instead of
   compensated by code.
 
+## 2026-05-09: Video Device Aliases Are Domain Evidence, Not Automation Evidence
+
+`camera` and `nvr_dvr` device aliases now emit the specific fact
+`video_device` instead of broad `automation_component` and `controlled_device`
+facts. The `video_surveillance` signal weight is below the lead threshold, so a
+single word like `камера` can explain the domain but cannot by itself become a
+lead or place the message into the smart-home solution area.
+
+Rationale:
+
+- `controlled_device` feeds the smart-home solution area, so using it for any
+  camera made video-only fragments look like smart-home automation.
+- `automation_component` and `controlled_device` add score reasons; attaching
+  both to generic camera aliases overheated sparse messages.
+- Direct video-surveillance leads should be detected through domain plus intent:
+  order/provider search, installation, consultation, customer request, project
+  context, or similar evidence.
+
 ## 2026-05-08: Live Analytics Candidate Lists Are SQL-Backed
 
 The live Telegram analytics run still uses PostgreSQL runtime tables as the

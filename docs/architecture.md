@@ -395,6 +395,15 @@ found, the signal is emitted with `source=alias_catalog`.
 Signals may also define `match.facts` dependencies to build a higher-level
 signal from already extracted fact types.
 
+Dependencies must stay narrow. A generic word such as `камера` may emit the
+specific fact `video_device` and the domain signal `video_surveillance`, but it
+must not emit broad automation facts such as `automation_component` or
+`controlled_device`. Broad facts feed score and solution-area inference, so they
+are reserved for genuinely controlled automation components. Domain evidence
+alone is intentionally below the lead threshold; an auto-lead should normally
+combine a PUR domain with intent such as provider search, installation,
+consultation, customer request, or project context.
+
 Brand/model spellings must not be duplicated in domain signal or fact phrase
 rules. For example, `Нептун`, `Нептуп`, `Neptun ProW`, and `Profi Wi-Fi` live in
 the `neptun` vendor alias. The `water_leak_protection` and `leak_protection`

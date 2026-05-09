@@ -275,6 +275,11 @@
 - Migration `0019_operator_noise_score_cap` appends `operator_noise` to the
   active hard-noise score cap. The Review "В шум" constructor also maintains
   that link for future operator-created noise phrases.
+- Camera and recorder aliases now emit the specific `video_device` fact instead
+  of broad `automation_component`/`controlled_device` facts. The
+  `video_surveillance` signal is below the lead threshold by itself, so a lone
+  word such as `камера` remains domain evidence, not a lead or smart-home area.
+  Migration `0020_camera_signal_scoring` patches active PostgreSQL config.
 - Review lane matching is centralized in `app.application.review_lanes`. The
   deterministic scorer and analytics import/list code use the same priority,
   exclusion, score/temperature, and match-group logic, including matched group

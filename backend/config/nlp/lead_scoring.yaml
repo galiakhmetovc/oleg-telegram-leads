@@ -12,7 +12,7 @@ lead_scoring:
       smart_home_automation: 35
       smart_home_platform: 25
       protocol_gateway: 20
-      video_surveillance: 35
+      video_surveillance: 25
       consultation_request: 8
       solution_selection_request: 18
       education_request: 10

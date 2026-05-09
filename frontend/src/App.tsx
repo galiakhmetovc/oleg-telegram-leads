@@ -2894,7 +2894,8 @@ function SettingsHelpPage() {
               <Typography variant="h6">Точное совпадение</Typography>
               <Typography variant="body2" color="text.secondary">
                 Используй для фраз, где важна именно запись: аббревиатуры, бренды, протоколы,
-                технические обозначения и короткие устойчивые выражения. Регистр не важен.
+                технические обозначения и короткие устойчивые выражения. Регистр не важен;
+                между словами могут быть пробелы, переносы, `@`, emoji и другая пунктуация.
               </Typography>
               <Stack spacing={0.75}>
                 {["с ндс", "white box", "220v", "wi-fi"].map((item) => (
@@ -3015,6 +3016,12 @@ function SettingsHelpPage() {
               `type` технически является строкой, но в рабочих настройках не пишем его по-русски.
               Русский текст живёт в `label`. Это нужно, чтобы ключи были стабильными в API,
               аналитике, весах, миграциях и будущих eval-наборах.
+            </Alert>
+            <Alert severity="warning">
+              Зависимости должны быть узкими. Например, `камера` может дать словарную сущность,
+              факт `video_device` и сигнал `video_surveillance`, но не должна давать
+              `automation_component`, `controlled_device` или зону "Умный дом". Иначе одно
+              слово начинает разгонять score сразу несколькими независимыми причинами.
             </Alert>
           </Paper>
 
@@ -3251,7 +3258,7 @@ function SettingsHelpPage() {
                     <TableRow>
                       <TableCell>weights.signals</TableCell>
                       <TableCell>веса доменных сигналов</TableCell>
-                      <TableCell>`video_surveillance: 35` добавит 35 баллов, если найден сигнал `video_surveillance`</TableCell>
+                      <TableCell>`video_surveillance: 25` добавит 25 баллов, если найден сигнал `video_surveillance`</TableCell>
                     </TableRow>
                     <TableRow>
                       <TableCell>weights.facts</TableCell>
