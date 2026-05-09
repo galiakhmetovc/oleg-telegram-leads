@@ -22,6 +22,8 @@ def _write_config(config_dir: Path) -> None:
 stages:
   - name: segmentation
     enabled: true
+  - name: facts
+    enabled: true
   - name: domain_signals
     enabled: true
 """,
@@ -584,7 +586,7 @@ def test_preview_nlp_settings_uses_draft_without_saving(tmp_path: Path) -> None:
             "group": "Умный дом",
             "phrases": [],
             "patterns": [],
-            "match": {"aliases": [{"catalog": "vendors", "keys": ["aqara"]}], "facts": []},
+            "match": {"facts": [{"types": ["alias:vendors:aqara"]}]},
         }
     )
     draft["vendors"][0]["aliases"].append("Аккара")
@@ -606,3 +608,28 @@ def test_preview_nlp_settings_uses_draft_without_saving(tmp_path: Path) -> None:
     assert repository.active is not None
     assert ["ищем", "поставщика"] not in repository.active["signals"]["signals"][0]["phrases"]
     assert "Аккара" not in repository.active["vendors"]["vendors"][0]["aliases"]
+
+
+def test_preview_nlp_settings_rejects_deprecated_direct_alias_dependencies(tmp_path: Path) -> None:
+    config_dir = tmp_path / "nlp"
+    _write_config(config_dir)
+    repository = InMemoryNlpConfigRepository()
+    client = _app_with_settings_repo(config_dir, repository)
+    draft = client.get("/api/v1/settings").json()["nlp"]
+    draft["signals"].append(
+        {
+            "type": "smart_home_platform",
+            "label": "Платформа умного дома",
+            "group": "Умный дом",
+            "phrases": [],
+            "patterns": [],
+            "match": {"aliases": [{"catalog": "vendors", "keys": ["aqara"]}], "facts": []},
+        }
+    )
+
+    response = client.post(
+        "/api/v1/settings/nlp/preview",
+        json={"text": "Aqara", "nlp": draft},
+    )
+
+    assert response.status_code == 422

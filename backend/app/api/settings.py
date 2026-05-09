@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.api.notifications import NotificationSettingsSnapshot
 from app.api.notifications import get_notification_settings_repository
@@ -75,30 +75,18 @@ class PatternSettings(BaseModel):
     tokens: list[PatternTokenSettings] = Field(min_length=1)
 
 
-class AliasMatchSettings(BaseModel):
-    catalog: str | None = None
-    catalogs: list[str] = Field(default_factory=list)
-    keys: list[str] = Field(default_factory=list)
-    kinds: list[str] = Field(default_factory=list)
-
-    @model_validator(mode="after")
-    def validate_alias_match_source(self) -> AliasMatchSettings:
-        if not self.catalog and not self.catalogs and not self.keys and not self.kinds:
-            raise ValueError("alias match must define catalog, catalogs, keys, or kinds")
-        return self
-
-
 class FactMatchSettings(BaseModel):
     types: list[str] = Field(min_length=1)
 
 
 class RuleMatchSettings(BaseModel):
-    aliases: list[AliasMatchSettings] = Field(default_factory=list)
+    model_config = ConfigDict(extra="forbid")
+
     facts: list[FactMatchSettings] = Field(default_factory=list)
 
     @property
     def is_empty(self) -> bool:
-        return not self.aliases and not self.facts
+        return not self.facts
 
 
 class RuleSettings(BaseModel):
@@ -688,8 +676,6 @@ def _rule_from_document(raw_rule: dict[str, Any]) -> RuleSettings:
 
 def _rule_match_to_document(match: RuleMatchSettings) -> dict[str, Any]:
     payload: dict[str, Any] = {}
-    if match.aliases:
-        payload["aliases"] = [dependency.model_dump(exclude_none=True) for dependency in match.aliases]
     if match.facts:
         payload["facts"] = [dependency.model_dump() for dependency in match.facts]
     return payload
@@ -697,9 +683,9 @@ def _rule_match_to_document(match: RuleMatchSettings) -> dict[str, Any]:
 
 def _rule_match_from_document(raw_match: Any) -> dict[str, Any]:
     if not raw_match:
-        return {"aliases": [], "facts": []}
+        return {"facts": []}
     if not isinstance(raw_match, dict):
-        return {"aliases": [], "facts": []}
+        return {"facts": []}
 
     facts = []
     for raw_fact in raw_match.get("facts", []):
@@ -707,10 +693,7 @@ def _rule_match_from_document(raw_match: Any) -> dict[str, Any]:
             facts.append({"types": [raw_fact]})
         else:
             facts.append(raw_fact)
-    return {
-        "aliases": raw_match.get("aliases", []),
-        "facts": facts,
-    }
+    return {"facts": facts}
 
 
 def _alias_to_document(alias: AliasSettings) -> dict[str, Any]:

@@ -97,7 +97,36 @@ signals:
     assert config.signals[0].patterns[0].tokens[1].value == "дом"
 
 
-def test_loads_signal_dictionary_dependencies_from_yaml(tmp_path: Path) -> None:
+def test_loads_signal_fact_dependencies_from_yaml(tmp_path: Path) -> None:
+    config_dir = tmp_path / "nlp"
+    config_dir.mkdir()
+    (config_dir / "pipeline.yaml").write_text("stages: []\n", encoding="utf-8")
+    (config_dir / "signals.yaml").write_text(
+        """
+signals:
+  - type: smart_home
+    label: Умный дом
+    match:
+      facts:
+        - types:
+            - alias:vendors:yandex
+            - alias:vendors:aqara
+        - types:
+            - alias:software:alice
+        - types:
+            - automation_component
+""",
+        encoding="utf-8",
+    )
+
+    config = load_nlp_config(config_dir)
+
+    assert config.signals[0].match.facts[0].types == ("alias:vendors:yandex", "alias:vendors:aqara")
+    assert config.signals[0].match.facts[1].types == ("alias:software:alice",)
+    assert config.signals[0].match.facts[2].types == ("automation_component",)
+
+
+def test_rejects_direct_signal_alias_dependencies_from_yaml(tmp_path: Path) -> None:
     config_dir = tmp_path / "nlp"
     config_dir.mkdir()
     (config_dir / "pipeline.yaml").write_text("stages: []\n", encoding="utf-8")
@@ -111,24 +140,33 @@ signals:
         - catalog: vendors
           keys:
             - yandex
-            - aqara
-        - catalog: software
-          keys:
-            - alice
-      facts:
-        - types:
-            - automation_component
 """,
         encoding="utf-8",
     )
 
-    config = load_nlp_config(config_dir)
+    with pytest.raises(ValueError, match="match.aliases is not supported"):
+        load_nlp_config(config_dir)
 
-    assert config.signals[0].match.aliases[0].catalogs == ("vendors",)
-    assert config.signals[0].match.aliases[0].keys == ("yandex", "aqara")
-    assert config.signals[0].match.aliases[1].catalogs == ("software",)
-    assert config.signals[0].match.aliases[1].keys == ("alice",)
-    assert config.signals[0].match.facts[0].types == ("automation_component",)
+
+def test_rejects_empty_direct_signal_alias_dependencies_from_yaml(tmp_path: Path) -> None:
+    config_dir = tmp_path / "nlp"
+    config_dir.mkdir()
+    (config_dir / "pipeline.yaml").write_text("stages: []\n", encoding="utf-8")
+    (config_dir / "signals.yaml").write_text(
+        """
+signals:
+  - type: smart_home
+    label: Умный дом
+    phrases:
+      - ["умный", "дом"]
+    match:
+      aliases: []
+""",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="match.aliases is not supported"):
+        load_nlp_config(config_dir)
 
 
 def test_rejects_unsupported_pattern_predicates(tmp_path: Path) -> None:

@@ -167,16 +167,10 @@ export function SettingsHelpPage() {
                     <TableCell>находит формы слов: "умного дома", "умному дому", "систему видеонаблюдения"</TableCell>
                   </TableRow>
                   <TableRow>
-                    <TableCell>match.aliases</TableCell>
-                    <TableCell>устаревший прямой путь от словаря к сигналу</TableCell>
-                    <TableCell>для доменных сигналов не используем; вместо этого словарь выпускает факт `alias:catalog:key`</TableCell>
-                    <TableCell>старые зависимости мигрируются в `match.facts`, чтобы цепочка была словарь, факт, сигнал</TableCell>
-                  </TableRow>
-                  <TableRow>
                     <TableCell>match.facts</TableCell>
                     <TableCell>зависимости сигнала от уже найденных фактов</TableCell>
                     <TableCell>выбери `alias:devices:camera`, `video_device`, `automation_component` или другой fact_type из списка</TableCell>
-                    <TableCell>позволяет строить сигнал поверх структурных фактов без повторного поиска текста</TableCell>
+                    <TableCell>единственный способ связать словари с сигналами: словарь выпускает факт, сигнал зависит от факта</TableCell>
                   </TableRow>
                 </TableBody>
               </Table>
@@ -273,7 +267,7 @@ export function SettingsHelpPage() {
                     <TableCell>aliases</TableCell>
                     <TableCell>варианты написания</TableCell>
                     <TableCell>латиница, кириллица, транслитерация, частые ошибки: `Нептун`, `Нептуп`</TableCell>
-                    <TableCell>сам alias создаёт факты; сигналы ссылаются на него через `match.aliases`</TableCell>
+                    <TableCell>сам alias создаёт факты; сигналы ссылаются на них через `match.facts`</TableCell>
                   </TableRow>
                   <TableRow>
                     <TableCell>fact_types</TableCell>
@@ -344,9 +338,38 @@ export function SettingsHelpPage() {
             <Typography variant="body2" color="text.secondary">
               Доменный сигнал и словарь не заменяют друг друга. Они являются разными источниками
               данных. Смысловая категория остаётся в доменных сигналах, а конкретные бренды,
-              модели, протоколы и приложения живут в словарях. Связь хранится на стороне
-              сигнала в `match.aliases`.
+              модели, протоколы и приложения живут в словарях. Связь строится только через
+              факты: словарь выпускает `alias:catalog:key`, а доменный сигнал ссылается на
+              этот факт в `match.facts`.
             </Typography>
+            <TableContainer>
+              <Table size="small">
+                <TableHead>
+                  <TableRow>
+                    <TableCell>Шаг</TableCell>
+                    <TableCell>Пример</TableCell>
+                    <TableCell>Что появляется в результате</TableCell>
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  <TableRow>
+                    <TableCell>1. Словарь</TableCell>
+                    <TableCell>`Нептун` найден в vendors/neptun</TableCell>
+                    <TableCell>факт `alias:vendors:neptun` и факт `vendor`</TableCell>
+                  </TableRow>
+                  <TableRow>
+                    <TableCell>2. Факт</TableCell>
+                    <TableCell>`alias:vendors:neptun` выбран в `match.facts`</TableCell>
+                    <TableCell>сигнал `water_leak_protection` с `source=fact_dependency`</TableCell>
+                  </TableRow>
+                  <TableRow>
+                    <TableCell>3. Score</TableCell>
+                    <TableCell>найден сигнал и/или факт с весом</TableCell>
+                    <TableCell>причина score, направление решения, сегмент или очередь разбора</TableCell>
+                  </TableRow>
+                </TableBody>
+              </Table>
+            </TableContainer>
             <TableContainer>
               <Table size="small">
                 <TableHead>
@@ -363,8 +386,8 @@ export function SettingsHelpPage() {
                     <TableCell>когда фраза описывает смысловую категорию, а не бренд или модель</TableCell>
                   </TableRow>
                   <TableRow>
-                    <TableCell>`match.aliases` у `water_leak_protection`</TableCell>
-                    <TableCell>сигнал явно ссылается на каталог `vendors` и alias `neptun`; "Нептун" не добавляем в `phrases`, но сигнал появляется с `source=alias_catalog`</TableCell>
+                    <TableCell>`match.facts` у `water_leak_protection`</TableCell>
+                    <TableCell>сигнал ссылается на факт `alias:vendors:neptun`; "Нептун" не добавляем в `phrases`, но сигнал появляется с `source=fact_dependency`</TableCell>
                     <TableCell>когда смысловой сигнал должен опираться на словарную сущность</TableCell>
                   </TableRow>
                   <TableRow>
@@ -383,8 +406,9 @@ export function SettingsHelpPage() {
             <Alert severity="info">
               Практическое правило: бренды, модели, протоколы, приложения и человеческие ошибки
               написания держим в словарях. Доменные сигналы ссылаются на словари через
-              `match.aliases`; словари не содержат `signal_types`, чтобы не было двух источников
-              правды. Факты от alias задаются через `fact_types`.
+              факты `alias:catalog:key` внутри `match.facts`; словари не содержат `signal_types`,
+              чтобы не было двух источников правды. Обобщенные факты от alias задаются через
+              `fact_types`.
             </Alert>
           </Paper>
 

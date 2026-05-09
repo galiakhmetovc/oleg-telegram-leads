@@ -590,10 +590,12 @@ signals or facts.
 The frontend Settings Center edits exact phrases and lemmatized phrases as
 separate lists with add/edit/delete actions. New lemmatized phrases are created
 from natural operator input through the backend semantic-pattern endpoint so the
-UI can show both the original text and the generated lemmas. Domain signals also
-expose editable `match.aliases` and `match.facts` dependencies as add/remove
-rows with catalog, alias, and fact selectors rather than text mini-language. The
-UI has a Help page that explains these matching modes. The Settings Center also
+UI can show both the original text and the generated lemmas. Domain signals
+expose only editable `match.facts` dependencies. The fact selector includes
+Yargy fact types, generic alias-emitted fact types, and concrete alias identity
+facts such as `alias:vendors:neptun`, so the operator can connect dictionaries
+to signals without a text mini-language or direct alias dependency path. The UI
+has a Help page that explains these matching modes. The Settings Center also
 exposes the alias catalogs as editable lists for vended platforms, protocols,
 devices, and software. Lead scoring settings include review lanes, so review
 queue logic is visible and editable together with thresholds, weights, taxonomy

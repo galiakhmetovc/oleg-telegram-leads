@@ -410,7 +410,7 @@ def add_rule_phrase_to_documents(
         }
         if collection == "signals":
             rule["color"] = color or "#0b57d0"
-            rule["match"] = {"aliases": [], "facts": []}
+            rule["match"] = {"facts": []}
         elif color:
             rule["color"] = color
         rules.append(rule)

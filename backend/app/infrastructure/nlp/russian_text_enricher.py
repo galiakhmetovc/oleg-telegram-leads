@@ -132,7 +132,7 @@ class RussianTextEnricher:
             mark("facts", 80, "Извлечены факты по Yargy-правилам")
 
         signals = (
-            self._extract_domain_signals(text, alias_matches, facts)
+            self._extract_domain_signals(text, facts)
             if self._config.is_enabled("domain_signals")
             else []
         )
@@ -234,7 +234,6 @@ class RussianTextEnricher:
     def _extract_domain_signals(
         self,
         text: str,
-        alias_matches: list[AliasTextMatch],
         facts: list[ExtractedFact],
     ) -> list[DomainSignal]:
         signals: list[DomainSignal] = []
@@ -262,30 +261,6 @@ class RussianTextEnricher:
                     compiled_rule.parser,
                 )
             )
-            for alias_match in alias_matches:
-                if not _rule_matches_alias(rule_config, alias_match.config):
-                    continue
-                signals.append(
-                    DomainSignal(
-                        id=f"signal-{len(signals) + 1}",
-                        text=alias_match.text,
-                        type=rule_config.type,
-                        label=rule_config.label,
-                        range=TextRange(start=alias_match.start, stop=alias_match.stop),
-                        source="alias_catalog",
-                        confidence=rule_config.confidence,
-                        color=rule_config.color,
-                        explanation=(
-                            f"Сигнал «{rule_config.label}» зависит от alias "
-                            f"«{alias_match.config.canonical}» из каталога "
-                            f"{alias_match.config.catalog} ({alias_match.config.key})."
-                        ),
-                        settings_refs=[
-                            _rule_settings_ref("signals", rule_config.type, rule_config.label),
-                            _alias_settings_ref(alias_match.config),
-                        ],
-                    )
-                )
             for fact in facts:
                 if not _rule_matches_fact(rule_config, fact):
                     continue
@@ -860,18 +835,6 @@ def _fact_type_labels(config: NlpPipelineConfig) -> dict[str, str]:
     }
     labels.update({rule.type: rule.label for rule in config.facts})
     return labels
-
-
-def _rule_matches_alias(rule_config: PhraseRuleConfig, alias_config: AliasRuleConfig) -> bool:
-    for dependency in rule_config.match.aliases:
-        if dependency.catalogs and alias_config.catalog not in dependency.catalogs:
-            continue
-        if dependency.keys and alias_config.key not in dependency.keys:
-            continue
-        if dependency.kinds and alias_config.kind not in dependency.kinds:
-            continue
-        return True
-    return False
 
 
 def _rule_matches_fact(rule_config: PhraseRuleConfig, fact: ExtractedFact) -> bool:

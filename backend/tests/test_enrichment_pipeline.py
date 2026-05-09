@@ -208,7 +208,7 @@ facts:
     assert len(tokenizer_ids) == 1
 
 
-def test_enriches_text_with_signal_dictionary_dependencies_and_alias_facts(tmp_path: Path) -> None:
+def test_enriches_text_with_fact_based_signal_dependencies_and_alias_facts(tmp_path: Path) -> None:
     config_dir = tmp_path / "nlp"
     config_dir.mkdir()
     (config_dir / "pipeline.yaml").write_text(
@@ -231,30 +231,23 @@ signals:
   - type: smart_home_platform
     label: Платформа умного дома
     match:
-      aliases:
-        - catalog: vendors
-          keys:
-            - aqara
-        - catalog: software
-          keys:
-            - alice
+      facts:
+        - types:
+            - alias:vendors:aqara
+            - alias:software:alice
   - type: protocol_gateway
     label: Протоколы и шлюзы
     match:
-      aliases:
-        - catalog: protocols
-          keys:
-            - zigbee
-        - catalog: devices
-          keys:
-            - relay
+      facts:
+        - types:
+            - alias:protocols:zigbee
+            - alias:devices:relay
   - type: water_leak_protection
     label: Защита от протечек
     match:
-      aliases:
-        - catalog: devices
-          keys:
-            - leak_sensor
+      facts:
+        - types:
+            - alias:devices:leak_sensor
 """,
         encoding="utf-8",
     )
@@ -365,7 +358,7 @@ software:
     fact_types = {fact.type for fact in result.facts}
     assert {"smart_home_platform", "protocol_gateway", "water_leak_protection"} <= signal_types
     assert {"vendor", "protocol", "automation_component", "software"} <= fact_types
-    assert any(signal.source == "alias_catalog" for signal in result.domain_signals)
+    assert any(signal.source == "fact_dependency" for signal in result.domain_signals)
     assert any(fact.text == "Aqara" and fact.source == "alias_catalog" for fact in result.facts)
     aqara_fact = next(fact for fact in result.facts if fact.text == "Aqara" and fact.source == "alias_catalog")
     assert any(
@@ -385,6 +378,20 @@ software:
     assert result.lead_assessment is not None
     assert result.lead_assessment.is_lead is True
     assert "smart_home" in {item.type for item in result.lead_assessment.solution_areas}
+
+
+def test_plain_lighting_word_does_not_trigger_automation_lead(default_lead_enricher: RussianTextEnricher) -> None:
+    result = default_lead_enricher.enrich("Бра в коридоре.")
+
+    signal_types = {signal.type for signal in result.domain_signals}
+    fact_types = {fact.type for fact in result.facts}
+
+    assert "lighting_control" not in signal_types
+    assert "lighting_automation" not in signal_types
+    assert "smart_home_automation" not in signal_types
+    assert "automation_component" not in fact_types
+    assert result.lead_assessment is not None
+    assert result.lead_assessment.is_lead is False
 
 
 def test_alias_matching_normalizes_spellings_and_uses_limited_fuzzy(tmp_path: Path) -> None:
@@ -781,9 +788,10 @@ def test_default_config_treats_single_camera_as_domain_evidence_not_lead(
 
 
 def test_default_signal_rules_do_not_depend_directly_on_alias_catalogs() -> None:
-    config = _lead_detection_config_without_heavy_natasha()
+    documents = read_nlp_config_documents(Path("config/nlp"))
+    raw_signals = documents["signals"].get("signals", [])
 
-    assert all(rule.match.aliases == () for rule in config.signals)
+    assert all(not raw_signal.get("match", {}).get("aliases") for raw_signal in raw_signals)
 
 
 def test_default_config_marks_water_leak_sensor_design_lead_from_artifact(

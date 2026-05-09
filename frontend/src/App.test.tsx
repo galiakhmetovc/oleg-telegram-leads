@@ -701,8 +701,7 @@ test("loads settings center on demand", async () => {
               }
             ],
             match: {
-              aliases: [{ catalog: "vendors", keys: ["aqara"], kinds: ["vendor"] }],
-              facts: [{ types: ["vendor"] }]
+              facts: [{ types: ["alias:vendors:aqara", "vendor"] }]
             }
           }
         ],
@@ -759,17 +758,13 @@ test("loads settings center on demand", async () => {
   expect(screen.getByText("Лемматические фразы")).toBeInTheDocument();
   expect(screen.getByText("Нужна консультация")).toBeInTheDocument();
   expect(screen.getByText("нужный консультация")).toBeInTheDocument();
-  expect(screen.getByText("Зависимости от словарей")).toBeInTheDocument();
-  expect(screen.getByLabelText("Добавить зависимость от словаря")).toBeInTheDocument();
-  expect(screen.getByLabelText("Удалить зависимость от словаря: vendors")).toBeInTheDocument();
-  expect(screen.getByLabelText("Каталог зависимости")).toHaveValue("vendors");
-  expect(screen.getByText("aqara — Aqara")).toBeInTheDocument();
-  expect(screen.getAllByText("vendor").length).toBeGreaterThan(0);
   expect(screen.getByText("Зависимости от фактов")).toBeInTheDocument();
   expect(screen.getByLabelText("Добавить зависимость от факта")).toBeInTheDocument();
   expect(screen.getByLabelText("Удалить зависимость от факта")).toBeInTheDocument();
-  fireEvent.click(screen.getByLabelText("Добавить зависимость от словаря"));
-  expect(screen.getAllByLabelText(/Удалить зависимость от словаря/)).toHaveLength(2);
+  expect(screen.getByText("Вендоры: Aqara (aqara)")).toBeInTheDocument();
+  expect(screen.getByText("vendor (vendor)")).toBeInTheDocument();
+  fireEvent.click(screen.getByLabelText("Добавить зависимость от факта"));
+  expect(screen.getAllByLabelText("Удалить зависимость от факта")).toHaveLength(2);
   expect(screen.queryByText(/normalized:/)).not.toBeInTheDocument();
   fireEvent.click(screen.getByText("Оценка лида"));
   expect(screen.getByText("Пороги оценки")).toBeInTheDocument();
@@ -2189,12 +2184,12 @@ test("renders expanded settings help page for all editable NLP settings", () => 
   expect(screen.getByText(/confidence - доверие к правилу/i)).toBeInTheDocument();
   expect(screen.getByText(/group - папка/i)).toBeInTheDocument();
   expect(screen.getByText(/Связь сигналов и словарей/i)).toBeInTheDocument();
-  expect(screen.getByText(/каталог `vendors` и alias `neptun`/i)).toBeInTheDocument();
+  expect(screen.getAllByText(/alias:vendors:neptun/i).length).toBeGreaterThan(0);
   expect(screen.getByText(/casefold/i)).toBeInTheDocument();
   expect(screen.getByText(/fuzzy_min_length/i)).toBeInTheDocument();
   expect(screen.getAllByText(/короткие alias/i).length).toBeGreaterThan(0);
-  expect(screen.getAllByText(/match.aliases/i).length).toBeGreaterThan(0);
-  expect(screen.getByText(/source=alias_catalog/i)).toBeInTheDocument();
+  expect(screen.queryByText(/match.aliases/i)).not.toBeInTheDocument();
+  expect(screen.getAllByText(/source=fact_dependency/i).length).toBeGreaterThan(0);
   expect(screen.getAllByText(/weights.signals/i).length).toBeGreaterThan(0);
   expect(screen.getAllByText(/weights.facts/i).length).toBeGreaterThan(0);
   expect(screen.getAllByText(/review_lanes/i).length).toBeGreaterThan(0);
@@ -2276,7 +2271,7 @@ function sampleSettingsSnapshot() {
           confidence: 0.9,
           phrases: [],
           patterns: [],
-          match: { aliases: [{ catalog: "devices", keys: ["smart_home_hub"], kinds: [] }], facts: [] }
+          match: { facts: [{ types: ["alias:devices:smart_home_hub"] }] }
         }
       ],
       facts: [
@@ -2288,7 +2283,7 @@ function sampleSettingsSnapshot() {
           confidence: 0.8,
           phrases: [],
           patterns: [],
-          match: { aliases: [], facts: [] }
+          match: { facts: [] }
         }
       ],
       vendors: [

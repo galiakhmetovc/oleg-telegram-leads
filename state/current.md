@@ -175,9 +175,9 @@
   and Help explains how signal dependencies work.
 - Brand/model spellings such as `Нептун`, `Нептуп`, `Neptun ProW`, and
   `Profi Wi-Fi` live only in alias catalogs. Domain signals keep semantic
-  phrases and explicitly reference dictionaries through `match.aliases`; alias
-  catalogs emit structured facts through `fact_types` and no longer carry
-  `signal_types`.
+  phrases and reference dictionaries only through facts such as
+  `alias:vendors:neptun` in `match.facts`; alias catalogs emit structured facts
+  through `fact_types` and no longer carry `signal_types`.
 - Settings rule editing now presents operator-facing matching modes: exact
   phrases and lemmatized phrases. Exact/semantic rules are edited with explicit
   add/edit/delete actions. New lemmatized phrases are built by the backend from
@@ -203,9 +203,10 @@
   shorter nested spans, so full model/platform aliases such as `Нептуп ProW` or
   `Profi Wi-Fi` do not produce extra nested facts for `Нептуп` or `Wi-Fi`.
 - Domain signal dependencies in Settings Center are no longer edited through
-  mini-language text such as `vendors:neptun`. Operators add/remove dependency
-  rows with buttons, select the alias catalog, choose concrete alias entries,
-  and choose dependent fact types from existing facts and alias `fact_types`.
+  mini-language text such as `vendors:neptun` and no longer use direct alias
+  dependencies. Operators add/remove fact-dependency rows with buttons and
+  choose from Yargy fact types, alias `fact_types`, and concrete alias identity
+  facts like `alias:vendors:neptun`.
 - Default NLP config includes a broad curated first pass for РФ/СНГ smart-home
   market terms: Яндекс/Сбер/Aqara/Xiaomi/Tuya/Sonoff/Rubetek/Livicom/Wiren Board,
   leak protection brands, CCTV/access vendors, Matter/Zigbee/Z-Wave/KNX/Wi-Fi/
@@ -298,10 +299,11 @@
   word such as `камера` remains domain evidence, not a lead or smart-home area.
   Migration `0020_camera_signal_scoring` patches active PostgreSQL config.
 - Alias matches also emit identity facts named `alias:<catalog>:<key>`.
-  Default domain signals now use `match.facts`, not `match.aliases`, so the
-  rule chain is explicit: dictionary alias -> fact -> domain signal -> lead
-  scoring. Migration `0021_signal_fact_dependencies` converts active signal
-  alias dependencies to fact dependencies.
+  Default domain signals now use `match.facts`, not direct alias dependencies,
+  so the rule chain is explicit: dictionary alias -> fact -> domain signal ->
+  lead scoring. Migration `0021_signal_fact_dependencies` converts active
+  signal alias dependencies to fact dependencies, and new API/config input with
+  `match.aliases` is rejected.
 - Review lane matching is centralized in `app.application.review_lanes`. The
   deterministic scorer and analytics import/list code use the same priority,
   exclusion, score/temperature, and match-group logic, including matched group
@@ -316,8 +318,8 @@
   revision 22 adds rule-group folders to the active PostgreSQL config; revision
   23 removes direct Neptun/ProW/Profi brand/model rules so those spellings are
   emitted only through alias catalogs; revision 24 migrates alias
-  `signal_types` into explicit `signals[].match.aliases` dependencies and
-  removes signal outputs from alias dictionaries; revision 26 stores the
+  `signal_types` into explicit signal dependencies and removes signal outputs
+  from alias dictionaries; revision 26 stores the
   configurable `pipeline.alias_matching` section, removes duplicated literal
   alias spellings across catalogs, lowers generic off-domain demand weights, and
   keeps PUR lead examples passing while avoiding ordinary non-PUR provider-search

@@ -913,6 +913,10 @@ signals:
   - tokens:
     - normalized: умный
     - normalized: свет
+  - source_text: подключить свет
+    tokens:
+    - normalized: подключить
+    - normalized: свет
   - tokens:
     - normalized: сценарий
     - normalized: освещение
@@ -925,10 +929,6 @@ signals:
   - tokens:
     - normalized: при
     - normalized: движение
-  - tokens:
-    - normalized: бра
-  - tokens:
-    - normalized: трек
   match:
     facts:
     - types:

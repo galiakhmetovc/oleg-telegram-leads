@@ -59,7 +59,6 @@ import {
 } from "./navigation";
 import type {
   AliasMatchingSettings,
-  AliasMatchSetting,
   AliasSetting,
   FactMatchSetting,
   LeadCategorySetting,
@@ -281,7 +280,7 @@ export function SettingsCenter({
       confidence: 0.5,
       phrases: [["пример"]],
       patterns: [],
-      match: { aliases: [], facts: [] }
+      match: { facts: [] }
     };
     updateDraft({ ...draft, [collection]: [...draft[collection], rule] });
   }
@@ -1653,22 +1652,6 @@ function RuleSettingsDetails({
                 </TableRow>
               </TableHead>
               <TableBody>
-                {(rule.match?.aliases ?? []).map((dependency, index) => {
-                  const catalog = aliasCatalogFromDependency(dependency);
-                  return (
-                    <TableRow key={`alias-${index}`}>
-                      <TableCell>Словарь: {catalog}</TableCell>
-                      <TableCell>
-                        <InlineSettingsLinks
-                          links={(dependency.keys ?? []).map((key) => ({
-                            label: aliasLabel(settings, catalog, key),
-                            target: { kind: "alias", catalog, key }
-                          }))}
-                        />
-                      </TableCell>
-                    </TableRow>
-                  );
-                })}
                 {(rule.match?.facts ?? []).map((dependency, index) => (
                   <TableRow key={`fact-${index}`}>
                     <TableCell>Факты</TableCell>
@@ -3158,13 +3141,6 @@ function SignalMatchEditor({
   settings: NlpSettings;
   onUpdate: (match: RuleMatchSetting) => void;
 }) {
-  function updateAliasDependency(index: number, dependency: AliasMatchSetting) {
-    onUpdate({
-      ...match,
-      aliases: match.aliases.map((item, itemIndex) => (itemIndex === index ? dependency : item))
-    });
-  }
-
   function updateFactDependency(index: number, dependency: FactMatchSetting) {
     onUpdate({
       ...match,
@@ -3175,134 +3151,16 @@ function SignalMatchEditor({
   const allFactTypes = factTypeOptions(settings, match.facts.flatMap((dependency) => dependency.types));
 
   return (
-    <Stack spacing={2}>
-      <Stack spacing={1}>
-        <RuleListHeader
-          title="Зависимости от словарей"
-          description="Сигнал срабатывает от выбранных alias-записей: брендов, протоколов, устройств или ПО. Названия вроде Neptun держим здесь, в словарях."
-          addLabel="Добавить зависимость от словаря"
-          onAdd={() =>
-            onUpdate({
-              ...match,
-              aliases: [...match.aliases, { catalog: defaultAliasCatalog, keys: [], kinds: [] }]
-            })
-          }
-        />
-        {match.aliases.length === 0 ? (
-          <Typography variant="body2" color="text.secondary">
-            Зависимостей от словарей нет.
-          </Typography>
-        ) : (
-          <Stack spacing={1}>
-            {match.aliases.map((dependency, index) => {
-              const catalog = aliasCatalogFromDependency(dependency);
-              const keys = dependency.keys ?? [];
-              const aliasOptions = aliasOptionsForCatalog(settings, catalog, keys);
-              const selectedAliases = selectedAliasOptions(settings, catalog, keys);
-              const kindOptions = uniqueStrings([...aliasKindOptions, ...(dependency.kinds ?? [])]);
-
-              return (
-                <Box className="rule-list-row" key={`alias-${catalog}-${index}`} sx={{ alignItems: "flex-start" }}>
-                  <Box
-                    sx={{
-                      alignItems: "start",
-                      display: "grid",
-                      flex: 1,
-                      gap: 1,
-                      gridTemplateColumns: { xs: "1fr", md: "180px minmax(220px, 1fr) minmax(180px, 0.6fr)" },
-                      minWidth: 0
-                    }}
-                  >
-                    <TextField
-                      label="Каталог зависимости"
-                      select
-                      value={catalog}
-                      onChange={(event) =>
-                        updateAliasDependency(index, {
-                          catalog: aliasCatalogFromText(event.target.value),
-                          catalogs: [],
-                          keys: [],
-                          kinds: []
-                        })
-                      }
-                      slotProps={{ select: { native: true } }}
-                      size="small"
-                      fullWidth
-                    >
-                      {aliasCatalogDefinitions.map((definition) => (
-                        <option key={definition.name} value={definition.name}>
-                          {definition.label}
-                        </option>
-                      ))}
-                    </TextField>
-                    <Autocomplete
-                      multiple
-                      size="small"
-                      options={aliasOptions}
-                      value={selectedAliases}
-                      isOptionEqualToValue={(option, value) => option.key === value.key}
-                      getOptionLabel={(option) => option.label}
-                      onChange={(_event, values) =>
-                        updateAliasDependency(index, {
-                          ...dependency,
-                          catalog,
-                          catalogs: [],
-                          keys: values.map((value) => value.key)
-                        })
-                      }
-                      renderInput={(params) => (
-                        <TextField
-                          {...params}
-                          label="Alias"
-                          helperText="Выбери конкретные записи словаря, которые должны включать этот сигнал."
-                        />
-                      )}
-                    />
-                    <Autocomplete
-                      multiple
-                      size="small"
-                      options={kindOptions}
-                      value={dependency.kinds ?? []}
-                      getOptionLabel={(option) => `type: ${option}`}
-                      onChange={(_event, values) =>
-                        updateAliasDependency(index, {
-                          ...dependency,
-                          catalog,
-                          catalogs: [],
-                          kinds: values
-                        })
-                      }
-                      renderInput={(params) => (
-                        <TextField
-                          {...params}
-                          label="Типы alias"
-                          helperText="Оставь пустым, если достаточно выбранного каталога и alias."
-                        />
-                      )}
-                    />
-                  </Box>
-                  <Tooltip title="Удалить">
-                    <IconButton
-                      aria-label={`Удалить зависимость от словаря: ${catalog}`}
-                      color="error"
-                      onClick={() =>
-                        onUpdate({ ...match, aliases: match.aliases.filter((_, itemIndex) => itemIndex !== index) })
-                      }
-                    >
-                      <DeleteIcon />
-                    </IconButton>
-                  </Tooltip>
-                </Box>
-              );
-            })}
-          </Stack>
-        )}
-      </Stack>
-
+    <Stack spacing={1}>
+      <Alert severity="info">
+        Сигнал зависит только от фактов. Словари сначала выпускают факты вида
+        `alias:devices:camera`, `alias:vendors:neptun` или обобщенные `vendor`,
+        `protocol`, `video_device`; затем сигнал ссылается на эти факты.
+      </Alert>
       <Stack spacing={1}>
         <RuleListHeader
           title="Зависимости от фактов"
-          description="Сигнал может опираться на факты, которые уже нашел Yargy или alias-словари. Здесь выбираются технические fact_type."
+          description="Выбирай факты Yargy, обобщенные fact_type и конкретные словарные сущности alias:catalog:key."
           addLabel="Добавить зависимость от факта"
           onAdd={() => onUpdate({ ...match, facts: [...match.facts, { types: [] }] })}
         />
@@ -3318,13 +3176,16 @@ function SignalMatchEditor({
                   multiple
                   size="small"
                   options={allFactTypes}
-                  value={dependency.types}
-                  onChange={(_event, values) => updateFactDependency(index, { types: values })}
+                  value={selectedFactTypeOptions(allFactTypes, dependency.types)}
+                  isOptionEqualToValue={(option, value) => option.key === value.key}
+                  getOptionLabel={(option) => option.label}
+                  groupBy={(option) => option.group}
+                  onChange={(_event, values) => updateFactDependency(index, { types: values.map((value) => value.key) })}
                   sx={{ flex: 1, minWidth: 0 }}
                   renderInput={(params) => (
                     <TextField
                       {...params}
-                      label="Типы фактов"
+                      label="Факты"
                       helperText="Выбери один или несколько fact_type, которые должны включать этот сигнал."
                     />
                   )}
@@ -3490,64 +3351,50 @@ function normalizedAliasMatchingSettings(settings?: AliasMatchingSettings): Alia
   };
 }
 
-type AliasOption = {
+type FactTypeOption = {
   key: string;
   label: string;
+  group: string;
 };
 
-const defaultAliasCatalog: AliasCatalogName = "vendors";
-const aliasKindOptions = ["vendor", "protocol", "device", "software", "model"];
+function factTypeOptions(settings: NlpSettings, selectedTypes: string[] = []): FactTypeOption[] {
+  const options = new Map<string, FactTypeOption>();
+  const addOption = (option: FactTypeOption) => {
+    if (!options.has(option.key)) {
+      options.set(option.key, option);
+    }
+  };
 
-function aliasCatalogFromText(value: string): AliasCatalogName {
-  return isAliasCatalogName(value) ? value : defaultAliasCatalog;
-}
-
-function aliasCatalogFromDependency(dependency: AliasMatchSetting): AliasCatalogName {
-  const candidates = [dependency.catalog, ...(dependency.catalogs ?? [])];
-  const catalog = candidates.find(isAliasCatalogName);
-  return catalog ?? defaultAliasCatalog;
-}
-
-function aliasOptionsForCatalog(
-  settings: NlpSettings,
-  catalog: AliasCatalogName,
-  selectedKeys: string[] = []
-): AliasOption[] {
-  const options = settings[catalog].map((alias) => ({
-    key: alias.key,
-    label: `${alias.key} — ${alias.canonical}`
-  }));
-  const knownKeys = new Set(options.map((option) => option.key));
-  selectedKeys
-    .filter((key) => !knownKeys.has(key))
-    .forEach((key) => {
-      knownKeys.add(key);
-      options.push({ key, label: key });
+  settings.facts.forEach((fact) => {
+    addOption({ key: fact.type, label: `${fact.label} (${fact.type})`, group: "Факты Yargy" });
+  });
+  aliasCatalogDefinitions.forEach((definition) => {
+    settings[definition.name].forEach((alias) => {
+      addOption({
+        key: aliasIdentityFactType(definition.name, alias.key),
+        label: `${definition.label}: ${alias.canonical} (${alias.key})`,
+        group: "Словарные сущности"
+      });
+      alias.fact_types.forEach((factType) => {
+        addOption({ key: factType, label: `${settingsTypeLabel(settings, factType)} (${factType})`, group: "Факты словарей" });
+      });
     });
-  return options;
+  });
+  Object.keys(settings.lead_scoring.fact_weights).forEach((factType) => {
+    addOption({ key: factType, label: `${settingsTypeLabel(settings, factType)} (${factType})`, group: "Веса score" });
+  });
+  selectedTypes.forEach((factType) => {
+    addOption({ key: factType, label: `${settingsTypeLabel(settings, factType)} (${factType})`, group: "Выбрано" });
+  });
+
+  return [...options.values()].sort((left, right) =>
+    `${left.group} ${left.label}`.localeCompare(`${right.group} ${right.label}`)
+  );
 }
 
-function selectedAliasOptions(
-  settings: NlpSettings,
-  catalog: AliasCatalogName,
-  selectedKeys: string[] = []
-): AliasOption[] {
-  const optionsByKey = new Map(
-    aliasOptionsForCatalog(settings, catalog, selectedKeys).map((option) => [option.key, option])
-  );
-  return uniqueStrings(selectedKeys).map((key) => optionsByKey.get(key) ?? { key, label: key });
-}
-
-function factTypeOptions(settings: NlpSettings, selectedTypes: string[] = []): string[] {
-  const aliasFactTypes = aliasCatalogDefinitions.flatMap((definition) =>
-    settings[definition.name].flatMap((alias) => alias.fact_types ?? [])
-  );
-  return uniqueStrings([
-    ...settings.facts.map((fact) => fact.type),
-    ...aliasFactTypes,
-    ...Object.keys(settings.lead_scoring.fact_weights),
-    ...selectedTypes
-  ]).sort((left, right) => left.localeCompare(right));
+function selectedFactTypeOptions(options: FactTypeOption[], selectedTypes: string[]): FactTypeOption[] {
+  const optionsByKey = new Map(options.map((option) => [option.key, option]));
+  return uniqueStrings(selectedTypes).map((key) => optionsByKey.get(key) ?? { key, label: key, group: "Выбрано" });
 }
 
 function uniqueStrings(items: string[]): string[] {
@@ -3600,6 +3447,10 @@ function settingsTargetTitle(target: SettingsTarget, settings: NlpSettings): str
 }
 
 function settingsTargetForType(settings: NlpSettings, type: string): SettingsTarget | null {
+  const aliasIdentity = parseAliasIdentityFactType(type);
+  if (aliasIdentity) {
+    return { kind: "alias", catalog: aliasIdentity.catalog, key: aliasIdentity.key };
+  }
   if (settings.signals.some((signal) => signal.type === type)) {
     return { kind: "signal", key: type };
   }
@@ -3622,6 +3473,10 @@ function settingsTargetForType(settings: NlpSettings, type: string): SettingsTar
 }
 
 function settingsTypeLabel(settings: NlpSettings, type: string): string {
+  const aliasIdentity = parseAliasIdentityFactType(type);
+  if (aliasIdentity) {
+    return aliasLabel(settings, aliasIdentity.catalog, aliasIdentity.key);
+  }
   return (
     settings.signals.find((signal) => signal.type === type)?.label ??
     settings.facts.find((fact) => fact.type === type)?.label ??
@@ -3634,6 +3489,19 @@ function settingsTypeLabel(settings: NlpSettings, type: string): string {
 function aliasLabel(settings: NlpSettings, catalog: AliasCatalogName, key: string): string {
   const alias = settings[catalog].find((item) => item.key === key);
   return alias ? `${alias.key} — ${alias.canonical}` : key;
+}
+
+function aliasIdentityFactType(catalog: AliasCatalogName, key: string): string {
+  return `alias:${catalog}:${key}`;
+}
+
+function parseAliasIdentityFactType(type: string): { catalog: AliasCatalogName; key: string } | null {
+  const [prefix, catalog, ...keyParts] = type.split(":");
+  const key = keyParts.join(":").trim();
+  if (prefix !== "alias" || !isAliasCatalogName(catalog) || !key) {
+    return null;
+  }
+  return { catalog, key };
 }
 
 function aliasTypeForCatalog(catalog: AliasCatalogName): AliasSetting["type"] {
@@ -3717,7 +3585,6 @@ function textToStringList(value: string): string[] {
 
 function normalizeRuleMatch(match?: RuleMatchSetting): RuleMatchSetting {
   return {
-    aliases: match?.aliases ?? [],
     facts: match?.facts ?? []
   };
 }

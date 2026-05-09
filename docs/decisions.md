@@ -187,9 +187,10 @@ Keep domain signals as semantic categories and move market spellings into
 separate PostgreSQL-backed alias catalogs: `vendors`, `protocols`, `devices`,
 and `software`. Each alias row stores canonical name, alias type, written
 variants, and fact types emitted by alias matches. Domain signals reference
-alias entries explicitly through `match.aliases`. Bootstrap YAML files seed a
-curated first pass for common РФ/СНГ smart-home platforms, protocols, devices,
-software, and security/leak/power/climate brands.
+alias entries through identity facts such as `alias:vendors:neptun` in
+`match.facts`. Bootstrap YAML files seed a curated first pass for common РФ/СНГ
+smart-home platforms, protocols, devices, software, and security/leak/power/
+climate brands.
 
 Rationale:
 
@@ -224,28 +225,28 @@ Do not duplicate concrete brands, model names, product names, or typo variants
 inside domain signal/fact phrase rules. Domain signals and facts describe
 semantic categories. Alias catalogs own market spellings and emit only
 structured `fact_types`. Domain signals own the dependency graph through
-`match.aliases` and `match.facts`.
+`match.facts`.
 
 Rationale:
 
 - `Нептун`, `Нептуп`, `Neptun ProW`, and `Profi Wi-Fi` are vendor/model aliases,
   not semantic signal phrases.
 - The durable relationship for signal detection is now stored on the signal:
-  `water_leak_protection.match.aliases` selects the `vendors` catalog and
-  `neptun` alias key. This makes the inference layer explicit and avoids hidden
-  reverse links inside dictionaries.
+  `water_leak_protection.match.facts` selects facts such as
+  `alias:vendors:neptun`. This makes the inference layer explicit and avoids
+  hidden reverse links inside dictionaries.
 - Alias rows still emit facts such as `vendor`, `model`, `protocol`, `software`,
   or `automation_component`; signals can depend on those facts through
   `match.facts` when useful.
-- This keeps scoring explainable while avoiding double extraction paths such as
-  `source=yargy` and `source=alias_catalog` for the same brand span.
+- This keeps scoring explainable while avoiding direct `dictionary -> signal`
+  extraction paths for the same brand span.
 
 ## 2026-05-08: Domain Signals Own Dictionary Dependencies
 
 Domain signals are the inference layer over dictionaries and facts. A signal
-may be triggered by exact/lemmatized semantic phrases, `match.aliases`
-dependencies on alias catalog entries, or `match.facts` dependencies on already
-extracted facts. Alias catalogs no longer contain `signal_types`.
+may be triggered by exact/lemmatized semantic phrases or `match.facts`
+dependencies on already extracted facts. Alias catalogs no longer contain
+`signal_types`.
 
 Rationale:
 
@@ -809,6 +810,10 @@ signals in the default config use `match.facts` and no longer use
 `match.aliases`. For example, `devices.camera` emits `alias:devices:camera` and
 `video_device`; `video_surveillance` depends on those facts and is emitted with
 `source=fact_dependency`.
+
+The API and config loader reject new direct `match.aliases` dependencies.
+Existing active revisions are migrated by `0021_signal_fact_dependencies`; any
+manual config must use `match.facts` only.
 
 Rationale:
 

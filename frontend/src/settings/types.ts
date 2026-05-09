@@ -13,19 +13,11 @@ export type RulePatternSetting = {
   tokens: PatternTokenSetting[];
 };
 
-export type AliasMatchSetting = {
-  catalog?: string | null;
-  catalogs?: string[];
-  keys?: string[];
-  kinds?: string[];
-};
-
 export type FactMatchSetting = {
   types: string[];
 };
 
 export type RuleMatchSetting = {
-  aliases: AliasMatchSetting[];
   facts: FactMatchSetting[];
 };
 

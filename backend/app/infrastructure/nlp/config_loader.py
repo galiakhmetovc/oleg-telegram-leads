@@ -40,17 +40,6 @@ class RulePatternConfig:
 
 
 @dataclass(frozen=True)
-class AliasMatchConfig:
-    catalogs: tuple[str, ...] = ()
-    keys: tuple[str, ...] = ()
-    kinds: tuple[str, ...] = ()
-
-    @property
-    def is_empty(self) -> bool:
-        return not self.catalogs and not self.keys and not self.kinds
-
-
-@dataclass(frozen=True)
 class FactMatchConfig:
     types: tuple[str, ...] = ()
 
@@ -61,12 +50,11 @@ class FactMatchConfig:
 
 @dataclass(frozen=True)
 class RuleMatchConfig:
-    aliases: tuple[AliasMatchConfig, ...] = ()
     facts: tuple[FactMatchConfig, ...] = ()
 
     @property
     def is_empty(self) -> bool:
-        return not self.aliases and not self.facts
+        return not self.facts
 
 
 @dataclass(frozen=True)
@@ -305,35 +293,10 @@ def _parse_rule_match(raw_match: Any, collection_name: str) -> RuleMatchConfig:
     if not isinstance(raw_match, dict):
         raise ValueError(f"{collection_name} match must be a mapping")
 
-    aliases = _parse_alias_match_dependencies(raw_match.get("aliases", []), collection_name)
+    if "aliases" in raw_match:
+        raise ValueError(f"{collection_name} match.aliases is not supported; use match.facts with alias:<catalog>:<key>")
     facts = _parse_fact_match_dependencies(raw_match.get("facts", []), collection_name)
-    return RuleMatchConfig(aliases=aliases, facts=facts)
-
-
-def _parse_alias_match_dependencies(raw_dependencies: Any, collection_name: str) -> tuple[AliasMatchConfig, ...]:
-    if not raw_dependencies:
-        return ()
-    if not isinstance(raw_dependencies, list):
-        raise ValueError(f"{collection_name} match.aliases must be a list")
-
-    dependencies: list[AliasMatchConfig] = []
-    for raw_dependency in raw_dependencies:
-        if not isinstance(raw_dependency, dict):
-            raise ValueError(f"{collection_name} match.aliases item must be a mapping")
-        catalogs = _parse_string_list(raw_dependency.get("catalogs", []), "match.aliases.catalogs")
-        catalog = raw_dependency.get("catalog")
-        if catalog is not None:
-            catalogs.insert(0, str(catalog))
-        dependency = AliasMatchConfig(
-            catalogs=tuple(dict.fromkeys(catalogs)),
-            keys=tuple(_parse_string_list(raw_dependency.get("keys", []), "match.aliases.keys")),
-            kinds=tuple(_parse_string_list(raw_dependency.get("kinds", []), "match.aliases.kinds")),
-        )
-        if dependency.is_empty:
-            raise ValueError(f"{collection_name} match.aliases item must define catalog, keys, or kinds")
-        dependencies.append(dependency)
-
-    return tuple(dependencies)
+    return RuleMatchConfig(facts=facts)
 
 
 def _parse_fact_match_dependencies(raw_dependencies: Any, collection_name: str) -> tuple[FactMatchConfig, ...]:

@@ -181,6 +181,15 @@ devices:
       - умные лампы
       - умная лампочка
       - умные лампочки
+      - сценарии освещения
+      - сценарий освещения
+    fact_types:
+      - automation_component
+      - controlled_device
+  - key: lighting_fixture
+    canonical: Осветительный прибор
+    type: device
+    aliases:
       - светодиодная лента
       - LED лента
       - RGB лента
@@ -190,10 +199,7 @@ devices:
       - ночной свет
       - дежурный свет
       - закарнизная подсветка
-      - сценарии освещения
-      - сценарий освещения
     fact_types:
-      - automation_component
       - controlled_device
   - key: thermostat
     canonical: Термостат / терморегулятор
