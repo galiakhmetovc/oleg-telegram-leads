@@ -842,6 +842,29 @@ Rationale:
 - Every node that can map to a setting reuses the existing modal/deeplink
   behavior, so visual inspection and configuration audit stay connected.
 
+## 2026-05-09: Operator Reviews Drive The First Eval Loop
+
+Use saved `message_reviews` as the first ground-truth source for deterministic
+lead-quality evaluation. The backend CLI `app.cli.eval_reviews` compares
+operator verdicts with persisted `lead_assessment.is_lead` and reports
+TP/FP/TN/FN, precision, recall, specificity, accuracy, F1, verdict counts, and
+false-positive/false-negative examples.
+
+Verdict mapping:
+
+- `lead` is positive ground truth.
+- `not_lead` and `noise` are negative ground truth.
+- `uncertain` is excluded from the confusion matrix.
+
+Rationale:
+
+- Rule and weight tuning needs measured feedback, not only individual examples.
+- Review labels already live in PostgreSQL and are separate from deterministic
+  enrichment output, so they can evaluate the classifier without rewriting
+  historical evidence.
+- A small CLI is enough while the labeled set is small; the UI can surface the
+  same metrics later after the workflow stabilizes.
+
 ## 2026-05-09: App Shell Should Not Own Feature UI
 
 `frontend/src/App.tsx` remains the top-level shell for auth, theme, hash routing,

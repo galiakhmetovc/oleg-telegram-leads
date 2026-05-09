@@ -258,6 +258,21 @@ source channel, received date, review state, verdict, and text. Review lanes are
 configured in `lead_scoring.review_lanes` and stored in PostgreSQL NLP config
 revisions; YAML is only the bootstrap default.
 
+## Review Eval
+
+Saved operator reviews can be evaluated against deterministic enrichment output:
+
+```bash
+cd backend
+PUR_DATABASE_URL='postgresql+psycopg://pur_leads:pur_leads_dev_password@127.0.0.1:55433/pur_leads_v2' \
+uv run python -m app.cli.eval_reviews --format markdown
+```
+
+The report reads `message_reviews` joined to Telegram source messages and
+enrichment results. `lead` is treated as positive ground truth,
+`not_lead`/`noise` as negative ground truth, and `uncertain` is skipped from the
+confusion matrix. JSON output is available with `--format json`.
+
 Checks:
 
 ```bash

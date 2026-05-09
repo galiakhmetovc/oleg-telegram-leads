@@ -281,6 +281,13 @@ and time filters in SQL with limit/offset pagination. API page size defaults to
 `PUR_RUNTIME_LOG_DEFAULT_LIMIT=50` and is capped by
 `PUR_RUNTIME_LOG_MAX_LIMIT=200`.
 
+Operator review labels are the first ground-truth source for deterministic
+classifier evaluation. The CLI `app.cli.eval_reviews` reads `message_reviews`
+joined to Telegram source messages and enrichment results, then computes a
+confusion matrix against `lead_assessment.is_lead`. Verdict `lead` is positive
+ground truth, `not_lead` and `noise` are negative ground truth, and `uncertain`
+is excluded from precision/recall until the operator resolves it.
+
 Disk growth is controlled at the log-like table boundary:
 
 - `enrichment_events` keeps the newest

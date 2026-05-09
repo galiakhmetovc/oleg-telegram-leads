@@ -87,6 +87,13 @@
   `Сомнительно` keeps the automatic verdict. Saving `Шум` or `Не лид` cancels
   unsent pending/sending Telegram notification outbox rows for that source
   message.
+- Operator reviews can now be evaluated from the backend CLI with
+  `uv run python -m app.cli.eval_reviews --format markdown|json`. The report
+  reads `message_reviews` plus persisted enrichment results and computes
+  TP/FP/TN/FN, precision, recall, specificity, accuracy, F1, verdict counts,
+  and false-positive/false-negative examples. Current dev DB has one reviewed
+  `noise` row, and the eval reports it as a false positive with automatic
+  `score=105`.
 - The UI now includes "Логи" and "Статус системы" tabs backed by durable
   runtime state and health counters. System Status distinguishes worker progress
   journal rows from Telegram messages visible in live Analytics.
@@ -349,8 +356,8 @@
 
 ## Next Steps
 
-1. Review live `research_warm`, `noise`, and `direct_pur_lead` candidates after
-   revision 27 to tune false positives with operator verdicts.
+1. Review live `research_warm`, `noise`, and `direct_pur_lead` candidates and
+   rerun `app.cli.eval_reviews` after each calibration pass.
 2. Promote confirmed production examples into a curated eval/golden dataset
    after deciding what text can be committed versus kept in ignored artifacts.
 3. Decide whether to close the remaining rare Telegram crash window by combining
