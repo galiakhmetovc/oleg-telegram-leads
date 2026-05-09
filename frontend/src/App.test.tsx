@@ -39,6 +39,9 @@ class FakeEventSource {
 
 beforeEach(() => {
   window.history.replaceState(null, "", "/");
+  window.localStorage.clear();
+  document.documentElement.removeAttribute("data-color-scheme");
+  document.documentElement.style.colorScheme = "";
   window.HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
   FakeEventSource.instances = [];
   vi.stubGlobal("EventSource", FakeEventSource);
@@ -59,6 +62,9 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   window.HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
+  window.localStorage.clear();
+  document.documentElement.removeAttribute("data-color-scheme");
+  document.documentElement.style.colorScheme = "";
   vi.unstubAllGlobals();
   window.history.replaceState(null, "", "/");
 });
@@ -80,6 +86,23 @@ test("uses scrollable top navigation for narrow screens", () => {
   const tabList = screen.getByRole("tablist", { name: "Основная навигация" });
 
   expect(tabList.closest(".MuiTabs-scroller")).toHaveClass("MuiTabs-scrollableX");
+});
+
+test("toggles dark theme and persists the operator preference", async () => {
+  const { unmount } = render(<App />);
+
+  fireEvent.click(await screen.findByRole("button", { name: "Включить темную тему" }));
+
+  expect(document.documentElement.dataset.colorScheme).toBe("dark");
+  expect(document.documentElement.style.colorScheme).toBe("dark");
+  expect(window.localStorage.getItem("pur-leads-theme-mode")).toBe("dark");
+  expect(screen.getByRole("button", { name: "Включить светлую тему" })).toBeInTheDocument();
+
+  unmount();
+  render(<App />);
+
+  expect(await screen.findByRole("button", { name: "Включить светлую тему" })).toBeInTheDocument();
+  expect(document.documentElement.dataset.colorScheme).toBe("dark");
 });
 
 test("requires login when backend reports anonymous session", async () => {

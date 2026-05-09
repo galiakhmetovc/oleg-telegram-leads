@@ -2,12 +2,14 @@ import AddIcon from "@mui/icons-material/Add";
 import ArticleIcon from "@mui/icons-material/Article";
 import AutoAwesomeIcon from "@mui/icons-material/AutoAwesome";
 import CheckCircleIcon from "@mui/icons-material/CheckCircle";
+import DarkModeIcon from "@mui/icons-material/DarkMode";
 import DeleteIcon from "@mui/icons-material/Delete";
 import EditIcon from "@mui/icons-material/Edit";
 import ErrorIcon from "@mui/icons-material/Error";
 import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
 import HelpOutlineIcon from "@mui/icons-material/HelpOutlineOutlined";
 import InsightsIcon from "@mui/icons-material/Insights";
+import LightModeIcon from "@mui/icons-material/LightMode";
 import LogoutIcon from "@mui/icons-material/Logout";
 import PlayArrowIcon from "@mui/icons-material/PlayArrow";
 import RefreshIcon from "@mui/icons-material/Refresh";
@@ -469,27 +471,51 @@ const defaultRouteMessageTemplate = [
 
 const apiBaseUrl = import.meta.env.VITE_API_BASE_URL ?? "";
 const openSettingsTargetEvent = "pur-open-settings-target";
+const themeStorageKey = "pur-leads-theme-mode";
 
-const theme = createTheme({
-  palette: {
-    mode: "light",
-    primary: {
-      main: "#0b57d0"
+type AppThemeMode = "light" | "dark";
+
+function createAppTheme(mode: AppThemeMode) {
+  return createTheme({
+    palette: {
+      mode,
+      primary: {
+        main: mode === "dark" ? "#8ab4f8" : "#0b57d0"
+      },
+      background: {
+        default: mode === "dark" ? "#0f172a" : "#f6f8fb",
+        paper: mode === "dark" ? "#111827" : "#ffffff"
+      }
     },
-    background: {
-      default: "#f6f8fb"
+    shape: {
+      borderRadius: 8
+    },
+    typography: {
+      fontFamily:
+        'Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif'
     }
-  },
-  shape: {
-    borderRadius: 8
-  },
-  typography: {
-    fontFamily:
-      'Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif'
+  });
+}
+
+function readStoredThemeMode(): AppThemeMode {
+  try {
+    return window.localStorage.getItem(themeStorageKey) === "dark" ? "dark" : "light";
+  } catch {
+    return "light";
   }
-});
+}
+
+function persistThemeMode(mode: AppThemeMode) {
+  try {
+    window.localStorage.setItem(themeStorageKey, mode);
+  } catch {
+    // The theme still applies for the current session when browser storage is unavailable.
+  }
+}
 
 export function App() {
+  const [themeMode, setThemeMode] = useState<AppThemeMode>(() => readStoredThemeMode());
+  const theme = useMemo(() => createAppTheme(themeMode), [themeMode]);
   const [authState, setAuthState] = useState<AuthState>({ status: "authenticated", username: null });
   const [activePage, setActivePage] = useState(() => (parseTestingMessageId(window.location.hash) ? 0 : 1));
   const [inputText, setInputText] = useState(
@@ -531,6 +557,13 @@ export function App() {
   const currentPage = settingsTarget ? 2 : activePage;
   const displayedPage = currentPage;
   const visibleSettingsSnapshot = settingsSnapshot ?? settingsSnapshotRef.current;
+  const themeToggleLabel = themeMode === "dark" ? "Включить светлую тему" : "Включить темную тему";
+
+  useEffect(() => {
+    document.documentElement.dataset.colorScheme = themeMode;
+    document.documentElement.style.colorScheme = themeMode;
+    persistThemeMode(themeMode);
+  }, [themeMode]);
 
   useEffect(() => {
     let active = true;
@@ -873,6 +906,16 @@ export function App() {
             >
               Выйти
             </Button>
+            <Tooltip title={themeToggleLabel}>
+              <IconButton
+                size="small"
+                color="inherit"
+                aria-label={themeToggleLabel}
+                onClick={() => setThemeMode((current) => (current === "dark" ? "light" : "dark"))}
+              >
+                {themeMode === "dark" ? <LightModeIcon fontSize="small" /> : <DarkModeIcon fontSize="small" />}
+              </IconButton>
+            </Tooltip>
           </Toolbar>
         </AppBar>
         {settingsLoading && (

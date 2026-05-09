@@ -578,6 +578,9 @@ then this dispatcher will use the completed result.
 The frontend package lives in `frontend/src`.
 
 - `App.tsx` is the first operator workspace shell.
+- The app shell owns the light/dark MUI theme mode. The preference is an
+  operator-local browser setting stored in `localStorage`, not a backend product
+  configuration revision.
 - `AnalyticsPage.tsx` owns live analytics, candidate tables, and the dedicated
   message review page.
 - `analytics/types.ts` contains shared analytics/review UI contracts used by

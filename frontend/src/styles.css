@@ -1,10 +1,41 @@
 :root {
-  color: #15171a;
-  background: #f6f8fb;
+  color: var(--app-text);
+  background: var(--app-bg);
+  --app-bg: #f6f8fb;
+  --app-surface: #ffffff;
+  --app-surface-muted: #fbfcfe;
+  --app-surface-accent: #f8fbff;
+  --app-border: #d9dee7;
+  --app-border-soft: #e6ebf3;
+  --app-border-muted: #edf1f7;
+  --app-control-border: #b8c0cc;
+  --app-primary: #0b57d0;
+  --app-primary-muted: #eef4ff;
+  --app-primary-border: #c8d7f3;
+  --app-primary-text: #174ea6;
+  --app-text: #15171a;
+  --app-bar-track: #e8edf5;
   font-family:
     Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
+}
+
+:root[data-color-scheme="dark"] {
+  --app-bg: #0f172a;
+  --app-surface: #111827;
+  --app-surface-muted: #172033;
+  --app-surface-accent: #12213a;
+  --app-border: #334155;
+  --app-border-soft: #263449;
+  --app-border-muted: #263449;
+  --app-control-border: #64748b;
+  --app-primary: #8ab4f8;
+  --app-primary-muted: #10233f;
+  --app-primary-border: #1d4f87;
+  --app-primary-text: #bfdbfe;
+  --app-text: #e5e7eb;
+  --app-bar-track: #263449;
 }
 
 * {
@@ -15,16 +46,17 @@ body {
   margin: 0;
   min-width: 320px;
   min-height: 100vh;
+  background: var(--app-bg);
 }
 
 .app-shell {
   min-height: 100vh;
-  background: #f6f8fb;
+  background: var(--app-bg);
 }
 
 .login-shell {
   align-items: center;
-  background: #f6f8fb;
+  background: var(--app-bg);
   display: flex;
   min-height: 100vh;
   justify-content: center;
@@ -32,7 +64,7 @@ body {
 }
 
 .login-panel {
-  background: #ffffff;
+  background: var(--app-surface);
   border-radius: 8px;
   max-width: 420px;
   padding: 24px;
@@ -40,7 +72,8 @@ body {
 }
 
 .top-bar {
-  border-bottom: 1px solid #d9dee7;
+  background: var(--app-surface) !important;
+  border-bottom: 1px solid var(--app-border);
 }
 
 .top-toolbar {
@@ -49,9 +82,9 @@ body {
 
 .background-settings-loading {
   align-items: center;
-  background: #eef4ff;
-  border-bottom: 1px solid #c8d7f3;
-  color: #174ea6;
+  background: var(--app-primary-muted);
+  border-bottom: 1px solid var(--app-primary-border);
+  color: var(--app-primary-text);
   display: flex;
   gap: 10px;
   min-height: 32px;
@@ -89,7 +122,7 @@ body {
 .result-card,
 .empty-result {
   border-radius: 8px;
-  background: #ffffff;
+  background: var(--app-surface);
   padding: 16px;
 }
 
@@ -102,9 +135,9 @@ body {
 }
 
 .annotated-text {
-  border: 1px solid #d9dee7;
+  border: 1px solid var(--app-border);
   border-radius: 8px;
-  background: #fbfcfe;
+  background: var(--app-surface-muted);
   padding: 16px;
   line-height: 1.8;
   white-space: pre-wrap;
@@ -112,7 +145,7 @@ body {
 
 .lead-assessment-panel {
   border-radius: 8px;
-  background: #fbfcfe;
+  background: var(--app-surface-muted);
   padding: 14px;
 }
 
@@ -138,7 +171,7 @@ body {
 .settings-toolbar,
 .settings-panel {
   border-radius: 8px;
-  background: #ffffff;
+  background: var(--app-surface);
   padding: 16px;
 }
 
@@ -158,7 +191,7 @@ body {
 }
 
 .settings-target-highlight {
-  border-color: #0b57d0 !important;
+  border-color: var(--app-primary) !important;
   box-shadow: 0 0 0 2px rgba(11, 87, 208, 0.22);
   scroll-margin-top: 88px;
 }
@@ -175,7 +208,7 @@ body {
 
 .help-section {
   border-radius: 8px;
-  background: #ffffff;
+  background: var(--app-surface);
   padding: 16px;
 }
 
@@ -185,7 +218,7 @@ body {
 .project-docs-header,
 .project-docs-sidebar,
 .project-docs-reader {
-  background: #ffffff;
+  background: var(--app-surface);
   border-radius: 8px;
   padding: 16px;
 }
@@ -236,7 +269,7 @@ body {
 
 .runtime-log-filters {
   align-items: center;
-  border-bottom: 1px solid #e6ebf3;
+  border-bottom: 1px solid var(--app-border-soft);
   margin-bottom: 12px;
   padding-bottom: 12px;
 }
@@ -248,7 +281,7 @@ body {
 }
 
 .system-status-detail-row {
-  border-top: 1px solid #edf1f7;
+  border-top: 1px solid var(--app-border-muted);
   display: grid;
   gap: 2px;
   padding-top: 8px;
@@ -283,7 +316,7 @@ body {
 .rule-color {
   width: 16px;
   height: 16px;
-  border: 1px solid #b8c0cc;
+  border: 1px solid var(--app-control-border);
   border-radius: 4px;
   flex: 0 0 auto;
 }
@@ -300,9 +333,9 @@ body {
   align-items: center;
   gap: 8px;
   min-height: 44px;
-  border: 1px solid #d9dee7;
+  border: 1px solid var(--app-border);
   border-radius: 8px;
-  background: #fbfcfe;
+  background: var(--app-surface-muted);
   padding: 6px 8px 6px 12px;
 }
 
@@ -329,7 +362,7 @@ body {
 .analytics-header,
 .analytics-section {
   border-radius: 8px;
-  background: #ffffff;
+  background: var(--app-surface);
   padding: 16px;
 }
 
@@ -346,9 +379,9 @@ body {
 
 .analytics-kpi {
   min-height: 88px;
-  border: 1px solid #d9dee7;
+  border: 1px solid var(--app-border);
   border-radius: 8px;
-  background: #ffffff;
+  background: var(--app-surface);
   padding: 14px;
 }
 
@@ -379,13 +412,13 @@ body {
   height: 8px;
   overflow: hidden;
   border-radius: 999px;
-  background: #e8edf5;
+  background: var(--app-bar-track);
 }
 
 .analytics-bar-fill {
   height: 100%;
   border-radius: inherit;
-  background: #0b57d0;
+  background: var(--app-primary);
 }
 
 .analytics-list-row {
@@ -418,7 +451,7 @@ body {
 }
 
 .candidate-row-expanded {
-  background: #f8fbff;
+  background: var(--app-surface-accent);
 }
 
 .candidate-row-focused {
@@ -427,12 +460,12 @@ body {
 }
 
 .candidate-detail-row > .MuiTableCell-root {
-  border-bottom-color: #d9dee7;
+  border-bottom-color: var(--app-border);
 }
 
 .candidate-detail {
-  border-top: 1px solid #e6ebf3;
-  background: #fbfcfe;
+  border-top: 1px solid var(--app-border-soft);
+  background: var(--app-surface-muted);
   padding: 16px;
 }
 
@@ -443,14 +476,14 @@ body {
 }
 
 .analytics-annotated-text {
-  background: #ffffff;
+  background: var(--app-surface);
 }
 
 .review-message-text {
   min-height: 160px;
-  border: 1px solid #d9dee7;
+  border: 1px solid var(--app-border);
   border-radius: 8px;
-  background: #fbfcfe;
+  background: var(--app-surface-muted);
   line-height: 1.65;
   overflow-wrap: anywhere;
   padding: 14px;
@@ -459,9 +492,9 @@ body {
 }
 
 .review-summary-reason {
-  border: 1px solid #e2e8f0;
+  border: 1px solid var(--app-border-soft);
   border-radius: 8px;
-  background: #ffffff;
+  background: var(--app-surface);
   padding: 8px 10px;
 }
 

@@ -56,6 +56,9 @@
 - Runtime operator pages for "Логи", "Статус системы", and "Проектная
   документация" now live in `frontend/src/runtime/RuntimePages.tsx` instead of
   the app shell.
+- The operator UI supports light and dark themes. The toggle lives in the top
+  toolbar, applies MUI theme mode plus app CSS variables, and stores the
+  operator-local preference in browser `localStorage`.
 - Analytics candidate lists now include saved review state, show a review chip
   (`Без ревью`, `Лид`, `Не лид`, `Сомнительно`, `Шум`), and can filter by
   `review_status` and `verdict`. Review links carry a return URL with the
