@@ -419,13 +419,20 @@ test("renders lead assessment from completed enrichment event", async () => {
     })
   );
 
-  expect(await screen.findByText("Горячий лид")).toBeInTheDocument();
-  expect(screen.getByText("95 баллов")).toBeInTheDocument();
+  expect((await screen.findAllByText("Горячий лид")).length).toBeGreaterThan(0);
+  expect(screen.getAllByText("95 баллов").length).toBeGreaterThan(0);
   expect(screen.getAllByText("Умный дом / автоматизация").length).toBeGreaterThan(0);
   expect(screen.getByText("Точный расчет оценки лида")).toBeInTheDocument();
   expect(screen.getByText(/score = max/)).toBeInTheDocument();
   expect(screen.getByText("Расчет очереди разбора")).toBeInTheDocument();
-  expect(screen.getByText("Прямой лид ПУР")).toBeInTheDocument();
+  expect(screen.getAllByText("Прямой лид ПУР").length).toBeGreaterThan(0);
+  expect(screen.getByText("Визуальная цепочка анализа")).toBeInTheDocument();
+  expect(screen.getAllByText("Фрагмент текста").length).toBeGreaterThan(0);
+  expect(screen.getAllByText("Словарь / правило").length).toBeGreaterThan(0);
+  expect(screen.getAllByText("Факт").length).toBeGreaterThan(0);
+  expect(screen.getAllByText("Сигнал").length).toBeGreaterThan(0);
+  expect(screen.getAllByText("Вклад в score").length).toBeGreaterThan(0);
+  expect(screen.getAllByText("+35").length).toBeGreaterThan(0);
 });
 
 test("renders annotation ranges correctly after emoji", async () => {
@@ -617,10 +624,13 @@ test("opens setting links as modal on left click and keeps cached settings for f
   );
 
   expect(await screen.findByRole("table", { name: "Точный расчет оценки лида" })).toBeInTheDocument();
-  const aliasLink = screen.getAllByRole("link", { name: "Устройство: Хаб умного дома" })[0];
+  const aliasLink = screen
+    .getAllByRole("link", { name: "Устройство: Хаб умного дома" })
+    .find((link) => link.getAttribute("href") === "#/settings/aliases/devices/smart_home_hub");
+  expect(aliasLink).toBeDefined();
   expect(aliasLink).toHaveAttribute("href", "#/settings/aliases/devices/smart_home_hub");
 
-  fireEvent.click(aliasLink);
+  fireEvent.click(aliasLink!);
 
   expect(await screen.findByRole("dialog", { name: "Настройка: Хаб умного дома" })).toBeInTheDocument();
   expect(screen.getByText("Каталог: devices")).toBeInTheDocument();
@@ -1226,10 +1236,11 @@ test("loads analytics dashboard on demand", async () => {
   fireEvent.click(screen.getByRole("button", { name: "Показать разбор сообщения 672162" }));
 
   expect(await screen.findByText("Раскрашенное сообщение")).toBeInTheDocument();
+  expect(screen.getByText("Визуальная цепочка анализа")).toBeInTheDocument();
   expect(screen.getAllByText("Причины score").length).toBeGreaterThan(1);
   expect(screen.getAllByText("Доменные сигналы").length).toBeGreaterThan(1);
   expect(screen.getByText("Факты")).toBeInTheDocument();
-  expect(screen.getByText("protocol_gateway")).toBeInTheDocument();
+  expect(screen.getAllByText("protocol_gateway").length).toBeGreaterThan(0);
   expect(screen.getAllByText("zigbee шлюз").length).toBeGreaterThan(0);
   expect(screen.getByText(/Управляемое устройство: розетки/)).toBeInTheDocument();
 });
@@ -2370,8 +2381,8 @@ function settingsLinkHrefs() {
 
 function sampleResult() {
   return {
-    original_text: "Нужен умный дом",
-    normalized_text: "Нужен умный дом",
+    original_text: "Нужен zigbee шлюз",
+    normalized_text: "Нужен zigbee шлюз",
     entities: [],
     facts: [
       {
@@ -2380,7 +2391,7 @@ function sampleResult() {
         type: "controlled_device",
         label: "Устройство: Хаб умного дома",
         source: "alias_catalog",
-        range: { start: 0, stop: 0 },
+        range: { start: 6, stop: 17 },
         explanation: "Найден alias «Хаб умного дома» в каталоге devices (smart_home_hub).",
         settings_refs: [
           {
@@ -2399,9 +2410,9 @@ function sampleResult() {
         text: "zigbee шлюз",
         type: "smart_home_automation",
         label: "Умный дом / автоматизация",
-        source: "alias_catalog",
-        range: { start: 0, stop: 0 },
-        explanation: "Сигнал «Умный дом / автоматизация» зависит от alias «Хаб умного дома».",
+        source: "fact_dependency",
+        range: { start: 6, stop: 17 },
+        explanation: "Сигнал «Умный дом / автоматизация» зависит от найденного факта «Устройство: Хаб умного дома»: «zigbee шлюз».",
         settings_refs: [
           {
             section: "signals",
@@ -2450,7 +2461,14 @@ function sampleResult() {
           key: "smart_home_automation",
           label: "Умный дом / автоматизация",
           weight: 35,
-          matched_texts: ["умный дом"]
+          matched_texts: ["zigbee шлюз"]
+        },
+        {
+          source: "fact",
+          key: "controlled_device",
+          label: "Устройство: Хаб умного дома",
+          weight: 60,
+          matched_texts: ["zigbee шлюз"]
         }
       ],
       review_lane: {

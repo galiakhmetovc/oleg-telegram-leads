@@ -86,7 +86,10 @@ facts, domain signals, the exact score arithmetic, and category/lane matches in
 operator-facing labels. Dictionary aliases emit identity facts and narrow
 semantic facts: for example, `камера` is `alias:devices:camera` plus
 `video_device`, then `video_surveillance` is inferred from those facts instead
-of directly from the dictionary. Evidence rows and calculation rows link to separate
+of directly from the dictionary. Testing and expanded Analytics rows also show
+an operator visualization of the evidence chain: text fragment -> dictionary or
+rule -> fact -> domain signal -> score contribution, with the same settings
+links as the detailed tables. Evidence rows and calculation rows link to separate
 settings detail pages through hash deeplinks like
 `#/settings/aliases/devices/electric_curtain`, while keeping the current input
 text in the SPA context. Scoring thresholds, weights, review lanes, and taxonomy

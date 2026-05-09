@@ -819,6 +819,24 @@ Rationale:
 - Identity facts preserve exact alias-key dependencies without broadening facts
   such as `vendor`, `software`, or `controlled_device`.
 
+## 2026-05-09: Enrichment Evidence Has A Visual Chain
+
+The operator UI now shows a visual evidence chain in Testing and expanded
+Analytics. The chain is derived from the same enrichment result and lead
+assessment that feed the detailed tables:
+text fragment -> dictionary or rule -> fact -> domain signal -> score
+contribution.
+
+Rationale:
+
+- The user needs to see the causal path while analyzing a message, not only
+  read long tables.
+- The UI must remain an explanation layer: it reconstructs links from returned
+  spans, source types, matched texts, and score reasons, but does not run a
+  second classifier.
+- Every node that can map to a setting reuses the existing modal/deeplink
+  behavior, so visual inspection and configuration audit stay connected.
+
 ## 2026-05-08: Live Analytics Candidate Lists Are SQL-Backed
 
 The live Telegram analytics run still uses PostgreSQL runtime tables as the

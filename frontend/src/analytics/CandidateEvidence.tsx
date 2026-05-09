@@ -13,6 +13,8 @@ import {
 } from "@mui/material";
 import { useMemo } from "react";
 import type { ReactNode } from "react";
+import { EvidenceFlow } from "../EvidenceFlow";
+import type { EvidenceFlowReason, EvidenceFlowSpan } from "../EvidenceFlow";
 import type {
   AliasCatalogName,
   AnalyticsCandidate,
@@ -46,6 +48,18 @@ const reviewLaneFallbackLabels: Record<string, string> = {
 };
 
 export function CandidateDetails({ candidate }: { candidate: AnalyticsCandidate }) {
+  const assessment = {
+    is_lead: candidateEffectiveIsLead(candidate),
+    score: candidate.score,
+    temperature: candidate.temperature,
+    solution_areas: candidate.solution_areas,
+    customer_segments: candidate.customer_segments,
+    reasons: candidate.reasons,
+    review_lane: candidate.review_lane
+      ? { key: candidate.review_lane, label: reviewLaneLabel(candidate.review_lane) }
+      : null
+  };
+
   return (
     <Box className="candidate-detail">
       <Stack spacing={2}>
@@ -67,6 +81,18 @@ export function CandidateDetails({ candidate }: { candidate: AnalyticsCandidate 
           <Typography variant="subtitle2">Раскрашенное сообщение</Typography>
           <AnnotatedCandidateText candidate={candidate} />
         </Stack>
+
+        <EvidenceFlow
+          facts={candidate.facts}
+          domainSignals={candidate.domain_signals}
+          assessment={assessment}
+          renderLink={(target, children) => <AnalyticsSettingLink target={target}>{children}</AnalyticsSettingLink>}
+          targetForSpan={candidateEvidenceFlowSpanTarget}
+          targetForReasonType={(reason) => candidateEvidenceFlowReasonTypeTarget(reason, candidate)}
+          targetForReasonWeight={(reason) => reasonWeightTarget(reason as AnalyticsReason)}
+          targetForCategory={(kind, key) => categoryTarget(kind, key)}
+          targetForReviewLane={(key): AnalyticsSettingsTarget => ({ kind: "review_lane", key })}
+        />
 
         <Box className="candidate-detail-grid">
           <Stack spacing={1.25}>
@@ -583,6 +609,17 @@ function matchedTypeTarget(type: string, candidate: AnalyticsCandidate): Analyti
     return { kind: "lead_signal_weight", key: type };
   }
   return null;
+}
+
+function candidateEvidenceFlowSpanTarget(span: EvidenceFlowSpan, kind: "fact" | "signal"): AnalyticsSettingsTarget | null {
+  return spanPrimaryTarget(span as AnalyticsSpan, kind === "fact" ? "facts" : "signals");
+}
+
+function candidateEvidenceFlowReasonTypeTarget(
+  reason: EvidenceFlowReason,
+  candidate: AnalyticsCandidate
+): AnalyticsSettingsTarget | null {
+  return reasonTypeTarget(reason as AnalyticsReason, candidate);
 }
 
 function typeLabelFromCandidate(type: string, candidate: AnalyticsCandidate): string {

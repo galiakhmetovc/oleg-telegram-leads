@@ -155,6 +155,49 @@ body {
   padding: 1px 3px;
 }
 
+.evidence-flow {
+  border: 1px solid var(--app-border);
+  border-radius: 8px;
+  background: var(--app-surface);
+  padding: 14px;
+}
+
+.evidence-flow-table {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.evidence-flow-row {
+  align-items: stretch;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: minmax(150px, 0.9fr) minmax(180px, 1fr) minmax(170px, 1fr) minmax(170px, 1fr) minmax(150px, 0.9fr);
+  min-width: 0;
+}
+
+.evidence-flow-header-row {
+  border-bottom: 1px solid var(--app-border-soft);
+  color: var(--app-text);
+  padding: 0 8px 6px;
+}
+
+.evidence-flow-cell {
+  align-items: flex-start;
+  background: var(--app-surface-muted);
+  border: 1px solid var(--app-border-soft);
+  border-radius: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+  padding: 8px;
+}
+
+.evidence-flow-cell-label {
+  display: none;
+}
+
 .event-list {
   max-height: 96px;
   overflow: auto;
@@ -508,11 +551,20 @@ body {
   .settings-two-column,
   .rule-grid,
   .help-grid,
+  .evidence-flow-row,
   .analytics-grid,
   .analytics-review-grid,
   .candidate-detail-grid,
   .project-docs-shell {
     grid-template-columns: 1fr;
+  }
+
+  .evidence-flow-header-row {
+    display: none;
+  }
+
+  .evidence-flow-cell-label {
+    display: block;
   }
 
   .project-docs-sidebar {

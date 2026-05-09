@@ -218,6 +218,11 @@
   and review lanes show the configured matched labels/groups. Score, category,
   review-lane, dictionary, fact, and signal tables use links wherever a setting
   can be identified.
+- Testing and expanded Analytics now include a visual evidence chain. It shows
+  how each matched text fragment flows through dictionary/rule evidence, facts,
+  domain signals, and score contribution. Nodes reuse the existing settings
+  modal/deeplink behavior, and manual review verdicts are respected when the
+  chain displays the lead/non-lead outcome.
 - Enrichment facts/signals now carry structured `settings_refs` for the rule or
   alias row that produced them. The frontend turns these into separate settings
   detail pages such as `#/settings/aliases/devices/electric_curtain`; navigation

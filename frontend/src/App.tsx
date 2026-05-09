@@ -63,6 +63,8 @@ import { FormEvent, SyntheticEvent, startTransition, useCallback, useEffect, use
 import type { ReactNode } from "react";
 
 import { AnalyticsPage, AnalyticsReviewPage } from "./AnalyticsPage";
+import { EvidenceFlow } from "./EvidenceFlow";
+import type { EvidenceFlowReason, EvidenceFlowSpan } from "./EvidenceFlow";
 import { ProjectDocumentationPage, RuntimeLogsPage, SystemStatusPage } from "./runtime/RuntimePages";
 
 type TextRange = {
@@ -5696,6 +5698,17 @@ function Overview({
         />
       )}
       <AnnotatedText result={result} />
+      <EvidenceFlow
+        facts={result.facts}
+        domainSignals={result.domain_signals}
+        assessment={result.lead_assessment}
+        renderLink={(target, children) => <SettingLink target={target}>{children}</SettingLink>}
+        targetForSpan={evidenceFlowSpanTarget}
+        targetForReasonType={(reason) => evidenceFlowReasonTypeTarget(reason, result)}
+        targetForReasonWeight={(reason) => reasonWeightTarget(reason as LeadReason)}
+        targetForCategory={(kind, key) => categoryTarget(kind, key)}
+        targetForReviewLane={(key): SettingsTarget => ({ kind: "review_lane", key })}
+      />
       <EvidenceTable
         title="Словарные сущности"
         kind="dictionary"
@@ -6262,6 +6275,14 @@ function matchedTypeTarget(type: string, result: TextEnrichmentResult): Settings
     return { kind: "lead_fact_weight", key: type };
   }
   return null;
+}
+
+function evidenceFlowSpanTarget(span: EvidenceFlowSpan, kind: "fact" | "signal"): SettingsTarget | null {
+  return spanPrimaryTarget(span as SpanItem, kind === "fact" ? "facts" : "signals");
+}
+
+function evidenceFlowReasonTypeTarget(reason: EvidenceFlowReason, result: TextEnrichmentResult): SettingsTarget | null {
+  return reasonTypeTarget(reason as LeadReason, result);
 }
 
 function collectNonOverlappingSpans(result: TextEnrichmentResult): SpanItem[] {

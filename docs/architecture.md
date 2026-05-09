@@ -235,6 +235,12 @@ The Analytics tab opens by default after login and uses a virtual run
   dependencies, weights, and review lanes link to their Settings detail target.
   A normal left click opens the quick preview modal; Ctrl/Cmd or middle click
   follows the full hash deeplink.
+- Testing overview and expanded Analytics render the same visual evidence
+  chain over persisted enrichment output. The UI does not reclassify text; it
+  reconstructs an operator-facing path from returned spans and assessment
+  reasons: text fragment -> dictionary/rule evidence -> fact -> domain signal
+  -> score contribution. Each node uses the same settings target resolver as
+  the detailed evidence tables.
 
 Migration `0008_runtime_analytics_cleanup` deletes old batch analytics rows so
 the operator screen starts from connected Telegram channels. Batch imports can
