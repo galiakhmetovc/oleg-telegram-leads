@@ -174,6 +174,10 @@
   job; System Status has a dedicated "Свежесть правил и кода" block for active
   revision, latest worker revision, backend code version, and worker code
   version.
+- Frontend Vitest now uses verbose reporting and a 30-second test timeout. The
+  full `App.test.tsx` suite is currently a heavy integration suite: it passes,
+  but takes roughly 2.5 minutes on the dev host and should be split/optimized in
+  a future frontend test cleanup.
 - Default NLP config now recognizes the smart-home automation lead case with
   customer intent, vendor, solution area, and electrical design context signals.
 - Default NLP config also recognizes hot Zigbee installation requests with
