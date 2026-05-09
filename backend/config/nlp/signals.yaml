@@ -263,12 +263,10 @@ signals:
       - alias:protocols:one_wire
       - alias:protocols:opentherm
       - alias:protocols:ebus
-      - alias:protocols:infrared
       - alias:protocols:rtsp
       - alias:protocols:onvif
       - alias:devices:smart_home_hub
       - alias:devices:controller
-      - alias:devices:ir_remote
       - alias:software:home_assistant
       - alias:software:ewelink
       - alias:software:zigbee2mqtt
@@ -896,11 +894,9 @@ signals:
       - alias:protocols:one_wire
       - alias:protocols:opentherm
       - alias:protocols:ebus
-      - alias:protocols:infrared
       - alias:devices:smoke_gas_sensor
       - alias:devices:thermostat
       - alias:devices:climate_control_device
-      - alias:devices:ir_remote
 - type: lighting_control
   label: Управление освещением
   group: Освещение и шторы

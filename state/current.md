@@ -92,6 +92,12 @@
   `Качество ревью` contains the manual-review quality report. Existing
   `#/analytics/message/{id}` and `#/analytics/review/{id}` deeplinks remain
   stable.
+- Bare `ИК`/`IR` is no longer treated as a protocol or climate automation
+  signal. The active PostgreSQL NLP config was migrated in
+  `0022_ir_signal_disambiguation`: `protocol_gateway` and `climate_automation`
+  no longer depend directly on `alias:protocols:infrared` or
+  `alias:devices:ir_remote`, while contextual climate aliases such as
+  `пульт для кондиционера` remain under climate equipment.
 - Operator reviews can now be evaluated in the Analytics UI and from the backend
   CLI with `uv run python -m app.cli.eval_reviews --format markdown|json`. The
   shared report reads `message_reviews` plus persisted enrichment results and

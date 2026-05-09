@@ -206,9 +206,6 @@ protocols:
     canonical: IR
     type: protocol
     aliases:
-      - IR
-      - ИК
-      - инфракрасный пульт
       - infrared
       - IrDA
     fact_types:

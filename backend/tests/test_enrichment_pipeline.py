@@ -794,6 +794,21 @@ def test_default_signal_rules_do_not_depend_directly_on_alias_catalogs() -> None
     assert all(not raw_signal.get("match", {}).get("aliases") for raw_signal in raw_signals)
 
 
+def test_default_config_does_not_treat_bare_ir_as_climate_or_gateway_lead(
+    default_lead_enricher: RussianTextEnricher,
+) -> None:
+    result = default_lead_enricher.enrich("ИК")
+
+    signal_types = {signal.type for signal in result.domain_signals}
+    fact_types = {fact.type for fact in result.facts}
+
+    assert "protocol_gateway" not in signal_types
+    assert "climate_automation" not in signal_types
+    assert "alias:protocols:infrared" not in fact_types
+    assert result.lead_assessment is not None
+    assert result.lead_assessment.is_lead is False
+
+
 def test_default_config_marks_water_leak_sensor_design_lead_from_artifact(
     default_lead_enricher: RussianTextEnricher,
 ) -> None:

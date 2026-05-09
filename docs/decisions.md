@@ -898,6 +898,24 @@ Rationale:
 - Keeping the pages inside the same Analytics section preserves shared run
   selection, filters, and existing links while reducing visual load.
 
+## 2026-05-09: Bare IR/ИК Does Not Emit High-Level Domain Signals
+
+Short aliases such as `ИК` are too ambiguous to directly trigger PUR domain
+signals. The `infrared` protocol catalog no longer includes bare `IR`/`ИК` or
+the device phrase `инфракрасный пульт`, and `protocol_gateway` /
+`climate_automation` no longer depend directly on `alias:protocols:infrared` or
+`alias:devices:ir_remote`.
+
+Rationale:
+
+- A single short token `ИК` was producing both `Протоколы / шлюзы / интеграции`
+  and `Автоматизация климата`, which inflated score and created a false lead.
+- High-level signals should come from sufficiently specific facts. For climate,
+  the config keeps contextual device aliases such as `пульт для кондиционера`
+  under climate equipment instead of using a bare infrared protocol fact.
+- IR remotes can still be represented as devices, but they should not by
+  themselves imply a gateway/integration or climate-automation need.
+
 ## 2026-05-09: App Shell Should Not Own Feature UI
 
 `frontend/src/App.tsx` remains the top-level shell for auth, theme, hash routing,
