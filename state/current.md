@@ -160,6 +160,14 @@
   leaves broker failures retryable in PostgreSQL. The worker atomically claims
   only queued jobs, so Celery redelivery or duplicate task publication cannot
   rerun completed/failed enrichments.
+- Enrichment jobs now record the claimed PostgreSQL NLP config revision
+  (`nlp_config_revision_id` and `nlp_config_revision`) when the worker moves a
+  job from `queued` to `running`. Workers resolve the active revision at claim
+  time and cache compiled NLP pipelines by revision, so new settings revisions
+  affect new jobs without a manual worker restart. System Status exposes the
+  active config revision, latest worker-used revision, backend code version,
+  and latest worker code version; dev Compose restarts the worker on Python
+  source changes through `watchfiles`.
 - Default NLP config now recognizes the smart-home automation lead case with
   customer intent, vendor, solution area, and electrical design context signals.
 - Default NLP config also recognizes hot Zigbee installation requests with

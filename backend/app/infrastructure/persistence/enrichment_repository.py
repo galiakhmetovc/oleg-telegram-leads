@@ -245,7 +245,14 @@ class PostgresEnrichmentJobRepository:
             )
             await session.commit()
 
-    async def claim_queued_job(self, job_id: UUID, *, stage_count: int) -> EnrichmentJobSnapshot | None:
+    async def claim_queued_job(
+        self,
+        job_id: UUID,
+        *,
+        stage_count: int,
+        nlp_config_revision_id: UUID,
+        nlp_config_revision: int,
+    ) -> EnrichmentJobSnapshot | None:
         async with self._session_factory() as session:
             result = await session.execute(
                 enrichment_jobs.update()
@@ -261,6 +268,8 @@ class PostgresEnrichmentJobRepository:
                     message="Обработка запущена",
                     started_at=datetime.now(UTC),
                     updated_at=datetime.now(UTC),
+                    nlp_config_revision_id=nlp_config_revision_id,
+                    nlp_config_revision=nlp_config_revision,
                 )
                 .returning(enrichment_jobs)
             )
@@ -278,13 +287,28 @@ class PostgresEnrichmentJobRepository:
                 stage_count=stage_count,
                 stage_progress_percent=0,
                 message="Обработка запущена",
-                payload={},
+                payload=_worker_event_payload(
+                    nlp_config_revision_id=nlp_config_revision_id,
+                    nlp_config_revision=nlp_config_revision,
+                ),
             )
             await session.commit()
         return _job_from_row(row)
 
-    async def mark_running(self, job_id: UUID, *, stage_count: int) -> None:
-        await self.claim_queued_job(job_id, stage_count=stage_count)
+    async def mark_running(
+        self,
+        job_id: UUID,
+        *,
+        stage_count: int,
+        nlp_config_revision_id: UUID,
+        nlp_config_revision: int,
+    ) -> None:
+        await self.claim_queued_job(
+            job_id,
+            stage_count=stage_count,
+            nlp_config_revision_id=nlp_config_revision_id,
+            nlp_config_revision=nlp_config_revision,
+        )
 
     async def record_stage_progress(
         self,
@@ -325,6 +349,7 @@ class PostgresEnrichmentJobRepository:
     async def complete_job(self, job_id: UUID, result: TextEnrichmentResult) -> None:
         async with self._session_factory() as session:
             result_payload = result.to_dict()
+            revision_payload = await self._job_revision_payload(session, job_id)
             await session.execute(
                 insert(enrichment_results)
                 .values(job_id=job_id, result=result_payload)
@@ -355,7 +380,7 @@ class PostgresEnrichmentJobRepository:
                 stage_count=0,
                 stage_progress_percent=100,
                 message="Обработка завершена",
-                payload={"result": result_payload},
+                payload={"result": result_payload, **revision_payload},
             )
             await trim_enrichment_events(
                 session,
@@ -365,6 +390,7 @@ class PostgresEnrichmentJobRepository:
 
     async def fail_job(self, job_id: UUID, error: dict[str, Any]) -> None:
         async with self._session_factory() as session:
+            revision_payload = await self._job_revision_payload(session, job_id)
             await self._update_job(
                 session,
                 job_id,
@@ -388,7 +414,7 @@ class PostgresEnrichmentJobRepository:
                 stage_count=0,
                 stage_progress_percent=100,
                 message="Обработка завершилась ошибкой",
-                payload={"error": error},
+                payload={"error": error, **revision_payload},
             )
             await trim_enrichment_events(
                 session,
@@ -439,6 +465,21 @@ class PostgresEnrichmentJobRepository:
             )
         )
 
+    async def _job_revision_payload(self, session: AsyncSession, job_id: UUID) -> dict[str, Any]:
+        result = await session.execute(
+            sa.select(
+                enrichment_jobs.c.nlp_config_revision_id,
+                enrichment_jobs.c.nlp_config_revision,
+            ).where(enrichment_jobs.c.id == job_id)
+        )
+        row = result.mappings().first()
+        if row is None:
+            return _worker_event_payload()
+        return _worker_event_payload(
+            nlp_config_revision_id=row["nlp_config_revision_id"],
+            nlp_config_revision=row["nlp_config_revision"],
+        )
+
 
 def _job_from_row(row: Any) -> EnrichmentJobSnapshot:
     result_payload = row.get("result")
@@ -457,6 +498,8 @@ def _job_from_row(row: Any) -> EnrichmentJobSnapshot:
         created_at=row["created_at"],
         started_at=row["started_at"],
         finished_at=row["finished_at"],
+        nlp_config_revision_id=row.get("nlp_config_revision_id"),
+        nlp_config_revision=row.get("nlp_config_revision"),
     )
 
 
@@ -474,6 +517,20 @@ def _event_from_row(row: Any) -> EnrichmentEvent:
         payload=row["payload"],
         created_at=row["created_at"],
     )
+
+
+def _worker_event_payload(
+    *,
+    nlp_config_revision_id: UUID | None = None,
+    nlp_config_revision: int | None = None,
+) -> dict[str, Any]:
+    settings = get_settings()
+    return {
+        "code_version": settings.code_version,
+        "process_role": settings.process_role,
+        "nlp_config_revision_id": str(nlp_config_revision_id) if nlp_config_revision_id else None,
+        "nlp_config_revision": nlp_config_revision,
+    }
 
 
 def _task_outbox_item_from_row(row: Any) -> EnrichmentTaskOutboxItem:

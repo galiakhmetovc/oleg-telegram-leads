@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections import OrderedDict
+from dataclasses import dataclass
 from typing import Any
 from uuid import UUID
 
@@ -10,6 +12,7 @@ from app.application.notifications.routing import NotificationMessageContext
 from app.core.config import get_settings
 from app.db.session import create_sessionmaker
 from app.domain.enrichment import EnrichmentStatus
+from app.infrastructure.nlp.config_loader import NlpPipelineConfig
 from app.infrastructure.nlp.config_loader import load_nlp_config_from_documents
 from app.infrastructure.nlp.config_loader import read_nlp_config_documents
 from app.infrastructure.nlp.russian_text_enricher import RussianTextEnricher
@@ -29,6 +32,21 @@ from app.worker.celery_app import celery_app
 logger = logging.getLogger(__name__)
 
 
+PIPELINE_CACHE_MAX_SIZE = 3
+
+
+@dataclass(frozen=True)
+class CompiledPipeline:
+    revision_id: UUID
+    revision: int
+    stage_names: tuple[str, ...]
+    stage_index_by_name: dict[str, int]
+    enricher: RussianTextEnricher
+
+
+_PIPELINE_CACHE: OrderedDict[UUID, CompiledPipeline] = OrderedDict()
+
+
 @celery_app.task(name="app.worker.tasks.enrich_text_job")  # type: ignore[untyped-decorator]
 def enrich_text_job(job_id: str) -> None:
     asyncio.run(_run_enrichment_job(UUID(job_id)))
@@ -46,18 +64,19 @@ async def _run_enrichment_job(job_id: UUID) -> None:
     config_revision = await config_repository.get_active_or_seed(
         read_nlp_config_documents(settings.nlp_config_dir)
     )
-    config = load_nlp_config_from_documents(config_revision.documents)
-    stage_names = [stage.name for stage in config.enabled_stages]
-    stage_count = len(stage_names)
-    stage_index_by_name = {stage_name: index for index, stage_name in enumerate(stage_names, start=1)}
+    pipeline = _compiled_pipeline_for_revision(config_revision.id, config_revision.revision, config_revision.documents)
+    stage_count = len(pipeline.stage_names)
 
-    snapshot = await repository.claim_queued_job(job_id, stage_count=stage_count)
+    snapshot = await repository.claim_queued_job(
+        job_id,
+        stage_count=stage_count,
+        nlp_config_revision_id=config_revision.id,
+        nlp_config_revision=config_revision.revision,
+    )
     if snapshot is None:
         return
 
     try:
-        enricher = RussianTextEnricher(config)
-
         loop = asyncio.get_running_loop()
 
         def progress(stage_name: str, progress_percent: int, message: str) -> None:
@@ -65,7 +84,7 @@ async def _run_enrichment_job(job_id: UUID) -> None:
                 repository.record_stage_progress(
                     job_id,
                     stage_name=stage_name,
-                    stage_index=stage_index_by_name.get(stage_name, 0),
+                    stage_index=pipeline.stage_index_by_name.get(stage_name, 0),
                     stage_count=stage_count,
                     progress_percent=progress_percent,
                     message=message,
@@ -74,12 +93,45 @@ async def _run_enrichment_job(job_id: UUID) -> None:
             )
             future.result()
 
-        result = await asyncio.to_thread(enricher.enrich, snapshot.input_text, progress)
+        result = await asyncio.to_thread(pipeline.enricher.enrich, snapshot.input_text, progress)
         await repository.complete_job(job_id, result)
         await _queue_notifications(session_factory, result, job_id)
     except Exception as exc:
         await repository.fail_job(job_id, _error_payload(exc))
         raise
+
+
+def _compiled_pipeline_for_revision(
+    revision_id: UUID,
+    revision: int,
+    documents: dict[str, dict[str, Any]],
+) -> CompiledPipeline:
+    cached = _PIPELINE_CACHE.get(revision_id)
+    if cached is not None:
+        _PIPELINE_CACHE.move_to_end(revision_id)
+        return cached
+
+    config = load_nlp_config_from_documents(documents)
+    pipeline = _compile_pipeline(revision_id, revision, config)
+    _PIPELINE_CACHE[revision_id] = pipeline
+    while len(_PIPELINE_CACHE) > PIPELINE_CACHE_MAX_SIZE:
+        _PIPELINE_CACHE.popitem(last=False)
+    return pipeline
+
+
+def _compile_pipeline(
+    revision_id: UUID,
+    revision: int,
+    config: NlpPipelineConfig,
+) -> CompiledPipeline:
+    stage_names = tuple(stage.name for stage in config.enabled_stages)
+    return CompiledPipeline(
+        revision_id=revision_id,
+        revision=revision,
+        stage_names=stage_names,
+        stage_index_by_name={stage_name: index for index, stage_name in enumerate(stage_names, start=1)},
+        enricher=RussianTextEnricher(config),
+    )
 
 
 async def _queue_notifications(

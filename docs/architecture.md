@@ -114,10 +114,22 @@ The first product slice uses a persisted enrichment job model:
   tasks. Failed broker publishes remain retryable in PostgreSQL instead of
   leaving queued jobs invisible to workers.
 - Celery workers execute the configured NLP pipeline outside the API process.
+- Celery workers resolve the active PostgreSQL NLP config revision when they
+  claim a queued job, persist that revision on the job row, and cache compiled
+  NLP pipelines by revision inside the worker process.
 - PostgreSQL stores jobs, progress events, and final enrichment results.
 - Redis is only the Celery broker; durable business state stays in PostgreSQL.
 - NLP stages, domain signals, and rule sources are loaded from configuration
   instead of being hardcoded into application code.
+
+Settings edits and code edits have different freshness semantics. A saved NLP
+settings change creates a new active `nlp_config_revisions` row and affects the
+next job a worker claims; already running jobs finish with their claimed
+revision. Backend Python code changes require process reload. In dev Compose,
+the API uses Uvicorn reload and the worker is wrapped in `watchfiles` so
+backend `.py` edits restart Celery automatically. System Status exposes
+`PUR_CODE_VERSION`, active config revision, and latest worker-used code/config
+revision so stale worker state is visible.
 
 ## Telegram Runtime Flow
 

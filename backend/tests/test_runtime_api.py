@@ -60,7 +60,11 @@ class FakeRuntimeRepository:
 
     async def system_status(self) -> list[dict[str, object]]:
         return [
-            {"service": "backend", "status": "ok", "details": {}},
+            {
+                "service": "backend",
+                "status": "ok",
+                "details": {"code_version": "test-code", "active_nlp_config_revision": 12},
+            },
             {"service": "userbot", "status": "ok", "details": {"resolved": 4}},
         ]
 
@@ -131,3 +135,5 @@ def test_returns_system_status() -> None:
     assert response.status_code == 200
     payload = response.json()
     assert [item["service"] for item in payload["services"]] == ["backend", "userbot"]
+    assert payload["services"][0]["details"]["code_version"] == "test-code"
+    assert payload["services"][0]["details"]["active_nlp_config_revision"] == 12

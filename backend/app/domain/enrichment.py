@@ -260,6 +260,8 @@ class EnrichmentJobSnapshot:
     created_at: datetime | None
     started_at: datetime | None
     finished_at: datetime | None
+    nlp_config_revision_id: UUID | None = None
+    nlp_config_revision: int | None = None
 
 
 @dataclass(frozen=True)

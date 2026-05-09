@@ -13,6 +13,7 @@ from app.infrastructure.persistence.runtime_retention import trim_notification_o
 from app.infrastructure.persistence.tables import enrichment_events, enrichment_jobs
 from app.infrastructure.persistence.tables import enrichment_results
 from app.infrastructure.persistence.tables import enrichment_task_outbox
+from app.infrastructure.persistence.tables import nlp_config_revisions
 from app.infrastructure.persistence.tables import notification_outbox
 from app.infrastructure.persistence.tables import telegram_userbot_accounts
 from app.infrastructure.persistence.tables import telegram_source_chats, telegram_source_messages
@@ -151,6 +152,9 @@ class PostgresRuntimeRepository:
             )
             pending_task_publish_errors = await _task_outbox_pending_with_errors(session)
             latest_task_publish_error = await _latest_task_publish_error(session)
+            active_nlp_config_revision = await _active_nlp_config_revision(session)
+            latest_worker_nlp_config_revision = await _latest_worker_nlp_config_revision(session)
+            latest_worker_code_version = await _latest_worker_code_version(session)
 
             outbox_total = await _count_rows(session, notification_outbox)
             latest_notification_at = await _max_value(
@@ -166,14 +170,26 @@ class PostgresRuntimeRepository:
             )
             latest_notification_error = await _latest_failed_notification_error(session)
         redis_ok = await _redis_ok()
+        worker_code_stale = (
+            latest_worker_code_version is not None and latest_worker_code_version != settings.code_version
+        )
+        worker_has_failed_jobs = bool(job_counts.get("failed", 0))
         return [
             {
                 "service": "backend",
                 "status": "ok",
                 "details": {
                     "environment": settings.environment,
+                    "code_version": settings.code_version,
+                    "process_role": settings.process_role,
                     "auth_enabled": settings.auth_enabled,
                     "public_base_url": settings.public_base_url,
+                    "active_nlp_config_revision": (
+                        active_nlp_config_revision["revision"] if active_nlp_config_revision else None
+                    ),
+                    "active_nlp_config_revision_id": (
+                        str(active_nlp_config_revision["id"]) if active_nlp_config_revision else None
+                    ),
                     "status_checked_at": checked_at,
                 },
             },
@@ -210,7 +226,7 @@ class PostgresRuntimeRepository:
             },
             {
                 "service": "worker",
-                "status": "warning" if job_counts.get("failed", 0) else "ok",
+                "status": "warning" if worker_has_failed_jobs or worker_code_stale else "ok",
                 "details": {
                     "jobs_total": jobs_total,
                     "jobs_by_status": job_counts,
@@ -221,6 +237,30 @@ class PostgresRuntimeRepository:
                     "telegram_messages_waiting_enrichment": telegram_messages_waiting_enrichment,
                     "telegram_messages_failed_enrichment": telegram_messages_failed_enrichment,
                     "failed_latest_error": latest_job_error,
+                    "backend_code_version": settings.code_version,
+                    "latest_worker_code_version": latest_worker_code_version,
+                    "worker_code_stale": worker_code_stale,
+                    "active_nlp_config_revision": (
+                        active_nlp_config_revision["revision"] if active_nlp_config_revision else None
+                    ),
+                    "active_nlp_config_revision_id": (
+                        str(active_nlp_config_revision["id"]) if active_nlp_config_revision else None
+                    ),
+                    "latest_worker_nlp_config_revision": (
+                        latest_worker_nlp_config_revision["revision"]
+                        if latest_worker_nlp_config_revision
+                        else None
+                    ),
+                    "latest_worker_nlp_config_revision_id": (
+                        str(latest_worker_nlp_config_revision["id"])
+                        if latest_worker_nlp_config_revision
+                        else None
+                    ),
+                    "worker_config_stale": (
+                        latest_worker_nlp_config_revision is not None
+                        and active_nlp_config_revision is not None
+                        and latest_worker_nlp_config_revision["id"] != active_nlp_config_revision["id"]
+                    ),
                 },
             },
             {
@@ -333,6 +373,62 @@ async def _latest_failed_job_error(session: AsyncSession) -> Any:
         .limit(1)
     )
     return result.scalar_one_or_none()
+
+
+async def _active_nlp_config_revision(session: AsyncSession) -> dict[str, Any] | None:
+    result = await session.execute(
+        sa.select(
+            nlp_config_revisions.c.id,
+            nlp_config_revisions.c.revision,
+            nlp_config_revisions.c.source,
+            nlp_config_revisions.c.created_at,
+        )
+        .where(nlp_config_revisions.c.is_active.is_(True))
+        .order_by(nlp_config_revisions.c.revision.desc())
+        .limit(1)
+    )
+    row = result.mappings().first()
+    return dict(row) if row is not None else None
+
+
+async def _latest_worker_nlp_config_revision(session: AsyncSession) -> dict[str, Any] | None:
+    result = await session.execute(
+        sa.select(
+            enrichment_jobs.c.nlp_config_revision_id.label("id"),
+            enrichment_jobs.c.nlp_config_revision.label("revision"),
+            enrichment_jobs.c.updated_at,
+        )
+        .where(enrichment_jobs.c.nlp_config_revision_id.is_not(None))
+        .where(enrichment_jobs.c.nlp_config_revision.is_not(None))
+        .order_by(enrichment_jobs.c.updated_at.desc())
+        .limit(1)
+    )
+    row = result.mappings().first()
+    return dict(row) if row is not None else None
+
+
+async def _latest_worker_code_version(session: AsyncSession) -> str | None:
+    result = await session.execute(
+        sa.select(enrichment_events.c.payload)
+        .where(
+            enrichment_events.c.event_type.in_(
+                ["job_started", "job_completed", "job_failed"],
+            )
+        )
+        .order_by(enrichment_events.c.created_at.desc())
+        .limit(50)
+    )
+    for payload in result.scalars():
+        if not isinstance(payload, dict):
+            continue
+        code_version = payload.get("code_version")
+        if code_version is None:
+            continue
+        process_role = payload.get("process_role")
+        if process_role not in {None, "worker"}:
+            continue
+        return str(code_version)
+    return None
 
 
 async def _task_outbox_pending_with_errors(session: AsyncSession) -> int:

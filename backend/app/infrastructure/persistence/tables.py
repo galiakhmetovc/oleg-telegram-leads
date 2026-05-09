@@ -22,6 +22,13 @@ enrichment_jobs = sa.Table(
     sa.Column("started_at", sa.DateTime(timezone=True), nullable=True),
     sa.Column("finished_at", sa.DateTime(timezone=True), nullable=True),
     sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
+    sa.Column(
+        "nlp_config_revision_id",
+        UUID(as_uuid=True),
+        sa.ForeignKey("nlp_config_revisions.id", ondelete="SET NULL"),
+        nullable=True,
+    ),
+    sa.Column("nlp_config_revision", sa.Integer(), nullable=True),
 )
 
 enrichment_results = sa.Table(

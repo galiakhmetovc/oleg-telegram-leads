@@ -14,7 +14,14 @@ class EnrichmentJobRepository(Protocol):
 
     async def get_job(self, job_id: UUID) -> EnrichmentJobSnapshot | None: ...
 
-    async def claim_queued_job(self, job_id: UUID, *, stage_count: int) -> EnrichmentJobSnapshot | None: ...
+    async def claim_queued_job(
+        self,
+        job_id: UUID,
+        *,
+        stage_count: int,
+        nlp_config_revision_id: UUID,
+        nlp_config_revision: int,
+    ) -> EnrichmentJobSnapshot | None: ...
 
     async def list_events_after(self, job_id: UUID, after_sequence: int) -> list[EnrichmentEvent]: ...
 

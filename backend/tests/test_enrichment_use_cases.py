@@ -37,7 +37,14 @@ class InMemoryJobRepository:
             finished_at=None,
         )
 
-    async def claim_queued_job(self, job_id: UUID, *, stage_count: int) -> EnrichmentJobSnapshot | None:
+    async def claim_queued_job(
+        self,
+        job_id: UUID,
+        *,
+        stage_count: int,
+        nlp_config_revision_id: UUID,
+        nlp_config_revision: int,
+    ) -> EnrichmentJobSnapshot | None:
         return None
 
     async def discard_unpublished_job(self, job_id: UUID) -> None:

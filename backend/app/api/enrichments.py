@@ -95,6 +95,8 @@ def serialize_job(job: EnrichmentJobSnapshot) -> dict[str, Any]:
         "created_at": _datetime_or_none(job.created_at),
         "started_at": _datetime_or_none(job.started_at),
         "finished_at": _datetime_or_none(job.finished_at),
+        "nlp_config_revision_id": str(job.nlp_config_revision_id) if job.nlp_config_revision_id else None,
+        "nlp_config_revision": job.nlp_config_revision,
     }
 
 

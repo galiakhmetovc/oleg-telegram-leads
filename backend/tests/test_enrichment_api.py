@@ -34,6 +34,8 @@ class ApiInMemoryJobRepository:
             created_at=datetime(2026, 5, 7, tzinfo=UTC),
             started_at=None,
             finished_at=None,
+            nlp_config_revision_id=UUID("00000000-0000-0000-0000-000000000123"),
+            nlp_config_revision=12,
         )
 
     async def mark_task_pending(self, job_id: UUID) -> None:
@@ -89,6 +91,8 @@ def test_create_enrichment_endpoint_returns_job_snapshot_and_publishes_task() ->
     assert payload["id"] == str(repository.job_id)
     assert payload["status"] == "queued"
     assert payload["progress_percent"] == 0
+    assert payload["nlp_config_revision_id"] == "00000000-0000-0000-0000-000000000123"
+    assert payload["nlp_config_revision"] == 12
     assert repository.created_texts == ["Нужна поставка завтра"]
     assert publisher.published == [repository.job_id]
     assert repository.outbox_status == "published"

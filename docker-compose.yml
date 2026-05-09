@@ -61,6 +61,8 @@ services:
     environment:
       PUR_DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-pur_leads}:${POSTGRES_PASSWORD:-pur_leads_dev_password}@postgres:5432/${POSTGRES_DB:-pur_leads_v2}
       PUR_ENVIRONMENT: development
+      PUR_CODE_VERSION: ${PUR_CODE_VERSION:-dev}
+      PUR_PROCESS_ROLE: backend
       PUR_REDIS_URL: redis://redis:6379/0
       PUR_NLP_CONFIG_DIR: /app/config/nlp
       PUR_PUBLIC_BASE_URL: ${PUR_PUBLIC_BASE_URL:-https://secclaw.qlbc.ru:19443}
@@ -87,10 +89,12 @@ services:
     build:
       context: ./backend
     logging: *default-logging
-    command: celery -A app.worker.celery_app worker --loglevel=info --pool=solo
+    command: watchfiles --filter python --target-type command "celery -A app.worker.celery_app worker --loglevel=info --pool=solo" /app/app
     environment:
       PUR_DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-pur_leads}:${POSTGRES_PASSWORD:-pur_leads_dev_password}@postgres:5432/${POSTGRES_DB:-pur_leads_v2}
       PUR_ENVIRONMENT: development
+      PUR_CODE_VERSION: ${PUR_CODE_VERSION:-dev}
+      PUR_PROCESS_ROLE: worker
       PUR_REDIS_URL: redis://redis:6379/0
       PUR_NLP_CONFIG_DIR: /app/config/nlp
       PUR_PUBLIC_BASE_URL: ${PUR_PUBLIC_BASE_URL:-https://secclaw.qlbc.ru:19443}

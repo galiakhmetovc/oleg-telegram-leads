@@ -12,6 +12,8 @@ class Settings(BaseSettings):
     nlp_config_dir: Path = Path("config/nlp")
     cors_origins: str = "http://localhost:5173"
     environment: str = "development"
+    code_version: str = "dev"
+    process_role: str = "backend"
     auth_enabled: bool = True
     auth_username: str = "admin"
     auth_password: str = "pur-dev-password"
