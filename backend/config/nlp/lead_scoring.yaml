@@ -224,6 +224,7 @@ lead_scoring:
         - irrelevant_or_sale
         - price_only
         - ordinary_household_system
+        - operator_noise
   review_lanes:
     - key: noise
       label: Шум / нецелевое

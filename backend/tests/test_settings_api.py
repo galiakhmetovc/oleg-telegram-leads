@@ -427,6 +427,43 @@ def test_constructor_noise_adds_selected_text_to_postgres_nlp_revision(tmp_path:
     assert "DSS Express" not in (config_dir / "signals.yaml").read_text(encoding="utf-8")
 
 
+def test_constructor_noise_phrase_matches_original_text_with_symbol_separator(tmp_path: Path) -> None:
+    config_dir = tmp_path / "nlp"
+    _write_config(config_dir)
+    repository = InMemoryNlpConfigRepository()
+    client = _app_with_settings_repo(config_dir, repository)
+
+    response = client.post(
+        "/api/v1/settings/nlp/constructor/noise",
+        json={
+            "text": "Бот создан в @botsbaseru",
+            "source_message_id": "focus-1",
+        },
+    )
+
+    assert response.status_code == 200
+    nlp_settings = response.json()["nlp"]
+    nlp_settings["pipeline"]["stages"].append({"name": "lead_scoring", "enabled": True})
+    nlp_settings["lead_scoring"]["signal_weights"]["demand"] = 100
+    preview = client.post(
+        "/api/v1/settings/nlp/preview",
+        json={
+            "nlp": nlp_settings,
+            "text": "Нужна консультация. 🔖ads: Бот создан в @botsbaseru",
+        },
+    )
+
+    assert preview.status_code == 200
+    payload = preview.json()
+    assert any(signal["type"] == "operator_noise" for signal in payload["domain_signals"])
+    assessment = payload["lead_assessment"]
+    assert assessment["score"] == 0
+    assert assessment["is_lead"] is False
+    assert assessment["temperature"] == "none"
+    assert assessment["noise_signals"][0]["type"] == "operator_noise"
+    assert any(reason["source"] == "score_cap" for reason in assessment["reasons"])
+
+
 def test_constructor_alias_adds_selected_text_to_existing_catalog_item(tmp_path: Path) -> None:
     config_dir = tmp_path / "nlp"
     _write_config(config_dir)

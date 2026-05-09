@@ -508,7 +508,7 @@ def _compile_normalized_aliases(
 
 
 def _exact_phrase_pattern(phrase: tuple[str, ...]) -> re.Pattern[str]:
-    body = r"\s+".join(re.escape(token) for token in _clean_phrase_tokens(phrase))
+    body = r"[^\w]+".join(re.escape(token) for token in _clean_phrase_tokens(phrase))
     return re.compile(rf"(?<![\w]){body}(?![\w])", flags=re.UNICODE)
 
 

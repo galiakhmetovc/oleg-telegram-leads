@@ -72,10 +72,11 @@ settings from PostgreSQL config revisions and read-only runtime settings from
 the backend environment. Draft NLP settings can be previewed on text before
 saving. Rule editing separates exact phrases from lemmatized phrases; new
 lemmatized phrases are built from operator-entered text by the backend and show
-both the original input and generated lemmas. Exact phrases use literal
-lowercased matching for technical spellings such as `Wi-Fi`, `220v`, and
-abbreviations; lemmatized phrases use normalized Yargy tokens. A Help tab in the
-UI explains the matching modes. `backend/config/nlp` is only the bootstrap
+both the original input and generated lemmas. Exact phrases use lowercased
+token-sequence matching for technical spellings such as `Wi-Fi`, `220v`, and
+abbreviations; punctuation, mentions, and other non-word separators may appear
+between tokens. Lemmatized phrases use normalized Yargy tokens. A Help tab in
+the UI explains the matching modes. `backend/config/nlp` is only the bootstrap
 default when the database has no active NLP config revision yet.
 
 The enrichment result now includes `lead_assessment`: an explainable PUR lead
@@ -182,6 +183,8 @@ compact dialogs for target selection, exact versus lemmatized matching, and new
 target metadata. Every constructor save writes a new `nlp_config_revisions` row
 and returns the updated NLP snapshot so the Settings Center cache does not stay
 stale. Newly created domain signals get score weight `0` until the operator
+sets one; `operator_noise` is kept in the hard-noise score cap so manual noise
+can suppress overheated candidates immediately.
 explicitly tunes scoring.
 
 The UI includes Logs and System Status tabs. These are based on durable backend

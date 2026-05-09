@@ -310,9 +310,10 @@ Rationale:
 ## 2026-05-07: Rule Matching Has Two Operator Modes
 
 Expose only two rule matching modes to operators and API clients: exact phrases
-and lemmatized phrases. Exact phrases are literal lowercased text matches with
-word-like boundaries; lemmatized phrases are stored as Yargy `normalized` tokens.
-Do not use `caseless` as a new persisted/operator-facing rule predicate.
+and lemmatized phrases. Exact phrases are lowercased token-sequence matches with
+word-like boundaries and non-word separators between tokens; lemmatized phrases
+are stored as Yargy `normalized` tokens. Do not use `caseless` as a new
+persisted/operator-facing rule predicate.
 
 Rationale:
 
@@ -639,6 +640,7 @@ normal editable domain signal:
 - exact phrase tokens built from the selected fragment;
 - signal weight `-50` when the weight is absent;
 - membership in `noise_signal_types` and `lead_veto_signal_types`;
+- membership in the hard-noise score cap, so manual noise can cap score to `0`;
 - inclusion in the noise review lane and exclusion from non-noise lanes.
 
 The endpoint returns the updated NLP settings snapshot so the frontend updates
@@ -768,10 +770,10 @@ negative adjustment, so the operator still sees the original positive evidence
 and the exact reason the final score was reduced.
 
 The bootstrap config uses `hard_noise` with `max_score: 0` for explicit
-supply/sale/equipment-only/price-only/ordinary-household noise. The broad
-`модуль управления` relay alias was removed because it misclassified generic
-video software license text such as DSS parking management modules as smart-home
-automation.
+supply/sale/equipment-only/price-only/ordinary-household/operator noise. The
+broad `модуль управления` relay alias was removed because it misclassified
+generic video software license text such as DSS parking management modules as
+smart-home automation.
 
 Rationale:
 

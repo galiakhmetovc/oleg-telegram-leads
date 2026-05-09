@@ -352,8 +352,11 @@ The persisted config still uses `phrases` and `patterns` as the storage shape
 because that is what the rule engine consumes. The web UI does not expose Yargy
 predicate names as the product vocabulary.
 
-Exact phrases are matched as lowercased literal text with word-like boundaries,
-not through Yargy morphology. This keeps technical variants such as `220v` and
+Exact phrases are matched as lowercased token sequences with word-like
+boundaries. Punctuation, emoji, mentions, and other non-word characters may sit
+between tokens, so a fragment saved from Review as `бот создан в botsbaseru`
+still matches the original text `Бот создан в @botsbaseru`. Exact phrases do
+not use Yargy morphology. This keeps technical variants such as `220v` and
 abbreviations in the exact matching mode. Product names, brands, protocols, and
 software names are handled by alias catalogs. Lemmatized phrases use Yargy
 `normalized` tokens. Documents that still contain `caseless` are invalid for v2
@@ -411,7 +414,9 @@ Built-in scoring mechanisms beyond summation are still configuration-driven.
 `is_lead=false` and `temperature=none`. `lead_scoring.score_caps` can also cap
 the final score when configured signal/fact/reason/noise evidence appears; the
 cap is emitted as a synthetic `score_cap` reason so the operator still sees why
-the arithmetic changed.
+the arithmetic changed. The Review constructor keeps `operator_noise` connected
+to the hard-noise cap, because a manual "В шум" action should suppress an
+otherwise overheated score.
 
 Generic demand signals such as `need`, `provider_search`, `consultation_request`,
 and generic `work_type` facts are intentionally low-weight. They explain intent,

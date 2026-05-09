@@ -12,6 +12,8 @@ OPERATOR_NOISE_SIGNAL_TYPE = "operator_noise"
 OPERATOR_NOISE_SIGNAL_LABEL = "Операторский шум"
 OPERATOR_NOISE_SIGNAL_GROUP = "Шум / ручная разметка"
 OPERATOR_NOISE_SIGNAL_WEIGHT = -50
+HARD_NOISE_SCORE_CAP_KEY = "hard_noise"
+HARD_NOISE_SCORE_CAP_LABEL = "Явный шум / нецелевой запрос"
 NEW_SIGNAL_DEFAULT_WEIGHT = 0
 SUPPORTED_ALIAS_CATALOGS = ("vendors", "protocols", "devices", "software")
 
@@ -501,6 +503,9 @@ def add_operator_noise_phrase_to_documents(
     if _append_unique(scoring.setdefault("lead_veto_signal_types", []), OPERATOR_NOISE_SIGNAL_TYPE):
         changed = True
 
+    if _ensure_operator_noise_score_cap(scoring):
+        changed = True
+
     for lane in scoring.get("review_lanes", []):
         if not isinstance(lane, dict):
             continue
@@ -521,6 +526,37 @@ def add_operator_noise_phrase_to_documents(
         created_phrase=created_phrase,
         changed=changed,
     )
+
+
+def _ensure_operator_noise_score_cap(scoring: dict[str, Any]) -> bool:
+    score_caps = scoring.setdefault("score_caps", [])
+    if not isinstance(score_caps, list):
+        scoring["score_caps"] = []
+        score_caps = scoring["score_caps"]
+    for cap in score_caps:
+        if not isinstance(cap, dict) or cap.get("key") != HARD_NOISE_SCORE_CAP_KEY:
+            continue
+        changed = False
+        cap.setdefault("label", HARD_NOISE_SCORE_CAP_LABEL)
+        cap.setdefault("max_score", 0)
+        noise_signal_types = cap.get("noise_signal_types")
+        if not isinstance(noise_signal_types, list):
+            noise_signal_types = []
+            cap["noise_signal_types"] = noise_signal_types
+            changed = True
+        return _append_unique(noise_signal_types, OPERATOR_NOISE_SIGNAL_TYPE) or changed
+    score_caps.append(
+        {
+            "key": HARD_NOISE_SCORE_CAP_KEY,
+            "label": HARD_NOISE_SCORE_CAP_LABEL,
+            "max_score": 0,
+            "signal_types": [],
+            "fact_types": [],
+            "reason_keys": [],
+            "noise_signal_types": [OPERATOR_NOISE_SIGNAL_TYPE],
+        }
+    )
+    return True
 
 
 def _document_list(

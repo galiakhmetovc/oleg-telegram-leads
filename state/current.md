@@ -171,10 +171,11 @@
   add/edit/delete actions. New lemmatized phrases are built by the backend from
   operator-entered text and preserve `source_text` alongside generated lemmas.
 - Rule matching no longer exposes `caseless` as an active mode. Exact phrases
-  are literal lowercased matches for technical spellings such as `Wi-Fi`, `220v`,
-  `Z-Wave`, and abbreviations; lemmatized phrases remain Yargy `normalized`
-  rules. Old `caseless` config revisions are invalid and should be replaced,
-  not adapted at runtime.
+  are lowercased token-sequence matches for technical spellings such as `Wi-Fi`,
+  `220v`, `Z-Wave`, and abbreviations; non-word separators such as `@`, emoji,
+  punctuation, and newlines may appear between exact-phrase tokens. Lemmatized
+  phrases remain Yargy `normalized` rules. Old `caseless` config revisions are
+  invalid and should be replaced, not adapted at runtime.
 - A Help tab in the web UI explains exact versus lemmatized matching and when to
   use each mode.
 - Settings Center now also exposes editable alias catalogs for `vendors`,
@@ -264,13 +265,16 @@
 - Default lead scoring now separates additive score from auto-lead verdict:
   configured `lead_veto_signal_types` force `is_lead=false` and
   `temperature=none` for explicit supply/sale/DIY/price-only or ordinary
-  household noise. Configured `score_caps` can also limit final score; bootstrap
-  `hard_noise` caps these clear noise classes at `0` and emits an explanatory
-  `score_cap` reason.
+  household or operator noise. Configured `score_caps` can also limit final
+  score; bootstrap `hard_noise` caps these clear noise classes at `0` and emits
+  an explanatory `score_cap` reason.
 - Default device aliases no longer include the broad phrase `модуль управления`
   for relay modules. Migration `0018_lead_scoring_caps` patches the active
   PostgreSQL NLP config with `score_caps` and removes that alias from
   `devices.relay_module`.
+- Migration `0019_operator_noise_score_cap` appends `operator_noise` to the
+  active hard-noise score cap. The Review "В шум" constructor also maintains
+  that link for future operator-created noise phrases.
 - Review lane matching is centralized in `app.application.review_lanes`. The
   deterministic scorer and analytics import/list code use the same priority,
   exclusion, score/temperature, and match-group logic, including matched group
