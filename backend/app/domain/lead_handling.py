@@ -42,6 +42,9 @@ class LeadHandling:
     closed_at: datetime | None
     created_at: datetime
     updated_at: datetime
+    source_chat_title: str | None = None
+    text_preview: str | None = None
+    telegram_message_url: str | None = None
 
 
 @dataclass(frozen=True)
@@ -81,6 +84,9 @@ class LeadHandlingSummary:
     sales_chat_id: str | None
     sales_chat_message_id: int | None
     updated_at: datetime
+    source_chat_title: str | None = None
+    text_preview: str | None = None
+    telegram_message_url: str | None = None
 
 
 @dataclass(frozen=True)

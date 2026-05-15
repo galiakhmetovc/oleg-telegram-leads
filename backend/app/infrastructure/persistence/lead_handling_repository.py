@@ -13,7 +13,8 @@ from app.domain.lead_handling import LeadHandlingActionResult, LeadHandlingActor
 from app.domain.lead_handling import LeadHandlingEvent, LeadHandlingEventType
 from app.domain.lead_handling import LeadHandlingStatus, LeadHandlingSummary
 from app.infrastructure.persistence.tables import lead_bot_sessions, lead_handling_events
-from app.infrastructure.persistence.tables import lead_handlings
+from app.infrastructure.persistence.tables import lead_handlings, telegram_source_chats
+from app.infrastructure.persistence.tables import telegram_source_messages
 
 
 class PostgresLeadHandlingRepository:
@@ -207,7 +208,7 @@ class PostgresLeadHandlingRepository:
     ) -> list[LeadHandlingSummary]:
         async with self._session_factory() as session:
             result = await session.execute(
-                sa.select(lead_handlings)
+                _handling_select()
                 .where(lead_handlings.c.owner_telegram_user_id == telegram_user_id)
                 .where(lead_handlings.c.status != "not_lead")
                 .order_by(lead_handlings.c.updated_at.desc(), lead_handlings.c.id.desc())
@@ -219,7 +220,7 @@ class PostgresLeadHandlingRepository:
     async def get_by_source_message_id(self, source_message_id: UUID) -> LeadHandling | None:
         async with self._session_factory() as session:
             result = await session.execute(
-                sa.select(lead_handlings).where(lead_handlings.c.source_message_id == source_message_id)
+                _handling_select().where(lead_handlings.c.source_message_id == source_message_id)
             )
             row = result.mappings().first()
         return _handling_from_row(row) if row is not None else None
@@ -381,6 +382,7 @@ async def _append_event(
 
 
 def _handling_from_row(row: Any) -> LeadHandling:
+    telegram_message_url = _telegram_message_url(row.get("input_ref"), row.get("telegram_message_id"))
     return LeadHandling(
         id=row["id"],
         source_message_id=row["source_message_id"],
@@ -396,6 +398,9 @@ def _handling_from_row(row: Any) -> LeadHandling:
         closed_at=row["closed_at"],
         created_at=row["created_at"],
         updated_at=row["updated_at"],
+        source_chat_title=row.get("source_chat_title"),
+        text_preview=_text_preview(row.get("source_text")),
+        telegram_message_url=telegram_message_url,
     )
 
 
@@ -414,6 +419,7 @@ def _event_from_row(row: Any) -> LeadHandlingEvent:
 
 
 def _summary_from_row(row: Any) -> LeadHandlingSummary:
+    telegram_message_url = _telegram_message_url(row.get("input_ref"), row.get("telegram_message_id"))
     return LeadHandlingSummary(
         id=row["id"],
         source_message_id=row["source_message_id"],
@@ -424,6 +430,9 @@ def _summary_from_row(row: Any) -> LeadHandlingSummary:
         sales_chat_id=row["sales_chat_id"],
         sales_chat_message_id=row["sales_chat_message_id"],
         updated_at=row["updated_at"],
+        source_chat_title=row.get("source_chat_title"),
+        text_preview=_text_preview(row.get("source_text")),
+        telegram_message_url=telegram_message_url,
     )
 
 
@@ -435,3 +444,46 @@ def _session_from_row(row: Any) -> LeadBotSession:
         payload=row["payload"],
         updated_at=row["updated_at"],
     )
+
+
+def _handling_select() -> sa.Select[tuple[Any, ...]]:
+    return (
+        sa.select(
+            lead_handlings,
+            telegram_source_chats.c.title.label("source_chat_title"),
+            telegram_source_chats.c.input_ref,
+            telegram_source_messages.c.telegram_message_id,
+            telegram_source_messages.c.text.label("source_text"),
+        )
+        .select_from(
+            lead_handlings.join(
+                telegram_source_messages,
+                lead_handlings.c.source_message_id == telegram_source_messages.c.id,
+            ).outerjoin(
+                telegram_source_chats,
+                telegram_source_messages.c.source_chat_id == telegram_source_chats.c.id,
+            )
+        )
+    )
+
+
+def _text_preview(value: object, *, max_length: int = 240) -> str | None:
+    if not isinstance(value, str):
+        return None
+    normalized = " ".join(value.split())
+    if len(normalized) <= max_length:
+        return normalized
+    return normalized[: max_length - 1].rstrip() + "..."
+
+
+def _telegram_message_url(input_ref: object, telegram_message_id: object) -> str | None:
+    if not isinstance(input_ref, str) or not isinstance(telegram_message_id, int):
+        return None
+    value = input_ref.strip().rstrip("/")
+    if not value:
+        return None
+    if value.startswith("https://t.me/"):
+        return f"{value}/{telegram_message_id}"
+    if value.startswith("@"):
+        return f"https://t.me/{value[1:]}/{telegram_message_id}"
+    return None
