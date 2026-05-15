@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Protocol
+from typing import Any, Protocol
 from uuid import UUID
 
 from app.domain.notifications import NotificationOutboxItem, NotificationSettings, TelegramSendResult
@@ -25,8 +25,38 @@ class TelegramMessageSender(Protocol):
         """Return Telegram bot username from the Bot API getMe method."""
         ...
 
-    async def send_text(self, *, bot_token: str, chat_id: str, text: str) -> TelegramSendResult:
+    async def send_text(
+        self,
+        *,
+        bot_token: str,
+        chat_id: str,
+        text: str,
+        reply_markup: dict[str, Any] | None = None,
+    ) -> TelegramSendResult:
         """Send a plain text message to a Telegram chat."""
+        ...
+
+    async def edit_text(
+        self,
+        *,
+        bot_token: str,
+        chat_id: str,
+        message_id: int,
+        text: str,
+        reply_markup: dict[str, Any] | None = None,
+    ) -> TelegramSendResult:
+        """Edit an existing Telegram message."""
+        ...
+
+    async def answer_callback_query(
+        self,
+        *,
+        bot_token: str,
+        callback_query_id: str,
+        text: str | None = None,
+        show_alert: bool = False,
+    ) -> None:
+        """Answer an inline keyboard callback query."""
         ...
 
 
