@@ -28,6 +28,11 @@ async def session_factory() -> AsyncIterator[async_sessionmaker[AsyncSession]]:
         await connection.run_sync(lambda sync: lead_handlings.create(sync, checkfirst=True))
         await connection.run_sync(lambda sync: lead_handling_events.create(sync, checkfirst=True))
         await connection.execute(
+            lead_bot_sessions.delete()
+            .where(lead_bot_sessions.c.bot_id == "main_bot")
+            .where(lead_bot_sessions.c.telegram_user_id == "100")
+        )
+        await connection.execute(
             telegram_source_messages.delete().where(telegram_source_messages.c.text == TEST_TEXT)
         )
     try:
@@ -35,11 +40,13 @@ async def session_factory() -> AsyncIterator[async_sessionmaker[AsyncSession]]:
     finally:
         async with engine.begin() as connection:
             await connection.execute(
+                lead_bot_sessions.delete()
+                .where(lead_bot_sessions.c.bot_id == "main_bot")
+                .where(lead_bot_sessions.c.telegram_user_id == "100")
+            )
+            await connection.execute(
                 telegram_source_messages.delete().where(telegram_source_messages.c.text == TEST_TEXT)
             )
-            await connection.run_sync(lambda sync: lead_bot_sessions.drop(sync, checkfirst=True))
-            await connection.run_sync(lambda sync: lead_handling_events.drop(sync, checkfirst=True))
-            await connection.run_sync(lambda sync: lead_handlings.drop(sync, checkfirst=True))
         await engine.dispose()
 
 

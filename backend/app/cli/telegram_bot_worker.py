@@ -253,6 +253,8 @@ async def main_async() -> None:
 
 def main() -> None:
     logging.basicConfig(level=logging.INFO)
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("httpcore").setLevel(logging.WARNING)
     asyncio.run(main_async())
 
 
