@@ -4,13 +4,26 @@ import argparse
 import asyncio
 import logging
 from typing import Protocol
+from typing import cast
 
 from app.application.lead_handling.use_cases import LeadActionCallback
+from app.application.lead_handling.use_cases import HandleLeadActionCallback
+from app.application.lead_handling.use_cases import HandleLeadBotPrivateMessage
+from app.application.lead_handling.use_cases import PrivateBotCallback, PrivateBotMessage
+from app.db.session import create_sessionmaker
+from app.domain.analytics import AnalyticsReviewVerdict
+from app.domain.notifications import NotificationSettings
+from app.infrastructure.notifications.telegram_sender import HttpTelegramMessageSender
+from app.infrastructure.persistence.analytics_repository import PostgresAnalyticsRepository
+from app.infrastructure.persistence.lead_handling_repository import PostgresLeadHandlingRepository
+from app.infrastructure.persistence.notification_settings_repository import (
+    PostgresNotificationSettingsRepository,
+)
 from app.infrastructure.telegram.bot_updates import HttpTelegramBotUpdateClient
-from app.infrastructure.telegram.bot_updates import TelegramBotCallback, TelegramBotPrivateMessage
 from app.infrastructure.telegram.bot_updates import TelegramBotUpdate
 
 logger = logging.getLogger(__name__)
+OFFSET_SESSION_USER_ID = "__offset__"
 
 
 class TelegramBotUpdateClient(Protocol):
@@ -34,9 +47,9 @@ class GroupLeadActionHandler(Protocol):
 
 
 class PrivateLeadBotHandler(Protocol):
-    async def execute_callback(self, callback: TelegramBotCallback) -> object: ...
+    async def execute_callback(self, callback: PrivateBotCallback) -> object: ...
 
-    async def execute_message(self, message: TelegramBotPrivateMessage) -> object: ...
+    async def execute_message(self, message: PrivateBotMessage) -> object: ...
 
 
 class TelegramBotWorker:
@@ -80,7 +93,17 @@ class TelegramBotWorker:
         callback = update.callback
         if callback is not None:
             if callback.chat_type == "private":
-                await self._private_handler.execute_callback(callback)
+                await self._private_handler.execute_callback(
+                    PrivateBotCallback(
+                        action=callback.action,
+                        source_message_id=callback.source_message_id,
+                        status=callback.status,
+                        callback_query_id=callback.callback_query_id,
+                        chat_id=callback.chat_id,
+                        message_id=callback.message_id,
+                        actor=callback.actor,
+                    )
+                )
                 return True
             if callback.action in {"claim", "notlead"} and callback.source_message_id is not None:
                 await self._group_handler.execute(
@@ -97,56 +120,134 @@ class TelegramBotWorker:
                 return True
             return False
         if update.private_message is not None:
-            await self._private_handler.execute_message(update.private_message)
+            await self._private_handler.execute_message(
+                PrivateBotMessage(
+                    chat_id=update.private_message.chat_id,
+                    actor=update.private_message.actor,
+                    text=update.private_message.text,
+                )
+            )
             return True
         return False
 
 
-class NoopLeadBotOffsetRepository:
+class LeadBotSessionOffsetRepository:
+    def __init__(self, handling_repository: PostgresLeadHandlingRepository) -> None:
+        self._handling_repository = handling_repository
+
     async def get_offset(self, bot_id: str) -> int | None:
-        return None
+        session = await self._handling_repository.get_session_state(
+            bot_id=bot_id,
+            telegram_user_id=OFFSET_SESSION_USER_ID,
+        )
+        if session is None:
+            return None
+        value = session.payload.get("offset")
+        return int(value) if isinstance(value, int) else None
 
     async def save_offset(self, bot_id: str, offset: int) -> None:
-        return None
+        await self._handling_repository.set_session_state(
+            bot_id=bot_id,
+            telegram_user_id=OFFSET_SESSION_USER_ID,
+            state="offset",
+            payload={"offset": offset},
+        )
 
 
-class NoopGroupLeadActionHandler:
-    async def execute(self, callback: LeadActionCallback) -> object:
-        logger.info("Ignoring group lead callback because runtime handler is not configured")
-        return object()
+class AnalyticsMessageReviewWriter:
+    def __init__(self, repository: PostgresAnalyticsRepository) -> None:
+        self._repository = repository
+
+    async def save_review(
+        self,
+        *,
+        message_id: str,
+        verdict: str | None,
+        comment: str,
+        tags: list[str],
+    ) -> object:
+        return await self._repository.save_message_review(
+            message_id=message_id,
+            verdict=cast(AnalyticsReviewVerdict | None, verdict),
+            comment=comment,
+            tags=tags,
+        )
+
+    async def cancel_unsent_notifications_for_message(self, message_id: str, *, reason: str) -> int:
+        return await self._repository.cancel_unsent_notifications_for_message(message_id, reason=reason)
 
 
-class NoopPrivateLeadBotHandler:
-    async def execute_callback(self, callback: TelegramBotCallback) -> object:
-        logger.info("Ignoring private lead callback because runtime handler is not configured")
-        return object()
+async def build_workers(*, timeout_seconds: int) -> list[TelegramBotWorker]:
+    session_factory = create_sessionmaker()
+    settings_repository = PostgresNotificationSettingsRepository(session_factory)
+    settings = await settings_repository.get_settings()
+    return _workers_from_settings(
+        settings=settings,
+        session_factory=session_factory,
+        timeout_seconds=timeout_seconds,
+    )
 
-    async def execute_message(self, message: TelegramBotPrivateMessage) -> object:
-        logger.info("Ignoring private lead message because runtime handler is not configured")
-        return object()
+
+def _workers_from_settings(
+    *,
+    settings: NotificationSettings,
+    session_factory: object,
+    timeout_seconds: int,
+) -> list[TelegramBotWorker]:
+    interactive_bot_ids = {
+        route.bot_id
+        for route in settings.routes
+        if route.enabled and route.delivery_mode == "interactive"
+    }
+    bots = [
+        bot
+        for bot in settings.bots
+        if bot.enabled and bot.token and bot.id in interactive_bot_ids
+    ]
+    workers: list[TelegramBotWorker] = []
+    for bot in bots:
+        handling_repository = PostgresLeadHandlingRepository(session_factory)  # type: ignore[arg-type]
+        sender = HttpTelegramMessageSender()
+        workers.append(
+            TelegramBotWorker(
+                bot_id=bot.id,
+                bot_token=bot.token or "",
+                update_client=HttpTelegramBotUpdateClient(),
+                offset_repository=LeadBotSessionOffsetRepository(handling_repository),
+                group_handler=HandleLeadActionCallback(
+                    handling_repository=handling_repository,
+                    review_repository=AnalyticsMessageReviewWriter(
+                        PostgresAnalyticsRepository(session_factory)  # type: ignore[arg-type]
+                    ),
+                    sender=sender,
+                    bot_token=bot.token or "",
+                ),
+                private_handler=HandleLeadBotPrivateMessage(
+                    handling_repository=handling_repository,
+                    sender=sender,
+                    bot_token=bot.token or "",
+                    bot_id=bot.id,
+                ),
+                timeout_seconds=timeout_seconds,
+            )
+        )
+    return workers
 
 
 async def main_async() -> None:
     parser = argparse.ArgumentParser(description="Poll Telegram Bot API updates for lead actions")
-    parser.add_argument("--bot-id", default="main_bot")
-    parser.add_argument("--bot-token", default="")
     parser.add_argument("--interval", type=float, default=2.0)
     parser.add_argument("--timeout", type=int, default=25)
     args = parser.parse_args()
-    if not args.bot_token:
-        logger.info("Lead bot worker has no --bot-token; exiting")
-        return
-    worker = TelegramBotWorker(
-        bot_id=args.bot_id,
-        bot_token=args.bot_token,
-        update_client=HttpTelegramBotUpdateClient(),
-        offset_repository=NoopLeadBotOffsetRepository(),
-        group_handler=NoopGroupLeadActionHandler(),
-        private_handler=NoopPrivateLeadBotHandler(),
-        timeout_seconds=args.timeout,
-    )
     while True:
-        await worker.run_once()
+        workers = await build_workers(timeout_seconds=args.timeout)
+        if not workers:
+            logger.info("Lead bot worker found no enabled interactive notification routes")
+        for worker in workers:
+            try:
+                await worker.run_once()
+            except Exception:
+                logger.exception("Lead bot worker poll failed")
         await asyncio.sleep(args.interval)
 
 

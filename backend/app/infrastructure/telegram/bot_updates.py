@@ -38,7 +38,8 @@ class TelegramBotUpdate:
 
     @classmethod
     def from_payload(cls, payload: dict[str, object]) -> TelegramBotUpdate:
-        update_id = int(payload["update_id"])
+        raw_update_id = payload["update_id"]
+        update_id = raw_update_id if isinstance(raw_update_id, int) else int(str(raw_update_id))
         callback_payload = payload.get("callback_query")
         if isinstance(callback_payload, dict):
             callback = _callback_from_payload(callback_payload)

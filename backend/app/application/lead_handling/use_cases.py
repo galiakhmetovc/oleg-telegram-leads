@@ -219,6 +219,9 @@ class HandleLeadBotPrivateMessage:
         await self._answer_private_callback(callback, text="Команда пока недоступна", show_alert=True)
 
     async def _open_private_card(self, callback: PrivateBotCallback) -> None:
+        if callback.source_message_id is None:
+            await self._answer_private_callback(callback, text="Лид не найден", show_alert=True)
+            return
         handling = await self._handling_repository.get_by_source_message_id(callback.source_message_id)
         if handling is None or handling.owner_telegram_user_id != callback.actor.telegram_user_id:
             await self._answer_private_callback(

@@ -160,6 +160,20 @@ services:
       migrate:
         condition: service_completed_successfully
 
+  lead-bot:
+    build:
+      context: ./backend
+    logging: *default-logging
+    command: python -m app.cli.telegram_bot_worker --interval 2 --timeout 25
+    environment:
+      PUR_DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-pur_leads}:${POSTGRES_PASSWORD:-pur_leads_dev_password}@postgres:5432/${POSTGRES_DB:-pur_leads_v2}
+      PUR_ENVIRONMENT: development
+    volumes:
+      - ./backend:/app
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
   frontend:
     build:
       context: ./frontend
