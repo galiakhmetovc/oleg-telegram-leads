@@ -822,6 +822,10 @@ git commit -m "feat: add telegram lead bot worker"
 - Test: `backend/tests/test_lead_handling_use_cases.py`
 - Test: `backend/tests/test_telegram_bot_worker.py`
 
+This MVP implements `/start` and `Мои лиды`. The spec's `Новые`, `В работе`,
+and `Закрытые` private filters are deferred until the base private workflow is
+working; they are filtered variants of `Мои лиды`, not separate infrastructure.
+
 - [ ] **Step 1: Write failing private-menu tests**
 
 ```python
@@ -895,9 +899,44 @@ async def test_my_leads_rows_open_private_lead_card() -> None:
     assert sender.sent[-1].reply_markup == _private_lead_card_keyboard(source_message_id)
 ```
 
+Add ownership protection:
+
+```python
+@pytest.mark.asyncio
+async def test_private_open_rejects_lead_owned_by_another_operator() -> None:
+    repository = InMemoryLeadHandlingRepository()
+    repository.add_owned_summary(
+        source_message_id=source_message_id,
+        owner_telegram_user_id="200",
+        source_chat_title="Aqara.ru | Чат",
+        text_preview="Нужен умный дом",
+        status="claimed",
+    )
+    sender = RecordingLeadBotSender()
+    handler = HandleLeadBotPrivateMessage(
+        handling_repository=repository,
+        sender=sender,
+        bot_token="token",
+    )
+
+    await handler.execute_callback(
+        PrivateBotCallback(
+            action="open",
+            source_message_id=source_message_id,
+            callback_query_id="cb2",
+            chat_id="100",
+            message_id=8,
+            actor=_actor("100", "manager"),
+        )
+    )
+
+    assert "Этот лид закреплен за другим оператором" in sender.callback_answers[-1].text
+    assert not sender.sent
+```
+
 - [ ] **Step 2: Run tests to verify they fail**
 
-Run: `cd backend && uv run pytest tests/test_lead_handling_use_cases.py::test_start_message_sends_private_menu tests/test_lead_handling_use_cases.py::test_my_leads_lists_only_owned_leads tests/test_lead_handling_use_cases.py::test_my_leads_rows_open_private_lead_card -q`
+Run: `cd backend && uv run pytest tests/test_lead_handling_use_cases.py::test_start_message_sends_private_menu tests/test_lead_handling_use_cases.py::test_my_leads_lists_only_owned_leads tests/test_lead_handling_use_cases.py::test_my_leads_rows_open_private_lead_card tests/test_lead_handling_use_cases.py::test_private_open_rejects_lead_owned_by_another_operator -q`
 
 Expected: FAIL because private message handler does not exist.
 
@@ -911,6 +950,10 @@ Handle:
 - `lh:open:<source_message_id>` callback: render a private lead card with text
   preview, source, source-message link when available, status, last comment, and
   action buttons for status/comment/source opening.
+- Before rendering a private card, load the handling row and require
+  `owner_telegram_user_id == actor.telegram_user_id`. If not, answer
+  `Этот лид закреплен за другим оператором` and do not expose lead text or
+  action buttons.
 - Plain text when no session state: send help/menu.
 
 Repository `list_for_owner` should join enough source-message/source-chat data for useful rows:
@@ -1006,9 +1049,53 @@ async def test_private_status_change_records_failed_event_when_group_edit_fails(
     assert repository.events[-1].payload["operation"] == "edit_group_card"
 ```
 
+Add ownership protection for mutation and follow-up comment text:
+
+```python
+@pytest.mark.asyncio
+async def test_private_status_change_rejects_lead_owned_by_another_operator() -> None:
+    repository.add_owned_summary(
+        source_message_id=source_message_id,
+        owner_telegram_user_id="200",
+        status="claimed",
+    )
+
+    await handler.execute_callback(
+        f"lh:status:{source_message_id}:waiting",
+        actor=_actor("100", "manager"),
+    )
+
+    assert repository.handling.status == "claimed"
+    assert "закреплен за другим оператором" in sender.callback_answers[-1].text
+```
+
+```python
+@pytest.mark.asyncio
+async def test_comment_text_rejects_lead_owned_by_another_operator() -> None:
+    repository.add_session_state(
+        bot_id="main_bot",
+        telegram_user_id="100",
+        state="awaiting_comment",
+        payload={"source_message_id": str(source_message_id)},
+    )
+    repository.add_owned_summary(
+        source_message_id=source_message_id,
+        owner_telegram_user_id="200",
+        status="claimed",
+    )
+
+    await handler.execute_message(
+        text="Комментарий чужому лиду",
+        actor=_actor("100", "manager"),
+    )
+
+    assert repository.handling.last_comment is None
+    assert "закреплен за другим оператором" in sender.sent[-1].text
+```
+
 - [ ] **Step 2: Run tests to verify they fail**
 
-Run: `cd backend && uv run pytest tests/test_lead_handling_use_cases.py::test_private_status_change_updates_handling_and_group_card tests/test_lead_handling_use_cases.py::test_comment_button_waits_for_next_message_and_saves_comment tests/test_lead_handling_use_cases.py::test_private_status_change_records_failed_event_when_group_edit_fails -q`
+Run: `cd backend && uv run pytest tests/test_lead_handling_use_cases.py::test_private_status_change_updates_handling_and_group_card tests/test_lead_handling_use_cases.py::test_comment_button_waits_for_next_message_and_saves_comment tests/test_lead_handling_use_cases.py::test_private_status_change_records_failed_event_when_group_edit_fails tests/test_lead_handling_use_cases.py::test_private_status_change_rejects_lead_owned_by_another_operator tests/test_lead_handling_use_cases.py::test_comment_text_rejects_lead_owned_by_another_operator -q`
 
 Expected: FAIL because status/comment callbacks are not implemented.
 
@@ -1032,6 +1119,17 @@ payload={"source_message_id": str(source_message_id)}
 ```
 
 On next private text, save comment event and clear session.
+
+Ownership rule:
+
+- For every private `open`, `status`, `comment`, and awaiting-comment text
+  action, load the handling row and require
+  `owner_telegram_user_id == actor.telegram_user_id`.
+- If the lead is missing or owned by another operator, answer/send
+  `Этот лид закреплен за другим оператором` and do not reveal text, mutate
+  status, save comment, or edit the group card.
+- Keep group callbacks separate: `Взял` is allowed on unowned leads, and
+  `Не лид` remains allowed from the sales group according to Task 5.
 
 After each status/comment, edit the original sales-group message if `sales_chat_id` and `sales_chat_message_id` are stored.
 
