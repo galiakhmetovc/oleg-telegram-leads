@@ -277,6 +277,37 @@ class PostgresLeadHandlingRepository:
             )
             await session.commit()
 
+    async def record_event(
+        self,
+        *,
+        source_message_id: UUID,
+        event_type: str,
+        actor: LeadHandlingActor,
+        payload: dict[str, object],
+    ) -> LeadHandlingEvent:
+        now = datetime.now(UTC)
+        async with self._session_factory() as session:
+            await _ensure_handling(
+                session,
+                source_message_id=source_message_id,
+                notification_outbox_id=None,
+                sales_chat_id=None,
+                sales_chat_message_id=None,
+                now=now,
+            )
+            row = await _locked_handling_row(session, source_message_id)
+            handling = _handling_from_row(row)
+            event = await _append_event(
+                session,
+                handling=handling,
+                event_type=event_type,  # type: ignore[arg-type]
+                actor=actor,
+                payload=payload,
+                created_at=now,
+            )
+            await session.commit()
+        return event
+
 
 async def _ensure_handling(
     session: AsyncSession,
