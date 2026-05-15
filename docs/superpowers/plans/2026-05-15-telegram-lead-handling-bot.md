@@ -547,6 +547,9 @@ Add:
 async def test_not_lead_callback_writes_review_and_edits_group_message() -> None:
     ...
     assert review_repo.saved[source_message_id].verdict == "not_lead"
+    assert review_repo.cancelled == [
+        (str(source_message_id), "lead marked not_lead from telegram bot")
+    ]
 ```
 
 Add Telegram API failure coverage:
@@ -605,7 +608,10 @@ class LeadActionCallback:
 Behavior:
 
 - `claim`: call `LeadHandlingRepository.claim`, answer callback, edit group card with current owner.
-- `notlead`: call `LeadHandlingRepository.mark_not_lead`, save `message_reviews` verdict `not_lead`, answer callback, edit group card.
+- `notlead`: call `LeadHandlingRepository.mark_not_lead`, save
+  `message_reviews` verdict `not_lead`, call
+  `cancel_unsent_notifications_for_message` with reason
+  `lead marked not_lead from telegram bot`, answer callback, edit group card.
 - Existing owner conflict: answer callback with `Уже взял @owner`, no edit.
 - Telegram API failures from `answer_callback_query` and `edit_text` must not
   roll back the saved handling state. Catch sender exceptions, append a
@@ -682,6 +688,64 @@ async def test_worker_dispatches_callback_and_advances_offset():
     assert offsets.offsets["main_bot"] == 11
 ```
 
+Test private callback and message dispatch:
+
+```python
+@pytest.mark.asyncio
+async def test_worker_dispatches_private_callbacks_to_private_handler():
+    client = FakeBotUpdateClient([
+        _callback_update(
+            update_id=20,
+            chat_id=100,
+            data="lh:my_leads",
+            chat_type="private",
+        ),
+        _callback_update(
+            update_id=21,
+            chat_id=100,
+            data=f"lh:open:{source_message_id}",
+            chat_type="private",
+        ),
+        _callback_update(
+            update_id=22,
+            chat_id=100,
+            data=f"lh:status:{source_message_id}:waiting",
+            chat_type="private",
+        ),
+        _callback_update(
+            update_id=23,
+            chat_id=100,
+            data=f"lh:comment:{source_message_id}",
+            chat_type="private",
+        ),
+    ])
+    private_handler = RecordingPrivateHandler()
+    worker = TelegramBotWorker(..., private_handler=private_handler)
+
+    await worker.run_once()
+
+    assert [callback.action for callback in private_handler.callbacks] == [
+        "my_leads",
+        "open",
+        "status",
+        "comment",
+    ]
+```
+
+```python
+@pytest.mark.asyncio
+async def test_worker_dispatches_private_text_to_private_handler():
+    client = FakeBotUpdateClient([
+        _private_message_update(update_id=30, chat_id=100, text="Написал, жду ответа")
+    ])
+    private_handler = RecordingPrivateHandler()
+    worker = TelegramBotWorker(..., private_handler=private_handler)
+
+    await worker.run_once()
+
+    assert private_handler.messages[-1].text == "Написал, жду ответа"
+```
+
 - [ ] **Step 2: Run tests to verify they fail**
 
 Run: `cd backend && uv run pytest tests/test_telegram_bot_worker.py -q`
@@ -701,7 +765,14 @@ Use Bot API `getUpdates` with `allowed_updates=["callback_query", "message"]`.
 - loads notification settings;
 - finds enabled bots used by interactive routes;
 - polls each bot;
-- dispatches callback queries to `HandleLeadActionCallback`;
+- dispatches group callback queries with `lh:claim:*` and `lh:notlead:*` to
+  `HandleLeadActionCallback`;
+- dispatches private callback queries with `lh:my_leads`, `lh:open:*`,
+  `lh:status:*:*`, and `lh:comment:*` to `HandleLeadBotPrivateMessage`;
+- dispatches private text messages, including `/start` and awaiting-comment
+  text, to `HandleLeadBotPrivateMessage`;
+- ignores non-private ordinary messages so the bot does not treat sales group
+  discussion as comments;
 - stores update offsets in repository/session state.
 
 Add persistence for offsets either in `lead_bot_sessions` with reserved `telegram_user_id = "__offset__"` or a dedicated table if Task 1 created one. Prefer dedicated table if added in migration; otherwise keep a focused `lead_bot_sessions` offset row and document it in code.
@@ -788,6 +859,7 @@ async def test_my_leads_rows_open_private_lead_card() -> None:
         owner_telegram_user_id="100",
         source_chat_title="Aqara.ru | Чат",
         text_preview="Нужен умный дом в квартире",
+        telegram_message_url="https://t.me/aqararuchat/128974",
         status="claimed",
     )
     sender = RecordingLeadBotSender()
@@ -819,6 +891,7 @@ async def test_my_leads_rows_open_private_lead_card() -> None:
 
     assert sender.sent[-2].reply_markup["inline_keyboard"][0][0]["callback_data"] == f"lh:open:{source_message_id}"
     assert "Нужен умный дом" in sender.sent[-1].text
+    assert "https://t.me/aqararuchat/128974" in sender.sent[-1].text
     assert sender.sent[-1].reply_markup == _private_lead_card_keyboard(source_message_id)
 ```
 
@@ -836,13 +909,16 @@ Handle:
 - `Мои лиды` button/callback: list leads where owner is actor. Each row must be
   an inline button using `lh:open:<source_message_id>`.
 - `lh:open:<source_message_id>` callback: render a private lead card with text
-  preview, source, status, last comment, and action buttons for status/comment.
+  preview, source, source-message link when available, status, last comment, and
+  action buttons for status/comment/source opening.
 - Plain text when no session state: send help/menu.
 
 Repository `list_for_owner` should join enough source-message/source-chat data for useful rows:
 
 - source chat title;
 - source message text preview;
+- source-message Telegram URL, when it can be derived from source chat and
+  Telegram message id;
 - status;
 - updated_at.
 
@@ -860,9 +936,15 @@ def _private_lead_card_keyboard(source_message_id: UUID) -> dict[str, Any]:
                 {"text": "Закрыт", "callback_data": f"lh:status:{source_message_id}:closed"},
                 {"text": "Комментарий", "callback_data": f"lh:comment:{source_message_id}"},
             ],
+            [
+                {"text": "Открыть источник", "url": "<telegram_message_url>"},
+            ],
         ]
     }
 ```
+
+Omit the `Открыть источник` row when `telegram_message_url` is unavailable;
+do not create a callback button that cannot open anything.
 
 - [ ] **Step 4: Run tests**
 
