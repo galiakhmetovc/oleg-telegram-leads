@@ -7,6 +7,7 @@ from uuid import UUID
 
 
 NotificationMatchMode = Literal["all", "any"]
+NotificationDeliveryMode = Literal["batched", "interactive"]
 NotificationOutboxStatus = Literal["pending", "sending", "sent", "failed", "cancelled"]
 
 
@@ -74,6 +75,7 @@ class NotificationRoute:
     match_mode: NotificationMatchMode
     conditions: NotificationRouteConditions
     message_template: str
+    delivery_mode: NotificationDeliveryMode = "batched"
 
 
 @dataclass(frozen=True)

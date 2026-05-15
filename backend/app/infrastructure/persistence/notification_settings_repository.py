@@ -97,6 +97,7 @@ def _route_from_dict(data: dict[str, Any]) -> NotificationRoute:
         bot_id=str(data["bot_id"]),
         chat_id=str(data["chat_id"]),
         match_mode="any" if data.get("match_mode") == "any" else "all",
+        delivery_mode="interactive" if data.get("delivery_mode") == "interactive" else "batched",
         conditions=_conditions_from_dict(data.get("conditions") or {}),
         message_template=str(data.get("message_template", "")),
     )
@@ -145,6 +146,7 @@ def _route_to_dict(route: NotificationRoute) -> dict[str, Any]:
         "bot_id": route.bot_id,
         "chat_id": route.chat_id,
         "match_mode": route.match_mode,
+        "delivery_mode": route.delivery_mode,
         "conditions": _conditions_to_dict(route.conditions),
         "message_template": route.message_template,
     }

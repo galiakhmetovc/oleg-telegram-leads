@@ -56,6 +56,7 @@ class NotificationRouteSnapshot(BaseModel):
     bot_id: str
     chat_id: str
     match_mode: Literal["all", "any"]
+    delivery_mode: Literal["batched", "interactive"] = "batched"
     conditions: NotificationRouteConditionsSnapshot
     message_template: str
 
@@ -93,6 +94,7 @@ class NotificationRouteUpdate(BaseModel):
     bot_id: str
     chat_id: str
     match_mode: Literal["all", "any"] = "all"
+    delivery_mode: Literal["batched", "interactive"] = "batched"
     conditions: NotificationRouteConditionsUpdate = Field(default_factory=NotificationRouteConditionsUpdate)
     message_template: str = ""
 
@@ -227,6 +229,7 @@ def settings_from_update(payload: NotificationSettingsUpdate) -> NotificationSet
                 bot_id=item.bot_id,
                 chat_id=item.chat_id,
                 match_mode=item.match_mode,
+                delivery_mode=item.delivery_mode,
                 conditions=conditions_from_update(item.conditions),
                 message_template=item.message_template,
             )
@@ -288,6 +291,7 @@ def route_snapshot(route: NotificationRoute) -> NotificationRouteSnapshot:
         bot_id=route.bot_id,
         chat_id=route.chat_id,
         match_mode=route.match_mode,
+        delivery_mode=route.delivery_mode,
         conditions=NotificationRouteConditionsSnapshot(**route.conditions.__dict__),
         message_template=route.message_template,
     )

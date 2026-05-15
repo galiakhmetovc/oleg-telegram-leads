@@ -100,6 +100,7 @@ def test_get_settings_contains_masked_notification_bots_chats_and_routes() -> No
                     "bot_id": "main_bot",
                     "chat_id": "sales_chat",
                     "match_mode": "all",
+                    "delivery_mode": "interactive",
                     "conditions": {"is_lead": True, "score_min": 80, "review_lanes": ["direct_pur_lead"]},
                     "message_template": "Лид {score}: {text}",
                 }
@@ -116,9 +117,55 @@ def test_get_settings_contains_masked_notification_bots_chats_and_routes() -> No
     assert notifications["bots"][0]["has_token"] is True
     assert notifications["bots"][0]["token_masked"] == "123456:***CRET"
     assert notifications["chats"][0]["telegram_chat_id"] == "-100123"
+    assert notifications["routes"][0]["delivery_mode"] == "interactive"
     assert notifications["routes"][0]["conditions"]["score_min"] == 80
     assert response.json()["telegram_ingestion"] == {"accounts": [], "chats": []}
     assert "ABCDEFSECRET" not in response.text
+
+
+def test_notification_route_delivery_mode_defaults_to_batched() -> None:
+    repository = InMemoryNotificationSettingsRepository()
+    client = _client_with_notifications(repository)
+    response = client.put(
+        "/api/v1/settings/notifications",
+        json={
+            "bots": [
+                {
+                    "id": "main_bot",
+                    "name": "Основной бот",
+                    "enabled": True,
+                    "token": "123456:ABCDEFSECRET",
+                }
+            ],
+            "chats": [
+                {
+                    "id": "sales_chat",
+                    "name": "Продажи",
+                    "enabled": True,
+                    "telegram_chat_id": "-100123",
+                }
+            ],
+            "routes": [
+                {
+                    "id": "hot_leads",
+                    "name": "Горячие лиды",
+                    "enabled": True,
+                    "priority": 100,
+                    "bot_id": "main_bot",
+                    "chat_id": "sales_chat",
+                    "match_mode": "all",
+                    "conditions": {"is_lead": True},
+                    "message_template": "Лид {score}: {text}",
+                }
+            ],
+        },
+    )
+    assert response.status_code == 200
+
+    response = client.get("/api/v1/settings")
+
+    assert response.status_code == 200
+    assert response.json()["notifications"]["routes"][0]["delivery_mode"] == "batched"
 
 
 def test_updates_notification_settings_and_preserves_existing_bot_tokens() -> None:
