@@ -5,6 +5,7 @@ import asyncio
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from typing import Any
 from uuid import UUID, uuid4
 
 from app.application.notifications.batching import TELEGRAM_SEND_MESSAGE_CHAR_LIMIT
@@ -213,11 +214,57 @@ class FlushNotificationOutbox:
         settings = await self._settings_repository.get_settings()
         bots = {bot.id: bot for bot in settings.bots if bot.enabled and bot.token}
         chats = {chat.id: chat for chat in settings.chats if chat.enabled}
+        routes = {route.id: route for route in settings.routes}
         sent: list[TelegramSendResult] = []
         sent_once_by_chat: set[str] = set()
         handled_item_ids: set[UUID] = set()
+        batched_pending: list[NotificationOutboxItem] = []
 
-        for group in _group_pending_items(pending):
+        for item in pending:
+            route = routes.get(item.route_id)
+            if route is None or route.delivery_mode != "interactive":
+                batched_pending.append(item)
+                continue
+            bot = bots.get(item.bot_id)
+            chat = chats.get(item.chat_id)
+            if bot is None or chat is None:
+                await self._outbox_repository.mark_failed(
+                    [item.id],
+                    error="Telegram bot or chat is not configured",
+                )
+                handled_item_ids.add(item.id)
+                continue
+            if item.source_message_id is None:
+                await self._outbox_repository.mark_failed(
+                    [item.id],
+                    error="Interactive notification requires source_message_id",
+                )
+                handled_item_ids.add(item.id)
+                continue
+            if chat.id in sent_once_by_chat and self._min_chat_send_interval_seconds > 0:
+                await self._sleep(self._min_chat_send_interval_seconds)
+            try:
+                sent.append(
+                    await self._sender.send_text(
+                        bot_token=bot.token or "",
+                        chat_id=chat.telegram_chat_id,
+                        text=item.text,
+                        reply_markup=_lead_action_keyboard(item.source_message_id),
+                    )
+                )
+            except Exception as exc:
+                await self._outbox_repository.mark_failed(
+                    [item.id],
+                    error=str(exc) or type(exc).__name__,
+                )
+                handled_item_ids.add(item.id)
+                logger.exception("Failed to flush interactive notification")
+                continue
+            await self._outbox_repository.mark_sent([item.id], sent_at=current_time)
+            handled_item_ids.add(item.id)
+            sent_once_by_chat.add(chat.id)
+
+        for group in _group_pending_items(batched_pending):
             due = current_time - min(item.created_at for item in group) >= self._flush_interval
             batches = pack_notification_batches(
                 group,
@@ -302,6 +349,17 @@ def _group_pending_items(
     for item in items:
         groups.setdefault((item.bot_id, item.chat_id), []).append(item)
     return list(groups.values())
+
+
+def _lead_action_keyboard(source_message_id: UUID) -> dict[str, Any]:
+    return {
+        "inline_keyboard": [
+            [
+                {"text": "Взял", "callback_data": f"lh:claim:{source_message_id}"},
+                {"text": "Не лид", "callback_data": f"lh:notlead:{source_message_id}"},
+            ]
+        ]
+    }
 
 
 def _find_enabled_bot(settings: NotificationSettings, bot_id: str) -> TelegramBot:
