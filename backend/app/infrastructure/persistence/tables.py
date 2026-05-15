@@ -208,6 +208,75 @@ notification_outbox = sa.Table(
     sa.Column("sent_at", sa.DateTime(timezone=True), nullable=True),
 )
 
+lead_handlings = sa.Table(
+    "lead_handlings",
+    metadata,
+    sa.Column("id", UUID(as_uuid=True), primary_key=True),
+    sa.Column(
+        "source_message_id",
+        UUID(as_uuid=True),
+        sa.ForeignKey("telegram_source_messages.id", ondelete="CASCADE"),
+        nullable=False,
+    ),
+    sa.Column(
+        "notification_outbox_id",
+        UUID(as_uuid=True),
+        sa.ForeignKey("notification_outbox.id", ondelete="SET NULL"),
+        nullable=True,
+    ),
+    sa.Column("sales_chat_id", sa.Text(), nullable=True),
+    sa.Column("sales_chat_message_id", sa.BigInteger(), nullable=True),
+    sa.Column("status", sa.Text(), nullable=False),
+    sa.Column("owner_telegram_user_id", sa.Text(), nullable=True),
+    sa.Column("owner_telegram_username", sa.Text(), nullable=True),
+    sa.Column("owner_display_name", sa.Text(), nullable=True),
+    sa.Column("last_comment", sa.Text(), nullable=True),
+    sa.Column("claimed_at", sa.DateTime(timezone=True), nullable=True),
+    sa.Column("closed_at", sa.DateTime(timezone=True), nullable=True),
+    sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
+    sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
+    sa.UniqueConstraint("source_message_id", name="uq_lead_handlings_source_message"),
+    sa.CheckConstraint(
+        "status IN ('new', 'claimed', 'contacted', 'waiting', 'closed', 'not_lead')",
+        name="ck_lead_handlings_status",
+    ),
+)
+
+lead_handling_events = sa.Table(
+    "lead_handling_events",
+    metadata,
+    sa.Column("id", UUID(as_uuid=True), primary_key=True),
+    sa.Column(
+        "lead_handling_id",
+        UUID(as_uuid=True),
+        sa.ForeignKey("lead_handlings.id", ondelete="CASCADE"),
+        nullable=False,
+    ),
+    sa.Column(
+        "source_message_id",
+        UUID(as_uuid=True),
+        sa.ForeignKey("telegram_source_messages.id", ondelete="CASCADE"),
+        nullable=False,
+    ),
+    sa.Column("actor_telegram_user_id", sa.Text(), nullable=True),
+    sa.Column("actor_telegram_username", sa.Text(), nullable=True),
+    sa.Column("actor_display_name", sa.Text(), nullable=True),
+    sa.Column("event_type", sa.Text(), nullable=False),
+    sa.Column("payload", JSONB(), nullable=False),
+    sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
+)
+
+lead_bot_sessions = sa.Table(
+    "lead_bot_sessions",
+    metadata,
+    sa.Column("bot_id", sa.Text(), nullable=False),
+    sa.Column("telegram_user_id", sa.Text(), nullable=False),
+    sa.Column("state", sa.Text(), nullable=False),
+    sa.Column("payload", JSONB(), nullable=False),
+    sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
+    sa.PrimaryKeyConstraint("bot_id", "telegram_user_id", name="pk_lead_bot_sessions"),
+)
+
 analytics_runs = sa.Table(
     "analytics_runs",
     metadata,
