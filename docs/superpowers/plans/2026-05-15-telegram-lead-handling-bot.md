@@ -549,6 +549,37 @@ async def test_not_lead_callback_writes_review_and_edits_group_message() -> None
     assert review_repo.saved[source_message_id].verdict == "not_lead"
 ```
 
+Add Telegram API failure coverage:
+
+```python
+@pytest.mark.asyncio
+async def test_claim_callback_records_failed_event_when_group_edit_fails() -> None:
+    handling_repo = InMemoryLeadHandlingRepository()
+    sender = FailingLeadBotSender(fail_edit=True)
+
+    result = await HandleLeadActionCallback(
+        handling_repository=handling_repo,
+        review_repository=InMemoryMessageReviewRepository(),
+        sender=sender,
+        bot_token="token",
+    ).execute(
+        LeadActionCallback(
+            action="claim",
+            source_message_id=source_message_id,
+            callback_query_id="cb1",
+            chat_id="-1001",
+            message_id=99,
+            actor=_actor("100", "manager"),
+            current_text="Лид ПУР\n\nСтатус: Новый",
+        )
+    )
+
+    assert result.status == "claimed"
+    assert handling_repo.events[-1].event_type == "callback_failed"
+    assert "editMessageText" in handling_repo.events[-1].payload["error"]
+    assert sender.callback_answers[-1].callback_query_id == "cb1"
+```
+
 - [ ] **Step 2: Run tests to verify they fail**
 
 Run: `cd backend && uv run pytest tests/test_lead_handling_use_cases.py -q`
@@ -576,6 +607,13 @@ Behavior:
 - `claim`: call `LeadHandlingRepository.claim`, answer callback, edit group card with current owner.
 - `notlead`: call `LeadHandlingRepository.mark_not_lead`, save `message_reviews` verdict `not_lead`, answer callback, edit group card.
 - Existing owner conflict: answer callback with `Уже взял @owner`, no edit.
+- Telegram API failures from `answer_callback_query` and `edit_text` must not
+  roll back the saved handling state. Catch sender exceptions, append a
+  `callback_failed` event with `operation`, `chat_id`, `message_id`,
+  `callback_query_id`, and `error`, then log the exception.
+- If `answer_callback_query` fails before or after the state change, still try to
+  edit the group message when it is safe to do so; if both fail, record one
+  `callback_failed` event per failed operation.
 
 Define a small `MessageReviewWriter` port instead of depending directly on `PostgresAnalyticsRepository`:
 
@@ -739,9 +777,54 @@ async def test_my_leads_lists_only_owned_leads() -> None:
     assert "Other manager lead" not in sender.sent[-1].text
 ```
 
+Add a card-opening test so the list has a usable next step:
+
+```python
+@pytest.mark.asyncio
+async def test_my_leads_rows_open_private_lead_card() -> None:
+    repository = InMemoryLeadHandlingRepository()
+    repository.add_owned_summary(
+        source_message_id=source_message_id,
+        owner_telegram_user_id="100",
+        source_chat_title="Aqara.ru | Чат",
+        text_preview="Нужен умный дом в квартире",
+        status="claimed",
+    )
+    sender = RecordingLeadBotSender()
+    handler = HandleLeadBotPrivateMessage(
+        handling_repository=repository,
+        sender=sender,
+        bot_token="token",
+    )
+
+    await handler.execute_callback(
+        PrivateBotCallback(
+            action="my_leads",
+            callback_query_id="cb1",
+            chat_id="100",
+            message_id=7,
+            actor=_actor("100", "manager"),
+        )
+    )
+    await handler.execute_callback(
+        PrivateBotCallback(
+            action="open",
+            source_message_id=source_message_id,
+            callback_query_id="cb2",
+            chat_id="100",
+            message_id=8,
+            actor=_actor("100", "manager"),
+        )
+    )
+
+    assert sender.sent[-2].reply_markup["inline_keyboard"][0][0]["callback_data"] == f"lh:open:{source_message_id}"
+    assert "Нужен умный дом" in sender.sent[-1].text
+    assert sender.sent[-1].reply_markup == _private_lead_card_keyboard(source_message_id)
+```
+
 - [ ] **Step 2: Run tests to verify they fail**
 
-Run: `cd backend && uv run pytest tests/test_lead_handling_use_cases.py::test_start_message_sends_private_menu tests/test_lead_handling_use_cases.py::test_my_leads_lists_only_owned_leads -q`
+Run: `cd backend && uv run pytest tests/test_lead_handling_use_cases.py::test_start_message_sends_private_menu tests/test_lead_handling_use_cases.py::test_my_leads_lists_only_owned_leads tests/test_lead_handling_use_cases.py::test_my_leads_rows_open_private_lead_card -q`
 
 Expected: FAIL because private message handler does not exist.
 
@@ -750,7 +833,10 @@ Expected: FAIL because private message handler does not exist.
 Handle:
 
 - `/start`: send menu with inline keyboard `Мои лиды`.
-- `Мои лиды` button/callback: list leads where owner is actor.
+- `Мои лиды` button/callback: list leads where owner is actor. Each row must be
+  an inline button using `lh:open:<source_message_id>`.
+- `lh:open:<source_message_id>` callback: render a private lead card with text
+  preview, source, status, last comment, and action buttons for status/comment.
 - Plain text when no session state: send help/menu.
 
 Repository `list_for_owner` should join enough source-message/source-chat data for useful rows:
@@ -759,6 +845,24 @@ Repository `list_for_owner` should join enough source-message/source-chat data f
 - source message text preview;
 - status;
 - updated_at.
+
+Private lead card keyboard:
+
+```python
+def _private_lead_card_keyboard(source_message_id: UUID) -> dict[str, Any]:
+    return {
+        "inline_keyboard": [
+            [
+                {"text": "Написал", "callback_data": f"lh:status:{source_message_id}:contacted"},
+                {"text": "Ждет", "callback_data": f"lh:status:{source_message_id}:waiting"},
+            ],
+            [
+                {"text": "Закрыт", "callback_data": f"lh:status:{source_message_id}:closed"},
+                {"text": "Комментарий", "callback_data": f"lh:comment:{source_message_id}"},
+            ],
+        ]
+    }
+```
 
 - [ ] **Step 4: Run tests**
 
@@ -806,9 +910,23 @@ async def test_comment_button_waits_for_next_message_and_saves_comment() -> None
     assert repository.handling.last_comment == "Написал, жду ответа"
 ```
 
+Add private send/edit failure coverage:
+
+```python
+@pytest.mark.asyncio
+async def test_private_status_change_records_failed_event_when_group_edit_fails() -> None:
+    sender = FailingLeadBotSender(fail_group_edit=True)
+
+    await handler.execute_callback(f"lh:status:{source_message_id}:waiting")
+
+    assert repository.handling.status == "waiting"
+    assert repository.events[-1].event_type == "callback_failed"
+    assert repository.events[-1].payload["operation"] == "edit_group_card"
+```
+
 - [ ] **Step 2: Run tests to verify they fail**
 
-Run: `cd backend && uv run pytest tests/test_lead_handling_use_cases.py::test_private_status_change_updates_handling_and_group_card tests/test_lead_handling_use_cases.py::test_comment_button_waits_for_next_message_and_saves_comment -q`
+Run: `cd backend && uv run pytest tests/test_lead_handling_use_cases.py::test_private_status_change_updates_handling_and_group_card tests/test_lead_handling_use_cases.py::test_comment_button_waits_for_next_message_and_saves_comment tests/test_lead_handling_use_cases.py::test_private_status_change_records_failed_event_when_group_edit_fails -q`
 
 Expected: FAIL because status/comment callbacks are not implemented.
 
@@ -816,7 +934,9 @@ Expected: FAIL because status/comment callbacks are not implemented.
 
 Add callback data:
 
-- `lh:open:<source_message_id>` - private lead card.
+- `lh:open:<source_message_id>` - private lead card. This callback is
+  implemented in Task 7 and must remain wired when status/comment actions are
+  added.
 - `lh:status:<source_message_id>:contacted`
 - `lh:status:<source_message_id>:waiting`
 - `lh:status:<source_message_id>:closed`
@@ -832,6 +952,17 @@ payload={"source_message_id": str(source_message_id)}
 On next private text, save comment event and clear session.
 
 After each status/comment, edit the original sales-group message if `sales_chat_id` and `sales_chat_message_id` are stored.
+
+Telegram API failure behavior:
+
+- If private `send_text` fails, record `callback_failed` or `message_failed`
+  with `operation="send_private_message"` and log the exception.
+- If private `edit_text` fails, record `callback_failed` with
+  `operation="edit_private_message"` and log the exception.
+- If group-card edit fails after status/comment save, keep the saved state and
+  record `callback_failed` with `operation="edit_group_card"`.
+- Never retry in a tight loop inside the callback handler. Let the operator
+  press again or use a future repair tool.
 
 - [ ] **Step 4: Run tests**
 
