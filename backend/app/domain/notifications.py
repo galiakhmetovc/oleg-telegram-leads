@@ -79,11 +79,22 @@ class NotificationRoute:
 
 
 @dataclass(frozen=True)
+class NotificationSummarySettings:
+    enabled: bool
+    bot_id: str
+    chat_id: str
+    timezone: str = "Europe/Moscow"
+    day_start_hour: int = 9
+    night_start_hour: int = 21
+
+
+@dataclass(frozen=True)
 class NotificationSettings:
     bots: list[TelegramBot]
     chats: list[TelegramChat]
     routes: list[NotificationRoute]
     updated_at: datetime | None
+    summary: NotificationSummarySettings | None = None
 
 
 @dataclass(frozen=True)

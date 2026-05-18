@@ -113,6 +113,17 @@ async def create_golden_example_from_message(
     return _golden_example_response(example)
 
 
+@router.delete("/{example_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_golden_example(
+    example_id: UUID,
+    repository: PostgresGoldenExamplesRepository = Depends(get_golden_examples_repository),
+) -> Response:
+    deleted = await repository.delete_example(example_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="golden example not found")
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
 @router.post("/{example_id}/run", response_model=GoldenExampleRunResponse)
 async def run_golden_example(
     example_id: UUID,

@@ -10,6 +10,24 @@ AnalyticsReviewVerdict = Literal["lead", "not_lead", "uncertain", "noise"]
 
 
 @dataclass(frozen=True)
+class AnalyticsCandidateLlmSummary:
+    processed: bool
+    latest_run_id: str | None = None
+    status: str | None = None
+    verdict: str | None = None
+    confidence: float | None = None
+    recommendation: str | None = None
+    agrees_with_rule_engine: bool | None = None
+    model: str | None = None
+    route_id: str | None = None
+    attempts: int | None = None
+    has_error: bool = False
+    error: str | None = None
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+
+
+@dataclass(frozen=True)
 class AnalyticsRun:
     id: UUID
     name: str
@@ -56,16 +74,34 @@ class AnalyticsCandidate:
     reasons: list[dict[str, Any]]
     domain_signals: list[dict[str, Any]]
     facts: list[dict[str, Any]]
+    source_type: str = "telegram"
     is_lead: bool = False
+    message_date: datetime | None = None
     received_at: datetime | None = None
+    sender_id: str | None = None
+    sender_username: str | None = None
+    source_account_id: str | None = None
     source_chat_id: str | None = None
     source_chat_title: str | None = None
+    source_input_ref: str | None = None
+    source_chat_status: str | None = None
+    source_chat_enabled: bool | None = None
+    source_chat_last_message_id: int | None = None
+    source_chat_last_error: str | None = None
     telegram_chat_id: str | None = None
     telegram_message_id: int | None = None
     telegram_message_url: str | None = None
     app_message_url: str | None = None
     testing_url: str | None = None
     enrichment_job_id: str | None = None
+    enrichment_status: str | None = None
+    enrichment_created_at: datetime | None = None
+    enrichment_started_at: datetime | None = None
+    enrichment_finished_at: datetime | None = None
+    enrichment_updated_at: datetime | None = None
+    enrichment_error: dict[str, Any] | None = None
+    raw_payload: dict[str, Any] = field(default_factory=dict)
+    llm: AnalyticsCandidateLlmSummary | None = None
     review: AnalyticsMessageReview | None = None
 
 

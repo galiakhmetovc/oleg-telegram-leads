@@ -1,11 +1,11 @@
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, waitForElementToBeRemoved, within } from "@testing-library/react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
 import { App } from "./App";
 
 const originalScrollIntoView = window.HTMLElement.prototype.scrollIntoView;
 const defaultRouteMessageTemplate = [
-  "Лид ПУР",
+  "Лид",
   "",
   "Оценка: {score} ({temperature})",
   "Очередь: {review_lane_label}",
@@ -69,15 +69,46 @@ afterEach(() => {
   window.history.replaceState(null, "", "/");
 });
 
-test("opens analytics by default and renders text testing workspace", async () => {
+function openWorkspaceSection(sectionName: "Очередь" | "Проверка" | "Конструктор") {
+  const mainNav = screen.getByRole("tablist", { name: "Основная навигация" });
+  const workspaceTab = within(mainNav).getByRole("tab", { name: "Рабочее место" });
+  if (workspaceTab.getAttribute("aria-selected") !== "true") {
+    fireEvent.click(workspaceTab);
+  }
+  const workspaceNav = screen.getByRole("tablist", { name: "Разделы рабочего места" });
+  fireEvent.click(within(workspaceNav).getByRole("tab", { name: sectionName }));
+}
+
+test("opens the operator workspace by default and keeps testing inside it", async () => {
   render(<App />);
 
-  expect(await screen.findByRole("heading", { name: "Аналитика лидов" })).toBeInTheDocument();
+  expect(await screen.findByRole("heading", { name: "Очередь сообщений" })).toBeInTheDocument();
   expect(screen.getByText("Нет данных аналитики. Подключите Telegram-источники или импортируйте тестовый batch.")).toBeInTheDocument();
-  fireEvent.click(screen.getByRole("tab", { name: "Тестирование" }));
+  const mainNav = screen.getByRole("tablist", { name: "Основная навигация" });
+  expect(within(mainNav).getByRole("tab", { name: "Рабочее место" })).toHaveAttribute("aria-selected", "true");
+  expect(within(mainNav).queryByRole("tab", { name: "Тестирование" })).not.toBeInTheDocument();
+  expect(within(mainNav).queryByRole("tab", { name: "Конструктор" })).not.toBeInTheDocument();
+
+  const workspaceNav = screen.getByRole("tablist", { name: "Разделы рабочего места" });
+  fireEvent.click(within(workspaceNav).getByRole("tab", { name: "Проверка" }));
 
   expect(screen.getByLabelText("Произвольный текст")).toBeInTheDocument();
   expect(screen.getByRole("button", { name: /запустить обогащение/i })).toBeInTheDocument();
+});
+
+test("shows review as a separate top-level screen after the workspace", async () => {
+  render(<App />);
+
+  expect(await screen.findByRole("heading", { name: "Очередь сообщений" })).toBeInTheDocument();
+  const mainNav = screen.getByRole("tablist", { name: "Основная навигация" });
+  const tabNames = within(mainNav).getAllByRole("tab").map((tab) => tab.textContent ?? "");
+  expect(tabNames.indexOf("Разбор")).toBe(tabNames.indexOf("Рабочее место") + 1);
+
+  fireEvent.click(within(mainNav).getByRole("tab", { name: "Разбор" }));
+
+  expect(window.location.pathname).toBe("/review");
+  expect(await screen.findByRole("heading", { name: "Разбор сообщения" })).toBeInTheDocument();
+  expect(screen.getByText(/Выберите запись в очереди/i)).toBeInTheDocument();
 });
 
 test("uses scrollable top navigation for narrow screens", () => {
@@ -88,15 +119,92 @@ test("uses scrollable top navigation for narrow screens", () => {
   expect(tabList.closest(".MuiTabs-scroller")).toHaveClass("MuiTabs-scrollableX");
 });
 
-test("opens the rule configurator from the top navigation", async () => {
+test("marks the redesigned workspace as the main operator area", async () => {
   render(<App />);
 
-  fireEvent.click(screen.getByRole("tab", { name: "Конфигуратор" }));
+  expect(await screen.findByRole("main", { name: "Рабочая область" })).toHaveClass("workspace");
+});
 
-  expect(await screen.findByRole("heading", { name: "Rule IDE" })).toBeInTheDocument();
-  expect(screen.getByText("Конфигуратор правил")).toBeInTheDocument();
+test("shows constructor inside workspace and keeps direct route working", async () => {
+  window.history.replaceState(null, "", "/#/constructor");
+
+  render(<App />);
+
+  const mainNav = screen.getByRole("tablist", { name: "Основная навигация" });
+  expect(within(mainNav).getByRole("tab", { name: "Рабочее место" })).toHaveAttribute("aria-selected", "true");
+  expect(within(mainNav).queryByRole("tab", { name: "Конструктор" })).not.toBeInTheDocument();
+  const workspaceNav = screen.getByRole("tablist", { name: "Разделы рабочего места" });
+  expect(within(workspaceNav).getByRole("tab", { name: "Конструктор" })).toHaveAttribute("aria-selected", "true");
+  expect(await screen.findByRole("heading", { name: "Конструктор" })).toBeInTheDocument();
+  expect(screen.getByText("Работа через draft-ревизию")).toBeInTheDocument();
   expect(screen.getByText("NLP-ревизия #1")).toBeInTheDocument();
-  expect(screen.getByRole("button", { name: /Умный дом 1 сигнал 0 фактов/i })).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Разобрать" })).toBeInTheDocument();
+});
+
+test("opens analytics reports separately from the operator queue", async () => {
+  window.history.replaceState(null, "", "/#/analytics/overview");
+
+  render(<App />);
+
+  const mainNav = screen.getByRole("tablist", { name: "Основная навигация" });
+  expect(within(mainNav).getByRole("tab", { name: "Аналитика" })).toHaveAttribute("aria-selected", "true");
+  expect(await screen.findByRole("heading", { name: "Аналитика лидов" })).toBeInTheDocument();
+  const analyticsNav = screen.getByRole("tablist", { name: "Разделы аналитики" });
+  expect(within(analyticsNav).getByRole("tab", { name: "Обзор" })).toHaveAttribute("aria-selected", "true");
+  expect(within(analyticsNav).queryByRole("tab", { name: "Кандидаты" })).not.toBeInTheDocument();
+});
+
+test("shows operator guide in top navigation and loads the canonical workflow document", async () => {
+  window.history.replaceState(null, "", "/#/guide");
+  const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+    const url = String(input);
+    if (url === "/api/v1/auth/me") {
+      return jsonResponse({ authenticated: true, username: "admin" });
+    }
+    if (url === "/api/v1/settings") {
+      return jsonResponse({
+        ...sampleSettingsSnapshot(),
+        telegram_ingestion: sampleDesignerTelegramIngestionSettings()
+      });
+    }
+    if (url === "/api/v1/analytics/runs") {
+      return jsonResponse({ runs: [] });
+    }
+    if (url === "/api/v1/project-docs/docs/how-to-work-in-system.md") {
+      return jsonResponse({
+        path: "docs/how-to-work-in-system.md",
+        title: "Как работать в системе",
+        size_bytes: 512,
+        updated_at: "2026-05-12T12:00:00Z",
+        content: [
+          "# Как работать в системе",
+          "",
+          "## Алгоритм работы с новым сообщением",
+          "",
+          "Сначала реши, владеет ли фрагмент словарь или fact rule.",
+          "",
+          "## Когда создавать alias",
+          "",
+          "Alias dictionary нужен только для именованных сущностей."
+        ].join("\n")
+      });
+    }
+    throw new Error(`Unhandled fetch: ${url}`);
+  });
+  vi.stubGlobal("fetch", fetchMock);
+
+  render(<App />);
+
+  expect(screen.getByRole("tab", { name: "Как работать" })).toBeInTheDocument();
+  expect(await screen.findByRole("heading", { name: "Как работать в системе" })).toBeInTheDocument();
+  await waitFor(() =>
+    expect(fetchMock).toHaveBeenCalledWith("/api/v1/project-docs/docs/how-to-work-in-system.md")
+  );
+  expect(screen.getByRole("button", { name: "Открыть Тестирование" })).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Открыть Golden" })).toBeInTheDocument();
+  expect(screen.getAllByText("Алгоритм работы с новым сообщением").length).toBeGreaterThan(0);
+  expect(screen.getAllByText("Когда создавать alias").length).toBeGreaterThan(0);
+  expect(screen.getByText("Сначала реши, владеет ли фрагмент словарь или fact rule.")).toBeInTheDocument();
 });
 
 test("toggles dark theme and persists the operator preference", async () => {
@@ -146,7 +254,48 @@ test("requires login when backend reports anonymous session", async () => {
   await waitFor(() =>
     expect(loginBody).toEqual({ username: "admin", password: "pur-dev-password" })
   );
-  expect(await screen.findByRole("heading", { name: "Аналитика лидов" })).toBeInTheDocument();
+  expect(await screen.findByRole("heading", { name: "Очередь сообщений" })).toBeInTheDocument();
+});
+
+test("keeps guide deeplink after login when the session starts anonymous", async () => {
+  window.history.replaceState(null, "", "/#/guide");
+  const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    if (url === "/api/v1/auth/me") {
+      return jsonResponse({ authenticated: false, username: null });
+    }
+    if (url === "/api/v1/auth/login" && init?.method === "POST") {
+      return jsonResponse({ authenticated: true, username: "admin" });
+    }
+    if (url === "/api/v1/settings") {
+      return jsonResponse(sampleSettingsSnapshot());
+    }
+    if (url === "/api/v1/analytics/runs") {
+      return jsonResponse({ runs: [] });
+    }
+    if (url === "/api/v1/project-docs/docs/how-to-work-in-system.md") {
+      return jsonResponse({
+        path: "docs/how-to-work-in-system.md",
+        title: "Как работать в системе",
+        size_bytes: 512,
+        updated_at: "2026-05-12T12:00:00Z",
+        content: "# Как работать в системе\n\n## Алгоритм работы с новым сообщением"
+      });
+    }
+    throw new Error(`Unhandled fetch: ${url}`);
+  });
+  vi.stubGlobal("fetch", fetchMock);
+
+  render(<App />);
+
+  expect(await screen.findByText("Вход в операторский интерфейс")).toBeInTheDocument();
+  fireEvent.change(screen.getByLabelText("Пароль"), { target: { value: "pur-dev-password" } });
+  fireEvent.click(screen.getByRole("button", { name: "Войти" }));
+
+  expect(await screen.findByRole("heading", { name: "Как работать в системе" })).toBeInTheDocument();
+  await waitFor(() =>
+    expect(fetchMock).toHaveBeenCalledWith("/api/v1/project-docs/docs/how-to-work-in-system.md")
+  );
 });
 
 test("renders runtime logs and system status tabs", async () => {
@@ -237,6 +386,21 @@ test("renders runtime logs and system status tabs", async () => {
             }
           },
           {
+            service: "llm-worker",
+            status: "warning",
+            details: {
+              model: "lead-qwen-ru",
+              endpoint: "http://host.docker.internal:11434/api/chat",
+              execution_mode: "celery_queue:llm",
+              redis_llm_queue_depth: 3,
+              llm_runs_total: 12,
+              llm_runs_by_status: { queued: 3, running: 1, completed: 6, failed: 2 },
+              oldest_queued_at: "2026-05-13T12:00:00Z",
+              latest_completed_at: "2026-05-13T12:10:00Z",
+              failed_latest_error: "model timeout"
+            }
+          },
+          {
             service: "userbot",
             status: "warning",
             details: {
@@ -280,6 +444,11 @@ test("renders runtime logs and system status tabs", async () => {
   expect(screen.getByText("Код worker актуален")).toBeInTheDocument();
   expect(await screen.findByText("backend")).toBeInTheDocument();
   expect(screen.getByText("worker")).toBeInTheDocument();
+  expect(screen.getByText("llm-worker")).toBeInTheDocument();
+  expect(screen.getByText("Глубина очереди llm")).toBeInTheDocument();
+  expect(screen.getByText("LLM runs по статусам")).toBeInTheDocument();
+  expect(screen.getByText("queued: 3, running: 1, completed: 6, failed: 2")).toBeInTheDocument();
+  expect(screen.getByText("model timeout")).toBeInTheDocument();
   expect(screen.getByText("userbot")).toBeInTheDocument();
   expect(screen.getByText("Окружение")).toBeInTheDocument();
   expect(screen.getByText("development")).toBeInTheDocument();
@@ -290,6 +459,72 @@ test("renders runtime logs and system status tabs", async () => {
   expect(screen.getByText("resolved: 3, error: 1")).toBeInTheDocument();
   expect(screen.getByText("Проблемные источники")).toBeInTheDocument();
   expect(screen.getByText(/AeternalLead MessagesTest/)).toBeInTheDocument();
+});
+
+test("shows top-level LLM monitor with saved runs", async () => {
+  window.history.replaceState(null, "", "/#/llm");
+  const run = sampleLlmRun();
+  const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+    const url = String(input);
+    if (url === "/api/v1/auth/me") {
+      return jsonResponse({ authenticated: true, username: "admin" });
+    }
+    if (url === "/api/v1/settings") {
+      return jsonResponse(sampleSettingsSnapshot());
+    }
+    if (url === "/api/v1/analytics/runs") {
+      return jsonResponse({ runs: [] });
+    }
+    if (url === "/api/v1/llm-verifications?limit=50&offset=0") {
+      return jsonResponse({ total: 1, items: [run] });
+    }
+    throw new Error(`Unhandled fetch: ${url}`);
+  });
+  vi.stubGlobal("fetch", fetchMock);
+
+  render(<App />);
+
+  expect(await screen.findByRole("heading", { name: "LLM" })).toBeInTheDocument();
+  expect(screen.getByRole("tab", { name: "LLM" })).toHaveAttribute("aria-selected", "true");
+  expect(screen.getByText("queued")).toBeInTheDocument();
+  expect(screen.getByText("lead-qwen-ru")).toBeInTheDocument();
+  expect(screen.getByText("designers_non_noise")).toBeInTheDocument();
+  expect(screen.getByText(/Нужен умный дом/)).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Показать детали LLM run run-1" }));
+  expect(screen.getByText("System prompt")).toBeInTheDocument();
+  expect(screen.getByText("Return JSON")).toBeInTheDocument();
+  expect(screen.getByText("Отдано модели: context_pack")).toBeInTheDocument();
+  expect(screen.getByText("Очищенный response")).toBeInTheDocument();
+  expect(screen.getByText("Сетевой ответ модели")).toBeInTheDocument();
+  expect(screen.getByText("raw_response")).toBeInTheDocument();
+  expect(screen.getAllByText("verdict").length).toBeGreaterThan(0);
+  expect(screen.getAllByText(/"verdict": "lead"/).length).toBeGreaterThan(0);
+});
+
+test("opens top-level pages by shareable path URLs without hash", async () => {
+  window.history.replaceState(null, "", "/llm");
+  const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+    const url = String(input);
+    if (url === "/api/v1/auth/me") {
+      return jsonResponse({ authenticated: true, username: "admin" });
+    }
+    if (url === "/api/v1/settings") {
+      return jsonResponse(sampleSettingsSnapshot());
+    }
+    if (url === "/api/v1/analytics/runs") {
+      return jsonResponse({ runs: [] });
+    }
+    if (url === "/api/v1/llm-verifications?limit=50&offset=0") {
+      return jsonResponse({ total: 0, items: [] });
+    }
+    throw new Error(`Unhandled fetch: ${url}`);
+  });
+  vi.stubGlobal("fetch", fetchMock);
+
+  render(<App />);
+
+  expect(await screen.findByRole("heading", { name: "LLM" })).toBeInTheDocument();
+  expect(screen.getByRole("tab", { name: "LLM" })).toHaveAttribute("aria-selected", "true");
 });
 
 test("shows active NLP revision in settings and links saved settings to golden checks", async () => {
@@ -328,9 +563,74 @@ test("shows active NLP revision in settings and links saved settings to golden c
   fireEvent.click(screen.getByRole("button", { name: "Сохранить" }));
 
   expect(await screen.findByText(/NLP-настройки сохранены как ревизия #2/)).toBeInTheDocument();
-  expect(screen.getByRole("link", { name: "Проверить Golden" })).toHaveAttribute("href", "#/golden");
+  expect(screen.getByRole("link", { name: "Проверить Golden" })).toHaveAttribute("href", "/golden");
   expect(screen.getByText("Активная NLP-ревизия #2")).toBeInTheDocument();
 });
+
+test("edits LLM settings and routing rules from settings center", async () => {
+  let savedPayload: unknown = null;
+  const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    if (url === "/api/v1/auth/me") {
+      return jsonResponse({ authenticated: true, username: "admin" });
+    }
+    if (url === "/api/v1/settings") {
+      return jsonResponse(sampleSettingsSnapshot());
+    }
+    if (url === "/api/v1/analytics/runs") {
+      return jsonResponse({ runs: [] });
+    }
+    if (url === "/api/v1/settings/llm" && !init) {
+      return jsonResponse(sampleLlmSettings());
+    }
+    if (url === "/api/v1/settings/llm" && init?.method === "PUT") {
+      savedPayload = JSON.parse(String(init.body));
+      return jsonResponse(savedPayload);
+    }
+    throw new Error(`Unhandled fetch: ${url}`);
+  });
+  vi.stubGlobal("fetch", fetchMock);
+
+  render(<App />);
+
+  fireEvent.click(screen.getByRole("tab", { name: "Настройки" }));
+  fireEvent.click(await screen.findByRole("button", { name: "LLM" }));
+
+  expect(await screen.findByRole("heading", { name: "Настройки LLM" })).toBeInTheDocument();
+  expect(screen.getByText(/Промпт = System prompt \+ User JSON context_pack/)).toBeInTheDocument();
+  expect(screen.getByText("Состав context_pack")).toBeInTheDocument();
+  expect(screen.getByText(/message.text/)).toBeInTheDocument();
+  expect(screen.getByText(/rule_engine_result передается компактно/)).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "lead-qwen-ru" })).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Добавить пример маршрута для дизайнерских чатов" })).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Добавить пример маршрута для дизайнерских чатов" }));
+  expect(screen.getByText("Дизайнерские чаты без операторского шума")).toBeInTheDocument();
+  chooseMuiOption("Исключить сигналы", /Умный дом \/ автоматизация/);
+  expect(screen.getByRole("combobox", { name: "Очереди разбора" })).toBeInTheDocument();
+  expect(screen.getByText("Прямой лид")).toBeInTheDocument();
+  chooseMuiOption("Включить факты", /Управляемое устройство/);
+  expect(screen.getByLabelText("Модель")).toHaveValue("lead-qwen-ru");
+  fireEvent.click(screen.getByRole("button", { name: "lead-qwen-ru" }));
+  fireEvent.change(screen.getByLabelText("System prompt"), { target: { value: "Return clean JSON only" } });
+  fireEvent.click(screen.getByRole("button", { name: "Сохранить LLM" }));
+
+  await waitFor(() => expect(savedPayload).not.toBeNull());
+  expect(savedPayload).toMatchObject({
+    model: "lead-qwen-ru",
+    system_prompt: "Return clean JSON only",
+    routes: [
+      {
+        id: "designers_non_noise",
+        conditions: {
+          review_lanes: ["direct_pur_lead"],
+          include_fact_types: ["controlled_device"],
+          exclude_signal_types: ["operator_noise", "smart_home_automation"]
+        }
+      }
+    ]
+  });
+});
+
 
 test("renders project documentation grouped by files", async () => {
   const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
@@ -424,7 +724,7 @@ test("starts enrichment job and subscribes to SSE progress", async () => {
   vi.stubGlobal("fetch", fetchMock);
   render(<App />);
 
-  fireEvent.click(screen.getByRole("tab", { name: "Тестирование" }));
+  openWorkspaceSection("Проверка");
   fireEvent.click(screen.getAllByRole("button", { name: /запустить обогащение/i })[0]);
 
   await waitFor(() =>
@@ -476,7 +776,7 @@ test("renders lead assessment from completed enrichment event", async () => {
   vi.stubGlobal("fetch", fetchMock);
   render(<App />);
 
-  fireEvent.click(screen.getByRole("tab", { name: "Тестирование" }));
+  openWorkspaceSection("Проверка");
   fireEvent.click(screen.getAllByRole("button", { name: /запустить обогащение/i })[0]);
   await waitFor(() => expect(FakeEventSource.instances.length).toBe(1));
   FakeEventSource.instances[0].listeners.get("job_completed")?.(
@@ -501,7 +801,7 @@ test("renders lead assessment from completed enrichment event", async () => {
   expect(screen.getByText("Точный расчет оценки лида")).toBeInTheDocument();
   expect(screen.getByText(/score = max/)).toBeInTheDocument();
   expect(screen.getByText("Расчет очереди разбора")).toBeInTheDocument();
-  expect(screen.getAllByText("Прямой лид ПУР").length).toBeGreaterThan(0);
+  expect(screen.getAllByText("Прямой лид").length).toBeGreaterThan(0);
   expect(screen.getByText("Визуальная цепочка анализа")).toBeInTheDocument();
   expect(screen.getAllByText("Фрагмент текста").length).toBeGreaterThan(0);
   expect(screen.getAllByText("Словарь / правило").length).toBeGreaterThan(0);
@@ -550,7 +850,7 @@ test("renders annotation ranges correctly after emoji", async () => {
   vi.stubGlobal("fetch", fetchMock);
   render(<App />);
 
-  fireEvent.click(screen.getByRole("tab", { name: "Тестирование" }));
+  openWorkspaceSection("Проверка");
   fireEvent.click(screen.getAllByRole("button", { name: /запустить обогащение/i })[0]);
   await waitFor(() => expect(FakeEventSource.instances.length).toBe(1));
   FakeEventSource.instances[0].listeners.get("job_completed")?.(
@@ -611,7 +911,7 @@ test("opens settings sections from enrichment overview shortcuts", async () => {
   vi.stubGlobal("fetch", fetchMock);
   render(<App />);
 
-  fireEvent.click(screen.getByRole("tab", { name: "Тестирование" }));
+  openWorkspaceSection("Проверка");
   fireEvent.click(screen.getAllByRole("button", { name: /запустить обогащение/i })[0]);
   await waitFor(() => expect(FakeEventSource.instances.length).toBe(1));
   FakeEventSource.instances[0].listeners.get("job_completed")?.(
@@ -678,7 +978,7 @@ test("opens setting links as modal on left click and keeps cached settings for f
 
   await waitFor(() => expect(settingsCalls).toBe(1));
 
-  fireEvent.click(screen.getByRole("tab", { name: "Тестирование" }));
+  openWorkspaceSection("Проверка");
   fireEvent.change(screen.getByLabelText("Произвольный текст"), {
     target: { value: "Контекст входного текста должен сохраниться" }
   });
@@ -702,9 +1002,9 @@ test("opens setting links as modal on left click and keeps cached settings for f
   expect(await screen.findByRole("table", { name: "Точный расчет оценки лида" })).toBeInTheDocument();
   const aliasLink = screen
     .getAllByRole("link", { name: "Устройство: Хаб умного дома" })
-    .find((link) => link.getAttribute("href") === "#/settings/aliases/devices/smart_home_hub");
+    .find((link) => link.getAttribute("href") === "/settings/aliases/devices/smart_home_hub");
   expect(aliasLink).toBeDefined();
-  expect(aliasLink).toHaveAttribute("href", "#/settings/aliases/devices/smart_home_hub");
+  expect(aliasLink).toHaveAttribute("href", "/settings/aliases/devices/smart_home_hub");
 
   fireEvent.click(aliasLink!);
 
@@ -722,7 +1022,7 @@ test("opens setting links as modal on left click and keeps cached settings for f
   expect(document.getElementById("settings-target-aliases-devices-smart_home_hub")).toHaveClass("settings-target-highlight");
   expect(settingsCalls).toBe(1);
 
-  fireEvent.click(screen.getByRole("tab", { name: "Тестирование" }));
+  openWorkspaceSection("Проверка");
 
   expect(screen.getByLabelText("Произвольный текст")).toHaveValue("Контекст входного текста должен сохраниться");
 });
@@ -766,6 +1066,20 @@ test("loads settings center on demand", async () => {
             group: "Безопасность",
             color: "#455a64",
             confidence: 0.84,
+            phrases: [],
+            patterns: [],
+            match: {
+              facts: [{ types: ["alias:vendors:aqara", "vendor"] }]
+            }
+          }
+        ],
+        facts: [
+          {
+            type: "consultation_context",
+            label: "Консультация",
+            group: "Безопасность",
+            color: null,
+            confidence: 0.72,
             phrases: [["с", "ндс"]],
             patterns: [
               {
@@ -776,12 +1090,9 @@ test("loads settings center on demand", async () => {
                 ]
               }
             ],
-            match: {
-              facts: [{ types: ["alias:vendors:aqara", "vendor"] }]
-            }
+            match: { facts: [] }
           }
         ],
-        facts: [],
         alias_matching: {
           normalize_separators: true,
           normalize_yo: true,
@@ -827,13 +1138,7 @@ test("loads settings center on demand", async () => {
   expect(await screen.findByText("Видеонаблюдение")).toBeInTheDocument();
   fireEvent.click(screen.getByText("Видеонаблюдение"));
   expect(screen.getByLabelText("Папка")).toHaveValue("Безопасность");
-  expect(screen.getByText("Точные фразы")).toBeInTheDocument();
-  expect(screen.getByLabelText("Добавить точную фразу")).toBeInTheDocument();
-  expect(screen.getByLabelText("Редактировать точную фразу: с ндс")).toBeInTheDocument();
-  expect(screen.getByLabelText("Удалить точную фразу: с ндс")).toBeInTheDocument();
-  expect(screen.getByText("Лемматические фразы")).toBeInTheDocument();
-  expect(screen.getByText("Нужна консультация")).toBeInTheDocument();
-  expect(screen.getByText("нужный консультация")).toBeInTheDocument();
+  expect(screen.getByText(/Сигналы не хранят текстовые фразы/)).toBeInTheDocument();
   expect(screen.getByText("Зависимости от фактов")).toBeInTheDocument();
   expect(screen.getByLabelText("Добавить зависимость от факта")).toBeInTheDocument();
   expect(screen.getByLabelText("Удалить зависимость от факта")).toBeInTheDocument();
@@ -841,19 +1146,60 @@ test("loads settings center on demand", async () => {
   expect(screen.getByText("vendor (vendor)")).toBeInTheDocument();
   fireEvent.click(screen.getByLabelText("Добавить зависимость от факта"));
   expect(screen.getAllByLabelText("Удалить зависимость от факта")).toHaveLength(2);
+  expect(screen.getByText(/У сигнала есть пустая зависимость от фактов/)).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Сохранить" })).toBeDisabled();
+
+  fireEvent.click(screen.getByRole("button", { name: "Факты" }));
+  fireEvent.click(screen.getByText("Консультация"));
+  expect(screen.getByText("Точные фразы")).toBeInTheDocument();
+  expect(screen.getByLabelText("Добавить точную фразу")).toBeInTheDocument();
+  expect(screen.getByLabelText("Редактировать точную фразу: с ндс")).toBeInTheDocument();
+  expect(screen.getByLabelText("Удалить точную фразу: с ндс")).toBeInTheDocument();
+  expect(screen.getByText("Лемматические фразы")).toBeInTheDocument();
+  expect(screen.getByText("Нужна консультация")).toBeInTheDocument();
+  expect(screen.getByText("нужный консультация")).toBeInTheDocument();
   expect(screen.queryByText(/normalized:/)).not.toBeInTheDocument();
   fireEvent.click(screen.getByText("Оценка лида"));
   expect(screen.getByText("Пороги оценки")).toBeInTheDocument();
   expect(screen.getByText("Ограничители score")).toBeInTheDocument();
   expect(screen.getByText("Явный шум")).toBeInTheDocument();
   expect(screen.getByLabelText("noise_signal_types")).toHaveValue("diy_or_equipment_only");
-  expect(screen.getByText("Очереди разбора")).toBeInTheDocument();
-  expect(screen.getByText("Прямой лид ПУР")).toBeInTheDocument();
+  expect(screen.queryByText("Прямой лид")).not.toBeInTheDocument();
+  expect(screen.queryByRole("heading", { name: "Направления решений" })).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Направления решений" }));
+  expect(screen.getByRole("heading", { name: "Направления решений" })).toBeInTheDocument();
+  expect(screen.getByText("Безопасность")).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Очереди разбора" }));
+  expect(screen.getByRole("heading", { name: "Очереди разбора" })).toBeInTheDocument();
+  expect(screen.getByText("Прямой лид")).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Схема" }));
+  expect(screen.getByRole("heading", { name: "Схема связей" })).toBeInTheDocument();
+  expect(screen.getByText("Словари / правила")).toBeInTheDocument();
+  expect(screen.getByRole("columnheader", { name: "Факты" })).toBeInTheDocument();
+  expect(screen.getByRole("columnheader", { name: "Сигналы" })).toBeInTheDocument();
+  expect(screen.getByText("Score / маршрутизация")).toBeInTheDocument();
   fireEvent.click(screen.getByText("Словари"));
   expect(screen.getByText("Alias-словари")).toBeInTheDocument();
+  const catalogToggle = (name: RegExp) => {
+    const toggle = screen.getAllByRole("button", { name }).find((button) => button.hasAttribute("aria-expanded"));
+    expect(toggle).toBeDefined();
+    return toggle as HTMLElement;
+  };
+  const vendorsToggle = catalogToggle(/Вендоры/i);
+  const protocolsToggle = catalogToggle(/Протоколы/i);
+  const devicesToggle = catalogToggle(/Устройства/i);
+  const softwareToggle = catalogToggle(/^ПО/i);
+  const addVendorAliasButton = screen.getByLabelText("Добавить запись в Вендоры");
+  expect(vendorsToggle).toHaveAttribute("aria-expanded", "false");
+  expect(protocolsToggle).toHaveAttribute("aria-expanded", "false");
+  expect(devicesToggle).toHaveAttribute("aria-expanded", "false");
+  expect(softwareToggle).toHaveAttribute("aria-expanded", "false");
+  expect(addVendorAliasButton).toBeVisible();
+  fireEvent.click(vendorsToggle);
+  expect(addVendorAliasButton).toBeVisible();
   expect(screen.getAllByText("Aqara").length).toBeGreaterThan(0);
   expect(screen.getByText("Акара")).toBeInTheDocument();
-  expect(screen.getByLabelText("Добавить alias в Вендоры")).toBeInTheDocument();
+  expect(screen.getByLabelText("Добавить запись в Вендоры")).toBeInTheDocument();
   fireEvent.click(screen.getByText("Pipeline"));
   expect(screen.getByText("Alias matching")).toBeInTheDocument();
   expect(screen.getByLabelText("Fuzzy alias matching")).toBeChecked();
@@ -861,7 +1207,7 @@ test("loads settings center on demand", async () => {
   expect(screen.getByLabelText("Исключения fuzzy")).toHaveValue("sst\nknx");
   fireEvent.click(screen.getByText("Runtime"));
   expect(screen.getByText("environment")).toBeInTheDocument();
-}, 15000);
+}, 30000);
 
 test("edits telegram bots chats and routes and sends chat test message", async () => {
   let savedBody: unknown = null;
@@ -1149,6 +1495,72 @@ test("edits telegram userbot ingestion settings and starts login flow", async ()
   expect(settingsRequestCount).toBeGreaterThan(0);
 }, 20000);
 
+test("refreshes cached settings when opening Telegram ingestion settings", async () => {
+  let settingsRequestCount = 0;
+  const freshSnapshot: any = sampleSettingsSnapshot();
+  freshSnapshot.telegram_ingestion = {
+    accounts: [
+      {
+        id: "c99d1db9-397b-4970-b4fc-112f305c2e57",
+        name: "Основной userbot",
+        phone: "+79990000000",
+        api_id: 12345,
+        enabled: true,
+        status: "authorized",
+        has_api_hash: true,
+        api_hash_masked: "hash***hash",
+        has_session: true,
+        last_error: null,
+        cooldown_until: null,
+        telegram_user_id: "42",
+        telegram_username: "operator",
+        created_at: "2026-05-08T00:00:00Z",
+        updated_at: "2026-05-13T10:00:00Z"
+      }
+    ],
+    chats: [
+      {
+        id: "fd6d4c53-5e4c-4742-892a-4f7d20f43ffe",
+        account_id: "c99d1db9-397b-4970-b4fc-112f305c2e57",
+        title: "Архитекторы, дизайн",
+        input_ref: "https://t.me/arhitectors_intchats",
+        telegram_chat_id: null,
+        enabled: true,
+        status: "draft",
+        last_message_id: null,
+        last_error: null,
+        created_at: "2026-05-13T10:00:00Z",
+        updated_at: "2026-05-13T10:00:00Z"
+      }
+    ]
+  };
+  const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+    const url = String(input);
+    if (url === "/api/v1/auth/me") {
+      return jsonResponse({ authenticated: true, username: "admin" });
+    }
+    if (url === "/api/v1/settings") {
+      settingsRequestCount += 1;
+      return jsonResponse(settingsRequestCount === 1 ? sampleSettingsSnapshot() : freshSnapshot);
+    }
+    if (url === "/api/v1/analytics/runs") {
+      return jsonResponse({ runs: [] });
+    }
+    throw new Error(`Unhandled fetch: ${url}`);
+  });
+  vi.stubGlobal("fetch", fetchMock);
+
+  render(<App />);
+
+  await waitFor(() => expect(settingsRequestCount).toBe(1));
+  fireEvent.click(screen.getByText("Настройки"));
+  fireEvent.click(await screen.findByText("Telegram вход"));
+  fireEvent.click(await screen.findByRole("tab", { name: "Чаты-источники" }));
+
+  expect(await screen.findByText("Архитекторы, дизайн")).toBeInTheDocument();
+  expect(settingsRequestCount).toBeGreaterThan(1);
+}, 20000);
+
 test("loads analytics dashboard on demand", async () => {
   const run = sampleAnalyticsRun();
   const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
@@ -1161,6 +1573,14 @@ test("loads analytics dashboard on demand", async () => {
     }
     if (url === "/api/v1/analytics/review-eval") {
       return jsonResponse(sampleReviewEvalReport());
+    }
+    if (url === "/api/v1/llm-verifications/config") {
+      return jsonResponse({
+        model: "lead-qwen-ru",
+        endpoint: "http://host.docker.internal:11434/api/chat",
+        timeout_seconds: 240,
+        execution_mode: "backend_inline"
+      });
     }
     if (url === `/api/v1/analytics/runs/${run.id}/summary`) {
       return jsonResponse({
@@ -1203,7 +1623,7 @@ test("loads analytics dashboard on demand", async () => {
             {
               kind: "review_lane",
               key: "direct_pur_lead",
-              label: "Прямой лид ПУР",
+              label: "Прямой лид",
               count: 339,
               payload: { description: "Сначала смотреть руками" }
             }
@@ -1282,32 +1702,53 @@ test("loads analytics dashboard on demand", async () => {
   vi.stubGlobal("fetch", fetchMock);
   render(<App />);
 
-  fireEvent.click(screen.getByRole("tab", { name: /аналитика/i }));
-
+  expect(await screen.findByRole("heading", { name: "Очередь сообщений" })).toBeInTheDocument();
   await waitFor(() => expect(fetchMock).toHaveBeenCalledWith("/api/v1/analytics/runs"));
-  expect(await screen.findByRole("heading", { name: "Аналитика лидов" })).toBeInTheDocument();
-  expect(screen.getByRole("tab", { name: "Кандидаты" })).toHaveAttribute("aria-selected", "true");
-  expect(screen.getByRole("tab", { name: "Обзор" })).toBeInTheDocument();
-  expect(screen.getByRole("tab", { name: "Качество ревью" })).toBeInTheDocument();
   expect(screen.queryByText("Качество по ревью")).not.toBeInTheDocument();
   expect(screen.queryByText("Доменные сигналы")).not.toBeInTheDocument();
-  expect(screen.getAllByText("Чат дизайнеров").length).toBeGreaterThan(0);
-  expect(screen.getByText((content) => content.includes("08.05.2026"))).toBeInTheDocument();
-  expect(screen.getByText(/Коллеги, такой запрос от клиента/i)).toBeInTheDocument();
+  expect(screen.queryByText("Тип источника: telegram")).not.toBeInTheDocument();
+  expect(screen.getByRole("button", { name: /Интервал времени.*24 часа/ })).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Открыть фильтры очереди" })).toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "Поля" })).not.toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Наборы полей" })).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Автообновление: выкл" })).toBeInTheDocument();
+  expect(await screen.findByText(/Коллеги, такой запрос от клиента/i)).toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "Действия" })).not.toBeInTheDocument();
+  fireEvent.click(screen.getAllByText(/Коллеги, такой запрос от клиента/i)[0]);
+  const sidePage = await screen.findByRole("complementary", { name: "Сообщение очереди" });
+  expect(within(sidePage).getByRole("link", { name: "Ревью / LLM" })).toHaveAttribute(
+    "href",
+    expect.stringContaining("/review/672162")
+  );
+
+  fireEvent.click(screen.getByRole("tab", { name: /аналитика/i }));
+  expect(await screen.findByRole("heading", { name: "Аналитика лидов" })).toBeInTheDocument();
+  const analyticsNav = screen.getByRole("tablist", { name: "Разделы аналитики" });
+  expect(within(analyticsNav).queryByRole("tab", { name: "Кандидаты" })).not.toBeInTheDocument();
+  expect(within(analyticsNav).getByRole("tab", { name: "Обзор" })).toHaveAttribute("aria-selected", "true");
+  expect(within(analyticsNav).getByRole("tab", { name: "Качество ревью" })).toBeInTheDocument();
+  expect(within(analyticsNav).getByRole("tab", { name: "LLM-проверка" })).toBeInTheDocument();
+
+  fireEvent.click(screen.getByRole("tab", { name: "LLM-проверка" }));
+  expect(window.location.pathname).toBe("/analytics/llm");
+  expect(await screen.findByRole("heading", { name: "LLM-проверка" })).toBeInTheDocument();
+  expect(screen.getByText("lead-qwen-ru")).toBeInTheDocument();
+  expect(screen.getByText("backend_inline")).toBeInTheDocument();
+  expect(screen.getByText(/host\.docker\.internal:11434\/api\/chat/)).toBeInTheDocument();
 
   fireEvent.click(screen.getByRole("tab", { name: "Качество ревью" }));
-  expect(window.location.hash).toMatch(/^#\/analytics\/quality/);
+  expect(window.location.pathname).toBe("/analytics/quality");
   expect(await screen.findByText("Качество по ревью")).toBeInTheDocument();
   expect(screen.getByText("Размечено: 2")).toBeInTheDocument();
   expect(screen.getByText("FP: 1")).toBeInTheDocument();
   expect(screen.getByText("FN: 1")).toBeInTheDocument();
   expect(screen.getByText("False Positives")).toBeInTheDocument();
   expect(screen.getByText("Добро пожаловать в чат Dahua Support")).toBeInTheDocument();
-  expect(screen.getByRole("link", { name: "479071" })).toHaveAttribute("href", "#/analytics/review/fp-1");
+  expect(screen.getByRole("link", { name: "479071" })).toHaveAttribute("href", "/review/fp-1");
   expect(screen.queryByText(/Коллеги, такой запрос от клиента/i)).not.toBeInTheDocument();
 
   fireEvent.click(screen.getByRole("tab", { name: "Обзор" }));
-  expect(window.location.hash).toMatch(/^#\/analytics\/overview/);
+  expect(window.location.pathname).toBe("/analytics/overview");
   expect(screen.getByText((content) => content.replace(/\s/g, "") === "528953")).toBeInTheDocument();
   expect(screen.getByText((content) => content.replace(/\s/g, "") === "16001")).toBeInTheDocument();
   expect(screen.getByText("3.03%")).toBeInTheDocument();
@@ -1326,22 +1767,23 @@ test("loads analytics dashboard on demand", async () => {
   await waitFor(() => expect(screen.queryByText("designer_context")).not.toBeInTheDocument());
   expect(screen.queryByText(/Коллеги, такой запрос от клиента/i)).not.toBeInTheDocument();
 
-  fireEvent.click(screen.getByRole("tab", { name: "Кандидаты" }));
-  expect(window.location.hash).toMatch(/^#\/analytics(\?|$)/);
+  openWorkspaceSection("Очередь");
+  expect(window.location.pathname).toBe("/analytics");
   expect(await screen.findByText(/Коллеги, такой запрос от клиента/i)).toBeInTheDocument();
   expect(screen.queryByText("Раскрашенное сообщение")).not.toBeInTheDocument();
 
-  fireEvent.click(screen.getByRole("button", { name: "Показать разбор сообщения 672162" }));
+  fireEvent.click(screen.getAllByText(/Коллеги, такой запрос от клиента/i)[0]);
 
-  expect(await screen.findByText("Раскрашенное сообщение")).toBeInTheDocument();
-  expect(screen.getByText("Визуальная цепочка анализа")).toBeInTheDocument();
-  expect(screen.getAllByText("Причины score").length).toBeGreaterThan(0);
-  expect(screen.getAllByText("Доменные сигналы").length).toBeGreaterThan(0);
-  expect(screen.getByText("Факты")).toBeInTheDocument();
-  expect(screen.getAllByText("protocol_gateway").length).toBeGreaterThan(0);
-  expect(screen.getAllByText("zigbee шлюз").length).toBeGreaterThan(0);
-  expect(screen.getByText(/Управляемое устройство: розетки/)).toBeInTheDocument();
-});
+  const queueSidePage = await screen.findByRole("complementary", { name: "Сообщение очереди" });
+  expect(within(queueSidePage).getByText("Текст")).toBeInTheDocument();
+  expect(within(queueSidePage).queryByText("Раскрашенное сообщение")).not.toBeInTheDocument();
+  expect(within(queueSidePage).queryByText("Визуальная цепочка анализа")).not.toBeInTheDocument();
+  expect(within(queueSidePage).getByText("Причины")).toBeInTheDocument();
+  expect(within(queueSidePage).getByText("Сигналы и факты")).toBeInTheDocument();
+  expect(within(queueSidePage).getAllByText("protocol_gateway").length).toBeGreaterThan(0);
+  expect(within(queueSidePage).getAllByText("Протоколы / шлюзы / интеграции").length).toBeGreaterThan(0);
+  expect(within(queueSidePage).getAllByText("розетки").length).toBeGreaterThan(0);
+}, 20000);
 
 test("opens golden examples panel and runs selected example", async () => {
   const exampleId = "7b353178-7b60-4f7e-a329-6f926a8ff1af";
@@ -1456,6 +1898,78 @@ test("opens golden examples panel and runs selected example", async () => {
   expect(await screen.findByRole("table", { name: "Точный расчет оценки лида" })).toBeInTheDocument();
 });
 
+test("deletes selected golden example and selects the next one", async () => {
+  const firstExampleId = "7b353178-7b60-4f7e-a329-6f926a8ff1af";
+  const secondExampleId = "6ddda4ea-d2b5-4c08-b8ef-62d5ce51cf3d";
+  const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    if (url === "/api/v1/settings") {
+      return jsonResponse(sampleSettingsSnapshot());
+    }
+    if (url === "/api/v1/analytics/runs") {
+      return jsonResponse({ runs: [] });
+    }
+    if (url === "/api/v1/golden-examples") {
+      return jsonResponse({
+        total: 2,
+        limit: 50,
+        offset: 0,
+        items: [
+          {
+            id: firstExampleId,
+            title: "Первый golden",
+            text: "Первый текст для удаления",
+            expected_verdict: "lead",
+            comment: "Первый пример",
+            source_message_id: null,
+            source_chat_title: null,
+            telegram_message_id: null,
+            telegram_message_url: null,
+            last_enrichment_job_id: null,
+            created_at: "2026-05-09T12:00:00Z",
+            updated_at: "2026-05-09T12:00:00Z"
+          },
+          {
+            id: secondExampleId,
+            title: "Второй golden",
+            text: "Второй текст должен остаться",
+            expected_verdict: "not_lead",
+            comment: "Второй пример",
+            source_message_id: null,
+            source_chat_title: null,
+            telegram_message_id: null,
+            telegram_message_url: null,
+            last_enrichment_job_id: null,
+            created_at: "2026-05-09T11:00:00Z",
+            updated_at: "2026-05-09T11:00:00Z"
+          }
+        ]
+      });
+    }
+    if (url === `/api/v1/golden-examples/${firstExampleId}` && init?.method === "DELETE") {
+      return new Response(null, { status: 204 });
+    }
+    throw new Error(`Unhandled fetch: ${url}`);
+  });
+  vi.stubGlobal("fetch", fetchMock);
+  render(<App />);
+
+  fireEvent.click(screen.getByRole("tab", { name: "Golden" }));
+
+  expect(await screen.findByRole("heading", { name: "Golden-примеры" })).toBeInTheDocument();
+  expect(screen.getByLabelText("Произвольный текст")).toHaveValue("Первый текст для удаления");
+
+  fireEvent.click(screen.getByRole("button", { name: `Удалить golden ${firstExampleId}` }));
+
+  await waitFor(() =>
+    expect(fetchMock).toHaveBeenCalledWith(`/api/v1/golden-examples/${firstExampleId}`, { method: "DELETE" })
+  );
+  expect(await screen.findByText("Golden-пример удален")).toBeInTheDocument();
+  expect(screen.queryByText("Первый golden")).not.toBeInTheDocument();
+  expect(screen.getByText("Второй golden")).toBeInTheDocument();
+  expect(screen.getByLabelText("Произвольный текст")).toHaveValue("Второй текст должен остаться");
+});
+
 test("adds analytics candidate to golden examples", async () => {
   const run = sampleAnalyticsRun();
   const candidate = {
@@ -1510,10 +2024,10 @@ test("adds analytics candidate to golden examples", async () => {
   vi.stubGlobal("fetch", fetchMock);
   render(<App />);
 
-  fireEvent.click(screen.getByRole("tab", { name: /аналитика/i }));
-
+  expect(await screen.findByRole("heading", { name: "Очередь сообщений" })).toBeInTheDocument();
   expect(await screen.findByText("Подскажите контакты по видеонаблюдению")).toBeInTheDocument();
-  fireEvent.click(screen.getByRole("button", { name: `Добавить в golden ${candidate.message_id}` }));
+  fireEvent.click(screen.getByText("Подскажите контакты по видеонаблюдению"));
+  fireEvent.click(screen.getByRole("button", { name: "В golden" }));
 
   await waitFor(() =>
     expect(fetchMock).toHaveBeenCalledWith(
@@ -1599,14 +2113,13 @@ test("opens analytics deeplink by expanding and scrolling to candidate row", asy
 
   render(<App />);
 
-  expect(
-    await screen.findByRole("button", { name: "Скрыть разбор сообщения focus-1" }, { timeout: 5000 })
-  ).toBeInTheDocument();
-  expect(screen.getByText("Раскрашенное сообщение")).toBeInTheDocument();
+  const sidePage = await screen.findByRole("complementary", { name: "Сообщение очереди" }, { timeout: 5000 });
+  expect(within(sidePage).getByText("Нужен проект умного дома и контакты подрядчика.")).toBeInTheDocument();
   await waitFor(() => expect(scrollIntoView).toHaveBeenCalled());
 });
 
-test("links expanded analytics evidence to settings targets", async () => {
+test("links review evidence to settings targets", async () => {
+  window.history.replaceState(null, "", "/#/review/linked-1");
   const run = sampleAnalyticsRun();
   const candidate = {
     message_id: "linked-1",
@@ -1710,26 +2223,39 @@ test("links expanded analytics evidence to settings targets", async () => {
     if (url.startsWith(`/api/v1/analytics/runs/${run.id}/candidates`)) {
       return jsonResponse({ total: 1, limit: 50, offset: 0, items: [candidate] });
     }
+    if (url === "/api/v1/analytics/messages/linked-1") {
+      return jsonResponse(candidate);
+    }
+    if (url === "/api/v1/llm-verifications/config") {
+      return jsonResponse({
+        model: "lead-qwen-ru",
+        endpoint: "http://host.docker.internal:11434/api/chat",
+        timeout_seconds: 240,
+        execution_mode: "backend_inline"
+      });
+    }
+    if (url === "/api/v1/llm-verifications/messages/linked-1") {
+      return jsonResponse({ total: 0, items: [] });
+    }
     throw new Error(`Unhandled fetch: ${url}`);
   });
   vi.stubGlobal("fetch", fetchMock);
 
   render(<App />);
 
+  expect(await screen.findByRole("heading", { name: "Разбор сообщения" })).toBeInTheDocument();
   expect(await screen.findByText("Нужно установить zigbee шлюз и электрокарниз.")).toBeInTheDocument();
-  fireEvent.click(screen.getByRole("button", { name: "Показать разбор сообщения linked-1" }));
-
   await screen.findByText("Раскрашенное сообщение");
   expect(settingsLinkHrefs()).toEqual(
     expect.arrayContaining([
-      expect.stringContaining("#/settings/signals/smart_home_automation"),
-      expect.stringContaining("#/settings/aliases/devices/smart_home_hub"),
-      expect.stringContaining("#/settings/aliases/devices/electric_curtain"),
-      expect.stringContaining("#/settings/lead-scoring/signal-weight/smart_home_automation"),
-      expect.stringContaining("#/settings/lead-scoring/fact-weight/automation_component"),
-      expect.stringContaining("#/settings/lead-scoring/solution-area/smart_home"),
-      expect.stringContaining("#/settings/lead-scoring/customer-segment/provider_request"),
-      expect.stringContaining("#/settings/lead-scoring/review-lane/direct_pur_lead")
+      expect.stringContaining("/settings/signals/smart_home_automation"),
+      expect.stringContaining("/settings/aliases/devices/smart_home_hub"),
+      expect.stringContaining("/settings/aliases/devices/electric_curtain"),
+      expect.stringContaining("/settings/lead-scoring/signal-weight/smart_home_automation"),
+      expect.stringContaining("/settings/lead-scoring/fact-weight/automation_component"),
+      expect.stringContaining("/settings/solution-areas/smart_home"),
+      expect.stringContaining("/settings/lead-scoring/customer-segment/provider_request"),
+      expect.stringContaining("/settings/review-lanes/direct_pur_lead")
     ])
   );
 });
@@ -1783,7 +2309,7 @@ test("opens analytics review page and saves verdict comment", async () => {
 
   render(<App />);
 
-  expect(await screen.findByRole("heading", { name: "Ревью сообщения" })).toBeInTheDocument();
+  expect(await screen.findByRole("heading", { name: "Разбор сообщения" })).toBeInTheDocument();
   fireEvent.click(screen.getByRole("button", { name: "Не лид" }));
   fireEvent.change(screen.getByLabelText("Комментарий ревью"), { target: { value: "Нет запроса на подрядчика" } });
   fireEvent.click(screen.getByRole("button", { name: "Сохранить ревью" }));
@@ -1794,6 +2320,110 @@ test("opens analytics review page and saves verdict comment", async () => {
   expect(await screen.findByText("Ревью сохранено")).toBeInTheDocument();
   expect(await screen.findAllByText("Не лид (ревью)")).toHaveLength(2);
   expect(screen.queryByText("Горячий лид")).not.toBeInTheDocument();
+});
+
+test("shows LLM verifier settings and run payload on analytics review page", async () => {
+  window.history.replaceState(null, "", "/#/analytics/review/focus-1");
+  const candidate = {
+    message_id: "focus-1",
+    text: "Нужен подрядчик на умный дом",
+    score: 80,
+    temperature: "hot",
+    review_lane: "direct_pur_lead",
+    solution_areas: [],
+    customer_segments: [],
+    intent_signals: [],
+    noise_signals: [],
+    reasons: [],
+    domain_signals: [],
+    facts: [],
+    review: null
+  };
+  const llmRun = {
+    id: "llm-run-1",
+    source_message_id: "focus-1",
+    enrichment_job_id: "job-1",
+    model: "lead-qwen-ru",
+    schema_version: "llm_verification.v1",
+    status: "completed",
+    prompt: "Return JSON",
+    context_pack: {
+      message: {
+        source_message_id: "focus-1",
+        source_chat_title: "Чат дизайнеров",
+        telegram_message_id: 10,
+        text: "Нужен подрядчик на умный дом"
+      },
+      rule_engine_result: { verdict: "lead", score: 80 },
+      golden_examples: []
+    },
+    response: {
+      verdict: "lead",
+      confidence: 0.91,
+      recommendation: "keep",
+      agrees_with_rule_engine: true,
+      matched_golden_ids: [],
+      missing_fact_types: [],
+      suspicious_fact_types: [],
+      missing_signal_types: [],
+      evidence: ["умный дом"],
+      anti_evidence: []
+    },
+    raw_response: "{\"verdict\":\"lead\"}",
+    error: null,
+    created_at: "2026-05-13T13:40:00Z",
+    updated_at: "2026-05-13T13:40:00Z"
+  };
+  const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    if (url === "/api/v1/auth/me") {
+      return jsonResponse({ authenticated: true, username: "admin" });
+    }
+    if (url === "/api/v1/settings") {
+      return jsonResponse(sampleSettingsSnapshot());
+    }
+    if (url === "/api/v1/analytics/messages/focus-1" && !init) {
+      return jsonResponse(candidate);
+    }
+    if (url === "/api/v1/llm-verifications/config") {
+      return jsonResponse({
+        model: "lead-qwen-ru",
+        endpoint: "http://host.docker.internal:11434/api/chat",
+        timeout_seconds: 240,
+        execution_mode: "backend_inline"
+      });
+    }
+    if (url === "/api/v1/llm-verifications/messages/focus-1" && !init) {
+      return jsonResponse({ total: 1, items: [llmRun] });
+    }
+    if (url === "/api/v1/llm-verifications/messages/focus-1" && init?.method === "POST") {
+      return jsonResponse(llmRun);
+    }
+    throw new Error(`Unhandled fetch: ${url}`);
+  });
+  vi.stubGlobal("fetch", fetchMock);
+
+  render(<App />);
+
+  expect(await screen.findByRole("heading", { name: "Разбор сообщения" })).toBeInTheDocument();
+  expect(await screen.findByText("LLM-проверка")).toBeInTheDocument();
+  expect(screen.getAllByText("lead-qwen-ru").length).toBeGreaterThan(0);
+  expect(screen.getByText("backend_inline")).toBeInTheDocument();
+  expect(screen.getByText(/host\.docker\.internal:11434\/api\/chat/)).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Запустить LLM" }));
+  await waitFor(() =>
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/v1/llm-verifications/messages/focus-1",
+      expect.objectContaining({ method: "POST" })
+    )
+  );
+  expect(screen.getByText("Отдано модели: context_pack")).toBeInTheDocument();
+  expect(screen.getByText("System prompt")).toBeInTheDocument();
+  expect(screen.getByText("Return JSON")).toBeInTheDocument();
+  expect(screen.getAllByText(/Нужен подрядчик на умный дом/).length).toBeGreaterThan(0);
+  expect(screen.getByText("Очищенный response")).toBeInTheDocument();
+  expect(screen.getByText("Сетевой ответ модели")).toBeInTheDocument();
+  expect(screen.getByText("raw_response")).toBeInTheDocument();
 });
 
 test("review constructor saves selected text as noise setting", async () => {
@@ -1853,7 +2483,7 @@ test("review constructor saves selected text as noise setting", async () => {
 
   render(<App />);
 
-  expect(await screen.findByRole("heading", { name: "Ревью сообщения" })).toBeInTheDocument();
+  expect(await screen.findByRole("heading", { name: "Разбор сообщения" })).toBeInTheDocument();
   fireEvent.mouseUp(screen.getAllByText(candidate.text)[0]);
   expect(await screen.findByText(/Выделено:/)).toBeInTheDocument();
   fireEvent.click(screen.getByRole("button", { name: "В шум" }));
@@ -1864,11 +2494,11 @@ test("review constructor saves selected text as noise setting", async () => {
       source_message_id: "focus-1"
     })
   );
-  expect(await screen.findByText(/Добавлено в шумовой сигнал/)).toBeInTheDocument();
+  expect(await screen.findByText(/Добавлено в шумовой факт/)).toBeInTheDocument();
   expect(screen.getByText("operator_noise: dss express")).toBeInTheDocument();
 });
 
-test("review constructor saves selected text to aliases facts and signals", async () => {
+test("review constructor saves selected text to aliases and facts", async () => {
   window.history.replaceState(null, "", "/#/analytics/review/focus-1");
   const candidate = {
     message_id: "focus-1",
@@ -1934,24 +2564,6 @@ test("review constructor saves selected text to aliases facts and signals", asyn
         nlp: updatedNlp
       });
     }
-    if (url === "/api/v1/settings/nlp/constructor/signal" && init?.method === "POST") {
-      constructorPayloads.signal = JSON.parse(String(init.body));
-      return jsonResponse({
-        text: "Камера DSS",
-        collection: "signals",
-        rule_type: "operator_dss_context",
-        rule_label: "DSS контекст",
-        phrase_kind: "semantic",
-        semantic_pattern: {
-          source_text: "Камера DSS",
-          tokens: [{ normalized: "камера" }, { normalized: "dss" }]
-        },
-        created_target: true,
-        created_entry: true,
-        settings_ref: { section: "signals", key: "operator_dss_context", label: "DSS контекст" },
-        nlp: updatedNlp
-      });
-    }
     throw new Error(`Unhandled fetch: ${url}`);
   });
   vi.stubGlobal("fetch", fetchMock);
@@ -1959,7 +2571,7 @@ test("review constructor saves selected text to aliases facts and signals", asyn
 
   render(<App />);
 
-  expect(await screen.findByRole("heading", { name: "Ревью сообщения" })).toBeInTheDocument();
+  expect(await screen.findByRole("heading", { name: "Разбор сообщения" })).toBeInTheDocument();
   selectionSpy.mockReturnValue({ toString: () => "Аккара" } as Selection);
   fireEvent.mouseUp(screen.getAllByText(candidate.text)[0]);
   fireEvent.click(screen.getByRole("button", { name: "В словарь" }));
@@ -2000,38 +2612,16 @@ test("review constructor saves selected text to aliases facts and signals", asyn
     })
   );
   expect(await screen.findByText(/Добавлено в факт/)).toBeInTheDocument();
-
-  selectionSpy.mockReturnValue({ toString: () => "Камера DSS" } as Selection);
-  fireEvent.mouseUp(screen.getAllByText(candidate.text)[0]);
-  fireEvent.click(screen.getByRole("button", { name: "В доменный сигнал" }));
-  expect(await screen.findByRole("dialog", { name: "Добавить в доменный сигнал" })).toBeInTheDocument();
-  fireEvent.change(screen.getByLabelText("type"), { target: { value: "operator_dss_context" } });
-  fireEvent.change(screen.getByLabelText("label"), { target: { value: "DSS контекст" } });
-  fireEvent.change(screen.getByLabelText("Тип совпадения"), { target: { value: "semantic" } });
-  fireEvent.click(screen.getByRole("button", { name: "Сохранить сигнал" }));
-
-  await waitFor(() =>
-    expect(constructorPayloads.signal).toEqual({
-      text: "Камера DSS",
-      source_message_id: "focus-1",
-      target_type: "operator_dss_context",
-      target_label: "DSS контекст",
-      group: "Операторские сигналы",
-      phrase_kind: "semantic",
-      color: "#0b57d0",
-      confidence: 0.5
-    })
-  );
-  expect(await screen.findByText(/Добавлено в доменный сигнал/)).toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "В доменный сигнал" })).not.toBeInTheDocument();
 }, 20000);
 
 test("review page supports hotkeys, structured tags, and save next", async () => {
   const run = sampleAnalyticsRun();
-  const returnHash = `#/analytics?limit=50&offset=0&review_status=unreviewed&run=${run.id}`;
+  const returnHash = `/analytics?limit=50&offset=0&review_status=unreviewed&run=${run.id}`;
   window.history.replaceState(
     null,
     "",
-    `/#/analytics/review/focus-1?return=${encodeURIComponent(returnHash)}`
+    `/review/focus-1?return=${encodeURIComponent(returnHash)}`
   );
   const firstCandidate = {
     message_id: "focus-1",
@@ -2104,7 +2694,7 @@ test("review page supports hotkeys, structured tags, and save next", async () =>
 
   render(<App />);
 
-  expect(await screen.findByRole("heading", { name: "Ревью сообщения" })).toBeInTheDocument();
+  expect(await screen.findByRole("heading", { name: "Разбор сообщения" })).toBeInTheDocument();
   fireEvent.keyDown(window, { key: "2" });
   expect(screen.getByRole("button", { name: "Не лид" })).toHaveClass("MuiButton-contained");
   fireEvent.click(screen.getByRole("button", { name: "Только оборудование" }));
@@ -2169,15 +2759,22 @@ test("pages analytics candidates with backend limit and offset", async () => {
   vi.stubGlobal("fetch", fetchMock);
   render(<App />);
 
-  fireEvent.click(screen.getByRole("tab", { name: /аналитика/i }));
+  expect(await screen.findByRole("heading", { name: "Очередь сообщений" })).toBeInTheDocument();
   expect(await screen.findByText("Первая страница кандидатов")).toBeInTheDocument();
 
   fireEvent.click(screen.getByRole("button", { name: "Следующая страница" }));
 
   await waitFor(() =>
-    expect(fetchMock).toHaveBeenCalledWith(
-      `/api/v1/analytics/runs/${run.id}/candidates?limit=50&offset=50`
-    )
+    expect(
+      fetchMock.mock.calls.some(([calledUrl]) => {
+        const called = String(calledUrl);
+        if (!called.startsWith(`/api/v1/analytics/runs/${run.id}/candidates`)) {
+          return false;
+        }
+        const params = new URL(called, "http://localhost").searchParams;
+        return params.get("limit") === "50" && params.get("offset") === "50";
+      })
+    ).toBe(true)
   );
   expect(await screen.findByText("Вторая страница кандидатов")).toBeInTheDocument();
 });
@@ -2225,7 +2822,7 @@ test("selects analytics filters from summary aggregates", async () => {
             { kind: "source_chat", key: "chat-designers", label: "Чат дизайнеров", count: 7, payload: {} }
           ],
           review_lane: [
-            { kind: "review_lane", key: "direct_pur_lead", label: "Прямой лид ПУР", count: 339, payload: {} }
+            { kind: "review_lane", key: "direct_pur_lead", label: "Прямой лид", count: 339, payload: {} }
           ]
         }
       });
@@ -2261,14 +2858,19 @@ test("selects analytics filters from summary aggregates", async () => {
   vi.stubGlobal("fetch", fetchMock);
   render(<App />);
 
-  fireEvent.click(screen.getByRole("tab", { name: /аналитика/i }));
+  expect(await screen.findByRole("heading", { name: "Очередь сообщений" })).toBeInTheDocument();
   expect(await screen.findByText("Отфильтрованный кандидат")).toBeInTheDocument();
 
+  fireEvent.click(screen.getByRole("button", { name: "Открыть фильтры очереди" }));
   chooseMuiOption("Сигнал", /designer_context/);
   chooseMuiOption("Канал", /Чат дизайнеров/);
-  fireEvent.change(screen.getByLabelText("Дата с"), { target: { value: "2026-05-08T00:00" } });
-  fireEvent.change(screen.getByLabelText("Дата по"), { target: { value: "2026-05-08T23:59" } });
-  fireEvent.click(screen.getByRole("button", { name: "Применить" }));
+  await waitFor(() => expect(screen.queryByRole("listbox")).not.toBeInTheDocument());
+  fireEvent.click(within(screen.getByRole("dialog", { name: "Фильтры" })).getByRole("button", { name: "Применить" }));
+  await waitForElementToBeRemoved(() => screen.queryByRole("dialog", { name: "Фильтры" }));
+  fireEvent.click(screen.getByRole("button", { name: /Интервал времени/ }));
+  fireEvent.change(screen.getByLabelText("От"), { target: { value: "2026-05-08T00:00" } });
+  fireEvent.change(screen.getByLabelText("До"), { target: { value: "2026-05-08T23:59" } });
+  fireEvent.click(screen.getByRole("button", { name: "Применить интервал" }));
 
   await waitFor(() =>
     expect(
@@ -2312,7 +2914,7 @@ test("filters analytics candidates by review status and verdict", async () => {
           customer_segment: [],
           source_chat: [],
           review_lane: [
-            { kind: "review_lane", key: "direct_pur_lead", label: "Прямой лид ПУР", count: 1, payload: {} }
+            { kind: "review_lane", key: "direct_pur_lead", label: "Прямой лид", count: 1, payload: {} }
           ]
         }
       });
@@ -2353,15 +2955,20 @@ test("filters analytics candidates by review status and verdict", async () => {
   vi.stubGlobal("fetch", fetchMock);
   render(<App />);
 
-  fireEvent.click(screen.getByRole("tab", { name: /аналитика/i }));
+  expect(await screen.findByRole("heading", { name: "Очередь сообщений" })).toBeInTheDocument();
   expect(await screen.findByText("Разобранный кандидат")).toBeInTheDocument();
   expect(screen.getByText("Не лид")).toBeInTheDocument();
-  expect(screen.getByText("Прямой лид ПУР")).toBeInTheDocument();
-  const reviewLink = screen.getByRole("link", { name: /ревью/i });
-  expect(reviewLink).toHaveAttribute("href", expect.stringContaining("#/analytics/review/reviewed?return="));
+  expect(screen.getByText("Прямой лид")).toBeInTheDocument();
+  fireEvent.click(screen.getByText("Разобранный кандидат"));
+  const reviewLink = within(await screen.findByRole("complementary", { name: "Сообщение очереди" })).getByRole("link", {
+    name: /ревью/i
+  });
+  expect(reviewLink).toHaveAttribute("href", expect.stringContaining("/review/reviewed?return="));
 
+  fireEvent.click(screen.getByRole("button", { name: "Открыть фильтры очереди" }));
   chooseMuiOption("Статус ревью", /С ревью/);
-  chooseMuiOption("Вердикт", /Не лид/);
+  chooseMuiOption("Вердикт ревью", /Не лид/);
+  fireEvent.click(screen.getByRole("button", { name: "Применить" }));
 
   await waitFor(() =>
     expect(
@@ -2377,26 +2984,238 @@ test("filters analytics candidates by review status and verdict", async () => {
   );
 });
 
+test("saves and applies local analytics queue filter presets", async () => {
+  const run = sampleAnalyticsRun();
+  const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+    const url = String(input);
+    if (url === "/api/v1/settings") {
+      return jsonResponse(sampleSettingsSnapshot());
+    }
+    if (url === "/api/v1/analytics/runs") {
+      return jsonResponse({ runs: [run] });
+    }
+    if (url === `/api/v1/analytics/runs/${run.id}/summary`) {
+      return jsonResponse({
+        run,
+        aggregates: {
+          score_bucket: [],
+          signal: [],
+          reason: [],
+          solution_area: [],
+          customer_segment: [],
+          source_chat: [],
+          review_lane: []
+        }
+      });
+    }
+    if (url.startsWith(`/api/v1/analytics/runs/${run.id}/candidates`)) {
+      return jsonResponse({
+        total: 1,
+        limit: 50,
+        offset: 0,
+        items: [
+          {
+            message_id: "saved-filter",
+            text: "Сохраненный фильтр кандидат",
+            score: 50,
+            temperature: "cold",
+            review_lane: "other_candidate",
+            solution_areas: [],
+            customer_segments: [],
+            intent_signals: [],
+            noise_signals: [],
+            reasons: [],
+            domain_signals: [],
+            facts: []
+          }
+        ]
+      });
+    }
+    throw new Error(`Unhandled fetch: ${url}`);
+  });
+  vi.stubGlobal("fetch", fetchMock);
+  render(<App />);
+
+  expect(await screen.findByRole("heading", { name: "Очередь сообщений" })).toBeInTheDocument();
+  expect(await screen.findByText("Сохраненный фильтр кандидат")).toBeInTheDocument();
+
+  fireEvent.click(screen.getByRole("button", { name: "Открыть фильтры очереди" }));
+  chooseMuiOption("Температура", /cold/);
+  chooseMuiOption("LLM вердикт", /^lead$/);
+  fireEvent.click(screen.getByRole("button", { name: "Применить" }));
+  await waitForElementToBeRemoved(() => screen.queryByRole("dialog", { name: "Фильтры" }));
+
+  await waitFor(() =>
+    expect(
+      fetchMock.mock.calls.some(([calledUrl]) => {
+        const called = String(calledUrl);
+        if (!called.startsWith(`/api/v1/analytics/runs/${run.id}/candidates`)) {
+          return false;
+        }
+        const params = new URL(called, "http://localhost").searchParams;
+        return params.get("temperature") === "cold" && params.get("llm_verdict") === "lead";
+      })
+    ).toBe(true)
+  );
+
+  fireEvent.click(screen.getByRole("button", { name: "Сохранить" }));
+  fireEvent.change(screen.getByLabelText("Название фильтра"), {
+    target: { value: "Холодные LLM lead" }
+  });
+  fireEvent.click(screen.getByLabelText("Сделать по умолчанию"));
+  fireEvent.click(screen.getByRole("button", { name: "Сохранить фильтр" }));
+  await waitForElementToBeRemoved(() => screen.queryByRole("dialog", { name: "Сохранить фильтр" }));
+
+  const saved = JSON.parse(window.localStorage.getItem("pur-leads.analytics.saved-filters.v1") ?? "[]");
+  expect(saved[0].name).toBe("Холодные LLM lead");
+  expect(saved[0].isDefault).toBe(true);
+  expect(saved[0].filters.temperature).toBe("cold");
+  expect(saved[0].filters.llmVerdict).toBe("lead");
+  expect(screen.getByText("Холодные LLM lead")).toBeInTheDocument();
+});
+
+test("applies compact interval, auto refresh, and clicked value filters in analytics queue", async () => {
+  const run = sampleAnalyticsRun();
+  const candidate = {
+    message_id: "quick-filter",
+    text: "Подскажите, кто занимается KNX?",
+    score: 88,
+    temperature: "warm",
+    review_lane: "direct_pur_lead",
+    solution_areas: [],
+    customer_segments: [],
+    intent_signals: [],
+    noise_signals: [],
+    reasons: [],
+    domain_signals: [],
+    facts: [],
+    source_type: "telegram",
+    received_at: "2026-05-15T08:30:00Z",
+    source_chat_id: "chat-designers",
+    source_chat_title: "Чат дизайнеров",
+    llm: {
+      processed: true,
+      status: "completed",
+      verdict: "lead",
+      confidence: 0.91,
+      recommendation: "keep",
+      agrees_with_rule_engine: true,
+      model: "lead-qwen-ru",
+      route_id: "designers",
+      attempts: 1,
+      has_error: false,
+      updated_at: "2026-05-15T08:31:00Z"
+    }
+  };
+  const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+    const url = String(input);
+    if (url === "/api/v1/settings") {
+      return jsonResponse(sampleSettingsSnapshot());
+    }
+    if (url === "/api/v1/analytics/runs") {
+      return jsonResponse({ runs: [run] });
+    }
+    if (url === `/api/v1/analytics/runs/${run.id}/summary`) {
+      return jsonResponse({
+        run,
+        aggregates: {
+          score_bucket: [],
+          signal: [],
+          reason: [],
+          solution_area: [],
+          customer_segment: [],
+          source_chat: [{ kind: "source_chat", key: "chat-designers", label: "Чат дизайнеров", count: 1, payload: {} }],
+          review_lane: []
+        }
+      });
+    }
+    if (url.startsWith(`/api/v1/analytics/runs/${run.id}/candidates`)) {
+      return jsonResponse({ total: 1, limit: 50, offset: 0, items: [candidate] });
+    }
+    throw new Error(`Unhandled fetch: ${url}`);
+  });
+  vi.stubGlobal("fetch", fetchMock);
+  render(<App />);
+
+  expect(await screen.findByRole("heading", { name: "Очередь сообщений" })).toBeInTheDocument();
+  expect(await screen.findByText("Подскажите, кто занимается KNX?")).toBeInTheDocument();
+
+  fireEvent.click(screen.getByRole("button", { name: /Интервал времени.*24 часа/ }));
+  fireEvent.click(await screen.findByRole("menuitem", { name: "3 часа" }));
+  expect(await screen.findByText(/Интервал: за 3 часа/)).toBeInTheDocument();
+  await waitFor(() =>
+    expect(
+      fetchMock.mock.calls.some(([calledUrl]) => {
+        const called = String(calledUrl);
+        if (!called.startsWith(`/api/v1/analytics/runs/${run.id}/candidates`)) {
+          return false;
+        }
+        const params = new URL(called, "http://localhost").searchParams;
+        return Boolean(params.get("received_from")) && params.get("received_to") === null;
+      })
+    ).toBe(true)
+  );
+
+  fireEvent.click(screen.getByRole("button", { name: "Автообновление: выкл" }));
+  fireEvent.click(await screen.findByRole("menuitem", { name: "1 мин" }));
+  await waitFor(() => expect(screen.queryByRole("menuitem", { name: "30 сек" })).not.toBeInTheDocument());
+  expect(screen.getAllByRole("button", { name: "Автообновление: 1 мин" }).length).toBeGreaterThan(0);
+
+  fireEvent.click(screen.getByRole("button", { name: "Фильтровать значение: Чат дизайнеров" }));
+  fireEvent.click(await screen.findByRole("menuitem", { name: /Фильтровать по этому значению/ }));
+  await waitFor(() =>
+    expect(
+      fetchMock.mock.calls.some(([calledUrl]) => {
+        const called = String(calledUrl);
+        if (!called.startsWith(`/api/v1/analytics/runs/${run.id}/candidates`)) {
+          return false;
+        }
+        const params = new URL(called, "http://localhost").searchParams;
+        return params.get("source_chat") === "Чат дизайнеров";
+      })
+    ).toBe(true)
+  );
+
+  fireEvent.click(screen.getByText("Подскажите, кто занимается KNX?"));
+  const sidePage = await screen.findByRole("complementary", { name: "Сообщение очереди" });
+  expect(within(sidePage).getByLabelText("Показывать пустые")).not.toBeChecked();
+  fireEvent.click(within(sidePage).getByRole("button", { name: "Фильтровать значение: lead" }));
+  fireEvent.click(await screen.findByRole("menuitem", { name: /Фильтровать по этому значению/ }));
+  await waitFor(() =>
+    expect(
+      fetchMock.mock.calls.some(([calledUrl]) => {
+        const called = String(calledUrl);
+        if (!called.startsWith(`/api/v1/analytics/runs/${run.id}/candidates`)) {
+          return false;
+        }
+        const params = new URL(called, "http://localhost").searchParams;
+        return params.get("llm_verdict") === "lead";
+      })
+    ).toBe(true)
+  );
+});
+
 test("adds semantic pattern through backend lemmatization", async () => {
   const settingsPayload = {
     nlp: {
       pipeline: { stages: [{ name: "segmentation", enabled: true }] },
-      signals: [
+      signals: [],
+      facts: [
         {
-          type: "video_surveillance",
+          type: "video_surveillance_fact",
           label: "Видеонаблюдение",
-          color: "#455a64",
+          color: null,
           confidence: 0.84,
           phrases: [],
-          patterns: []
+          patterns: [],
+          match: { facts: [] }
         }
       ],
-        facts: [],
-        vendors: [],
-        protocols: [],
-        devices: [],
-        software: [],
-        lead_scoring: sampleLeadScoringSettings(),
+      vendors: [],
+      protocols: [],
+      devices: [],
+      software: [],
+      lead_scoring: sampleLeadScoringSettings(),
       source: {
         type: "postgres",
         path: "nlp_config_revisions.config",
@@ -2428,6 +3247,7 @@ test("adds semantic pattern through backend lemmatization", async () => {
   render(<App />);
 
   fireEvent.click(screen.getByRole("tab", { name: /настройки/i }));
+  fireEvent.click(await screen.findByRole("button", { name: "Факты" }));
   expect(await screen.findByText("Видеонаблюдение")).toBeInTheDocument();
   fireEvent.click(screen.getByText("Видеонаблюдение"));
   fireEvent.click(screen.getByRole("button", { name: "Добавить лемматическую фразу" }));
@@ -2458,17 +3278,37 @@ test("renders expanded settings help page for all editable NLP settings", () => 
   expect(screen.getByRole("heading", { name: "Pipeline" })).toBeInTheDocument();
   expect(screen.getByRole("heading", { name: "Доменные сигналы" })).toBeInTheDocument();
   expect(screen.getByRole("heading", { name: "Факты" })).toBeInTheDocument();
+  expect(screen.getByRole("heading", { name: "Evidence-only факты" })).toBeInTheDocument();
   expect(screen.getByRole("heading", { name: "Словари" })).toBeInTheDocument();
   expect(screen.getByRole("heading", { name: "Alias matching" })).toBeInTheDocument();
   expect(screen.getByRole("heading", { name: "Оценка лида" })).toBeInTheDocument();
+  expect(screen.getByRole("heading", { name: "Сквозной пример" })).toBeInTheDocument();
   expect(screen.getAllByText("Точное совпадение").length).toBeGreaterThan(0);
   expect(screen.getAllByText("Лемматическое совпадение").length).toBeGreaterThan(0);
+  expect(screen.getByText(/у фактов два источника: fact rule и alias dictionary/i)).toBeInTheDocument();
+  expect(screen.getByText(/operator_noise_fact - обычный fact rule/i)).toBeInTheDocument();
+  expect(screen.getAllByText(/словарь не делает лемматический поиск/i).length).toBeGreaterThan(0);
+  expect(screen.getByText(/если это бренды, протоколы, устройства, модели или по - используй словарь/i)).toBeInTheDocument();
+  expect(screen.getByText(/если это намерение, контекст, домен, объект или шум - используй факт/i)).toBeInTheDocument();
+  expect(screen.getByText(/если это бизнес-вывод по найденным фактам - используй сигнал/i)).toBeInTheDocument();
   expect(screen.getByText(/type пишем латиницей в snake_case/i)).toBeInTheDocument();
   expect(screen.getByText(/label - русское название/i)).toBeInTheDocument();
   expect(screen.getByText(/confidence - доверие к правилу/i)).toBeInTheDocument();
   expect(screen.getByText(/group - папка/i)).toBeInTheDocument();
   expect(screen.getByText(/Связь сигналов и словарей/i)).toBeInTheDocument();
   expect(screen.getAllByText(/alias:vendors:neptun/i).length).toBeGreaterThan(0);
+  expect(screen.getAllByText(/alias:vendors:aqara/i).length).toBeGreaterThan(0);
+  expect(screen.getAllByText(/alias:protocols:zigbee/i).length).toBeGreaterThan(0);
+  expect(screen.getAllByText(/intent_install_connect/i).length).toBeGreaterThan(0);
+  expect(screen.getAllByText(/domain_smart_home/i).length).toBeGreaterThan(0);
+  expect(screen.getAllByText(/lead_active_intent/i).length).toBeGreaterThan(0);
+  expect(screen.getAllByText(/pur_smart_home/i).length).toBeGreaterThan(0);
+  expect(screen.getAllByText(/domain_ventilation/i).length).toBeGreaterThan(0);
+  expect(screen.getAllByText(/intent_ventilation_specialist_request/i).length).toBeGreaterThan(0);
+  expect(screen.getAllByText(/lead_partner_sourcing/i).length).toBeGreaterThan(0);
+  expect(screen.getAllByText(/evidence-only/i).length).toBeGreaterThan(0);
+  expect(screen.getAllByText(/weights\.signals/i).length).toBeGreaterThan(0);
+  expect(screen.getByText(/Хочу поставить умный дом Aqara с Zigbee в квартире/i)).toBeInTheDocument();
   expect(screen.getByText(/casefold/i)).toBeInTheDocument();
   expect(screen.getByText(/fuzzy_min_length/i)).toBeInTheDocument();
   expect(screen.getAllByText(/короткие alias/i).length).toBeGreaterThan(0);
@@ -2479,7 +3319,7 @@ test("renders expanded settings help page for all editable NLP settings", () => 
   expect(screen.getAllByText(/review_lanes/i).length).toBeGreaterThan(0);
   expect(screen.getByText(/score = сумма весов/i)).toBeInTheDocument();
   expect(screen.getByText(/negative weights/i)).toBeInTheDocument();
-  expect(screen.getByText("нужна консультация")).toBeInTheDocument();
+  expect(screen.getAllByText("нужна консультация").length).toBeGreaterThan(0);
   expect(screen.getByText("нужный консультация")).toBeInTheDocument();
   expect(screen.queryByText(/caseless:/)).not.toBeInTheDocument();
   expect(screen.queryByText(/normalized:/)).not.toBeInTheDocument();
@@ -2521,7 +3361,7 @@ function sampleLeadScoringSettings() {
     review_lanes: [
       {
         key: "direct_pur_lead",
-        label: "Прямой лид ПУР",
+        label: "Прямой лид",
         description: "Сначала смотреть руками",
         priority: 200,
         match_groups: [
@@ -2624,6 +3464,73 @@ function sampleTelegramIngestionSettings() {
   };
 }
 
+function sampleDesignerTelegramIngestionSettings() {
+  return {
+    accounts: [],
+    chats: [
+      {
+        id: "chat-designers",
+        account_id: "account-main",
+        title: "Чат дизайнеров",
+        input_ref: "https://t.me/designers",
+        telegram_chat_id: "-1001",
+        enabled: true,
+        status: "resolved",
+        last_message_id: 42,
+        last_error: null,
+        created_at: "2026-05-13T10:00:00Z",
+        updated_at: "2026-05-13T10:00:00Z"
+      }
+    ]
+  };
+}
+
+function sampleLlmSettings() {
+  return {
+    enabled: true,
+    model: "lead-qwen-ru",
+    endpoint: "http://host.docker.internal:11434/api/chat",
+    timeout_seconds: 240,
+    system_prompt: "Return JSON",
+    updated_at: null,
+    routes: []
+  };
+}
+
+function sampleLlmRun() {
+  return {
+    id: "run-1",
+    source_message_id: "message-1",
+    enrichment_job_id: "job-1",
+    model: "lead-qwen-ru",
+    route_id: "designers_non_noise",
+    schema_version: "llm_verification.v1",
+    status: "queued",
+    prompt: "Return JSON",
+    attempts: 0,
+    context_pack: {
+      message: {
+        text: "Нужен умный дом",
+        source_chat_title: "Дизайнеры",
+        telegram_message_id: 42,
+        source_message_id: "message-1"
+      }
+    },
+    response: {
+      verdict: "lead",
+      confidence: 0.88,
+      recommendation: "keep",
+      evidence: ["умный дом"],
+      anti_evidence: []
+    },
+    raw_response: "{\"verdict\":\"lead\",\"confidence\":0.88}",
+    error: null,
+    claimed_at: null,
+    created_at: "2026-05-13T14:00:00Z",
+    updated_at: "2026-05-13T14:00:00Z"
+  };
+}
+
 function sampleAnalyticsRun() {
   return {
     id: "1ce74b24-4b8a-4f65-ac1d-3649b9e1e226",
@@ -2704,7 +3611,7 @@ function settingsLinkHrefs() {
   return screen
     .getAllByRole("link")
     .map((link) => link.getAttribute("href") ?? "")
-    .filter((href) => href.includes("#/settings/"));
+    .filter((href) => href.includes("/settings/"));
 }
 
 function sampleResult() {
@@ -2801,7 +3708,7 @@ function sampleResult() {
       ],
       review_lane: {
         key: "direct_pur_lead",
-        label: "Прямой лид ПУР",
+        label: "Прямой лид",
         description: "Есть домен и активное намерение",
         matched_group_indexes: [0, 1]
       }

@@ -36,7 +36,7 @@ export type ReviewNlpSettings = {
 };
 
 type ConstructorPhraseKind = "exact" | "semantic";
-export type ConstructorKind = "alias" | "fact" | "signal";
+export type ConstructorKind = "alias" | "fact";
 
 export type ConstructorDialogState =
   | {
@@ -50,7 +50,7 @@ export type ConstructorDialogState =
       confidence: string;
     }
   | {
-      kind: "fact" | "signal";
+      kind: "fact";
       text: string;
       target_type: string;
       target_label: string;
@@ -130,7 +130,7 @@ export function createConstructorDialog(kind: ConstructorKind, text: string): Co
     text,
     target_type: constructorKeyFromText(text),
     target_label: text,
-    group: kind === "signal" ? "Операторские сигналы" : "Операторские факты",
+    group: "Операторские факты",
     phrase_kind: "exact",
     color: "#0b57d0",
     confidence: "0.5"
@@ -162,7 +162,7 @@ export async function saveConstructorDialogRequest({
       })
     });
     if (!response.ok) {
-      throw new Error(`Backend вернул ${response.status}`);
+      throw new Error(await readBackendError(response));
     }
     const payload = (await response.json()) as ConstructorAliasResponse;
     return {
@@ -172,8 +172,7 @@ export async function saveConstructorDialogRequest({
     };
   }
 
-  const endpoint = dialog.kind === "signal" ? "signal" : "fact";
-  const response = await fetch(`${apiBaseUrl}/api/v1/settings/nlp/constructor/${endpoint}`, {
+  const response = await fetch(`${apiBaseUrl}/api/v1/settings/nlp/constructor/fact`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -183,18 +182,17 @@ export async function saveConstructorDialogRequest({
       target_label: dialog.target_label,
       group: dialog.group,
       phrase_kind: dialog.phrase_kind,
-      ...(dialog.kind === "signal" ? { color: dialog.color } : {}),
       confidence: numberOrNull(dialog.confidence)
     })
   });
   if (!response.ok) {
-    throw new Error(`Backend вернул ${response.status}`);
+    throw new Error(await readBackendError(response));
   }
   const payload = (await response.json()) as ConstructorRuleResponse;
   return {
     nlp: payload.nlp,
     draft: `${payload.collection}:${payload.rule_type} <- ${payload.text}`,
-    message: `Добавлено в ${dialog.kind === "signal" ? "доменный сигнал" : "факт"} «${payload.rule_label}»: ${payload.text}`
+    message: `Добавлено в факт «${payload.rule_label}»: ${payload.text}`
   };
 }
 
@@ -216,7 +214,7 @@ export async function saveNoiseConstructorRequest({
     })
   });
   if (!response.ok) {
-    throw new Error(`Backend вернул ${response.status}`);
+    throw new Error(await readBackendError(response));
   }
   const payload = (await response.json()) as ConstructorNoiseResponse;
   const phraseText = payload.phrase.join(" ");
@@ -224,9 +222,21 @@ export async function saveNoiseConstructorRequest({
     nlp: payload.nlp,
     draft: `${payload.signal_type}: ${phraseText}`,
     message: payload.created_phrase
-      ? `Добавлено в шумовой сигнал «${payload.signal_label}»: ${phraseText}`
-      : `Шумовой сигнал «${payload.signal_label}» уже содержит: ${phraseText}`
+      ? `Добавлено в шумовой факт «${payload.signal_label}»: ${phraseText}`
+      : `Шумовой факт «${payload.signal_label}» уже содержит: ${phraseText}`
   };
+}
+
+async function readBackendError(response: Response): Promise<string> {
+  try {
+    const payload = (await response.json()) as { detail?: unknown };
+    if (typeof payload.detail === "string") {
+      return payload.detail;
+    }
+  } catch {
+    // Keep the generic HTTP status below when the backend response is not JSON.
+  }
+  return `Backend вернул ${response.status}`;
 }
 
 export function ConstructorDialog({
@@ -251,15 +261,11 @@ export function ConstructorDialog({
   const title =
     dialog.kind === "alias"
       ? "Добавить в словарь"
-      : dialog.kind === "fact"
-        ? "Добавить в факт"
-        : "Добавить в доменный сигнал";
+      : "Добавить в факт";
   const saveLabel =
     dialog.kind === "alias"
       ? "Сохранить в словарь"
-      : dialog.kind === "fact"
-        ? "Сохранить факт"
-        : "Сохранить сигнал";
+      : "Сохранить факт";
 
   return (
     <Dialog open onClose={onClose} fullWidth maxWidth="sm" aria-labelledby="constructor-dialog-title">
@@ -402,11 +408,11 @@ function RuleConstructorFields({
   nlpSettings,
   onChange
 }: {
-  dialog: Extract<ConstructorDialogState, { kind: "fact" | "signal" }>;
+  dialog: Extract<ConstructorDialogState, { kind: "fact" }>;
   nlpSettings?: ReviewNlpSettings | null;
   onChange: (dialog: ConstructorDialogState) => void;
 }) {
-  const rules = dialog.kind === "signal" ? (nlpSettings?.signals ?? []) : (nlpSettings?.facts ?? []);
+  const rules = nlpSettings?.facts ?? [];
   return (
     <>
       <TextField
@@ -463,15 +469,6 @@ function RuleConstructorFields({
         <option value="exact">Точная фраза</option>
         <option value="semantic">Лемматическая фраза</option>
       </TextField>
-      {dialog.kind === "signal" && (
-        <TextField
-          label="color"
-          type="color"
-          value={dialog.color}
-          onChange={(event) => onChange({ ...dialog, color: event.target.value })}
-          fullWidth
-        />
-      )}
       <TextField
         label="confidence"
         type="number"

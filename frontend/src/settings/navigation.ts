@@ -1,3 +1,5 @@
+import { routeParts } from "../routes";
+
 export type AliasCatalogName = "vendors" | "protocols" | "devices" | "software";
 
 export type SettingsSection =
@@ -6,6 +8,10 @@ export type SettingsSection =
   | "facts"
   | "aliases"
   | "lead_scoring"
+  | "solution_areas"
+  | "review_lanes"
+  | "dependency_graph"
+  | "llm"
   | "notifications"
   | "telegram_ingestion"
   | "system";
@@ -31,27 +37,27 @@ export function settingsTargetHash(target: SettingsTarget | null): string {
     return "";
   }
   if (target.kind === "signal") {
-    return `#/settings/signals/${encodeURIComponent(target.key)}`;
+    return `/settings/signals/${encodeURIComponent(target.key)}`;
   }
   if (target.kind === "fact") {
-    return `#/settings/facts/${encodeURIComponent(target.key)}`;
+    return `/settings/facts/${encodeURIComponent(target.key)}`;
   }
   if (target.kind === "alias") {
-    return `#/settings/aliases/${target.catalog}/${encodeURIComponent(target.key)}`;
+    return `/settings/aliases/${target.catalog}/${encodeURIComponent(target.key)}`;
   }
   if (target.kind === "lead_signal_weight") {
-    return `#/settings/lead-scoring/signal-weight/${encodeURIComponent(target.key)}`;
+    return `/settings/lead-scoring/signal-weight/${encodeURIComponent(target.key)}`;
   }
   if (target.kind === "lead_fact_weight") {
-    return `#/settings/lead-scoring/fact-weight/${encodeURIComponent(target.key)}`;
+    return `/settings/lead-scoring/fact-weight/${encodeURIComponent(target.key)}`;
   }
   if (target.kind === "solution_area") {
-    return `#/settings/lead-scoring/solution-area/${encodeURIComponent(target.key)}`;
+    return `/settings/solution-areas/${encodeURIComponent(target.key)}`;
   }
   if (target.kind === "customer_segment") {
-    return `#/settings/lead-scoring/customer-segment/${encodeURIComponent(target.key)}`;
+    return `/settings/lead-scoring/customer-segment/${encodeURIComponent(target.key)}`;
   }
-  return `#/settings/lead-scoring/review-lane/${encodeURIComponent(target.key)}`;
+  return `/settings/review-lanes/${encodeURIComponent(target.key)}`;
 }
 
 export function settingsTargetElementId(target: SettingsTarget): string {
@@ -83,8 +89,8 @@ export function settingsTargetIdPart(value: string): string {
   return value.replace(/[^a-zA-Z0-9_-]/g, "_");
 }
 
-export function parseSettingsTargetHash(hash: string): SettingsTarget | null {
-  const parts = hash.replace(/^#\/?/, "").split("/").filter(Boolean).map(decodeURIComponent);
+export function parseSettingsTargetHash(route: string): SettingsTarget | null {
+  const parts = routeParts(route);
   if (parts[0] !== "settings") {
     return null;
   }
@@ -96,6 +102,12 @@ export function parseSettingsTargetHash(hash: string): SettingsTarget | null {
   }
   if (parts[1] === "aliases" && isAliasCatalogName(parts[2]) && parts[3]) {
     return { kind: "alias", catalog: parts[2], key: parts[3] };
+  }
+  if (parts[1] === "solution-areas" && parts[2]) {
+    return { kind: "solution_area", key: parts[2] };
+  }
+  if (parts[1] === "review-lanes" && parts[2]) {
+    return { kind: "review_lane", key: parts[2] };
   }
   if (parts[1] === "lead-scoring" && parts[3]) {
     if (parts[2] === "signal-weight") {

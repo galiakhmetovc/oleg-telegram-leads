@@ -64,6 +64,14 @@ class ApiInMemoryGoldenExamplesRepository:
     async def get_example(self, example_id: UUID) -> GoldenExample | None:
         return self.examples.get(example_id)
 
+    async def delete_example(self, example_id: UUID) -> bool:
+        example = self.examples.pop(example_id, None)
+        if example is None:
+            return False
+        if example.source_message_id is not None:
+            self.source_index.pop(example.source_message_id, None)
+        return True
+
     async def set_last_enrichment_job(self, *, example_id: UUID, job_id: UUID) -> GoldenExample | None:
         example = self.examples.get(example_id)
         if example is None:
@@ -216,6 +224,37 @@ def test_creates_golden_example_from_source_message_idempotently() -> None:
     assert first_response.json()["id"] == second_response.json()["id"]
     assert first_response.json()["source_message_id"] == str(source_message_id)
     assert first_response.json()["source_chat_title"] == "Чат дизайнеров"
+
+
+def test_deletes_golden_example() -> None:
+    golden_repository = ApiInMemoryGoldenExamplesRepository()
+    example = _golden_example(
+        text="Подрядчик на видеонаблюдение",
+        title="Удаляемый пример",
+        expected_verdict="lead",
+        comment="Нужно удалить",
+    )
+    golden_repository.examples[example.id] = example
+    app = create_app()
+    app.dependency_overrides[get_golden_examples_repository] = lambda: golden_repository
+    client = TestClient(app)
+
+    response = client.delete(f"/api/v1/golden-examples/{example.id}")
+
+    assert response.status_code == 204
+    assert example.id not in golden_repository.examples
+
+
+def test_returns_404_when_deleting_missing_golden_example() -> None:
+    golden_repository = ApiInMemoryGoldenExamplesRepository()
+    app = create_app()
+    app.dependency_overrides[get_golden_examples_repository] = lambda: golden_repository
+    client = TestClient(app)
+
+    response = client.delete(f"/api/v1/golden-examples/{uuid4()}")
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "golden example not found"
 
 
 def _golden_example(

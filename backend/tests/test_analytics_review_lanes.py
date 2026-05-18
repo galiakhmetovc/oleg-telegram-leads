@@ -21,7 +21,7 @@ def test_assigns_first_matching_review_lane_by_priority() -> None:
         ),
         ReviewLaneConfig(
             key="direct_pur_lead",
-            label="Прямой лид ПУР",
+            label="Прямой лид",
             priority=200,
             match_groups=[
                 ReviewLaneMatchGroup(solution_area_types=["smart_home"]),
@@ -37,7 +37,7 @@ def test_assigns_first_matching_review_lane_by_priority() -> None:
     assignment = assign_review_lane(candidate, lanes)
 
     assert assignment.key == "direct_pur_lead"
-    assert assignment.label == "Прямой лид ПУР"
+    assert assignment.label == "Прямой лид"
     assert assignment.matched_group_indexes == [0, 1]
 
 
@@ -45,7 +45,7 @@ def test_review_lane_excludes_noise_even_when_positive_groups_match() -> None:
     lanes = [
         ReviewLaneConfig(
             key="direct_pur_lead",
-            label="Прямой лид ПУР",
+            label="Прямой лид",
             priority=200,
             match_groups=[
                 ReviewLaneMatchGroup(solution_area_types=["smart_home"]),
@@ -92,7 +92,7 @@ def test_read_candidates_assigns_review_lane_from_config(tmp_path: Path) -> None
     lanes = [
         ReviewLaneConfig(
             key="direct_pur_lead",
-            label="Прямой лид ПУР",
+            label="Прямой лид",
             priority=200,
             match_groups=[
                 ReviewLaneMatchGroup(solution_area_types=["smart_home"]),
@@ -110,7 +110,7 @@ def test_build_aggregates_counts_review_lanes_with_configured_labels() -> None:
     lanes = [
         ReviewLaneConfig(
             key="direct_pur_lead",
-            label="Прямой лид ПУР",
+            label="Прямой лид",
             priority=200,
             description="Сначала смотреть руками",
             match_groups=[],
@@ -126,7 +126,7 @@ def test_build_aggregates_counts_review_lanes_with_configured_labels() -> None:
 
     lane_aggregates = [item for item in aggregates if item.kind == "review_lane"]
     assert lane_aggregates[0].key == "direct_pur_lead"
-    assert lane_aggregates[0].label == "Прямой лид ПУР"
+    assert lane_aggregates[0].label == "Прямой лид"
     assert lane_aggregates[0].count == 2
     assert lane_aggregates[0].payload["description"] == "Сначала смотреть руками"
     assert lane_aggregates[1].key == "domain_interest"

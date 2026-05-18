@@ -257,7 +257,7 @@ def test_uses_human_labels_and_assigns_review_lane() -> None:
             review_lanes=[
                 ReviewLaneConfig(
                     key="direct_pur_lead",
-                    label="Прямой лид ПУР",
+                    label="Прямой лид",
                     description="Есть домен и активное намерение",
                     priority=900,
                     match_groups=[
@@ -287,7 +287,7 @@ def test_uses_human_labels_and_assigns_review_lane() -> None:
     assert reason_labels["automation_component"] == "Компонент автоматизации"
     assert assessment.review_lane is not None
     assert assessment.review_lane.key == "direct_pur_lead"
-    assert assessment.review_lane.label == "Прямой лид ПУР"
+    assert assessment.review_lane.label == "Прямой лид"
     assert assessment.review_lane.matched_group_indexes == [0, 1]
 
 

@@ -35,6 +35,54 @@ async def test_worker_skips_notifications_for_non_telegram_jobs(monkeypatch: pyt
 
 
 @pytest.mark.asyncio
+async def test_worker_queues_llm_notification_after_completed_run(monkeypatch: pytest.MonkeyPatch) -> None:
+    run_id = uuid4()
+    session_factory = object()
+    completed_run = SimpleNamespace(
+        status="completed",
+        source_message_id=uuid4(),
+        enrichment_job_id=uuid4(),
+    )
+    queued: list[tuple[object, object]] = []
+
+    class RecordingLlmSettingsRepository:
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            pass
+
+        async def get_settings(self) -> SimpleNamespace:
+            return SimpleNamespace(endpoint="http://llm.local/api/chat", timeout_seconds=600)
+
+    class RecordingLlmExecutor:
+        def __init__(self, **kwargs: object) -> None:
+            pass
+
+        async def execute(self, requested_run_id: object) -> object:
+            assert requested_run_id == run_id
+            return completed_run
+
+    async def record_llm_notification(requested_session_factory: object, run: object) -> None:
+        queued.append((requested_session_factory, run))
+
+    monkeypatch.setattr(tasks, "create_sessionmaker", lambda: session_factory)
+    monkeypatch.setattr(
+        tasks,
+        "get_settings",
+        lambda: SimpleNamespace(
+            llm_verification_model="lead-qwen-ru",
+            llm_verification_endpoint="http://llm.local/api/chat",
+            llm_verification_timeout_seconds=600,
+        ),
+    )
+    monkeypatch.setattr(tasks, "PostgresLlmSettingsRepository", RecordingLlmSettingsRepository)
+    monkeypatch.setattr(tasks, "ExecuteQueuedLlmVerification", RecordingLlmExecutor)
+    monkeypatch.setattr(tasks, "_queue_llm_notification", record_llm_notification)
+
+    await tasks._run_llm_verification(run_id)
+
+    assert queued == [(session_factory, completed_run)]
+
+
+@pytest.mark.asyncio
 async def test_worker_redelivery_does_not_rerun_non_queued_job(monkeypatch: pytest.MonkeyPatch) -> None:
     job_id = uuid4()
     calls: list[str] = []
@@ -81,6 +129,80 @@ async def test_worker_redelivery_does_not_rerun_non_queued_job(monkeypatch: pyte
     await tasks._run_enrichment_job(job_id)
 
     assert calls == [f"get:{job_id}"]
+
+
+@pytest.mark.asyncio
+async def test_worker_marks_queued_job_failed_when_active_config_is_invalid(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    job_id = uuid4()
+    revision_id = uuid4()
+    calls: list[tuple[str, object]] = []
+
+    class RecordingRepository:
+        def __init__(self, session_factory: object) -> None:
+            pass
+
+        async def get_job(self, requested_job_id: object) -> EnrichmentJobSnapshot | None:
+            calls.append(("get", requested_job_id))
+            return EnrichmentJobSnapshot(
+                id=job_id,
+                input_text="тест",
+                status=EnrichmentStatus.QUEUED,
+                progress_percent=0,
+                current_stage=None,
+                stage_index=0,
+                stage_count=0,
+                stage_progress_percent=0,
+                message="queued",
+                result=None,
+                error=None,
+                created_at=datetime(2026, 5, 10, tzinfo=UTC),
+                started_at=None,
+                finished_at=None,
+            )
+
+        async def claim_queued_job(self, requested_job_id: object, **kwargs: object) -> None:
+            calls.append(("claim", requested_job_id))
+
+        async def fail_job(self, requested_job_id: object, error: object) -> None:
+            calls.append(("fail", (requested_job_id, error)))
+
+    class ActiveRevisionRepository:
+        def __init__(self, session_factory: object) -> None:
+            pass
+
+        async def get_active_or_seed(self, default_documents: object) -> NlpConfigRevision:
+            calls.append(("active_revision", default_documents))
+            return NlpConfigRevision(
+                id=revision_id,
+                revision=88,
+                documents={"pipeline": {"stages": []}},
+                source="test",
+                created_at=datetime(2026, 5, 10, tzinfo=UTC),
+            )
+
+    def raise_invalid_config(documents: object) -> object:
+        raise ValueError("invalid active NLP config")
+
+    monkeypatch.setattr(tasks, "create_sessionmaker", lambda: object())
+    monkeypatch.setattr(tasks, "PostgresEnrichmentJobRepository", RecordingRepository)
+    monkeypatch.setattr(tasks, "PostgresNlpConfigRepository", ActiveRevisionRepository)
+    monkeypatch.setattr(tasks, "read_nlp_config_documents", lambda path: {"pipeline": {"stages": []}})
+    monkeypatch.setattr(tasks, "load_nlp_config_from_documents", raise_invalid_config)
+    tasks._PIPELINE_CACHE.clear()
+
+    with pytest.raises(ValueError, match="invalid active NLP config"):
+        await tasks._run_enrichment_job(job_id)
+
+    assert ("claim", job_id) not in calls
+    assert (
+        "fail",
+        (
+            job_id,
+            {"type": "ValueError", "message": "invalid active NLP config"},
+        ),
+    ) in calls
 
 
 @pytest.mark.asyncio

@@ -65,6 +65,17 @@ class PostgresGoldenExamplesRepository:
         async with self._session_factory() as session:
             return await _get_example(session, example_id)
 
+    async def delete_example(self, example_id: UUID) -> bool:
+        async with self._session_factory() as session:
+            result = await session.execute(
+                golden_examples.delete()
+                .where(golden_examples.c.id == example_id)
+                .returning(golden_examples.c.id)
+            )
+            deleted_id = result.scalar_one_or_none()
+            await session.commit()
+            return deleted_id is not None
+
     async def get_by_source_message_id(self, source_message_id: UUID) -> GoldenExample | None:
         async with self._session_factory() as session:
             result = await session.execute(

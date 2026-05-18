@@ -10,7 +10,8 @@ from app.application.notifications.use_cases import SendTelegramChatTestNotifica
 from app.application.notifications.use_cases import TestTelegramBot, UpdateNotificationSettings
 from app.db.session import create_sessionmaker
 from app.domain.notifications import NotificationRoute, NotificationRouteConditions
-from app.domain.notifications import NotificationSettings, TelegramBot, TelegramChat
+from app.domain.notifications import NotificationSettings, NotificationSummarySettings
+from app.domain.notifications import TelegramBot, TelegramChat
 from app.infrastructure.notifications.telegram_sender import HttpTelegramMessageSender, TelegramSendError
 from app.infrastructure.persistence.notification_settings_repository import (
     PostgresNotificationSettingsRepository,
@@ -61,11 +62,21 @@ class NotificationRouteSnapshot(BaseModel):
     message_template: str
 
 
+class NotificationSummarySettingsSnapshot(BaseModel):
+    enabled: bool
+    bot_id: str
+    chat_id: str
+    timezone: str = "Europe/Moscow"
+    day_start_hour: int = 9
+    night_start_hour: int = 21
+
+
 class NotificationSettingsSnapshot(BaseModel):
     bots: list[TelegramBotSnapshot]
     chats: list[TelegramChatSnapshot]
     routes: list[NotificationRouteSnapshot]
     updated_at: datetime | None
+    summary: NotificationSummarySettingsSnapshot | None = None
 
 
 class TelegramBotUpdate(BaseModel):
@@ -99,10 +110,20 @@ class NotificationRouteUpdate(BaseModel):
     message_template: str = ""
 
 
+class NotificationSummarySettingsUpdate(BaseModel):
+    enabled: bool = False
+    bot_id: str
+    chat_id: str
+    timezone: str = "Europe/Moscow"
+    day_start_hour: int = Field(default=9, ge=0, le=23)
+    night_start_hour: int = Field(default=21, ge=0, le=23)
+
+
 class NotificationSettingsUpdate(BaseModel):
     bots: list[TelegramBotUpdate] = Field(default_factory=list)
     chats: list[TelegramChatUpdate] = Field(default_factory=list)
     routes: list[NotificationRouteUpdate] = Field(default_factory=list)
+    summary: NotificationSummarySettingsUpdate | None = None
 
 
 class TelegramBotTestResponse(BaseModel):
@@ -236,6 +257,7 @@ def settings_from_update(payload: NotificationSettingsUpdate) -> NotificationSet
             for item in payload.routes
         ],
         updated_at=None,
+        summary=summary_from_update(payload.summary),
     )
 
 
@@ -255,6 +277,21 @@ def conditions_from_update(payload: NotificationRouteConditionsUpdate) -> Notifi
     )
 
 
+def summary_from_update(
+    payload: NotificationSummarySettingsUpdate | None,
+) -> NotificationSummarySettings | None:
+    if payload is None:
+        return None
+    return NotificationSummarySettings(
+        enabled=payload.enabled,
+        bot_id=payload.bot_id,
+        chat_id=payload.chat_id,
+        timezone=payload.timezone,
+        day_start_hour=payload.day_start_hour,
+        night_start_hour=payload.night_start_hour,
+    )
+
+
 def notification_settings_snapshot(settings: NotificationSettings) -> NotificationSettingsSnapshot:
     return NotificationSettingsSnapshot(
         bots=[bot_snapshot(bot) for bot in settings.bots],
@@ -269,6 +306,7 @@ def notification_settings_snapshot(settings: NotificationSettings) -> Notificati
         ],
         routes=[route_snapshot(route) for route in settings.routes],
         updated_at=settings.updated_at,
+        summary=summary_snapshot(settings.summary),
     )
 
 
@@ -294,6 +332,21 @@ def route_snapshot(route: NotificationRoute) -> NotificationRouteSnapshot:
         delivery_mode=route.delivery_mode,
         conditions=NotificationRouteConditionsSnapshot(**route.conditions.__dict__),
         message_template=route.message_template,
+    )
+
+
+def summary_snapshot(
+    summary: NotificationSummarySettings | None,
+) -> NotificationSummarySettingsSnapshot | None:
+    if summary is None:
+        return None
+    return NotificationSummarySettingsSnapshot(
+        enabled=summary.enabled,
+        bot_id=summary.bot_id,
+        chat_id=summary.chat_id,
+        timezone=summary.timezone,
+        day_start_hour=summary.day_start_hour,
+        night_start_hour=summary.night_start_hour,
     )
 
 

@@ -26,6 +26,9 @@ class Settings(BaseSettings):
     runtime_log_max_limit: int = 200
     runtime_enrichment_event_retention_rows: int = 20000
     runtime_notification_outbox_retention_rows: int = 10000
+    llm_verification_model: str = "lead-qwen-ru"
+    llm_verification_endpoint: str = "http://localhost:11434/api/chat"
+    llm_verification_timeout_seconds: float = 600.0
 
     model_config = SettingsConfigDict(env_prefix="PUR_", env_file=".env", extra="ignore")
 

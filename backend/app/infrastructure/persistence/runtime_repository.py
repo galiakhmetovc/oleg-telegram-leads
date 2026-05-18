@@ -13,6 +13,7 @@ from app.infrastructure.persistence.runtime_retention import trim_notification_o
 from app.infrastructure.persistence.tables import enrichment_events, enrichment_jobs
 from app.infrastructure.persistence.tables import enrichment_results
 from app.infrastructure.persistence.tables import enrichment_task_outbox
+from app.infrastructure.persistence.tables import llm_settings, llm_verifications
 from app.infrastructure.persistence.tables import nlp_config_revisions
 from app.infrastructure.persistence.tables import notification_outbox
 from app.infrastructure.persistence.tables import telegram_userbot_accounts
@@ -155,6 +156,28 @@ class PostgresRuntimeRepository:
             active_nlp_config_revision = await _active_nlp_config_revision(session)
             latest_worker_nlp_config_revision = await _latest_worker_nlp_config_revision(session)
             latest_worker_code_version = await _latest_worker_code_version(session)
+            llm_run_counts = await _counts_by_status(session, llm_verifications.c.status, llm_verifications)
+            llm_runs_total = await _count_rows(session, llm_verifications)
+            oldest_llm_queued_at = await _min_value(
+                session,
+                llm_verifications,
+                llm_verifications.c.created_at,
+                llm_verifications.c.status == "queued",
+            )
+            oldest_llm_running_claimed_at = await _min_value(
+                session,
+                llm_verifications,
+                llm_verifications.c.claimed_at,
+                llm_verifications.c.status == "running",
+            )
+            latest_llm_completed_at = await _max_value(
+                session,
+                llm_verifications,
+                llm_verifications.c.updated_at,
+                llm_verifications.c.status == "completed",
+            )
+            latest_llm_error = await _latest_failed_llm_error(session)
+            active_llm_settings = await _active_llm_settings(session)
 
             outbox_total = await _count_rows(session, notification_outbox)
             latest_notification_at = await _max_value(
@@ -170,10 +193,15 @@ class PostgresRuntimeRepository:
             )
             latest_notification_error = await _latest_failed_notification_error(session)
         redis_ok = await _redis_ok()
+        llm_queue_depth = await _redis_queue_depth("llm")
         worker_code_stale = (
             latest_worker_code_version is not None and latest_worker_code_version != settings.code_version
         )
         worker_has_failed_jobs = bool(job_counts.get("failed", 0))
+        stale_llm_running = (
+            oldest_llm_running_claimed_at is not None
+            and oldest_llm_running_claimed_at < checked_at - timedelta(minutes=30)
+        )
         return [
             {
                 "service": "backend",
@@ -264,6 +292,27 @@ class PostgresRuntimeRepository:
                 },
             },
             {
+                "service": "llm-worker",
+                "status": _llm_worker_status(
+                    failed_runs=llm_run_counts.get("failed", 0),
+                    stale_running=stale_llm_running,
+                    redis_ok=redis_ok,
+                ),
+                "details": {
+                    "model": active_llm_settings.get("model", settings.llm_verification_model),
+                    "endpoint": active_llm_settings.get("endpoint", settings.llm_verification_endpoint),
+                    "llm_enabled": active_llm_settings.get("enabled", True),
+                    "execution_mode": "celery_queue:llm",
+                    "redis_llm_queue_depth": llm_queue_depth,
+                    "llm_runs_total": llm_runs_total,
+                    "llm_runs_by_status": llm_run_counts,
+                    "oldest_queued_at": oldest_llm_queued_at,
+                    "oldest_running_claimed_at": oldest_llm_running_claimed_at,
+                    "latest_completed_at": latest_llm_completed_at,
+                    "failed_latest_error": latest_llm_error,
+                },
+            },
+            {
                 "service": "enrichment-dispatcher",
                 "status": _enrichment_dispatcher_status(
                     pending_with_errors=pending_task_publish_errors,
@@ -310,6 +359,16 @@ async def _redis_ok() -> bool:
         await client.aclose()
 
 
+async def _redis_queue_depth(queue_name: str) -> int | None:
+    client = redis.from_url(get_settings().redis_url)
+    try:
+        return int(await cast(Any, client.llen(queue_name)))
+    except Exception:
+        return None
+    finally:
+        await client.aclose()
+
+
 async def _counts_by_status(
     session: AsyncSession,
     status_column: Any,
@@ -326,8 +385,8 @@ async def _count_rows(session: AsyncSession, table: sa.Table, *conditions: Any) 
     return int(result or 0)
 
 
-async def _max_value(session: AsyncSession, table: sa.Table, column: Any) -> Any:
-    return await session.scalar(sa.select(sa.func.max(column)).select_from(table))
+async def _max_value(session: AsyncSession, table: sa.Table, column: Any, *conditions: Any) -> Any:
+    return await session.scalar(sa.select(sa.func.max(column)).select_from(table).where(*conditions))
 
 
 async def _min_value(session: AsyncSession, table: sa.Table, column: Any, *conditions: Any) -> Any:
@@ -373,6 +432,23 @@ async def _latest_failed_job_error(session: AsyncSession) -> Any:
         .limit(1)
     )
     return result.scalar_one_or_none()
+
+
+async def _latest_failed_llm_error(session: AsyncSession) -> str | None:
+    result = await session.execute(
+        sa.select(llm_verifications.c.error)
+        .where(llm_verifications.c.status == "failed")
+        .where(llm_verifications.c.error.is_not(None))
+        .order_by(llm_verifications.c.updated_at.desc())
+        .limit(1)
+    )
+    return result.scalar_one_or_none()
+
+
+async def _active_llm_settings(session: AsyncSession) -> dict[str, Any]:
+    result = await session.execute(sa.select(llm_settings.c.config).where(llm_settings.c.id == "default"))
+    config = result.scalar_one_or_none()
+    return config if isinstance(config, dict) else {}
 
 
 async def _active_nlp_config_revision(session: AsyncSession) -> dict[str, Any] | None:
@@ -494,6 +570,14 @@ def _enrichment_dispatcher_status(*, pending_with_errors: int, stale_sending: in
     if stale_sending:
         return "error"
     if pending_with_errors:
+        return "warning"
+    return "ok"
+
+
+def _llm_worker_status(*, failed_runs: int, stale_running: bool, redis_ok: bool) -> str:
+    if not redis_ok or stale_running:
+        return "error"
+    if failed_runs:
         return "warning"
     return "ok"
 

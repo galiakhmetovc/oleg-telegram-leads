@@ -1,12 +1,17 @@
-import AccountTreeIcon from "@mui/icons-material/AccountTree";
 import ArticleIcon from "@mui/icons-material/Article";
 import AutoAwesomeIcon from "@mui/icons-material/AutoAwesome";
+import ConstructionIcon from "@mui/icons-material/Construction";
 import DarkModeIcon from "@mui/icons-material/DarkMode";
 import HelpOutlineIcon from "@mui/icons-material/HelpOutlineOutlined";
 import InsightsIcon from "@mui/icons-material/Insights";
 import LightModeIcon from "@mui/icons-material/LightMode";
 import LogoutIcon from "@mui/icons-material/Logout";
+import MonitorHeartIcon from "@mui/icons-material/MonitorHeart";
+import RateReviewIcon from "@mui/icons-material/RateReview";
+import ReceiptLongIcon from "@mui/icons-material/ReceiptLong";
+import ScienceIcon from "@mui/icons-material/Science";
 import SettingsIcon from "@mui/icons-material/Settings";
+import SmartToyIcon from "@mui/icons-material/SmartToy";
 import StarIcon from "@mui/icons-material/Star";
 import {
   Alert,
@@ -30,13 +35,16 @@ import {
   createTheme,
   useMediaQuery
 } from "@mui/material";
-import { FormEvent, SyntheticEvent, startTransition, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { FormEvent, ReactNode, SyntheticEvent, startTransition, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { AnalyticsPage, AnalyticsReviewPage } from "./AnalyticsPage";
 import { ConfiguratorPage } from "./configurator/ConfiguratorPage";
 import { LeadAssessmentSummary, TestingWorkspace } from "./enrichment/TestingWorkspace";
 import type { EnrichmentEvent, EnrichmentJob, TextEnrichmentResult } from "./enrichment/types";
 import { GoldenExamplesPage } from "./golden/GoldenExamplesPage";
+import { LlmPage } from "./llm/LlmPage";
+import { OperatorGuidePage, type OperatorGuideRouteTarget } from "./operator-guide/OperatorGuidePage";
+import { currentRoute, navigateRoute, normalizeRoute, routeParts, routeQuery, routeWithoutQuery } from "./routes";
 import { ProjectDocumentationPage, RuntimeLogsPage, SystemStatusPage } from "./runtime/RuntimePages";
 import { SettingsCenter, SettingsTargetDialog, settingsSectionForTarget } from "./settings/SettingsCenter";
 import { SettingsHelpPage } from "./settings/SettingsHelpPage";
@@ -58,6 +66,7 @@ const apiBaseUrl = import.meta.env.VITE_API_BASE_URL ?? "";
 const themeStorageKey = "pur-leads-theme-mode";
 
 type AppThemeMode = "light" | "dark";
+type WorkbenchSection = "queue" | "testing" | "constructor";
 
 function createAppTheme(mode: AppThemeMode) {
   return createTheme({
@@ -101,15 +110,7 @@ export function App() {
   const [themeMode, setThemeMode] = useState<AppThemeMode>(() => readStoredThemeMode());
   const theme = useMemo(() => createAppTheme(themeMode), [themeMode]);
   const [authState, setAuthState] = useState<AuthState>({ status: "authenticated", username: null });
-  const [activePage, setActivePage] = useState(() =>
-    parseTestingMessageId(window.location.hash)
-      ? 0
-      : window.location.hash.startsWith("#/golden")
-        ? 2
-        : window.location.hash.startsWith("#/configurator")
-          ? 3
-          : 1
-  );
+  const [activePage, setActivePage] = useState(() => pageFromRoute(currentRoute()));
   const [inputText, setInputText] = useState(
     "Ищем поставщика в Москве. Нужно 20 тонн до 12 мая, желательно с НДС."
   );
@@ -119,20 +120,21 @@ export function App() {
   const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState(0);
   const [settingsTarget, setSettingsTarget] = useState<SettingsTarget | null>(() =>
-    parseSettingsTargetHash(window.location.hash)
+    parseSettingsTargetHash(currentRoute())
   );
   const [analyticsMessageId, setAnalyticsMessageId] = useState<string | null>(() =>
-    parseAnalyticsMessageId(window.location.hash)
+    parseAnalyticsMessageId(currentRoute())
   );
   const [analyticsReviewMessageId, setAnalyticsReviewMessageId] = useState<string | null>(() =>
-    parseAnalyticsReviewMessageId(window.location.hash)
+    parseAnalyticsReviewMessageId(currentRoute())
   );
   const [analyticsReviewReturnHash, setAnalyticsReviewReturnHash] = useState<string | null>(() =>
-    parseAnalyticsReviewReturnHash(window.location.hash)
+    parseAnalyticsReviewReturnHash(currentRoute())
   );
   const [settingsSection, setSettingsSection] = useState<SettingsSection>(() => {
-    const initialTarget = parseSettingsTargetHash(window.location.hash);
-    return initialTarget ? settingsSectionForTarget(initialTarget) : "signals";
+    const route = currentRoute();
+    const initialTarget = parseSettingsTargetHash(route);
+    return initialTarget ? settingsSectionForTarget(initialTarget) : settingsSectionFromRoute(route);
   });
   const [settingsModalTarget, setSettingsModalTarget] = useState<SettingsTarget | null>(null);
   const [settingsSnapshot, setSettingsSnapshot] = useState<SettingsSnapshot | null>(null);
@@ -147,9 +149,14 @@ export function App() {
   const isProcessing = isSubmitting || job?.status === "queued" || job?.status === "running";
   const isNarrowScreen = useMediaQuery(theme.breakpoints.down("sm"));
   const currentPage = settingsTarget ? 4 : activePage;
-  const displayedPage = currentPage;
+  const displayedPage = isWorkbenchPage(currentPage) ? 1 : currentPage;
   const visibleSettingsSnapshot = settingsSnapshot ?? settingsSnapshotRef.current;
   const themeToggleLabel = themeMode === "dark" ? "Включить светлую тему" : "Включить темную тему";
+  const workspaceClassName = [
+    "workspace",
+    currentPage === 1 ? "workspace--queue" : "",
+    currentPage === 12 ? "workspace--review" : ""
+  ].filter(Boolean).join(" ");
 
   useEffect(() => {
     document.documentElement.dataset.colorScheme = themeMode;
@@ -188,8 +195,10 @@ export function App() {
   }, []);
 
   useEffect(() => {
-    function handleHashChange() {
-      const testingMessageId = parseTestingMessageId(window.location.hash);
+    function handleRouteChange() {
+      const route = currentRoute();
+      setSettingsModalTarget(null);
+      const testingMessageId = parseTestingMessageId(route);
       if (testingMessageId) {
         setSettingsTarget(null);
         setAnalyticsMessageId(null);
@@ -198,26 +207,27 @@ export function App() {
         void loadAnalyticsMessageIntoTesting(testingMessageId);
         return;
       }
-      const target = parseSettingsTargetHash(window.location.hash);
-      const reviewMessageId = parseAnalyticsReviewMessageId(window.location.hash);
+      const target = parseSettingsTargetHash(route);
+      const reviewMessageId = parseAnalyticsReviewMessageId(route);
       setSettingsTarget(target);
       setAnalyticsReviewMessageId(reviewMessageId);
-      setAnalyticsReviewReturnHash(reviewMessageId ? parseAnalyticsReviewReturnHash(window.location.hash) : null);
-      setAnalyticsMessageId(reviewMessageId ? null : parseAnalyticsMessageId(window.location.hash));
+      setAnalyticsReviewReturnHash(reviewMessageId ? parseAnalyticsReviewReturnHash(route) : null);
+      setAnalyticsMessageId(reviewMessageId ? null : parseAnalyticsMessageId(route));
       if (target) {
         setSettingsSection(settingsSectionForTarget(target));
         setActivePage(4);
-      } else if (window.location.hash.startsWith("#/analytics")) {
-        setActivePage(1);
-      } else if (window.location.hash.startsWith("#/golden")) {
-        setActivePage(2);
-      } else if (window.location.hash.startsWith("#/configurator")) {
-        setActivePage(3);
+      } else {
+        setSettingsSection(settingsSectionFromRoute(route));
+        setActivePage(pageFromRoute(route));
       }
     }
-    handleHashChange();
-    window.addEventListener("hashchange", handleHashChange);
-    return () => window.removeEventListener("hashchange", handleHashChange);
+    handleRouteChange();
+    window.addEventListener("hashchange", handleRouteChange);
+    window.addEventListener("popstate", handleRouteChange);
+    return () => {
+      window.removeEventListener("hashchange", handleRouteChange);
+      window.removeEventListener("popstate", handleRouteChange);
+    };
   }, []);
 
   const loadSettingsSnapshot = useCallback(async (options: { commit?: boolean; force?: boolean } = {}): Promise<SettingsSnapshot> => {
@@ -416,25 +426,81 @@ export function App() {
   }
 
   function handlePageChange(_: SyntheticEvent, value: number) {
-    clearRoutedHash();
     setSettingsTarget(null);
     setAnalyticsMessageId(null);
     setAnalyticsReviewMessageId(null);
     setAnalyticsReviewReturnHash(null);
     setActivePage(value);
+    if (value === 4) {
+      setSettingsSection((current) => current || "signals");
+    }
+    navigateRoute(pageRoute(value, value === 4 ? settingsSection : undefined));
+  }
+
+  function handleWorkbenchSectionChange(section: WorkbenchSection) {
+    setSettingsTarget(null);
+    setAnalyticsMessageId(null);
+    setAnalyticsReviewMessageId(null);
+    setAnalyticsReviewReturnHash(null);
+    if (section === "testing") {
+      setActivePage(0);
+      navigateRoute("/testing");
+      return;
+    }
+    if (section === "constructor") {
+      setActivePage(3);
+      navigateRoute("/constructor");
+      return;
+    }
+    setActivePage(1);
+    navigateRoute("/analytics");
   }
 
   function openSettingsSection(section: SettingsSection) {
-    clearSettingsHash();
     setSettingsTarget(null);
     setSettingsSection(section);
     setActivePage(4);
+    navigateRoute(settingsSectionRoute(section));
   }
 
   function handleSettingsSectionChange(section: SettingsSection) {
-    clearSettingsHash();
     setSettingsTarget(null);
     setSettingsSection(section);
+    navigateRoute(settingsSectionRoute(section));
+  }
+
+  function openPageFromGuide(target: OperatorGuideRouteTarget) {
+    setSettingsTarget(null);
+    setAnalyticsMessageId(null);
+    setAnalyticsReviewMessageId(null);
+    setAnalyticsReviewReturnHash(null);
+    if (target === "testing") {
+      setActivePage(0);
+      navigateRoute("/testing");
+      return;
+    }
+    if (target === "analytics") {
+      setActivePage(1);
+      navigateRoute("/analytics");
+      return;
+    }
+    if (target === "golden") {
+      setActivePage(2);
+      navigateRoute("/golden");
+      return;
+    }
+    if (target === "constructor") {
+      setActivePage(3);
+      navigateRoute("/constructor");
+      return;
+    }
+    if (target === "settings") {
+      setActivePage(4);
+      navigateRoute(settingsSectionRoute(settingsSection));
+      return;
+    }
+    setActivePage(5);
+    navigateRoute("/help");
   }
 
   async function handleLogin(username: string, password: string): Promise<void> {
@@ -451,7 +517,7 @@ export function App() {
       throw new Error("Backend не подтвердил авторизацию");
     }
     setAuthState({ status: "authenticated", username: payload.username ?? username });
-    setActivePage(1);
+    setActivePage(pageFromRoute(currentRoute()));
     await loadSettingsSnapshot({ force: true });
   }
 
@@ -476,12 +542,16 @@ export function App() {
     <ThemeProvider theme={theme}>
       <CssBaseline />
       <Box className="app-shell">
-        <AppBar position="static" color="default" elevation={0} className="top-bar">
+        <AppBar position="sticky" color="default" elevation={0} className="top-bar">
           <Toolbar variant="dense" className="top-toolbar">
-            <AutoAwesomeIcon color="primary" fontSize="small" />
-            <Typography variant="subtitle1" component="h1" className="app-title" sx={{ ml: 1, fontWeight: 700 }}>
-              PUR Leads v2
-            </Typography>
+            <Box className="brand-lockup">
+              <Box className="brand-mark" aria-hidden="true">
+                <AutoAwesomeIcon color="primary" fontSize="small" />
+              </Box>
+              <Typography variant="subtitle1" component="h1" className="app-title">
+                PUR Leads v2
+              </Typography>
+            </Box>
             <Tabs
               value={displayedPage}
               onChange={handlePageChange}
@@ -491,35 +561,38 @@ export function App() {
               allowScrollButtonsMobile
               aria-label="Основная навигация"
             >
-              <Tab label="Тестирование" />
-              <Tab icon={<InsightsIcon fontSize="small" />} iconPosition="start" label="Аналитика" />
-              <Tab icon={<StarIcon fontSize="small" />} iconPosition="start" label="Golden" />
-              <Tab icon={<AccountTreeIcon fontSize="small" />} iconPosition="start" label="Конфигуратор" />
-              <Tab icon={<SettingsIcon fontSize="small" />} iconPosition="start" label="Настройки" />
-              <Tab icon={<HelpOutlineIcon fontSize="small" />} iconPosition="start" label="Справка" />
-              <Tab icon={<ArticleIcon fontSize="small" />} iconPosition="start" label="Проектная документация" />
-              <Tab label="Логи" />
-              <Tab label="Статус системы" />
+              <Tab value={1} icon={<RateReviewIcon fontSize="small" />} iconPosition="start" label="Рабочее место" />
+              <Tab value={12} icon={<ScienceIcon fontSize="small" />} iconPosition="start" label="Разбор" />
+              <Tab value={11} icon={<InsightsIcon fontSize="small" />} iconPosition="start" label="Аналитика" />
+              <Tab value={10} icon={<SmartToyIcon fontSize="small" />} iconPosition="start" label="LLM" />
+              <Tab value={2} icon={<StarIcon fontSize="small" />} iconPosition="start" label="Golden" />
+              <Tab value={4} icon={<SettingsIcon fontSize="small" />} iconPosition="start" label="Настройки" />
+              <Tab value={9} icon={<ArticleIcon fontSize="small" />} iconPosition="start" label="Как работать" />
+              <Tab value={5} icon={<HelpOutlineIcon fontSize="small" />} iconPosition="start" label="Справка" />
+              <Tab value={6} icon={<ArticleIcon fontSize="small" />} iconPosition="start" label="Проектная документация" />
+              <Tab value={7} icon={<ReceiptLongIcon fontSize="small" />} iconPosition="start" label="Логи" />
+              <Tab value={8} icon={<MonitorHeartIcon fontSize="small" />} iconPosition="start" label="Статус системы" />
             </Tabs>
-            <Button
-              size="small"
-              variant="text"
-              startIcon={<LogoutIcon />}
-              onClick={() => void handleLogout()}
-              sx={{ ml: 1, whiteSpace: "nowrap" }}
-            >
-              Выйти
-            </Button>
-            <Tooltip title={themeToggleLabel}>
-              <IconButton
+            <Box className="top-actions">
+              <Button
                 size="small"
-                color="inherit"
-                aria-label={themeToggleLabel}
-                onClick={() => setThemeMode((current) => (current === "dark" ? "light" : "dark"))}
+                variant="text"
+                startIcon={<LogoutIcon />}
+                onClick={() => void handleLogout()}
               >
-                {themeMode === "dark" ? <LightModeIcon fontSize="small" /> : <DarkModeIcon fontSize="small" />}
-              </IconButton>
-            </Tooltip>
+                Выйти
+              </Button>
+              <Tooltip title={themeToggleLabel}>
+                <IconButton
+                  size="small"
+                  color="inherit"
+                  aria-label={themeToggleLabel}
+                  onClick={() => setThemeMode((current) => (current === "dark" ? "light" : "dark"))}
+                >
+                  {themeMode === "dark" ? <LightModeIcon fontSize="small" /> : <DarkModeIcon fontSize="small" />}
+                </IconButton>
+              </Tooltip>
+            </Box>
           </Toolbar>
         </AppBar>
         {settingsLoading && (
@@ -529,24 +602,55 @@ export function App() {
           </Box>
         )}
 
-        <Container maxWidth={false} className="workspace">
-          {currentPage === 0 ? (
-            <TestingWorkspace
-              inputText={inputText}
-              onInputTextChange={setInputText}
-              onSubmit={handleSubmit}
-              isNarrowScreen={isNarrowScreen}
-              isProcessing={isProcessing}
-              isSubmitting={isSubmitting}
-              error={error}
-              job={job}
-              events={events}
-              result={result}
-              activeTab={activeTab}
-              onTabChange={handleTabChange}
-              onOpenSettings={openSettingsSection}
-            />
-          ) : currentPage === 1 ? (
+        <Container component="main" aria-label="Рабочая область" maxWidth={false} className={workspaceClassName}>
+          {isWorkbenchPage(currentPage) ? (
+            <WorkbenchShell
+              activeSection={workbenchSectionForPage(currentPage)}
+              onSectionChange={handleWorkbenchSectionChange}
+            >
+              {currentPage === 0 ? (
+                <TestingWorkspace
+                  inputText={inputText}
+                  onInputTextChange={setInputText}
+                  onSubmit={handleSubmit}
+                  isNarrowScreen={isNarrowScreen}
+                  isProcessing={isProcessing}
+                  isSubmitting={isSubmitting}
+                  error={error}
+                  job={job}
+                  events={events}
+                  result={result}
+                  activeTab={activeTab}
+                  onTabChange={handleTabChange}
+                  onOpenSettings={openSettingsSection}
+                />
+              ) : currentPage === 3 ? (
+                <ConfiguratorPage
+                  settings={visibleSettingsSnapshot}
+                  loading={settingsLoading}
+                  loadError={settingsError}
+                  loadSettings={loadSettingsSnapshot}
+                  onSettingsSnapshotChange={updateSettingsSnapshot}
+                />
+              ) : (
+                <AnalyticsPage
+                  apiBaseUrl={apiBaseUrl}
+                  focusMessageId={analyticsMessageId}
+                  sectionScope="workspace"
+                  onTestMessage={(candidate) => {
+                    setSettingsTarget(null);
+                    setAnalyticsMessageId(null);
+                    setAnalyticsReviewMessageId(null);
+                    setAnalyticsReviewReturnHash(null);
+                    setInputText(candidate.text);
+                    setActivePage(0);
+                    navigateRoute("/testing");
+                    void startEnrichment(candidate.text);
+                  }}
+                />
+              )}
+            </WorkbenchShell>
+          ) : currentPage === 12 ? (
             analyticsReviewMessageId ? (
               <AnalyticsReviewPage
                 apiBaseUrl={apiBaseUrl}
@@ -554,52 +658,22 @@ export function App() {
                 returnHash={analyticsReviewReturnHash}
                 nlpSettings={visibleSettingsSnapshot?.nlp ?? null}
                 onBack={() => {
-                  window.location.hash =
-                    analyticsReviewReturnHash ?? `#/analytics/message/${encodeURIComponent(analyticsReviewMessageId)}`;
+                  navigateRoute(
+                    analyticsReviewReturnHash ?? `/analytics/message/${encodeURIComponent(analyticsReviewMessageId)}`
+                  );
                   setAnalyticsReviewMessageId(null);
                   setActivePage(1);
-                }}
-                onTestMessage={(candidate) => {
-                  clearRoutedHash();
-                  setSettingsTarget(null);
-                  setAnalyticsMessageId(null);
-                  setAnalyticsReviewMessageId(null);
-                  setAnalyticsReviewReturnHash(null);
-                  setInputText(candidate.text);
-                  setActivePage(0);
-                  void startEnrichment(candidate.text);
                 }}
                 onNlpSettingsChange={updateNlpSettingsSnapshot}
               />
             ) : (
-              <AnalyticsPage
-                apiBaseUrl={apiBaseUrl}
-                focusMessageId={analyticsMessageId}
-                onTestMessage={(candidate) => {
-                  clearRoutedHash();
-                  setSettingsTarget(null);
-                  setAnalyticsMessageId(null);
-                  setAnalyticsReviewMessageId(null);
-                  setAnalyticsReviewReturnHash(null);
-                  setInputText(candidate.text);
-                  setActivePage(0);
-                  void startEnrichment(candidate.text);
-                }}
-              />
+              <ReviewEmptyState />
             )
           ) : currentPage === 2 ? (
             <GoldenExamplesPage
               apiBaseUrl={apiBaseUrl}
               isNarrowScreen={isNarrowScreen}
               onOpenSettings={openSettingsSection}
-            />
-          ) : currentPage === 3 ? (
-            <ConfiguratorPage
-              settings={visibleSettingsSnapshot}
-              loading={settingsLoading}
-              loadError={settingsError}
-              loadSettings={loadSettingsSnapshot}
-              onSettingsSnapshotChange={updateSettingsSnapshot}
             />
           ) : currentPage === 4 ? (
             <SettingsCenter
@@ -612,6 +686,12 @@ export function App() {
               onSettingsSnapshotChange={updateSettingsSnapshot}
               onSectionChange={handleSettingsSectionChange}
             />
+          ) : currentPage === 10 ? (
+            <LlmPage apiBaseUrl={apiBaseUrl} />
+          ) : currentPage === 11 ? (
+            <AnalyticsPage apiBaseUrl={apiBaseUrl} sectionScope="reports" />
+          ) : currentPage === 9 ? (
+            <OperatorGuidePage apiBaseUrl={apiBaseUrl} onNavigate={openPageFromGuide} />
           ) : currentPage === 5 ? (
             <SettingsHelpPage />
           ) : currentPage === 6 ? (
@@ -622,18 +702,20 @@ export function App() {
             <SystemStatusPage apiBaseUrl={apiBaseUrl} />
           )}
         </Container>
-        <SettingsTargetDialog
-          target={settingsModalTarget}
-          settings={visibleSettingsSnapshot}
-          loading={settingsLoading}
-          error={settingsError}
-          loadSettings={loadSettingsSnapshot}
-          onClose={() => setSettingsModalTarget(null)}
-          onOpenPage={(target) => {
-            setSettingsModalTarget(null);
-            navigateToSettingsTarget(target);
-          }}
-        />
+        {settingsModalTarget && (
+          <SettingsTargetDialog
+            target={settingsModalTarget}
+            settings={visibleSettingsSnapshot}
+            loading={settingsLoading}
+            error={settingsError}
+            loadSettings={loadSettingsSnapshot}
+            onClose={() => setSettingsModalTarget(null)}
+            onOpenPage={(target) => {
+              setSettingsModalTarget(null);
+              navigateToSettingsTarget(target);
+            }}
+          />
+        )}
       </Box>
     </ThemeProvider>
   );
@@ -700,78 +782,282 @@ function LoginPage({ onLogin }: { onLogin: (username: string, password: string) 
   );
 }
 
+function ReviewEmptyState() {
+  return (
+    <Paper variant="outlined" className="review-empty-state">
+      <Stack spacing={1.5}>
+        <Box>
+          <Typography variant="h5" component="h2" sx={{ fontWeight: 750 }}>
+            Разбор сообщения
+          </Typography>
+          <Typography variant="body2" color="text.secondary">
+            Выберите запись в очереди и откройте разбор, чтобы увидеть ревью, проверку, LLM и конструктор в одном рабочем экране.
+          </Typography>
+        </Box>
+        <Stack direction="row" spacing={1} useFlexGap sx={{ flexWrap: "wrap" }}>
+          <Button variant="contained" onClick={() => navigateRoute("/analytics")}>
+            Открыть очередь
+          </Button>
+          <Button variant="outlined" onClick={() => navigateRoute("/testing")}>
+            Произвольная проверка
+          </Button>
+        </Stack>
+      </Stack>
+    </Paper>
+  );
+}
+
+function WorkbenchShell({
+  activeSection,
+  onSectionChange,
+  children
+}: {
+  activeSection: WorkbenchSection;
+  onSectionChange: (section: WorkbenchSection) => void;
+  children: ReactNode;
+}) {
+  return (
+    <Stack
+      spacing={2}
+      className={["workbench-shell", activeSection === "queue" ? "workbench-shell--queue" : ""]
+        .filter(Boolean)
+        .join(" ")}
+    >
+      <Paper variant="outlined" className="workspace-section-nav">
+        <Tabs
+          value={activeSection}
+          onChange={(_, value) => onSectionChange(value as WorkbenchSection)}
+          variant="scrollable"
+          scrollButtons="auto"
+          allowScrollButtonsMobile
+          aria-label="Разделы рабочего места"
+        >
+          <Tab value="queue" icon={<InsightsIcon fontSize="small" />} iconPosition="start" label="Очередь" />
+          <Tab value="testing" icon={<ScienceIcon fontSize="small" />} iconPosition="start" label="Проверка" />
+          <Tab value="constructor" icon={<ConstructionIcon fontSize="small" />} iconPosition="start" label="Конструктор" />
+        </Tabs>
+      </Paper>
+      {children}
+    </Stack>
+  );
+}
+
 function parseTestingMessageId(hash: string): string | null {
-  if (!hash.startsWith("#/testing")) {
+  const route = normalizeRoute(hash);
+  if (!routeWithoutQuery(route).startsWith("/testing")) {
     return null;
   }
-  const queryIndex = hash.indexOf("?");
-  if (queryIndex === -1) {
-    return null;
-  }
-  const params = new URLSearchParams(hash.slice(queryIndex + 1));
+  const params = routeQuery(route);
   const messageId = params.get("message_id");
   return messageId?.trim() || null;
 }
 
-function parseAnalyticsMessageId(hash: string): string | null {
-  const route = stripHashQuery(hash);
-  const parts = route.replace(/^#\/?/, "").split("/").filter(Boolean).map(decodeURIComponent);
+function parseAnalyticsMessageId(route: string): string | null {
+  const parts = routeParts(route);
   if (parts[0] !== "analytics" || parts[1] !== "message") {
     return null;
   }
   return parts[2]?.trim() || null;
 }
 
-function parseAnalyticsReviewMessageId(hash: string): string | null {
-  const route = stripHashQuery(hash);
-  const parts = route.replace(/^#\/?/, "").split("/").filter(Boolean).map(decodeURIComponent);
-  if (parts[0] !== "analytics" || parts[1] !== "review") {
-    return null;
+function parseAnalyticsReviewMessageId(route: string): string | null {
+  const parts = routeParts(route);
+  if (parts[0] === "review") {
+    return parts[1]?.trim() || null;
   }
-  return parts[2]?.trim() || null;
+  if (parts[0] === "analytics" && parts[1] === "review") {
+    return parts[2]?.trim() || null;
+  }
+  return null;
 }
 
-function parseAnalyticsReviewReturnHash(hash: string): string | null {
-  if (parseAnalyticsReviewMessageId(hash) === null) {
+function parseAnalyticsReviewReturnHash(route: string): string | null {
+  if (parseAnalyticsReviewMessageId(route) === null) {
     return null;
   }
-  const queryIndex = hash.indexOf("?");
-  if (queryIndex === -1) {
-    return null;
-  }
-  const params = new URLSearchParams(hash.slice(queryIndex + 1));
+  const params = routeQuery(route);
   const value = params.get("return")?.trim() ?? "";
-  return value.startsWith("#/analytics") ? value : null;
+  const normalized = normalizeRoute(value);
+  return normalized.startsWith("/analytics") ? normalized : null;
 }
 
-function stripHashQuery(hash: string): string {
-  const queryIndex = hash.indexOf("?");
-  return queryIndex === -1 ? hash : hash.slice(0, queryIndex);
+function pageFromRoute(route: string): number {
+  const normalizedRoute = normalizeRoute(route);
+  const parts = routeParts(normalizedRoute);
+  if (parseTestingMessageId(normalizedRoute) || parts[0] === "testing") {
+    return 0;
+  }
+  if (parseSettingsTargetHash(normalizedRoute) || parts[0] === "settings") {
+    return 4;
+  }
+  if (parts[0] === "guide") {
+    return 9;
+  }
+  if (parts[0] === "golden") {
+    return 2;
+  }
+  if (parts[0] === "llm") {
+    return 10;
+  }
+  if (parts[0] === "review") {
+    return 12;
+  }
+  if (parts[0] === "analytics" && parts[1] === "review") {
+    return 12;
+  }
+  if (parts[0] === "analytics" && ["overview", "quality", "llm"].includes(parts[1] ?? "")) {
+    return 11;
+  }
+  if (parts[0] === "configurator" || parts[0] === "constructor") {
+    return 3;
+  }
+  if (parts[0] === "help") {
+    return 5;
+  }
+  if (parts[0] === "project-docs") {
+    return 6;
+  }
+  if (parts[0] === "logs") {
+    return 7;
+  }
+  if (parts[0] === "status") {
+    return 8;
+  }
+  return 1;
 }
 
 function navigateToSettingsTarget(target: SettingsTarget) {
-  const hash = settingsTargetHash(target);
-  if (window.location.hash === hash) {
-    window.dispatchEvent(new Event("hashchange"));
-    return;
-  }
-  window.location.hash = hash;
+  navigateRoute(settingsTargetHash(target));
 }
 
-function clearSettingsHash() {
-  if (window.location.hash.startsWith("#/settings/")) {
-    window.history.pushState(null, "", `${window.location.pathname}${window.location.search}`);
+function settingsSectionFromRoute(route: string): SettingsSection {
+  const parts = routeParts(route);
+  if (parts[0] !== "settings") {
+    return "signals";
   }
+  if (parts[1] === "pipeline") {
+    return "pipeline";
+  }
+  if (parts[1] === "facts") {
+    return "facts";
+  }
+  if (parts[1] === "aliases") {
+    return "aliases";
+  }
+  if (parts[1] === "lead-scoring") {
+    return "lead_scoring";
+  }
+  if (parts[1] === "solution-areas") {
+    return "solution_areas";
+  }
+  if (parts[1] === "review-lanes") {
+    return "review_lanes";
+  }
+  if (parts[1] === "schema") {
+    return "dependency_graph";
+  }
+  if (parts[1] === "llm") {
+    return "llm";
+  }
+  if (parts[1] === "notifications") {
+    return "notifications";
+  }
+  if (parts[1] === "telegram-ingestion") {
+    return "telegram_ingestion";
+  }
+  if (parts[1] === "runtime") {
+    return "system";
+  }
+  return "signals";
 }
 
-function clearRoutedHash() {
-  if (
-    window.location.hash.startsWith("#/settings/") ||
-    window.location.hash.startsWith("#/analytics") ||
-    window.location.hash.startsWith("#/testing") ||
-    window.location.hash.startsWith("#/golden") ||
-    window.location.hash.startsWith("#/configurator")
-  ) {
-    window.history.pushState(null, "", `${window.location.pathname}${window.location.search}`);
+function pageRoute(page: number, settingsSection?: SettingsSection): string {
+  if (page === 0) {
+    return "/testing";
   }
+  if (page === 1) {
+    return "/analytics";
+  }
+  if (page === 2) {
+    return "/golden";
+  }
+  if (page === 4) {
+    return settingsSectionRoute(settingsSection ?? "signals");
+  }
+  if (page === 5) {
+    return "/help";
+  }
+  if (page === 6) {
+    return "/project-docs";
+  }
+  if (page === 7) {
+    return "/logs";
+  }
+  if (page === 8) {
+    return "/status";
+  }
+  if (page === 9) {
+    return "/guide";
+  }
+  if (page === 10) {
+    return "/llm";
+  }
+  if (page === 11) {
+    return "/analytics/overview";
+  }
+  if (page === 12) {
+    return "/review";
+  }
+  return "/analytics";
+}
+
+function isWorkbenchPage(page: number): boolean {
+  return page === 0 || page === 1 || page === 3;
+}
+
+function workbenchSectionForPage(page: number): WorkbenchSection {
+  if (page === 0) {
+    return "testing";
+  }
+  if (page === 3) {
+    return "constructor";
+  }
+  return "queue";
+}
+
+function settingsSectionRoute(section: SettingsSection): string {
+  if (section === "pipeline") {
+    return "/settings/pipeline";
+  }
+  if (section === "facts") {
+    return "/settings/facts";
+  }
+  if (section === "aliases") {
+    return "/settings/aliases";
+  }
+  if (section === "lead_scoring") {
+    return "/settings/lead-scoring";
+  }
+  if (section === "solution_areas") {
+    return "/settings/solution-areas";
+  }
+  if (section === "review_lanes") {
+    return "/settings/review-lanes";
+  }
+  if (section === "dependency_graph") {
+    return "/settings/schema";
+  }
+  if (section === "llm") {
+    return "/settings/llm";
+  }
+  if (section === "notifications") {
+    return "/settings/notifications";
+  }
+  if (section === "telegram_ingestion") {
+    return "/settings/telegram-ingestion";
+  }
+  if (section === "system") {
+    return "/settings/runtime";
+  }
+  return "/settings/signals";
 }

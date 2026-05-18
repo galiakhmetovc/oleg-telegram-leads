@@ -11,7 +11,7 @@ describe("ConfiguratorPage", () => {
     vi.unstubAllGlobals();
   });
 
-  test("shows a Rule IDE workspace with explorer graph and test mode", () => {
+  test("shows a constructor workspace with message preview and signal builder", () => {
     render(
       <ConfiguratorPage
         settings={sampleSettingsSnapshot()}
@@ -22,43 +22,160 @@ describe("ConfiguratorPage", () => {
       />
     );
 
-    expect(screen.getByRole("heading", { name: "Rule IDE" })).toBeInTheDocument();
-    expect(screen.getByText("Конфигуратор правил")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Конструктор" })).toBeInTheDocument();
+    expect(screen.getByText("Работа через draft-ревизию")).toBeInTheDocument();
     expect(screen.getByText("NLP-ревизия #1")).toBeInTheDocument();
-    expect(screen.getByText("EXPLORER")).toBeInTheDocument();
-    expect(screen.getByText("GRAPH")).toBeInTheDocument();
-    expect(screen.getByText("TEST MODE")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /Умный дом 1 сигнал 0 фактов/i })).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "Умный дом" })).toBeInTheDocument();
-    expect(screen.getByText("Словари")).toBeInTheDocument();
-    expect(screen.getByText("Факты")).toBeInTheDocument();
-    expect(screen.getByText("Сигналы")).toBeInTheDocument();
-    expect(screen.getByText("Score")).toBeInTheDocument();
-    expect(screen.getByText("Умный дом / автоматизация")).toBeInTheDocument();
-    expect(screen.getByText("Хаб умного дома")).toBeInTheDocument();
-    expect(screen.getByText("zigbee шлюз")).toBeInTheDocument();
-    expect(screen.getByText("controlled_device")).toBeInTheDocument();
-    expect(screen.getByText("+35")).toBeInTheDocument();
+    expect(screen.getByLabelText("Сообщение для разбора")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Разобрать" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "В словарь" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "В факт" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "В шум" })).toBeDisabled();
+    expect(screen.getByRole("heading", { name: "Конструктор сигналов" })).toBeInTheDocument();
+    expect(screen.getByText("Сигналы строятся только из найденных facts.")).toBeInTheDocument();
   });
 
-  test("saves selected signal edits through the active NLP settings endpoint", async () => {
-    const snapshot = sampleSettingsSnapshot();
-    const onSettingsSnapshotChange = vi.fn();
+  test("adds a semantic fact from selected text and refreshes preview against the updated draft", async () => {
+    const previewBodies: Array<{ text: string; nlp: NlpSettings }> = [];
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-      if (String(input) === "/api/v1/settings/nlp" && init?.method === "PUT") {
-        const body = JSON.parse(String(init.body)) as NlpSettings;
+      const url = String(input);
+      if (url === "/api/v1/settings/nlp/preview" && init?.method === "POST") {
+        const body = JSON.parse(String(init.body)) as { text: string; nlp: NlpSettings };
+        previewBodies.push(body);
+        if (previewBodies.length === 1) {
+          return jsonResponse(samplePreviewResult({ facts: [], domain_signals: [] }));
+        }
+        return jsonResponse(
+          samplePreviewResult({
+            facts: [
+              previewFact({
+                id: "fact-intent",
+                text: "Хочу поставить",
+                type: "intent_install_connect",
+                label: "Намерение: установка",
+                source: "semantic_pattern"
+              })
+            ],
+            domain_signals: []
+          })
+        );
+      }
+      if (url === "/api/v1/settings/nlp/semantic-pattern" && init?.method === "POST") {
         return jsonResponse({
-          ...body,
-          source: { type: "postgres", path: "nlp_config_revisions.config", editable: true, revision: 2 }
+          source_text: "Хочу поставить",
+          lemma_text: "хотеть поставить",
+          tokens: [
+            { predicate: "normalized", value: "хотеть" },
+            { predicate: "normalized", value: "поставить" }
+          ]
         });
       }
-      throw new Error(`Unhandled fetch: ${String(input)}`);
+      throw new Error(`Unhandled fetch: ${url}`);
     });
     vi.stubGlobal("fetch", fetchMock);
 
     render(
       <ConfiguratorPage
-        settings={snapshot}
+        settings={sampleSettingsSnapshot()}
+        loading={false}
+        loadError={null}
+        loadSettings={vi.fn()}
+        onSettingsSnapshotChange={vi.fn()}
+      />
+    );
+
+    fireEvent.change(screen.getByLabelText("Сообщение для разбора"), {
+      target: { value: "Хочу поставить умный дом Aqara" }
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Разобрать" }));
+    await screen.findByText("Ничего не найдено. Добавь факт, alias или сигнал в draft и повтори preview.");
+
+    const textarea = screen.getByLabelText("Сообщение для разбора") as HTMLTextAreaElement;
+    const selectionEnd = "Хочу поставить".length;
+    textarea.setSelectionRange(0, selectionEnd);
+    fireEvent.select(textarea);
+
+    fireEvent.click(screen.getByRole("button", { name: "В факт" }));
+    fireEvent.change(screen.getByLabelText("type"), {
+      target: { value: "intent_install_connect" }
+    });
+    fireEvent.change(screen.getByLabelText("label"), {
+      target: { value: "Намерение: установка" }
+    });
+    fireEvent.mouseDown(screen.getByRole("combobox", { name: "Тип совпадения" }));
+    fireEvent.click(await screen.findByRole("option", { name: "Лемматическая фраза" }));
+    fireEvent.click(screen.getByRole("button", { name: "Сохранить в draft" }));
+
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/v1/settings/nlp/semantic-pattern",
+        expect.objectContaining({
+          method: "POST",
+          body: JSON.stringify({ text: "Хочу поставить" })
+        })
+      )
+    );
+    await waitFor(() => expect(previewBodies).toHaveLength(2));
+    expect(await screen.findByText("Намерение: установка")).toBeInTheDocument();
+    expect(previewBodies[1]?.nlp.facts).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: "intent_install_connect",
+          patterns: [
+            {
+              source_text: "Хочу поставить",
+              tokens: [
+                { predicate: "normalized", value: "хотеть" },
+                { predicate: "normalized", value: "поставить" }
+              ]
+            }
+          ]
+        })
+      ])
+    );
+  });
+
+  test("builds a domain signal from preview facts and saves the updated draft revision", async () => {
+    let savedBody: NlpSettings | null = null;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url === "/api/v1/settings/nlp/preview" && init?.method === "POST") {
+        return jsonResponse(
+          samplePreviewResult({
+            facts: [
+              previewFact({
+                id: "fact-intent",
+                text: "Хочу поставить",
+                type: "intent_install_connect",
+                label: "Намерение: установка",
+                source: "semantic_pattern"
+              }),
+              previewFact({
+                id: "fact-domain",
+                text: "умный дом",
+                type: "domain_smart_home",
+                label: "Домен: умный дом",
+                source: "exact_phrase"
+              })
+            ],
+            domain_signals: []
+          })
+        );
+      }
+      if (url === "/api/v1/settings/nlp" && init?.method === "PUT") {
+        savedBody = JSON.parse(String(init.body)) as NlpSettings;
+        return jsonResponse({
+          ...savedBody,
+          source: { type: "postgres", path: "nlp_config_revisions.config", editable: true, revision: 2 }
+        });
+      }
+      throw new Error(`Unhandled fetch: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const onSettingsSnapshotChange = vi.fn();
+    render(
+      <ConfiguratorPage
+        settings={sampleSettingsSnapshot()}
         loading={false}
         loadError={null}
         loadSettings={vi.fn()}
@@ -66,116 +183,62 @@ describe("ConfiguratorPage", () => {
       />
     );
 
-    fireEvent.click(screen.getByRole("button", { name: /Умный дом \/ автоматизация/i }));
-    fireEvent.change(screen.getByLabelText("Название"), {
-      target: { value: "Умный дом / проектирование" }
+    fireEvent.change(screen.getByLabelText("Сообщение для разбора"), {
+      target: { value: "Хочу поставить умный дом Aqara" }
     });
+    fireEvent.click(screen.getByRole("button", { name: "Разобрать" }));
+    await screen.findByText("Намерение: установка");
+    expect(screen.getByText("Домен: умный дом")).toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText("Тип сигнала"), {
+      target: { value: "pur_smart_home" }
+    });
+    fireEvent.change(screen.getByLabelText("Название сигнала"), {
+      target: { value: "PUR / умный дом" }
+    });
+    fireEvent.change(screen.getByLabelText("Папка сигнала"), {
+      target: { value: "PUR" }
+    });
+    fireEvent.change(screen.getByLabelText("Вес в score"), {
+      target: { value: "35" }
+    });
+    fireEvent.click(screen.getByRole("checkbox", { name: /Намерение: установка/i }));
+    fireEvent.click(screen.getByRole("checkbox", { name: /Домен: умный дом/i }));
+    fireEvent.click(screen.getByRole("button", { name: "Сохранить сигнал в draft" }));
     fireEvent.click(screen.getByRole("button", { name: "Сохранить ревизию" }));
 
     await waitFor(() =>
       expect(fetchMock).toHaveBeenCalledWith(
         "/api/v1/settings/nlp",
-        expect.objectContaining({
-          method: "PUT",
-          body: expect.stringContaining("Умный дом / проектирование")
-        })
+        expect.objectContaining({ method: "PUT" })
       )
     );
+    expect(savedBody).not.toBeNull();
+    if (savedBody === null) {
+      throw new Error("Expected saved draft payload");
+    }
+    const persistedBody: NlpSettings = savedBody;
+    expect(persistedBody.signals).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: "pur_smart_home",
+          label: "PUR / умный дом",
+          group: "PUR",
+          match: {
+            facts: [{ types: ["intent_install_connect"] }, { types: ["domain_smart_home"] }]
+          }
+        })
+      ])
+    );
+    expect(persistedBody.lead_scoring.signal_weights.pur_smart_home).toBe(35);
     expect(await screen.findByText("Сохранено как NLP-ревизия #2")).toBeInTheDocument();
     expect(onSettingsSnapshotChange).toHaveBeenCalledWith(
       expect.objectContaining({
         nlp: expect.objectContaining({
-          source: expect.objectContaining({ revision: 2 }),
-          signals: expect.arrayContaining([
-            expect.objectContaining({ type: "smart_home_automation", label: "Умный дом / проектирование" })
-          ])
+          source: expect.objectContaining({ revision: 2 })
         })
       })
     );
-  });
-
-  test("runs draft preview from the right test panel", async () => {
-    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-      if (String(input) === "/api/v1/settings/nlp/preview" && init?.method === "POST") {
-        return jsonResponse({
-          original_text: "Установить zigbee шлюз",
-          normalized_text: "установить zigbee шлюз",
-          entities: [],
-          facts: [],
-          domain_signals: [],
-          tokens: [],
-          syntax: [],
-          metrics: {},
-          pipeline_trace: [],
-          lead_assessment: {
-            is_lead: true,
-            score: 35,
-            temperature: "warm",
-            solution_areas: [],
-            customer_segments: [],
-            intent_signals: [],
-            noise_signals: [],
-            reasons: [
-              {
-                source: "signal",
-                key: "smart_home_automation",
-                label: "Умный дом / автоматизация",
-                weight: 35,
-                matched_texts: ["zigbee шлюз"]
-              }
-            ],
-            review_lane: { key: "direct_pur_lead", label: "Прямой лид ПУР", matched_group_indexes: [0] }
-          }
-        });
-      }
-      throw new Error(`Unhandled fetch: ${String(input)}`);
-    });
-    vi.stubGlobal("fetch", fetchMock);
-
-    render(
-      <ConfiguratorPage
-        settings={sampleSettingsSnapshot()}
-        loading={false}
-        loadError={null}
-        loadSettings={vi.fn()}
-        onSettingsSnapshotChange={vi.fn()}
-      />
-    );
-
-    fireEvent.change(screen.getByLabelText("Текст для проверки"), {
-      target: { value: "Установить zigbee шлюз" }
-    });
-    fireEvent.click(screen.getByRole("button", { name: "Run" }));
-
-    await waitFor(() =>
-      expect(fetchMock).toHaveBeenCalledWith(
-        "/api/v1/settings/nlp/preview",
-        expect.objectContaining({
-          method: "POST",
-          body: expect.stringContaining("Установить zigbee шлюз")
-        })
-      )
-    );
-    expect(await screen.findByText("lead")).toBeInTheDocument();
-    expect(screen.getByText("35")).toBeInTheDocument();
-    expect(screen.getByText("Умный дом / автоматизация")).toBeInTheDocument();
-  });
-
-  test("opens detailed settings through a real settings hash deeplink", () => {
-    render(
-      <ConfiguratorPage
-        settings={sampleSettingsSnapshot()}
-        loading={false}
-        loadError={null}
-        loadSettings={vi.fn()}
-        onSettingsSnapshotChange={vi.fn()}
-      />
-    );
-
-    fireEvent.click(screen.getByRole("button", { name: /Умный дом \/ автоматизация/i }));
-    fireEvent.click(screen.getByRole("button", { name: "Advanced" }));
-
-    expect(window.location.hash).toBe("#/settings/signals/smart_home_automation");
   });
 });
 
@@ -184,6 +247,62 @@ function jsonResponse(payload: unknown): Response {
     status: 200,
     headers: { "Content-Type": "application/json" }
   });
+}
+
+function previewFact({
+  id,
+  text,
+  type,
+  label,
+  source
+}: {
+  id: string;
+  text: string;
+  type: string;
+  label: string;
+  source: string;
+}) {
+  return {
+    id,
+    text,
+    type,
+    label,
+    range: { start: 0, stop: text.length },
+    source,
+    span_id: `span-${id}`,
+    sentence_id: "sentence-1",
+    settings_refs: [{ section: "facts", key: type, label, kind: "fact" }]
+  };
+}
+
+function samplePreviewResult({
+  facts,
+  domain_signals
+}: {
+  facts: ReturnType<typeof previewFact>[];
+  domain_signals: ReturnType<typeof previewFact>[];
+}) {
+  return {
+    original_text: "Хочу поставить умный дом Aqara",
+    normalized_text: "хочу поставить умный дом aqara",
+    entities: [],
+    facts,
+    domain_signals,
+    tokens: [],
+    syntax: [],
+    metrics: {},
+    pipeline_trace: [],
+    lead_assessment: {
+      is_lead: domain_signals.length > 0,
+      score: domain_signals.length > 0 ? 35 : 0,
+      temperature: domain_signals.length > 0 ? "warm" : "cold",
+      solution_areas: [],
+      customer_segments: [],
+      intent_signals: [],
+      noise_signals: [],
+      reasons: []
+    }
+  };
 }
 
 function sampleSettingsSnapshot(): SettingsSnapshot {
@@ -201,105 +320,25 @@ function sampleSettingsSnapshot(): SettingsSnapshot {
         fuzzy_long_max_distance: 2,
         fuzzy_excluded_aliases: []
       },
-      signals: [
-        {
-          type: "smart_home_automation",
-          label: "Умный дом / автоматизация",
-          group: "Умный дом",
-          color: "#0b57d0",
-          confidence: 0.9,
-          phrases: [],
-          patterns: [],
-          match: { facts: [{ types: ["alias:devices:smart_home_hub"] }] }
-        },
-        {
-          type: "video_surveillance",
-          label: "Видеонаблюдение",
-          group: "Безопасность",
-          color: null,
-          confidence: 0.8,
-          phrases: [],
-          patterns: [],
-          match: { facts: [{ types: ["object_camera"] }] }
-        }
-      ],
-      facts: [
-        {
-          type: "controlled_device",
-          label: "Управляемое устройство",
-          group: "Устройства",
-          color: null,
-          confidence: 0.8,
-          phrases: [],
-          patterns: [],
-          match: { facts: [] }
-        }
-      ],
+      signals: [],
+      facts: [],
       vendors: [],
       protocols: [],
-      devices: [
-        {
-          key: "smart_home_hub",
-          canonical: "Хаб умного дома",
-          type: "device",
-          aliases: ["zigbee шлюз"],
-          fact_types: ["controlled_device"]
-        }
-      ],
+      devices: [],
       software: [],
       lead_scoring: {
         lead_threshold: 35,
         warm_threshold: 60,
         hot_threshold: 90,
-        signal_weights: { smart_home_automation: 35, video_surveillance: 35 },
-        fact_weights: { controlled_device: 10 },
-        solution_areas: {
-          automation: {
-            label: "Умный дом / автоматизация",
-            signal_types: ["smart_home_automation"],
-            fact_types: ["controlled_device"]
-          }
-        },
-        customer_segments: {
-          project_selection: {
-            label: "Подбор решений для проекта",
-            signal_types: ["smart_home_automation"],
-            fact_types: []
-          }
-        },
-        intent_signal_types: ["smart_home_automation"],
+        signal_weights: {},
+        fact_weights: {},
+        solution_areas: {},
+        customer_segments: {},
+        intent_signal_types: [],
         noise_signal_types: [],
         lead_veto_signal_types: [],
         score_caps: [],
-        review_lanes: [
-          {
-            key: "direct_pur_lead",
-            label: "Прямой лид ПУР",
-            description: "Есть домен ПУР и активное намерение.",
-            priority: 200,
-            min_score: 35,
-            max_score: null,
-            temperatures: ["warm", "hot"],
-            match_groups: [
-              {
-                signal_types: ["smart_home_automation"],
-                fact_types: [],
-                reason_keys: [],
-                solution_area_types: ["automation"],
-                customer_segment_types: [],
-                intent_signal_types: [],
-                noise_signal_types: []
-              }
-            ],
-            excluded_signal_types: [],
-            excluded_fact_types: [],
-            excluded_reason_keys: [],
-            excluded_solution_area_types: [],
-            excluded_customer_segment_types: [],
-            excluded_intent_signal_types: [],
-            excluded_noise_signal_types: []
-          }
-        ]
+        review_lanes: []
       },
       source: {
         type: "postgres",
@@ -308,8 +347,16 @@ function sampleSettingsSnapshot(): SettingsSnapshot {
         revision: 1
       }
     },
-    notifications: { bots: [], chats: [], routes: [], updated_at: null },
-    telegram_ingestion: { accounts: [], chats: [] },
+    notifications: {
+      bots: [],
+      chats: [],
+      routes: [],
+      updated_at: null
+    },
+    telegram_ingestion: {
+      accounts: [],
+      chats: []
+    },
     system: []
   };
 }

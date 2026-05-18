@@ -1,5 +1,314 @@
 # Current State
 
+## Handoff 2026-05-14
+
+This is the current continuation point for the next agent/session.
+
+### Lead Handling Bot Update 2026-05-15
+
+- Added Telegram lead handling persistence: `lead_handlings`,
+  `lead_handling_events`, and `lead_bot_sessions` via Alembic revision
+  `0035_lead_handling_bot`.
+- Added notification route `delivery_mode`: existing/omitted routes default to
+  `batched`; `interactive` routes send one Telegram card per lead with buttons
+  `Взял` and `Не лид`.
+- Added `lead-bot` Docker Compose service. It polls Telegram Bot API updates for
+  enabled bots used by interactive notification routes. Poll offsets are stored
+  in `lead_bot_sessions` with reserved `telegram_user_id="__offset__"`.
+- Group button behavior:
+  - `Взял` claims the lead and edits the sales group card.
+  - `Не лид` writes a `not_lead` review and cancels unsent notifications for
+    that source message.
+- Private bot behavior:
+  - Operators can send `/start`, open `Мои лиды`, open their own lead cards,
+    change status (`Написал`, `Ждет`, `Закрыт`), and add one-message comments.
+  - Private open/status/comment actions enforce ownership and do not reveal
+    another operator's lead text.
+  - Operators must start the bot privately (`/start`) before expecting Telegram
+    private bot UX to be discoverable.
+- Runtime status after deploy:
+  - `docker compose run --rm migrate` upgraded
+    `0034_llm_settings_queue -> 0035_lead_handling_bot`.
+  - `docker compose up -d backend notification-dispatcher lead-bot` started
+    `lead-bot`.
+  - Runtime notification route `hot_leads` is now switched to
+    `delivery_mode="interactive"`.
+  - `lead-bot` is running and polling Telegram Bot API; future logs suppress
+    `httpx/httpcore` INFO output so bot tokens are not printed in request URLs.
+- Verification:
+  - `uv run pytest tests/test_notification_outbox.py tests/test_interactive_notification_outbox.py tests/test_notification_settings_api.py tests/test_worker_notifications.py tests/test_lead_handling_repository.py tests/test_lead_handling_use_cases.py tests/test_telegram_bot_worker.py tests/test_telegram_sender.py -q`
+    -> `45 passed`.
+  - `uv run ruff check app tests/test_notification_outbox.py tests/test_interactive_notification_outbox.py tests/test_notification_settings_api.py tests/test_lead_handling_repository.py tests/test_lead_handling_use_cases.py tests/test_telegram_bot_worker.py tests/test_telegram_sender.py`
+    -> passed.
+  - `docker compose config >/tmp/pur-leads-compose.yml` -> passed.
+  - `uv run mypy app` still fails in pre-existing LLM verification/LLM
+    notification code paths, not in the lead-bot files.
+
+### Workspace And Runtime
+
+- Work in the git worktree:
+  `/home/admin/.config/superpowers/worktrees/oleg-telegram-leads/v2-from-scratch`.
+- The live dev UI is exposed at `https://secclaw.qlbc.ru:19443/`.
+- Docker Compose is the active runtime. Main services: `backend`, `frontend`,
+  `postgres`, `redis`, `worker`, `llm-worker`, `enrichment-dispatcher`,
+  `notification-dispatcher`, `userbot`, `lead-bot`.
+- The worktree is dirty with many intentional product changes and untracked
+  migrations/modules. Do not reset or revert unrelated files.
+- Current operator flow is production/dev live, not local-only experiments.
+  The user expects changes to affect the running app at the public URL.
+
+### Current System State
+
+Last verified on 2026-05-14 after adding the latest approved sources:
+
+- Telegram source chat rows: `74`.
+- Enabled Telegram source chats: `73`.
+- Telegram source chats actually present in the userbot dialogs: `63`.
+- Missing/pending/private sources: `10`.
+- Redis queue lengths: `celery=0`, `llm=0`.
+- Enrichment jobs: all `completed`, last observed total `6226`.
+- Userbot logs after restart showed only a normal Telegram connection, no
+  FloodWait or captcha warning.
+- One enrichment worker is enough for the current load. Do not add a second
+  enrichment worker unless there is real backlog such as `celery > 50`, queued
+  enrichment jobs stuck for minutes, or visible delay from Telegram message to
+  Analytics.
+
+Missing/pending/private Telegram sources at the last check:
+
+- `Design Wall Street | Чат` -> `https://t.me/designwallstreet`
+- `Home Assistant / SprutAI` -> `https://t.me/SprutAI_HomeAssistant`
+- `smarch архитекторы дизайнеры проектировщики инженеры конструкторы художники чат`
+  -> `https://t.me/sm_arch001`
+- `Дизайнеры интерьера | chat` -> `https://t.me/interiordesignchat`
+- `Заказы по ремонту квартир чат` -> `https://t.me/zakazi_remont_kvartir2`
+- `СОЮЗ МОНТАЖНИКОВ` -> `https://t.me/souzmo`
+- `Слаботочка - что и почем чат` -> `https://t.me/leprice_chat`
+- `Строители Москвы | чат` -> `https://t.me/stroiteli_moskva`
+- `Строительство Москва Чат` -> `https://t.me/stroitelimsk4`
+- `Электрика. Чат для коллег` -> `https://t.me/electricianclub`
+
+Interpretation:
+
+- Several of these are likely pending moderation after `JOIN_REQUEST_SENT`.
+- `Home Assistant / SprutAI` and `СОЮЗ МОНТАЖНИКОВ` behaved as private or
+  inaccessible in manual join attempts.
+- Do not hammer this missing list. Recheck occasionally; if still missing,
+  leave them as pending/private unless the user explicitly wants cleanup.
+
+### Telegram Joining Procedure
+
+The userbot receives live updates automatically only for dialogs it has joined.
+The app settings remain necessary as the whitelist and metadata source:
+
+- `telegram_source_chats` decides which dialogs the listener should subscribe
+  to and gives each message a stable `source_chat_id`.
+- Being in a Telegram dialog alone is not enough; if the chat is not in settings
+  it is ignored by the app listener.
+- Adding a source should be: resolve candidate -> insert source setting with
+  `telegram_chat_id` -> join through userbot account -> restart or wait for
+  userbot settings reload.
+
+When joining chats:
+
+- Join one by one.
+- Use long pauses around 180-260 seconds between successful joins.
+- After each join, inspect recent chat messages and recent DMs for captcha-like
+  text such as `капча`, `captcha`, `не бот`, `докажите`, `пройдите проверку`,
+  `verify human`, or button/verification language.
+- Stop immediately on captcha or FloodWait and tell the user what happened.
+- Do not solve captchas automatically and do not click verification buttons.
+  The user solves them manually and then says `готово`/`продолжай`.
+- Do not run parallel Telethon join/search commands while a join script is
+  active.
+
+Recently added and successfully joined sources:
+
+- `Aqara.ru | Чат` -> `https://t.me/aqararuchat`
+- `Проектировщики и Строители Россия` -> `https://t.me/stroy_proekt_chat`
+- `Чат взаимопомощи: проектировщики` -> `https://t.me/help_club_engineers`
+- `Чат Строительство домов| Москва и МО Chat` -> `https://t.me/landhausartchat`
+- `HOMESTYLER | Чат дизайнеров интерьера` -> `https://t.me/homestyler_chat`
+- `Всем подряд - Субподряды. Строительные заказы для всех`
+  -> `https://t.me/vsem_podryad`
+- `LAB | REMONT Чубарова Николая (ремонт квартир, дизайн-проект) Chat`
+  -> `https://t.me/chat_labremont`
+- `Чат ЭЛЕКТРИКА | САНТЕХНИКА | ОТОПЛЕНИЕ`
+  -> `https://t.me/c_electrika_santehnika_otoplenie`
+- `Электрика | Умный дом | Чат`
+  -> `https://t.me/smarthomekrum`
+- `чат Videsign | Дизайн интерьера, электрика, умный дом`
+  -> `https://t.me/vi_desssign`
+- `ПТО | Проектировщики | Сметчики | Инженеры`
+  -> `https://t.me/chat_injeneri_pto_ovik`
+- Earlier successful additions included `ЗАКАЗЫ ПО РЕМОНТУ КВАРТИР И ВАННЫХ
+  КОМНАТ`, `Чат Видеонаблюдение в Сочи, WiFi, СКУД, Сети`, `Чат архитекторы |
+  дизайнеры | проектировщики`, and `Чат. Стройка и ремонт Москва`.
+
+Latest Telegram expansion notes:
+
+- The user manually joined the latest approved batch. Six sources were added to
+  `telegram_source_chats` with their current latest message id as the cursor, so
+  old history is not imported.
+- `@stroitel_birja` was in the user's joined list, but a dialogs check did not
+  show it in the userbot account. It was not added to source settings. Recheck
+  the dialog before adding it.
+- Captcha/DM check found `AqaraChatGuardBot` saying the Aqara chat verification
+  was passed. Older `arch_chat_check_bot` verification messages were still
+  visible in recent DMs but were not from the latest batch.
+
+### Telegram Live Architecture
+
+Current intended model:
+
+- `userbot` runs in live listen mode with Telethon `NewMessage` updates.
+- It should not poll history for every configured chat in normal operation.
+- The live listener resolves configured sources and subscribes to updates.
+- `telegram_userbot_worker.py` supports `--settings-reload-interval`; Compose
+  sets `${TELEGRAM_SETTINGS_RELOAD_INTERVAL:-600}`.
+- After adding many new chats, restarting `userbot` is acceptable to subscribe
+  immediately. Recent restarts were clean.
+
+Important code paths:
+
+- `backend/app/application/telegram_ingestion/live_service.py`
+- `backend/app/cli/telegram_userbot_worker.py`
+- `backend/app/infrastructure/telegram/userbot_history.py`
+- `backend/app/infrastructure/persistence/telegram_ingestion_repository.py`
+
+### LLM Verification State
+
+LLM verification is an additional final-stage checker, not a replacement for
+deterministic rules.
+
+Current product direction:
+
+- Cold and warm leads route to LLM.
+- LLM-verified cold/warm leads can enqueue Telegram notifications.
+- LLM notification confidence threshold is `>= 0.5`.
+- Do not force-send warm notifications manually; let the dispatcher send them.
+- LLM prompt must stay compact and Russian-operator-facing:
+  send the message text, concise Russian labels for current signals/facts/
+  dictionaries, and compact golden examples. Do not dump internal UUIDs or full
+  alias catalog JSON into the prompt.
+- The user rejected verbose `catalog:key`/UUID-heavy prompts. Labels should be
+  human-readable Russian where possible.
+
+Important code paths:
+
+- `backend/app/application/llm_verification/`
+- `backend/app/infrastructure/persistence/llm_verification_repository.py`
+- `backend/app/infrastructure/llm/ollama_client.py`
+- `backend/app/api/llm_settings.py`
+- `backend/app/api/llm_verifications.py`
+- `frontend/src/llm/`
+- `backend/app/application/notifications/use_cases.py`
+- `backend/app/worker/tasks.py`
+
+### NLP And Operator Rules
+
+Approved conceptual model:
+
+- `alias` handles canonicalization and known names/spellings.
+- `fact` handles meaning.
+- `signal` handles inference/lead logic.
+- `span` and `sentence` are coordinates.
+- `relations` connect facts.
+- `same_span` and `same_sentence` are service/computed relations, usually not
+  manually configured.
+- `intent_object`, `located_at`, and `negates` are the small explicit relation
+  set when needed.
+
+Text ownership rule:
+
+- A word/phrase should live in one clear owner.
+- Market spellings and variants belong in dictionaries/alias catalogs.
+- Fact rules own semantic exact/lemmatized phrases.
+- Signals should not own raw text phrases; signals depend on facts.
+- Dictionaries support exact/light fuzzy alias matching, but not lemmatized
+  semantic search. Lemmatized matching belongs in fact rules.
+- Example: `домофон` and `домофоны` should not both be duplicated in a
+  dictionary if a lemmatized fact rule already covers the semantic form.
+
+Span behavior:
+
+- Longer spans should intercept shorter spans when they overlap.
+- Example: in `умный дом у себя дома и на даче`, `умный дом` should produce
+  the smart-home domain/object fact; standalone `дома` and `даче` can produce
+  location/object context without stealing the `дом` inside `умный дом`.
+
+Operator documentation already exists and should stay current:
+
+- `docs/how-to-work-in-system.md`
+- `docs/operator-golden-rules.md`
+- `docs/llm-verifier.md`
+- `docs/architecture.md`
+- `docs/decisions.md`
+
+### UI State
+
+Current top-level UI includes:
+
+- Analytics
+- Golden
+- Testing
+- Settings
+- Operator guide / `Как работать`
+- LLM
+- Runtime/status/logs/docs pages
+
+Configurator was intentionally hidden from normal navigation because the user
+said it is not currently useful. If touching routing/navigation, keep this in
+mind: hiding the tab was requested, not necessarily disabling deep links.
+
+Important UI changes already made:
+
+- Normal URLs/routes were added so pages can be shared.
+- Golden examples can be deleted.
+- Dictionaries are collapsed by default.
+- Analytics defaults to newer messages first.
+- LLM pages/settings show routing and context information.
+- LLM raw JSON should be formatted/readable.
+- Settings LLM routes should use dropdowns with human-readable names, not raw
+  ID text fields.
+
+### Verification Commands Used Recently
+
+Useful checks:
+
+```bash
+docker compose ps
+docker compose logs --since=90s userbot
+docker compose exec -T redis sh -lc 'printf "celery="; redis-cli llen celery; printf "llm="; redis-cli llen llm'
+docker compose exec -T postgres psql -U pur_leads -d pur_leads_v2 -c "select status, count(*) from enrichment_jobs group by status order by status;"
+```
+
+Backend tests that passed after recent architecture changes:
+
+```bash
+cd backend && uv run pytest tests/test_telegram_live_sources.py tests/test_telegram_userbot_worker_cli.py -q
+cd backend && uv run pytest tests/test_notification_outbox.py tests/test_worker_notifications.py::test_worker_queues_llm_notification_after_completed_run -q
+```
+
+### Next Reasonable Steps
+
+If the next session continues chat expansion:
+
+1. Search for more Telegram candidates without adding or joining.
+2. Exclude sources already in `telegram_source_chats`.
+3. Inspect recent messages for live useful traffic versus spam/ads/USDT/
+   vacancies.
+4. Show the candidate list to the user first.
+5. Only after approval, add a small batch to settings and join one by one with
+   captcha/FloodWait checks.
+
+If the next session works on product quality:
+
+1. Review new incoming Analytics messages from the newly joined chats.
+2. Mark false positives/false negatives in Review/Golden.
+3. Update dictionaries/facts/signals according to the approved ownership rules.
+4. Keep operator docs updated after any rule/process change.
+
 ## Active Work
 
 - Build PUR Leads v2 from a clean scaffold.
@@ -36,15 +345,15 @@
   Analytics, and select a text fragment for the settings/entity constructor.
 - Review constructor action `В шум` is now active. It sends the selected
   fragment to `POST /api/v1/settings/nlp/constructor/noise`, creates or updates
-  the editable `operator_noise` signal in the active PostgreSQL NLP config
-  revision, adds it to noise/veto scoring lists and review-lane exclusions, and
-  refreshes the frontend settings cache from the response.
-- Review constructor actions `В словарь`, `В факт`, and `В доменный сигнал` are
-  now active too. They open target-selection dialogs and write selected text to
-  alias catalogs, fact rules, or domain-signal rules through PostgreSQL NLP
-  revisions. Fact/signal constructors support exact and lemmatized phrases.
-  Newly created domain signals get score weight `0` until scoring is tuned
-  explicitly.
+  an editable `operator_noise_fact` fact and connects the existing
+  `operator_noise` signal through `match.facts`, keeps the signal in noise/veto
+  scoring lists and review-lane exclusions, and refreshes the frontend settings
+  cache from the response.
+- Review constructor actions `В словарь` and `В факт` are active. They open
+  target-selection dialogs and write selected text to exactly one alias catalog
+  or fact rule through PostgreSQL NLP revisions. Signals do not own text
+  phrases; they depend on facts through `match.facts`, so traces stay
+  fragment -> dictionary/rule -> fact -> signal -> score.
 - NLP/domain settings are now config v3. The active PostgreSQL config revision
   is `31` from migration `0026_config_v3_taxonomy`; old semantic names are not
   compatibility targets. The current chain is: dictionaries emit alias facts,
@@ -135,6 +444,9 @@
   manually or idempotently promoted from Analytics/Review messages, and run
   through the regular enrichment/SSE pipeline with the same explainability UI as
   Testing.
+- Operator rules for using Golden as the rule-calibration loop are documented in
+  `docs/operator-golden-rules.md`, including the example "я хочу установить
+  умный дом у себя дома и на даче".
 - The Configurator is now a Rule IDE rather than another dense settings form:
   the left explorer selects domain folders or rule layers, the central graph
   visualizes dictionary -> fact -> signal -> score chains, and the right panel
@@ -244,20 +556,26 @@
   config revisions. Settings Center groups large rule lists by these folders,
   and Help explains how signal dependencies work.
 - Brand/model spellings such as `Нептун`, `Нептуп`, `Neptun ProW`, and
-  `Profi Wi-Fi` live only in alias catalogs. Domain signals keep semantic
+  `Profi Wi-Fi` live only in alias catalogs. Domain signals keep no text
   phrases and reference dictionaries only through facts such as
   `alias:vendors:neptun` in `match.facts`; alias catalogs emit structured facts
   through `fact_types` and no longer carry `signal_types`.
+- Text ownership validation now uses runtime-equivalent keys for separators and
+  Latin/Cyrillic confusables, treats alias `canonical` as display-only, and
+  rejects dangling `match.facts` / lead-scoring fact references. Migration
+  `0031_text_owner_config_repair` repairs active PostgreSQL configs by moving
+  legacy signal text into facts and removing stale fact references.
 - Settings rule editing now presents operator-facing matching modes: exact
   phrases and lemmatized phrases. Exact/semantic rules are edited with explicit
   add/edit/delete actions. New lemmatized phrases are built by the backend from
   operator-entered text and preserve `source_text` alongside generated lemmas.
 - Rule matching no longer exposes `caseless` as an active mode. Exact phrases
-  are lowercased token-sequence matches for technical spellings such as `Wi-Fi`,
-  `220v`, `Z-Wave`, and abbreviations; non-word separators such as `@`, emoji,
-  punctuation, and newlines may appear between exact-phrase tokens. Lemmatized
-  phrases remain Yargy `normalized` rules. Old `caseless` config revisions are
-  invalid and should be replaced, not adapted at runtime.
+  are lowercased token-sequence matches for non-catalog technical spellings such
+  as `220v` and abbreviations; market spellings such as `Wi-Fi` stay in alias
+  catalogs. Non-word separators such as `@`, emoji, punctuation, and newlines
+  may appear between exact-phrase tokens. Lemmatized phrases remain Yargy
+  `normalized` rules. Old `caseless` config revisions are invalid and should be
+  replaced, not adapted at runtime.
 - A Help tab in the web UI explains exact versus lemmatized matching and when to
   use each mode.
 - Settings Center now also exposes editable alias catalogs for `vendors`,

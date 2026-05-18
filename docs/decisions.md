@@ -219,6 +219,22 @@ Rationale:
 - Russian group labels are acceptable because they are operator-facing folder
   names, while stable scoring/filter keys remain English `type` values.
 
+## 2026-05-12: One Canonical Operator Guide Tab
+
+Expose one dedicated top-level tab `Как работать` backed by the canonical
+markdown document `docs/how-to-work-in-system.md`. Keep
+`frontend/src/settings/SettingsHelpPage.tsx` as a concise technical reference
+instead of turning it into the full operator playbook.
+
+Rationale:
+
+- Operators now work across Analytics, Testing, Constructor, Golden, and
+  Settings as one continuous workflow.
+- The system needs one authoritative operator algorithm that explains when to
+  create or update aliases, facts, signals, scoring, and Golden examples.
+- Keeping the playbook in markdown avoids duplicating long prose across TSX and
+  makes updates cheaper while still exposing the content directly in the web UI.
+
 ## 2026-05-08: Brand Spellings Stay In Alias Catalogs
 
 Do not duplicate concrete brands, model names, product names, or typo variants
@@ -244,9 +260,9 @@ Rationale:
 ## 2026-05-08: Domain Signals Own Dictionary Dependencies
 
 Domain signals are the inference layer over dictionaries and facts. A signal
-may be triggered by exact/lemmatized semantic phrases or `match.facts`
-dependencies on already extracted facts. Alias catalogs no longer contain
-`signal_types`.
+is triggered through `match.facts` dependencies on already extracted facts.
+Alias catalogs no longer contain `signal_types`, and signal rules do not own
+text phrases directly.
 
 Rationale:
 
@@ -320,8 +336,9 @@ Rationale:
 
 - The user-facing distinction must stay understandable: exact spelling versus
   semantic Russian word forms.
-- Technical tokens such as `Wi-Fi`, `220v`, `Z-Wave`, abbreviations, and product
-  names are exact spellings and should not depend on Yargy tokenization.
+- Technical tokens such as `220v` and abbreviations are exact spellings and
+  should not depend on Yargy tokenization. Market spellings such as `Wi-Fi`,
+  `Z-Wave`, and product names belong to alias catalogs.
 - Old `caseless` documents are not supported by v2. They should be replaced by
   a fresh PostgreSQL config revision or reseeded from current bootstrap YAML
   instead of hidden compatibility code.
@@ -399,6 +416,37 @@ Rationale:
 - The strongest explanation is usually the most specific full phrase. If one
   spelling must produce multiple facts, attach multiple `fact_types` to that
   one alias entry instead of duplicating the spelling across catalogs.
+
+## 2026-05-12: Alias Catalogs Stay Non-Lemmatized And Minimal
+
+Keep the operator-facing extraction model minimal:
+`sentence -> span -> alias or fact -> signal -> lead_assessment`.
+
+Low-level text matching mechanisms are limited to three:
+
+- exact phrase
+- lemmatized phrase
+- alias dictionary
+
+Alias catalogs stay curated dictionaries of named entities. They may use
+configured normalization and limited fuzzy matching, but they do not perform
+lemmatized matching. Lemmatized matching belongs only to semantic fact rules.
+
+Rationale:
+
+- The dictionary question is identity: "is this this named entity?" rather than
+  semantic equivalence across inflected Russian forms.
+- Brand, protocol, model, software, and product spellings need controlled alias
+  variants, not open-ended lemma expansion.
+- Keeping lemmatization on facts only preserves one clear text owner for each
+  span and keeps traces readable: dictionary/entity evidence versus semantic
+  evidence.
+- When one alias match needs to imply additional meaning, the system should
+  prefer one matched alias owner plus derived facts from the same span instead
+  of emitting multiple competing alias identities for that one text fragment.
+- If additional context between facts is needed, the system should add minimal
+  relations such as `same_sentence`, `intent_object`, `located_at`, or
+  `negates`, rather than introducing new hidden inference layers.
 
 ## 2026-05-08: Off-Domain Demand Is Not A PUR Lead By Itself
 
@@ -604,14 +652,15 @@ Rationale:
 
 ## 2026-05-08: Review Constructor Writes NLP Settings
 
-The Review page constructor now supports all first-pass targets:
+The Review page constructor initially supported all first-pass targets:
 
 - `В словарь`: selected text is added to an existing or new alias catalog item
   under `vendors`, `protocols`, `devices`, or `software`.
 - `В факт`: selected text is added to an existing or new fact rule as either an
   exact phrase or a lemmatized phrase.
-- `В доменный сигнал`: selected text is added to an existing or new signal rule
-  as either an exact phrase or a lemmatized phrase.
+- `В доменный сигнал`: selected text was added to an existing or new signal rule
+  as either an exact phrase or a lemmatized phrase. This was superseded on
+  2026-05-10 by fact-only signal dependencies.
 - `В шум`: selected text is added to `operator_noise`.
 
 All actions write normal editable config data by creating a new
@@ -824,6 +873,37 @@ Rationale:
   intermediate evidence actually caused a signal.
 - Identity facts preserve exact alias-key dependencies without broadening facts
   such as `vendor`, `software`, or `controlled_device`.
+
+## 2026-05-10: Text Fragments Have One Owner
+
+Concrete text fragments now have one phrase owner in NLP config:
+
+- market spellings such as `Wi-Fi`, product names, brands, protocols, and
+  software live in exactly one alias catalog entry;
+- non-catalog semantic language lives in fact rules as exact or lemmatized
+  phrases;
+- domain signals contain no `phrases` or `patterns` and depend only on facts
+  through `match.facts`;
+- operator noise text is stored in `operator_noise_fact`, while the
+  `operator_noise` signal depends on that fact.
+
+The config loader rejects signal phrase rules, duplicate runtime-equivalent
+alias spellings, and fact/signal phrase text already owned by another alias or
+fact rule. Ownership is checked on matchable alias text, not display-only
+`canonical` labels. The same loader validates `match.facts` and lead-scoring
+fact references against facts emitted by fact rules and alias catalogs. Review
+and Settings UI no longer offer adding selected text directly to a signal.
+Migration `0031_text_owner_config_repair` repairs active PostgreSQL revisions
+by moving legacy signal phrases into facts and removing stale fact references.
+
+Rationale:
+
+- The operator needs a full trace: text fragment -> dictionary/rule -> fact ->
+  domain signal -> score contribution.
+- Letting the same spelling appear in aliases, facts, and signals creates
+  duplicate matches and makes ownership unclear.
+- Fuzzy matching is a dictionary concern; facts use explicit exact or
+  lemmatized phrase rules, and signals are pure inference over facts.
 
 ## 2026-05-09: Enrichment Evidence Has A Visual Chain
 

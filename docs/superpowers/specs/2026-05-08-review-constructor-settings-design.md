@@ -13,10 +13,10 @@ Implemented constructor actions:
   in `vendors`, `protocols`, `devices`, or `software`.
 - `В факт`: add selected text to an existing or new fact rule as either an exact
   phrase or a backend-built lemmatized phrase.
-- `В доменный сигнал`: add selected text to an existing or new signal rule as an
-  exact or lemmatized phrase. Newly created signals get a `0` scoring weight so
-  they do not change lead score until the operator explicitly tunes scoring.
-- `В шум`: existing fast path to `operator_noise`.
+- Domain signals are not text owners; connect them by editing `match.facts` in
+  Settings/Configurator.
+- `В шум`: existing fast path stores selected text in `operator_noise_fact` and
+  connects `operator_noise` through `match.facts`.
 
 All changes write a new active PostgreSQL `nlp_config_revisions` row. YAML files
 remain bootstrap defaults only.
@@ -52,8 +52,8 @@ operator-visible errors in the Review constructor panel.
 
 ## Verification
 
-- API tests verify alias, fact, and signal constructors write PostgreSQL
-  revisions rather than YAML files.
+- API tests verify alias/fact constructors write PostgreSQL revisions rather
+  than YAML files and signal text constructors are rejected.
 - UI tests verify selected text opens dialogs and sends the expected API
   payloads.
 - Full backend tests, ruff, mypy, frontend tests/build, Docker Compose config,

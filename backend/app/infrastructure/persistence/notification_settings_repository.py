@@ -8,7 +8,8 @@ from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.domain.notifications import NotificationRoute, NotificationRouteConditions
-from app.domain.notifications import NotificationSettings, TelegramBot, TelegramChat
+from app.domain.notifications import NotificationSettings, NotificationSummarySettings
+from app.domain.notifications import TelegramBot, TelegramChat
 from app.infrastructure.persistence.tables import notification_settings
 
 NOTIFICATION_SETTINGS_CHANNEL = "telegram_routing"
@@ -39,6 +40,7 @@ class PostgresNotificationSettingsRepository:
             "bots": [_bot_to_dict(bot) for bot in settings.bots],
             "chats": [_chat_to_dict(chat) for chat in settings.chats],
             "routes": [_route_to_dict(route) for route in settings.routes],
+            "summary": _summary_to_dict(settings.summary) if settings.summary else None,
         }
         statement = (
             insert(notification_settings)
@@ -57,6 +59,7 @@ class PostgresNotificationSettingsRepository:
             chats=settings.chats,
             routes=settings.routes,
             updated_at=updated_at,
+            summary=settings.summary,
         )
 
 
@@ -67,6 +70,7 @@ def _settings_from_row(row: Any) -> NotificationSettings:
         chats=[_chat_from_dict(item) for item in config.get("chats", [])],
         routes=[_route_from_dict(item) for item in config.get("routes", [])],
         updated_at=row["updated_at"],
+        summary=_summary_from_dict(config.get("summary")),
     )
 
 
@@ -100,6 +104,19 @@ def _route_from_dict(data: dict[str, Any]) -> NotificationRoute:
         delivery_mode="interactive" if data.get("delivery_mode") == "interactive" else "batched",
         conditions=_conditions_from_dict(data.get("conditions") or {}),
         message_template=str(data.get("message_template", "")),
+    )
+
+
+def _summary_from_dict(data: Any) -> NotificationSummarySettings | None:
+    if not isinstance(data, dict):
+        return None
+    return NotificationSummarySettings(
+        enabled=bool(data.get("enabled", False)),
+        bot_id=str(data.get("bot_id", "")),
+        chat_id=str(data.get("chat_id", "")),
+        timezone=str(data.get("timezone") or "Europe/Moscow"),
+        day_start_hour=int(data.get("day_start_hour", 9)),
+        night_start_hour=int(data.get("night_start_hour", 21)),
     )
 
 
@@ -149,6 +166,17 @@ def _route_to_dict(route: NotificationRoute) -> dict[str, Any]:
         "delivery_mode": route.delivery_mode,
         "conditions": _conditions_to_dict(route.conditions),
         "message_template": route.message_template,
+    }
+
+
+def _summary_to_dict(summary: NotificationSummarySettings) -> dict[str, Any]:
+    return {
+        "enabled": summary.enabled,
+        "bot_id": summary.bot_id,
+        "chat_id": summary.chat_id,
+        "timezone": summary.timezone,
+        "day_start_hour": summary.day_start_hour,
+        "night_start_hour": summary.night_start_hour,
     }
 
 

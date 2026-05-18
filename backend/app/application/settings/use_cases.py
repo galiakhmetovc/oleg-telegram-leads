@@ -10,6 +10,8 @@ from app.domain.settings import NlpConfigRevision
 
 OPERATOR_NOISE_SIGNAL_TYPE = "operator_noise"
 OPERATOR_NOISE_SIGNAL_LABEL = "Операторский шум"
+OPERATOR_NOISE_FACT_TYPE = "operator_noise_fact"
+OPERATOR_NOISE_FACT_LABEL = "Факт: операторский шум"
 OPERATOR_NOISE_SIGNAL_GROUP = "Шум / ручная разметка"
 OPERATOR_NOISE_SIGNAL_WEIGHT = -50
 HARD_NOISE_SCORE_CAP_KEY = "hard_noise"
@@ -240,6 +242,10 @@ class AddRulePhraseFromSelection:
         self,
         command: AddRulePhraseFromSelectionCommand,
     ) -> AddRulePhraseFromSelectionResult:
+        if command.collection == "signals":
+            raise ValueError(
+                "signals do not own text phrases; add a fact phrase and reference it from signal match.facts"
+            )
         exact_phrase: list[str] | None = None
         semantic_pattern: dict[str, Any] | None = None
         if command.phrase_kind == "exact":
@@ -389,6 +395,10 @@ def add_rule_phrase_to_documents(
 ) -> RulePhraseMutation:
     if collection not in {"signals", "facts"}:
         raise ValueError(f"unsupported rule collection: {collection}")
+    if collection == "signals":
+        raise ValueError(
+            "signals do not own text phrases; add a fact phrase and reference it from signal match.facts"
+        )
     if phrase_kind not in {"exact", "semantic"}:
         raise ValueError(f"unsupported phrase kind: {phrase_kind}")
     cleaned_type = clean_key(target_type)
@@ -466,6 +476,30 @@ def add_operator_noise_phrase_to_documents(
     created_rule = False
     created_phrase = False
 
+    facts = _document_list(next_documents, "facts", "facts")
+    fact = _find_mapping_by_key(facts, "type", OPERATOR_NOISE_FACT_TYPE)
+    if fact is None:
+        fact = {
+            "type": OPERATOR_NOISE_FACT_TYPE,
+            "label": OPERATOR_NOISE_FACT_LABEL,
+            "group": OPERATOR_NOISE_SIGNAL_GROUP,
+            "confidence": 0.95,
+            "phrases": [],
+        }
+        facts.append(fact)
+        created_rule = True
+        changed = True
+
+    phrases = fact.setdefault("phrases", [])
+    if not isinstance(phrases, list):
+        phrases = []
+        fact["phrases"] = phrases
+        changed = True
+    if phrase not in phrases:
+        phrases.append(phrase)
+        created_phrase = True
+        changed = True
+
     signals = _document_list(next_documents, "signals", "signals")
     signal = _find_mapping_by_key(signals, "type", OPERATOR_NOISE_SIGNAL_TYPE)
     if signal is None:
@@ -475,21 +509,29 @@ def add_operator_noise_phrase_to_documents(
             "group": OPERATOR_NOISE_SIGNAL_GROUP,
             "color": "#5f6368",
             "confidence": 0.95,
-            "phrases": [],
+            "match": {"facts": [{"types": [OPERATOR_NOISE_FACT_TYPE]}]},
         }
         signals.append(signal)
         created_rule = True
         changed = True
-
-    phrases = signal.setdefault("phrases", [])
-    if not isinstance(phrases, list):
-        phrases = []
-        signal["phrases"] = phrases
-        changed = True
-    if phrase not in phrases:
-        phrases.append(phrase)
-        created_phrase = True
-        changed = True
+    else:
+        if signal.pop("phrases", None) is not None:
+            changed = True
+        if signal.pop("patterns", None) is not None:
+            changed = True
+        match = signal.setdefault("match", {})
+        if not isinstance(match, dict):
+            match = {}
+            signal["match"] = match
+            changed = True
+        dependencies = match.setdefault("facts", [])
+        if not isinstance(dependencies, list):
+            dependencies = []
+            match["facts"] = dependencies
+            changed = True
+        if not _match_facts_include(dependencies, OPERATOR_NOISE_FACT_TYPE):
+            dependencies.append({"types": [OPERATOR_NOISE_FACT_TYPE]})
+            changed = True
 
     scoring = next_documents.setdefault("lead_scoring", {}).setdefault("lead_scoring", {})
     weights = scoring.setdefault("weights", {})
@@ -526,6 +568,15 @@ def add_operator_noise_phrase_to_documents(
         created_phrase=created_phrase,
         changed=changed,
     )
+
+
+def _match_facts_include(dependencies: list[Any], fact_type: str) -> bool:
+    for dependency in dependencies:
+        if isinstance(dependency, str) and dependency == fact_type:
+            return True
+        if isinstance(dependency, dict) and fact_type in dependency.get("types", []):
+            return True
+    return False
 
 
 def _ensure_operator_noise_score_cap(scoring: dict[str, Any]) -> bool:

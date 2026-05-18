@@ -92,12 +92,18 @@ class FakeLiveClient:
         self.flood_wait_by_ref: dict[str, int] = {}
         self.fetch_calls: list[dict[str, object]] = []
         self.watched_sources: list[object] = []
+        self.reload_after_seconds: float | None = None
 
     async def __aenter__(self) -> FakeLiveClient:
         return self
 
     async def __aexit__(self, exc_type: object, exc: object, tb: object) -> None:
         return None
+
+    async def resolve_source(self, input_ref: str) -> str | None:
+        if input_ref in self.flood_wait_by_ref:
+            raise TelegramUserbotFloodWait(self.flood_wait_by_ref[input_ref])
+        return self.latest_by_ref.get(input_ref, (None, None))[0]
 
     async def get_latest_message_id(self, input_ref: str) -> tuple[str | None, int | None]:
         if input_ref in self.flood_wait_by_ref:
@@ -126,8 +132,11 @@ class FakeLiveClient:
         self,
         sources: Sequence[TelegramSourceSubscription],
         handler: Callable[[UUID, TelegramFetchedMessage], Awaitable[None]],
+        *,
+        reload_after_seconds: float | None = None,
     ) -> None:
         self.watched_sources = list(sources)
+        self.reload_after_seconds = reload_after_seconds
         for source_chat_id, message in self.live_messages:
             await handler(source_chat_id, message)
 
@@ -173,10 +182,83 @@ async def test_live_watch_bootstraps_unresolved_source_without_importing_history
             "chat_id": chat.id,
             "status": "resolved",
             "telegram_chat_id": "telegram-chat-1",
-            "last_message_id": 500,
+            "last_message_id": None,
             "last_error": None,
         }
     ]
+    assert len(client.watched_sources) == 1
+
+
+@pytest.mark.asyncio
+async def test_live_watch_passes_settings_reload_interval_to_live_client() -> None:
+    account = _authorized_account()
+    chat = _source_chat(account.id, telegram_chat_id="telegram-chat-1", last_message_id=500)
+    repository = InMemorySourceStateRepository(TelegramIngestionSettings(accounts=[account], chats=[chat]))
+    ingester = FakeIngester()
+    client = FakeLiveClient()
+
+    await WatchTelegramSources(
+        repository=repository,
+        ingester=ingester,
+        history_client_factory=FakeLiveClientFactory(client),
+        settings_reload_interval_seconds=45,
+    ).execute()
+
+    assert client.reload_after_seconds == 45
+
+
+@pytest.mark.asyncio
+async def test_live_watch_subscribes_resolved_source_without_history_recovery() -> None:
+    account = _authorized_account()
+    chat = _source_chat(account.id, telegram_chat_id="telegram-chat-1", last_message_id=500)
+    repository = InMemorySourceStateRepository(TelegramIngestionSettings(accounts=[account], chats=[chat]))
+    ingester = FakeIngester()
+    client = FakeLiveClient()
+    client.recovery_by_ref[chat.input_ref] = [
+        _fetched_message(telegram_chat_id="telegram-chat-1", message_id=501, text="Should not be recovered")
+    ]
+    client.live_messages = [
+        (chat.id, _fetched_message(telegram_chat_id="telegram-chat-1", message_id=502, text="Live lead"))
+    ]
+
+    summary = await WatchTelegramSources(
+        repository=repository,
+        ingester=ingester,
+        history_client_factory=FakeLiveClientFactory(client),
+        recovery_limit=100,
+    ).execute()
+
+    assert summary.accounts == 1
+    assert summary.chats == 1
+    assert client.fetch_calls == []
+    assert [message.telegram_message_id for message in ingester.messages] == [502]
+    assert len(client.watched_sources) == 1
+
+
+@pytest.mark.asyncio
+async def test_live_watch_does_not_recover_prepared_sources_on_settings_reload() -> None:
+    account = _authorized_account()
+    chat = _source_chat(account.id, telegram_chat_id="telegram-chat-1", last_message_id=500)
+    repository = InMemorySourceStateRepository(TelegramIngestionSettings(accounts=[account], chats=[chat]))
+    ingester = FakeIngester()
+    client = FakeLiveClient()
+    client.recovery_by_ref[chat.input_ref] = [
+        _fetched_message(telegram_chat_id="telegram-chat-1", message_id=501, text="Recovery lead")
+    ]
+    watcher = WatchTelegramSources(
+        repository=repository,
+        ingester=ingester,
+        history_client_factory=FakeLiveClientFactory(client),
+        recovery_limit=100,
+    )
+
+    first = await watcher.execute()
+    second = await watcher.execute()
+
+    assert first.messages_created == 0
+    assert second.messages_created == 0
+    assert client.fetch_calls == []
+    assert ingester.messages == []
     assert len(client.watched_sources) == 1
 
 
@@ -300,19 +382,8 @@ async def test_live_watch_throttles_recovery_after_expired_cooldown() -> None:
             "last_error": None,
         }
     ]
-    assert client.fetch_calls == [
-        {
-            "input_ref": first_chat.input_ref,
-            "after_message_id": 500,
-            "limit": 5,
-        },
-        {
-            "input_ref": second_chat.input_ref,
-            "after_message_id": 700,
-            "limit": 5,
-        },
-    ]
-    assert sleep.calls == [1.5]
+    assert client.fetch_calls == []
+    assert sleep.calls == []
     assert len(client.watched_sources) == 2
 
 
@@ -344,20 +415,9 @@ async def test_live_watch_drains_cooldown_recovery_in_small_batches() -> None:
         sleep=sleep,
     ).execute()
 
-    assert client.fetch_calls == [
-        {
-            "input_ref": chat.input_ref,
-            "after_message_id": 500,
-            "limit": 2,
-        },
-        {
-            "input_ref": chat.input_ref,
-            "after_message_id": 502,
-            "limit": 2,
-        },
-    ]
-    assert [message.telegram_message_id for message in ingester.messages] == [501, 502, 503]
-    assert sleep.calls == [1.5]
+    assert client.fetch_calls == []
+    assert ingester.messages == []
+    assert sleep.calls == []
 
 
 @pytest.mark.asyncio
@@ -383,22 +443,9 @@ async def test_live_watch_recovers_once_then_processes_live_messages() -> None:
 
     assert summary.accounts == 1
     assert summary.chats == 1
-    assert client.fetch_calls == [
-        {
-            "input_ref": chat.input_ref,
-            "after_message_id": 500,
-            "limit": 100,
-        }
-    ]
-    assert [message.telegram_message_id for message in ingester.messages] == [501, 502]
+    assert client.fetch_calls == []
+    assert [message.telegram_message_id for message in ingester.messages] == [502]
     assert repository.state_updates[-2:] == [
-        {
-            "chat_id": chat.id,
-            "status": "resolved",
-            "telegram_chat_id": "telegram-chat-1",
-            "last_message_id": 501,
-            "last_error": None,
-        },
         {
             "chat_id": chat.id,
             "status": "resolved",

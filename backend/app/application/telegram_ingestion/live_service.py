@@ -162,6 +162,7 @@ class WatchTelegramSources:
         recovery_limit: int = 100,
         cooldown_recovery_limit: int = 10,
         cooldown_recovery_delay_seconds: float = 15.0,
+        settings_reload_interval_seconds: float | None = 60.0,
         sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
     ) -> None:
         self._repository = repository
@@ -170,8 +171,10 @@ class WatchTelegramSources:
         self._recovery_limit = recovery_limit
         self._cooldown_recovery_limit = cooldown_recovery_limit
         self._cooldown_recovery_delay_seconds = cooldown_recovery_delay_seconds
+        self._settings_reload_interval_seconds = settings_reload_interval_seconds
         self._sleep = sleep
         self._latest_message_ids: dict[Any, int] = {}
+        self._prepared_source_ids: set[Any] = set()
 
     async def execute(self) -> TelegramPollingSummary:
         settings = await self._repository.get_settings()
@@ -215,9 +218,8 @@ class WatchTelegramSources:
                 session_string=account.session_string or "",
             ) as client:
                 subscriptions: list[TelegramSourceSubscription] = []
-                for index, chat in enumerate(chats):
+                for chat in chats:
                     self._remember_latest_message_id(chat.id, chat.last_message_id)
-                    delay_after_attempt = ready.resumed_after_cooldown and index < len(chats) - 1
                     try:
                         subscription, recovered = await self._prepare_source(
                             account,
@@ -232,7 +234,6 @@ class WatchTelegramSources:
                             status=chat.status if chat.status in {"draft", "resolved"} else "resolved",
                             last_error=str(exc),
                         )
-                        delay_after_attempt = False
                         raise
                     except Exception as exc:
                         await self._repository.update_source_chat_state(
@@ -245,8 +246,6 @@ class WatchTelegramSources:
                     else:
                         subscriptions.append(subscription)
                         summary = _merge_summary(summary, recovered)
-                    if delay_after_attempt:
-                        await self._sleep(self._cooldown_recovery_delay_seconds)
                 if subscriptions:
                     await client.watch_sources(
                         subscriptions,
@@ -255,6 +254,7 @@ class WatchTelegramSources:
                             source_chat_id=source_chat_id,
                             message=message,
                         ),
+                        reload_after_seconds=self._settings_reload_interval_seconds,
                     )
         except TelegramUserbotFloodWait as exc:
             await _store_account_flood_wait(self._repository, account, exc)
@@ -270,14 +270,14 @@ class WatchTelegramSources:
         drain_recovery: bool,
     ) -> tuple[TelegramSourceSubscription, TelegramPollingSummary]:
         if chat.last_message_id is None:
-            telegram_chat_id, latest_message_id = await client.get_latest_message_id(chat.input_ref)
-            self._remember_latest_message_id(chat.id, latest_message_id)
+            telegram_chat_id = await client.resolve_source(chat.input_ref)
             await self._repository.update_source_chat_state(
                 chat_id=chat.id,
                 status="resolved",
                 telegram_chat_id=telegram_chat_id,
-                last_message_id=latest_message_id,
+                last_message_id=None,
             )
+            self._prepared_source_ids.add(chat.id)
             return (
                 TelegramSourceSubscription(
                     source_chat_id=chat.id,
@@ -287,44 +287,21 @@ class WatchTelegramSources:
                 TelegramPollingSummary(),
             )
 
-        recovered = TelegramPollingSummary()
-        telegram_chat_id = chat.telegram_chat_id
-        after_message_id = chat.last_message_id
-        while after_message_id is not None:
-            messages = await client.fetch_messages_after(
-                chat.input_ref,
-                after_message_id=after_message_id,
-                limit=recovery_limit,
+        if chat.last_error:
+            await self._repository.update_source_chat_state(
+                chat_id=chat.id,
+                status="resolved",
+                telegram_chat_id=chat.telegram_chat_id,
+                last_error=None,
             )
-            if not messages:
-                await self._repository.update_source_chat_state(
-                    chat_id=chat.id,
-                    status="resolved",
-                    telegram_chat_id=telegram_chat_id,
-                    last_error=None,
-                )
-                break
-            for message in messages:
-                telegram_chat_id = message.telegram_chat_id or telegram_chat_id
-                after_message_id = max(after_message_id, message.telegram_message_id)
-                recovered = _merge_summary(
-                    recovered,
-                    await self._ingest_and_advance(
-                        account=account,
-                        source_chat_id=chat.id,
-                        message=message,
-                    ),
-                )
-            if not drain_recovery or len(messages) < recovery_limit:
-                break
-            await self._sleep(self._cooldown_recovery_delay_seconds)
+        self._prepared_source_ids.add(chat.id)
         return (
             TelegramSourceSubscription(
                 source_chat_id=chat.id,
                 input_ref=chat.input_ref,
-                telegram_chat_id=telegram_chat_id,
+                telegram_chat_id=chat.telegram_chat_id,
             ),
-            recovered,
+            TelegramPollingSummary(),
         )
 
     async def _handle_live_message(

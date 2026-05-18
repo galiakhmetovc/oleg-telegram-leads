@@ -64,7 +64,7 @@ def test_merge_missing_default_documents_adds_new_lead_scoring_sections_without_
             "lead_scoring": {
                 "thresholds": {"lead": 35, "warm": 60, "hot": 90},
                 "weights": {"signals": {"default": 10}, "facts": {}},
-                "review_lanes": [{"key": "direct_pur_lead", "label": "Прямой лид ПУР"}],
+                "review_lanes": [{"key": "direct_pur_lead", "label": "Прямой лид"}],
             }
         }
     }
@@ -74,5 +74,5 @@ def test_merge_missing_default_documents_adds_new_lead_scoring_sections_without_
     assert merged["lead_scoring"]["lead_scoring"]["thresholds"]["lead"] == 20
     assert merged["lead_scoring"]["lead_scoring"]["weights"]["signals"] == {"custom": 99}
     assert merged["lead_scoring"]["lead_scoring"]["review_lanes"] == [
-        {"key": "direct_pur_lead", "label": "Прямой лид ПУР"}
+        {"key": "direct_pur_lead", "label": "Прямой лид"}
     ]

@@ -1,7 +1,7 @@
 signals:
   - type: lead_active_intent
     label: Активное намерение / заявка
-    group: "V3: намерение"
+    group: "Намерение"
     color: "#d32f2f"
     confidence: 0.88
     match:
@@ -12,9 +12,19 @@ signals:
             - intent_provider_search
             - intent_install_connect
 
+  - type: lead_partner_sourcing
+    label: Партнерский поиск / команда
+    group: "Намерение"
+    color: "#6d4c41"
+    confidence: 0.85
+    match:
+      facts:
+        - types:
+            - intent_partner_contractor_search
+
   - type: lead_consultation_intent
     label: Консультация / вопрос по реализации
-    group: "V3: намерение"
+    group: "Намерение"
     color: "#7b1fa2"
     confidence: 0.78
     match:
@@ -24,7 +34,7 @@ signals:
 
   - type: lead_research_intent
     label: Подбор / изучение решения
-    group: "V3: намерение"
+    group: "Намерение"
     color: "#00897b"
     confidence: 0.78
     match:
@@ -35,7 +45,7 @@ signals:
 
   - type: project_context
     label: Проектный / монтажный контекст
-    group: "V3: контекст"
+    group: "Контекст"
     color: "#5d4037"
     confidence: 0.74
     match:
@@ -49,7 +59,7 @@ signals:
 
   - type: segment_designer
     label: "Сегмент: дизайнер / проектировщик"
-    group: "V3: сегмент"
+    group: "Сегменты"
     color: "#3949ab"
     confidence: 0.7
     match:
@@ -59,7 +69,7 @@ signals:
 
   - type: segment_private_residential
     label: "Сегмент: частное жилье"
-    group: "V3: сегмент"
+    group: "Сегменты"
     color: "#00838f"
     confidence: 0.68
     match:
@@ -70,7 +80,7 @@ signals:
 
   - type: segment_commercial
     label: "Сегмент: коммерческий объект"
-    group: "V3: сегмент"
+    group: "Сегменты"
     color: "#455a64"
     confidence: 0.7
     match:
@@ -80,7 +90,7 @@ signals:
 
   - type: segment_family
     label: "Сегмент: семья / дети"
-    group: "V3: сегмент"
+    group: "Сегменты"
     color: "#2e7d32"
     confidence: 0.66
     match:
@@ -89,8 +99,8 @@ signals:
             - object_family
 
   - type: pur_smart_home
-    label: "ПУР: умный дом / автоматизация"
-    group: "V3: домен ПУР"
+    label: "Умный дом"
+    group: "Направления"
     color: "#00838f"
     confidence: 0.84
     match:
@@ -163,8 +173,8 @@ signals:
             - alias:software:livicom_app
 
   - type: pur_leak_protection
-    label: "ПУР: защита от протечек"
-    group: "V3: домен ПУР"
+    label: "Защита от протечек"
+    group: "Направления"
     color: "#00695c"
     confidence: 0.84
     match:
@@ -178,8 +188,8 @@ signals:
             - alias:devices:leak_valve
 
   - type: pur_video_surveillance
-    label: "ПУР: видеонаблюдение"
-    group: "V3: домен ПУР"
+    label: "Видеонаблюдение"
+    group: "Направления"
     color: "#455a64"
     confidence: 0.84
     match:
@@ -196,8 +206,8 @@ signals:
             - alias:software:video_security_apps
 
   - type: pur_access_control
-    label: "ПУР: СКУД / контроль доступа"
-    group: "V3: домен ПУР"
+    label: "Контроль доступа"
+    group: "Направления"
     color: "#00897b"
     confidence: 0.82
     match:
@@ -210,8 +220,8 @@ signals:
             - alias:devices:gate_barrier
 
   - type: pur_intercom
-    label: "ПУР: домофония"
-    group: "V3: домен ПУР"
+    label: "Домофоны"
+    group: "Направления"
     color: "#546e7a"
     confidence: 0.8
     match:
@@ -220,8 +230,8 @@ signals:
             - alias:devices:intercom
 
   - type: pur_security_alarm
-    label: "ПУР: охранная / пожарная сигнализация"
-    group: "V3: домен ПУР"
+    label: "Охранно-пожарная сигнализация"
+    group: "Направления"
     color: "#c62828"
     confidence: 0.82
     match:
@@ -235,32 +245,30 @@ signals:
             - alias:software:livicom_app
 
   - type: pur_gate_automation
-    label: "ПУР: ворота / шлагбаумы"
-    group: "V3: домен ПУР"
+    label: "Автоматика ворот"
+    group: "Направления"
     color: "#6d4c41"
     confidence: 0.8
     match:
       facts:
         - types:
-            - domain_gate_automation
             - alias:vendors:gate_automation_brands
             - alias:devices:gate_barrier
 
   - type: pur_power_stability
-    label: "ПУР: электропитание / ИБП"
-    group: "V3: домен ПУР"
+    label: "Бесперебойное питание"
+    group: "Направления"
     color: "#f57f17"
     confidence: 0.8
     match:
       facts:
         - types:
-            - domain_power_stability
             - alias:devices:ups
             - alias:devices:voltage_stabilizer
 
   - type: pur_climate_control
-    label: "ПУР: управление климатом"
-    group: "V3: домен ПУР"
+    label: "Климатический контроль"
+    group: "Направления"
     color: "#0277bd"
     confidence: 0.78
     match:
@@ -277,8 +285,8 @@ signals:
             - alias:devices:climate_control_device
 
   - type: pur_lighting_automation
-    label: "ПУР: автоматизация освещения"
-    group: "V3: домен ПУР"
+    label: "Автоматизация освещения"
+    group: "Направления"
     color: "#9e9d24"
     confidence: 0.78
     match:
@@ -304,8 +312,8 @@ signals:
             - alias:devices:smart_panel
 
   - type: pur_curtain_control
-    label: "ПУР: электрокарнизы / шторы"
-    group: "V3: домен ПУР"
+    label: "Электрокарнизы"
+    group: "Направления"
     color: "#8e24aa"
     confidence: 0.78
     match:
@@ -315,8 +323,8 @@ signals:
             - alias:devices:electric_curtain
 
   - type: pur_network_infrastructure
-    label: "ПУР: СКС / слаботочные сети"
-    group: "V3: домен ПУР"
+    label: "Слаботочные сети"
+    group: "Направления"
     color: "#5e35b1"
     confidence: 0.76
     match:
@@ -332,7 +340,7 @@ signals:
 
   - type: noise_supply
     label: "Шум: продажа / наличие"
-    group: "V3: шум"
+    group: "Шум"
     color: "#616161"
     confidence: 0.8
     match:
@@ -340,9 +348,19 @@ signals:
         - types:
             - noise_supply_sale
 
+  - type: noise_advertising_self_promo
+    label: "Шум: реклама / самопродвижение"
+    group: "Шум"
+    color: "#5f6368"
+    confidence: 0.84
+    match:
+      facts:
+        - types:
+            - noise_advertising_self_promo
+
   - type: noise_diy_equipment_only
     label: "Шум: DIY / только оборудование"
-    group: "V3: шум"
+    group: "Шум"
     color: "#757575"
     confidence: 0.78
     match:
@@ -352,7 +370,7 @@ signals:
 
   - type: noise_price_only
     label: "Шум: только цена"
-    group: "V3: шум"
+    group: "Шум"
     color: "#8d6e63"
     confidence: 0.7
     match:
@@ -362,7 +380,7 @@ signals:
 
   - type: noise_ordinary_household
     label: "Шум: обычная бытовая система"
-    group: "V3: шум"
+    group: "Шум"
     color: "#78909c"
     confidence: 0.74
     match:

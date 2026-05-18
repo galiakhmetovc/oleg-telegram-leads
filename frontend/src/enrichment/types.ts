@@ -10,6 +10,10 @@ export type SpanItem = {
   label?: string;
   range: TextRange;
   source: string;
+  span_id?: string | null;
+  sentence_id?: string | null;
+  derived_from_fact_id?: string | null;
+  source_fact_ids?: string[];
   confidence?: number | null;
   color?: string | null;
   explanation?: string | null;

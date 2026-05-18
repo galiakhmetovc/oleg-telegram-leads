@@ -28,10 +28,10 @@ stages:
 signals:
   - type: smart_home
     label: Умный дом
-    patterns:
-      - tokens:
-          - normalized: "умный"
-          - normalized: "дом"
+    match:
+      facts:
+        - types:
+            - solution_area
 """,
         encoding="utf-8",
     )

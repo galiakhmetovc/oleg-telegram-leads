@@ -1,7 +1,7 @@
 facts:
   - type: intent_need
     label: Потребность / нужно
-    group: "V3: намерение"
+    group: "Намерение"
     confidence: 0.68
     patterns:
       - source_text: "нужно"
@@ -32,7 +32,7 @@ facts:
 
   - type: intent_customer_request
     label: Запрос заказчика / клиента
-    group: "V3: намерение"
+    group: "Намерение"
     confidence: 0.82
     patterns:
       - source_text: "заказчик хочет"
@@ -60,7 +60,7 @@ facts:
 
   - type: intent_provider_search
     label: Поиск исполнителя / контактов
-    group: "V3: намерение"
+    group: "Намерение"
     confidence: 0.88
     patterns:
       - source_text: "посоветуйте контакты"
@@ -96,9 +96,55 @@ facts:
           - normalized: "поделиться"
           - normalized: "контакт"
 
+  - type: intent_partner_contractor_search
+    label: Поиск партнеров / подрядчиков для сотрудничества
+    group: "Намерение"
+    confidence: 0.9
+    patterns:
+      - source_text: "ищу дизайнеров интерьера и бригады рабочих для сотрудничества"
+        tokens:
+          - normalized: "искать"
+          - normalized: "дизайнер"
+          - normalized: "интерьер"
+          - normalized: "и"
+          - normalized: "бригада"
+          - normalized: "рабочий"
+          - normalized: "для"
+          - normalized: "сотрудничество"
+      - source_text: "ищу строительные бригады"
+        tokens:
+          - normalized: "искать"
+          - normalized: "строительный"
+          - normalized: "бригада"
+      - source_text: "ищу строительные бригады и мастеров"
+        tokens:
+          - normalized: "искать"
+          - normalized: "строительный"
+          - normalized: "бригада"
+          - normalized: "и"
+          - normalized: "мастер"
+      - source_text: "нужны исполнители по строительству домов"
+        tokens:
+          - normalized: "нужный"
+          - normalized: "исполнитель"
+          - normalized: "по"
+          - normalized: "строительство"
+          - normalized: "дом"
+      - source_text: "бригады рабочих для сотрудничества"
+        tokens:
+          - normalized: "бригада"
+          - normalized: "рабочий"
+          - normalized: "для"
+          - normalized: "сотрудничество"
+      - source_text: "выстраивать нормальное сотрудничество"
+        tokens:
+          - normalized: "выстраивать"
+          - normalized: "нормальный"
+          - normalized: "сотрудничество"
+
   - type: intent_install_connect
     label: Установить / подключить
-    group: "V3: намерение"
+    group: "Намерение"
     confidence: 0.84
     patterns:
       - source_text: "установить и подключить"
@@ -134,7 +180,7 @@ facts:
 
   - type: intent_consultation
     label: Консультация / вопрос
-    group: "V3: намерение"
+    group: "Намерение"
     confidence: 0.78
     patterns:
       - source_text: "подскажите"
@@ -163,16 +209,9 @@ facts:
         tokens:
           - normalized: "помочь"
           - normalized: "решить"
-      - source_text: "помогите собрать комплект"
+      - source_text: "помогите"
         tokens:
           - normalized: "помочь"
-          - normalized: "собрать"
-          - normalized: "комплект"
-      - source_text: "помогите подобрать комплект"
-        tokens:
-          - normalized: "помочь"
-          - normalized: "подобрать"
-          - normalized: "комплект"
       - source_text: "слышали про такое"
         tokens:
           - normalized: "слышать"
@@ -181,7 +220,7 @@ facts:
 
   - type: intent_solution_selection
     label: Подбор / оценка решения
-    group: "V3: намерение"
+    group: "Намерение"
     confidence: 0.78
     phrases:
       - ["кому", "и", "зачем"]
@@ -241,7 +280,7 @@ facts:
 
   - type: intent_implementation
     label: Намерение внедрить / реализовать
-    group: "V3: намерение"
+    group: "Намерение"
     confidence: 0.76
     patterns:
       - source_text: "хочу реализовать"
@@ -263,7 +302,7 @@ facts:
 
   - type: context_design_project
     label: Проектирование / дизайн
-    group: "V3: контекст"
+    group: "Контекст"
     confidence: 0.72
     patterns:
       - source_text: "чертежи электрики"
@@ -318,7 +357,7 @@ facts:
 
   - type: context_wiring_output
     label: Выводы / кабели / розетки
-    group: "V3: контекст"
+    group: "Контекст"
     confidence: 0.7
     phrases:
       - ["220v"]
@@ -341,18 +380,10 @@ facts:
       - source_text: "розетка"
         tokens:
           - normalized: "розетка"
-      - source_text: "слаботочный щит"
-        tokens:
-          - normalized: "слаботочный"
-          - normalized: "щит"
-      - source_text: "мелкоточный щит"
-        tokens:
-          - normalized: "мелкоточный"
-          - normalized: "щит"
 
   - type: context_renovation_modification
     label: Ремонт / изменение схемы
-    group: "V3: контекст"
+    group: "Контекст"
     confidence: 0.76
     patterns:
       - source_text: "добавление розеток"
@@ -386,7 +417,7 @@ facts:
 
   - type: context_developer_system
     label: Система от застройщика
-    group: "V3: контекст"
+    group: "Контекст"
     confidence: 0.8
     patterns:
       - source_text: "умный дом от застройщика"
@@ -406,7 +437,7 @@ facts:
 
   - type: context_warranty_risk
     label: Гарантия / риск сломать систему
-    group: "V3: контекст"
+    group: "Контекст"
     confidence: 0.8
     patterns:
       - source_text: "слетает гарантия"
@@ -425,7 +456,7 @@ facts:
 
   - type: context_designer
     label: Дизайнер / проектировщик
-    group: "V3: сегмент"
+    group: "Сегмент"
     confidence: 0.68
     patterns:
       - source_text: "дизайнер"
@@ -443,7 +474,7 @@ facts:
 
   - type: object_apartment
     label: Квартира
-    group: "V3: объект"
+    group: "Объект"
     confidence: 0.68
     patterns:
       - source_text: "квартира"
@@ -455,7 +486,7 @@ facts:
 
   - type: object_family
     label: Семья / дети
-    group: "V3: объект"
+    group: "Объект"
     confidence: 0.66
     patterns:
       - source_text: "родители"
@@ -471,7 +502,7 @@ facts:
 
   - type: object_commercial
     label: Коммерческий объект
-    group: "V3: объект"
+    group: "Объект"
     confidence: 0.7
     phrases:
       - ["тц"]
@@ -494,7 +525,7 @@ facts:
 
   - type: object_country_house
     label: Дом / дача / коттедж
-    group: "V3: объект"
+    group: "Объект"
     confidence: 0.7
     patterns:
       - source_text: "частный дом"
@@ -514,7 +545,7 @@ facts:
 
   - type: service_location
     label: Локация работ
-    group: "V3: объект"
+    group: "Локация"
     confidence: 0.72
     phrases:
       - ["спб"]
@@ -529,7 +560,7 @@ facts:
 
   - type: domain_smart_home
     label: "Домен: умный дом"
-    group: "V3: домен"
+    group: "Домен"
     confidence: 0.82
     patterns:
       - source_text: "умный дом"
@@ -551,13 +582,9 @@ facts:
 
   - type: domain_leak_protection
     label: "Домен: защита от протечек"
-    group: "V3: домен"
+    group: "Домен"
     confidence: 0.84
     patterns:
-      - source_text: "датчик протечки"
-        tokens:
-          - normalized: "датчик"
-          - normalized: "протечка"
       - source_text: "защита от протечек"
         tokens:
           - normalized: "защита"
@@ -570,10 +597,6 @@ facts:
         tokens:
           - normalized: "проводной"
           - normalized: "датчик"
-      - source_text: "датчик сработал"
-        tokens:
-          - normalized: "датчик"
-          - normalized: "сработать"
       - source_text: "перекрывать воду"
         tokens:
           - normalized: "перекрывать"
@@ -587,7 +610,7 @@ facts:
 
   - type: domain_video_surveillance
     label: "Домен: видеонаблюдение"
-    group: "V3: домен"
+    group: "Домен"
     confidence: 0.84
     patterns:
       - source_text: "система видеонаблюдения"
@@ -597,20 +620,10 @@ facts:
       - source_text: "видеонаблюдение"
         tokens:
           - normalized: "видеонаблюдение"
-      - source_text: "камера на стену"
-        tokens:
-          - normalized: "камера"
-          - normalized: "на"
-          - normalized: "стена"
-      - source_text: "следить за няней"
-        tokens:
-          - normalized: "следить"
-          - normalized: "за"
-          - normalized: "няня"
 
   - type: domain_access_control
     label: "Домен: СКУД / доступ"
-    group: "V3: домен"
+    group: "Домен"
     confidence: 0.82
     phrases:
       - ["скуд"]
@@ -619,29 +632,10 @@ facts:
         tokens:
           - normalized: "контроль"
           - normalized: "доступ"
-      - source_text: "электромагнитный замок"
-        tokens:
-          - normalized: "электромагнитный"
-          - normalized: "замок"
-      - source_text: "входной замок"
-        tokens:
-          - normalized: "входной"
-          - normalized: "замок"
-      - source_text: "кнопка открывания"
-        tokens:
-          - normalized: "кнопка"
-          - normalized: "открывание"
-      - source_text: "домофон"
-        tokens:
-          - normalized: "домофон"
-      - source_text: "вызывная панель"
-        tokens:
-          - normalized: "вызывной"
-          - normalized: "панель"
 
   - type: domain_security_alarm
     label: "Домен: охранная / пожарная сигнализация"
-    group: "V3: домен"
+    group: "Домен"
     confidence: 0.82
     patterns:
       - source_text: "охранная сигнализация"
@@ -653,73 +647,14 @@ facts:
           - normalized: "пожарный"
           - normalized: "сигнализация"
 
-  - type: domain_gate_automation
-    label: "Домен: ворота / шлагбаумы"
-    group: "V3: домен"
-    confidence: 0.78
-    patterns:
-      - source_text: "автоматизация ворот"
-        tokens:
-          - normalized: "автоматизация"
-          - normalized: "ворота"
-      - source_text: "ворота"
-        tokens:
-          - normalized: "ворота"
-      - source_text: "шлагбаум"
-        tokens:
-          - normalized: "шлагбаум"
-      - source_text: "въездная группа"
-        tokens:
-          - normalized: "въездной"
-          - normalized: "группа"
-
-  - type: domain_power_stability
-    label: "Домен: электропитание"
-    group: "V3: домен"
-    confidence: 0.78
-    phrases:
-      - ["ибп"]
-    patterns:
-      - source_text: "бесперебойное питание"
-        tokens:
-          - normalized: "бесперебойный"
-          - normalized: "питание"
-      - source_text: "стабилизатор напряжения"
-        tokens:
-          - normalized: "стабилизатор"
-          - normalized: "напряжение"
-      - source_text: "нестабильное электроснабжение"
-        tokens:
-          - normalized: "нестабильный"
-          - normalized: "электроснабжение"
-      - source_text: "скачки напряжения"
-        tokens:
-          - normalized: "скачок"
-          - normalized: "напряжение"
-
   - type: domain_climate
     label: "Домен: климат"
-    group: "V3: домен"
+    group: "Домен"
     confidence: 0.78
     patterns:
-      - source_text: "управление климатом"
-        tokens:
-          - normalized: "управление"
-          - normalized: "климат"
-      - source_text: "кондиционер"
-        tokens:
-          - normalized: "кондиционер"
-      - source_text: "теплый пол"
-        tokens:
-          - normalized: "теплый"
-          - normalized: "пол"
       - source_text: "отопление"
         tokens:
           - normalized: "отопление"
-      - source_text: "канальное кондиционирование"
-        tokens:
-          - normalized: "канальный"
-          - normalized: "кондиционирование"
       - source_text: "статическое давление"
         tokens:
           - normalized: "статический"
@@ -727,60 +662,23 @@ facts:
 
   - type: domain_lighting
     label: "Домен: освещение / сценарии"
-    group: "V3: домен"
+    group: "Домен"
     confidence: 0.76
     patterns:
       - source_text: "управление освещением"
         tokens:
           - normalized: "управление"
           - normalized: "освещение"
-      - source_text: "сценарий освещения"
-        tokens:
-          - normalized: "сценарий"
-          - normalized: "освещение"
-      - source_text: "ночной свет"
-        tokens:
-          - normalized: "ночной"
-          - normalized: "свет"
-      - source_text: "дежурный свет"
-        tokens:
-          - normalized: "дежурный"
-          - normalized: "свет"
-      - source_text: "датчик движения"
-        tokens:
-          - normalized: "датчик"
-          - normalized: "движение"
-      - source_text: "при движении"
-        tokens:
-          - normalized: "при"
-          - normalized: "движение"
       - source_text: "подключить свет"
         tokens:
           - normalized: "подключить"
           - normalized: "свет"
-      - source_text: "умный свет"
-        tokens:
-          - normalized: "умный"
-          - normalized: "свет"
 
   - type: domain_curtain
     label: "Домен: электрокарнизы / шторы"
-    group: "V3: домен"
+    group: "Домен"
     confidence: 0.78
     patterns:
-      - source_text: "электрический карниз"
-        tokens:
-          - normalized: "электрический"
-          - normalized: "карниз"
-      - source_text: "электрокарниз"
-        tokens:
-          - normalized: "электрокарниз"
-      - source_text: "карниз с Wi-Fi"
-        tokens:
-          - normalized: "карниз"
-          - normalized: "с"
-          - normalized: "wi"
-          - normalized: "fi"
       - source_text: "работа с Алисой"
         tokens:
           - normalized: "работа"
@@ -789,16 +687,9 @@ facts:
 
   - type: domain_network
     label: "Домен: СКС / слаботочные сети"
-    group: "V3: домен"
+    group: "Домен"
     confidence: 0.74
-    phrases:
-      - ["скс"]
     patterns:
-      - source_text: "структурированная кабельная сеть"
-        tokens:
-          - normalized: "структурированный"
-          - normalized: "кабельный"
-          - normalized: "сеть"
       - source_text: "слаботочная сеть"
         tokens:
           - normalized: "слаботочный"
@@ -810,7 +701,7 @@ facts:
 
   - type: noise_supply_sale
     label: "Шум: продажа / наличие"
-    group: "V3: шум"
+    group: "Шум"
     confidence: 0.8
     phrases:
       - ["продаем"]
@@ -822,9 +713,64 @@ facts:
         tokens:
           - normalized: "продать"
 
+  - type: noise_advertising_self_promo
+    label: "Шум: реклама / самопродвижение"
+    group: "Шум"
+    confidence: 0.84
+    phrases:
+      - ["наш", "сайт"]
+      - ["наш", "канал"]
+      - ["наше", "типовое", "решение"]
+      - ["готовые", "коробочные", "решения"]
+      - ["собрали", "комплекты"]
+      - ["посмотреть", "можно", "на", "сайте"]
+      - ["переходите", "по", "ссылке"]
+      - ["подписывайтесь", "на", "канал"]
+      - ["ищет", "объекты"]
+      - ["спектр", "услуг"]
+      - ["работаем", "по", "всей", "рф"]
+      - ["телефон", "для", "связи"]
+      - ["готовы", "к", "долгосрочному", "сотрудничеству"]
+      - ["открылся", "экспертный", "центр"]
+      - ["для", "обучения", "мы", "собрали"]
+      - ["проходить", "практику"]
+      - ["на", "реальной", "инженерной", "базе"]
+    patterns:
+      - source_text: "мы обновили наш сайт"
+        tokens:
+          - normalized: "мы"
+          - normalized: "обновить"
+          - normalized: "наш"
+          - normalized: "сайт"
+      - source_text: "показываем один из наших объектов"
+        tokens:
+          - normalized: "показывать"
+          - normalized: "один"
+          - normalized: "из"
+          - normalized: "наш"
+          - normalized: "объект"
+      - source_text: "показываем объект"
+        tokens:
+          - normalized: "показывать"
+          - normalized: "объект"
+      - source_text: "показываем вам"
+        tokens:
+          - normalized: "показывать"
+          - normalized: "вы"
+      - source_text: "наш реальный опыт"
+        tokens:
+          - normalized: "наш"
+          - normalized: "реальный"
+          - normalized: "опыт"
+      - source_text: "мы собрали комплекты"
+        tokens:
+          - normalized: "мы"
+          - normalized: "собрать"
+          - normalized: "комплект"
+
   - type: noise_diy_equipment_only
     label: "Шум: DIY / только оборудование"
-    group: "V3: шум"
+    group: "Шум"
     confidence: 0.78
     patterns:
       - source_text: "без монтажа"
@@ -850,7 +796,7 @@ facts:
 
   - type: noise_price_only
     label: "Шум: только цена"
-    group: "V3: шум"
+    group: "Шум"
     confidence: 0.7
     patterns:
       - source_text: "сколько стоит"
@@ -867,7 +813,7 @@ facts:
 
   - type: noise_ordinary_household
     label: "Шум: обычная бытовая система"
-    group: "V3: шум"
+    group: "Шум"
     confidence: 0.74
     patterns:
       - source_text: "обычный кондиционер"

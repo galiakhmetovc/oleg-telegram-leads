@@ -509,16 +509,10 @@ async def add_constructor_fact(
 )
 async def add_constructor_signal(
     request: ConstructorRuleRequest,
-    config_dir: Path = Depends(get_nlp_config_dir),
-    repository: PostgresNlpConfigRepository = Depends(get_nlp_config_repository),
-    normalizer: RussianRulePhraseNormalizer = Depends(get_rule_phrase_normalizer),
 ) -> ConstructorRuleResponse:
-    return await _add_constructor_rule(
-        request=request,
-        collection="signals",
-        config_dir=config_dir,
-        repository=repository,
-        normalizer=normalizer,
+    raise HTTPException(
+        status_code=422,
+        detail="signals do not own text phrases; add a fact phrase and reference it from signal match.facts",
     )
 
 

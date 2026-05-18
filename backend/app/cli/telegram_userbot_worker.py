@@ -48,6 +48,12 @@ def main() -> None:
         default=60.0,
         help="sleep before reconnecting the live listener after a normal disconnect",
     )
+    parser.add_argument(
+        "--settings-reload-interval",
+        type=float,
+        default=600.0,
+        help="seconds before reconnecting the live listener to reload Telegram source settings",
+    )
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO)
     asyncio.run(
@@ -58,6 +64,7 @@ def main() -> None:
             batch_limit=args.batch_limit,
             cooldown_recovery_limit=args.cooldown_recovery_limit,
             cooldown_recovery_delay=args.cooldown_recovery_delay,
+            settings_reload_interval=args.settings_reload_interval,
             idle_retry=args.idle_retry,
         )
     )
@@ -71,6 +78,7 @@ async def _run(
     batch_limit: int,
     cooldown_recovery_limit: int,
     cooldown_recovery_delay: float,
+    settings_reload_interval: float,
     idle_retry: float,
 ) -> None:
     session_factory = create_sessionmaker()
@@ -98,6 +106,7 @@ async def _run(
         recovery_limit=batch_limit,
         cooldown_recovery_limit=cooldown_recovery_limit,
         cooldown_recovery_delay_seconds=cooldown_recovery_delay,
+        settings_reload_interval_seconds=settings_reload_interval,
     )
     while True:
         try:

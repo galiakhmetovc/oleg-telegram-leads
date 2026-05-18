@@ -31,6 +31,7 @@ Services:
 - worker: Celery enrichment worker
 - userbot: Telegram source listener, no public port
 - notification-dispatcher: Telegram notification outbox flusher, no public port
+- summary-bot: day/night Telegram operational summary sender, no public port
 
 The dev operator UI is protected by a simple session cookie login. Defaults are:
 
@@ -77,14 +78,17 @@ editing plus draft preview. The Settings Center remains the advanced editor.
 It shows editable NLP/domain settings from
 PostgreSQL config revisions and read-only runtime settings from the backend
 environment. Draft NLP settings can be previewed on text before saving. Rule
-editing separates exact phrases from lemmatized phrases; new lemmatized phrases
-are built from operator-entered text by the backend and show both the original
-input and generated lemmas. Exact phrases use lowercased token-sequence matching
-for technical spellings such as `Wi-Fi`, `220v`, and abbreviations;
-punctuation, mentions, and other non-word separators may appear between tokens.
-Lemmatized phrases use normalized Yargy tokens. A Help tab in the UI explains
-the matching modes. `backend/config/nlp` is only the bootstrap default when the
-database has no active NLP config revision yet.
+editing for facts separates exact phrases from lemmatized phrases; new
+lemmatized phrases are built from operator-entered text by the backend and show
+both the original input and generated lemmas. Exact phrases use lowercased
+token-sequence matching for technical spellings such as `220v` and
+abbreviations; punctuation, mentions, and other non-word separators may appear
+between tokens. Concrete market spellings such as `Wi-Fi` belong to exactly one
+alias catalog entry, not to fact/signal phrase rules. Lemmatized phrases use
+normalized Yargy tokens. Domain signals do not own text phrases; they depend on
+facts through `match.facts`. A Help tab in the UI explains the matching modes.
+`backend/config/nlp` is only the bootstrap default when the database has no
+active NLP config revision yet.
 
 The enrichment result now includes `lead_assessment`: an explainable PUR lead
 verdict with score, temperature, solution areas, customer segments, review lane,
@@ -137,6 +141,8 @@ links are available. Analytics rows and the dedicated Review page include
 `В golden`; it creates the example idempotently from `telegram_source_messages`
 by `source_message_id`, preserving chat title, Telegram message id/link, current
 review verdict, and comment when available.
+Operator rules for using Golden together with dictionaries, facts, and signals
+are documented in [docs/operator-golden-rules.md](docs/operator-golden-rules.md).
 
 The Settings Center also exposes Telegram runtime settings:
 
@@ -148,6 +154,8 @@ The Settings Center also exposes Telegram runtime settings:
   token, never the full bot token. Default lead notifications are formatted as
   readable blocks with score, review lane, solution areas, customer segments,
   score reasons, source text preview, and Telegram/app links.
+  The optional summary settings reuse the same bot/chat registry and point to a
+  separate Telegram chat for operational day/night summaries.
 - Telegram input: userbot accounts own phone/app credentials/session state, and
   source chats own input refs such as `@channel` plus the high-water mark
   `last_message_id`. API responses mask `api_hash` and never return the
@@ -185,6 +193,10 @@ Production runtime flow:
 6. `notification-dispatcher` atomically claims pending outbox rows, groups by
    bot+chat, packs batches under Telegram `sendMessage` 4096-character limit,
    and sends a partial batch after the oldest item waits 5 minutes.
+7. `summary-bot` polls notification settings, computes the latest completed
+   Moscow day/night period, sends one operational summary to the configured
+   summary chat, and records the period in `notification_summary_runs` so
+   restarts do not duplicate it.
 
 Telegram notifications are emitted only for enrichment jobs that belong to a
 stored Telegram source message. Manual Testing enrichments can reuse the same
@@ -204,16 +216,15 @@ source text, score/temperature/lane, reasons, facts, domain signals, and
 highlighted fragments, then lets the operator save one of `Лид`, `Не лид`,
 `Сомнительно`, or `Шум` with structured tags and a comment. The page also
 contains the settings constructor panel: select a fragment in the source text
-and save it into an alias catalog, a fact rule, a domain signal rule, or the
-fast `operator_noise` noise signal. Alias/fact/signal constructor actions open
-compact dialogs for target selection, exact versus lemmatized matching, and new
-target metadata. Every constructor save writes a new `nlp_config_revisions` row
-and returns the updated NLP snapshot so the Settings Center cache does not stay
-stale. Newly created domain signals get score weight `0` until the operator
-sets one; `operator_noise` is kept in the hard-noise score cap so manual noise
-can suppress overheated candidates immediately.
-explicitly tunes scoring.
-
+and save it into an alias catalog, a fact rule, or the fast operator-noise fact.
+Alias/fact constructor actions open compact dialogs for target selection, exact
+versus lemmatized matching, and new target metadata. Signals are connected by
+editing `match.facts`, so selected text has a single owner and future evidence
+traces stay fragment -> dictionary/rule -> fact -> signal -> score. Every
+constructor save writes a new `nlp_config_revisions` row and returns the updated
+NLP snapshot so the Settings Center cache does not stay stale. `operator_noise`
+is kept in the hard-noise score cap so manual noise can suppress overheated
+candidates immediately.
 The UI includes Logs and System Status tabs. These are based on durable backend
 state: enrichment events, enrichment task outbox rows, source messages, source
 chat errors, notification outbox state, database/Redis checks, source-chat

@@ -72,8 +72,8 @@ Proposal types:
 - add alias to `vendors`, `devices`, `software`, `protocols`, or future
   `models`;
 - create or update a fact phrase;
-- create or update a domain signal phrase/dependency;
-- create a noise signal through `operator_noise`.
+- connect a domain signal dependency through facts;
+- create a noise fact and connect `operator_noise` through `match.facts`.
 
 Each proposal should preserve selected text, offsets, surrounding context, and
 the target config reference. Applying a proposal should create a new

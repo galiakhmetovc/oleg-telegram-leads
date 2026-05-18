@@ -30,7 +30,7 @@ def test_matches_notification_routes_from_enrichment_result() -> None:
             ],
             review_lane=LeadReviewLane(
                 key="direct_pur_lead",
-                label="Прямой лид ПУР",
+                label="Прямой лид",
                 description=None,
                 matched_group_indexes=[0],
             ),
@@ -84,7 +84,7 @@ def test_renders_notification_message_template_from_enrichment_result() -> None:
             reasons=[],
             review_lane=LeadReviewLane(
                 key="direct_pur_lead",
-                label="Прямой лид ПУР",
+                label="Прямой лид",
                 description=None,
                 matched_group_indexes=[0],
             ),

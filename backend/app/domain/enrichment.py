@@ -63,6 +63,9 @@ class ExtractedFact:
     label: str
     range: TextRange
     source: str
+    span_id: str | None = None
+    sentence_id: str | None = None
+    derived_from_fact_id: str | None = None
     confidence: float | None = None
     explanation: str | None = None
     settings_refs: list[SettingsReference] = field(default_factory=list)
@@ -76,6 +79,9 @@ class DomainSignal:
     label: str
     range: TextRange
     source: str
+    span_id: str | None = None
+    sentence_id: str | None = None
+    source_fact_ids: list[str] = field(default_factory=list)
     confidence: float | None = None
     color: str | None = None
     explanation: str | None = None
@@ -203,6 +209,9 @@ class TextEnrichmentResult:
                     label=str(item["label"]),
                     range=TextRange(**item["range"]),
                     source=str(item["source"]),
+                    span_id=item.get("span_id"),
+                    sentence_id=item.get("sentence_id"),
+                    derived_from_fact_id=item.get("derived_from_fact_id"),
                     confidence=item.get("confidence"),
                     explanation=item.get("explanation"),
                     settings_refs=[
@@ -220,6 +229,9 @@ class TextEnrichmentResult:
                     label=str(item["label"]),
                     range=TextRange(**item["range"]),
                     source=str(item["source"]),
+                    span_id=item.get("span_id"),
+                    sentence_id=item.get("sentence_id"),
+                    source_fact_ids=[str(value) for value in item.get("source_fact_ids", [])],
                     confidence=item.get("confidence"),
                     color=item.get("color"),
                     explanation=item.get("explanation"),

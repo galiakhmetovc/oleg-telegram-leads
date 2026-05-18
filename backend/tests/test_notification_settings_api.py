@@ -29,6 +29,7 @@ class InMemoryNotificationSettingsRepository:
             chats=settings.chats,
             routes=settings.routes,
             updated_at=datetime(2026, 5, 8, tzinfo=UTC),
+            summary=settings.summary,
         )
         return self.settings
 
@@ -168,6 +169,178 @@ def test_notification_route_delivery_mode_defaults_to_batched() -> None:
     assert response.json()["notifications"]["routes"][0]["delivery_mode"] == "batched"
 
 
+def test_updates_notification_summary_settings() -> None:
+    repository = InMemoryNotificationSettingsRepository()
+    client = _client_with_notifications(repository)
+
+    response = client.put(
+        "/api/v1/settings/notifications",
+        json={
+            "bots": [
+                {
+                    "id": "main_bot",
+                    "name": "Основной бот",
+                    "enabled": True,
+                    "token": "123456:ABCDEFSECRET",
+                }
+            ],
+            "chats": [
+                {
+                    "id": "sales_chat",
+                    "name": "Продажи",
+                    "enabled": True,
+                    "telegram_chat_id": "-100123",
+                },
+                {
+                    "id": "summary_chat",
+                    "name": "Сводки",
+                    "enabled": True,
+                    "telegram_chat_id": "-100456",
+                },
+            ],
+            "routes": [],
+            "summary": {
+                "enabled": True,
+                "bot_id": "main_bot",
+                "chat_id": "summary_chat",
+                "timezone": "Europe/Moscow",
+                "day_start_hour": 9,
+                "night_start_hour": 21,
+            },
+        },
+    )
+    assert response.status_code == 200
+
+    response = client.get("/api/v1/settings")
+
+    assert response.status_code == 200
+    assert response.json()["notifications"]["summary"] == {
+        "enabled": True,
+        "bot_id": "main_bot",
+        "chat_id": "summary_chat",
+        "timezone": "Europe/Moscow",
+        "day_start_hour": 9,
+        "night_start_hour": 21,
+    }
+
+
+def test_notification_summary_requires_known_bot_and_chat() -> None:
+    repository = InMemoryNotificationSettingsRepository()
+    client = _client_with_notifications(repository)
+
+    response = client.put(
+        "/api/v1/settings/notifications",
+        json={
+            "bots": [
+                {
+                    "id": "main_bot",
+                    "name": "Основной бот",
+                    "enabled": True,
+                    "token": "123456:ABCDEFSECRET",
+                }
+            ],
+            "chats": [],
+            "routes": [],
+            "summary": {
+                "enabled": True,
+                "bot_id": "main_bot",
+                "chat_id": "summary_chat",
+            },
+        },
+    )
+
+    assert response.status_code == 422
+    assert "unknown chat summary_chat" in response.json()["detail"]
+
+
+def test_notification_summary_requires_valid_timezone() -> None:
+    repository = InMemoryNotificationSettingsRepository()
+    client = _client_with_notifications(repository)
+
+    response = client.put(
+        "/api/v1/settings/notifications",
+        json={
+            "bots": [
+                {
+                    "id": "main_bot",
+                    "name": "Основной бот",
+                    "enabled": True,
+                    "token": "123456:ABCDEFSECRET",
+                }
+            ],
+            "chats": [
+                {
+                    "id": "summary_chat",
+                    "name": "Сводки",
+                    "enabled": True,
+                    "telegram_chat_id": "-100456",
+                }
+            ],
+            "routes": [],
+            "summary": {
+                "enabled": True,
+                "bot_id": "main_bot",
+                "chat_id": "summary_chat",
+                "timezone": "Bad/Zone",
+            },
+        },
+    )
+
+    assert response.status_code == 422
+    assert "Summary timezone is invalid" in response.json()["detail"]
+
+
+def test_notification_summary_is_preserved_when_payload_omits_it() -> None:
+    repository = InMemoryNotificationSettingsRepository()
+    client = _client_with_notifications(repository)
+    base_payload = {
+        "bots": [
+            {
+                "id": "main_bot",
+                "name": "Основной бот",
+                "enabled": True,
+                "token": "123456:ABCDEFSECRET",
+            }
+        ],
+        "chats": [
+            {
+                "id": "summary_chat",
+                "name": "Сводки",
+                "enabled": True,
+                "telegram_chat_id": "-100456",
+            }
+        ],
+        "routes": [],
+    }
+    response = client.put(
+        "/api/v1/settings/notifications",
+        json={
+            **base_payload,
+            "summary": {
+                "enabled": True,
+                "bot_id": "main_bot",
+                "chat_id": "summary_chat",
+            },
+        },
+    )
+    assert response.status_code == 200
+
+    response = client.put(
+        "/api/v1/settings/notifications",
+        json=base_payload,
+    )
+
+    assert response.status_code == 200
+    assert response.json()["summary"] == {
+        "enabled": True,
+        "bot_id": "main_bot",
+        "chat_id": "summary_chat",
+        "timezone": "Europe/Moscow",
+        "day_start_hour": 9,
+        "night_start_hour": 21,
+    }
+
+
 def test_updates_notification_settings_and_preserves_existing_bot_tokens() -> None:
     repository = InMemoryNotificationSettingsRepository()
     client = _client_with_notifications(repository)
@@ -240,7 +413,7 @@ def test_sends_chat_test_message_with_selected_bot_and_chat() -> None:
 
     response = client.post(
         "/api/v1/settings/notifications/telegram/chats/sales_chat/test",
-        json={"bot_id": "main_bot", "message": "Проверка уведомлений ПУР"},
+        json={"bot_id": "main_bot", "message": "Проверка уведомлений"},
     )
 
     assert response.status_code == 200
@@ -251,7 +424,7 @@ def test_sends_chat_test_message_with_selected_bot_and_chat() -> None:
         "chat_id": "@pur_test_group",
     }
     assert sender.calls == [
-        ("123456:ABCDEFSECRET", "@pur_test_group", "Проверка уведомлений ПУР")
+        ("123456:ABCDEFSECRET", "@pur_test_group", "Проверка уведомлений")
     ]
 
 

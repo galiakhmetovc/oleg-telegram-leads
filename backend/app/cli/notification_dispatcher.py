@@ -24,6 +24,8 @@ def main() -> None:
     parser.add_argument("--interval", type=float, default=30.0, help="poll interval in seconds")
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO)
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("httpcore").setLevel(logging.WARNING)
     asyncio.run(_run(once=args.once, interval=args.interval))
 
 

@@ -1,4 +1,5 @@
 import AddIcon from "@mui/icons-material/Add";
+import DeleteIcon from "@mui/icons-material/Delete";
 import RefreshIcon from "@mui/icons-material/Refresh";
 import StarIcon from "@mui/icons-material/Star";
 import {
@@ -73,6 +74,7 @@ export function GoldenExamplesPage({
   const [newComment, setNewComment] = useState("");
   const [loading, setLoading] = useState(true);
   const [creating, setCreating] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const [running, setRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
@@ -221,6 +223,38 @@ export function GoldenExamplesPage({
       setError(caught instanceof Error ? caught.message : "Не удалось запустить golden-пример");
     } finally {
       setRunning(false);
+    }
+  }
+
+  async function deleteSelectedExample() {
+    if (!selectedExample) {
+      setError("Выберите golden-пример");
+      return;
+    }
+    setDeleting(true);
+    setError(null);
+    setMessage(null);
+    try {
+      const response = await fetch(`${apiBaseUrl}/api/v1/golden-examples/${selectedExample.id}`, { method: "DELETE" });
+      if (!response.ok) {
+        throw new Error(`Backend вернул ${response.status}`);
+      }
+      eventSourceRef.current?.close();
+      const removedIndex = examples.findIndex((item) => item.id === selectedExample.id);
+      const nextExamples = examples.filter((item) => item.id !== selectedExample.id);
+      const nextSelectedExample = nextExamples[removedIndex] ?? nextExamples[removedIndex - 1] ?? null;
+      setExamples(nextExamples);
+      setTotal((current) => Math.max(0, current - 1));
+      setSelectedId(nextSelectedExample?.id ?? null);
+      setInputText(nextSelectedExample?.text ?? "");
+      setJob(null);
+      setEvents([]);
+      setActiveTab(0);
+      setMessage("Golden-пример удален");
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Не удалось удалить golden-пример");
+    } finally {
+      setDeleting(false);
     }
   }
 
@@ -423,6 +457,16 @@ export function GoldenExamplesPage({
                           Telegram
                         </Button>
                       )}
+                      <Button
+                        size="small"
+                        color="error"
+                        startIcon={deleting ? <CircularProgress size={16} color="inherit" /> : <DeleteIcon />}
+                        disabled={deleting || isProcessing}
+                        aria-label={`Удалить golden ${selectedExample.id}`}
+                        onClick={() => void deleteSelectedExample()}
+                      >
+                        Удалить
+                      </Button>
                       <Chip
                         icon={<StarIcon fontSize="small" />}
                         label={selectedExample.expected_verdict ? verdictLabel(selectedExample.expected_verdict) : "Вердикт не указан"}

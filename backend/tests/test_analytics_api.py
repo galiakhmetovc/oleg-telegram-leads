@@ -6,7 +6,7 @@ from uuid import UUID, uuid4
 from fastapi.testclient import TestClient
 
 from app.api.analytics import get_analytics_repository
-from app.domain.analytics import AnalyticsAggregate, AnalyticsCandidate, AnalyticsCandidatePage
+from app.domain.analytics import AnalyticsAggregate, AnalyticsCandidate, AnalyticsCandidateLlmSummary, AnalyticsCandidatePage
 from app.domain.analytics import AnalyticsMessageReview, AnalyticsRun
 from app.domain.analytics import AnalyticsReviewVerdict
 from app.application.evaluation.review_eval import ReviewEvalRow
@@ -51,7 +51,7 @@ class ApiInMemoryAnalyticsRepository:
             AnalyticsAggregate(
                 kind="review_lane",
                 key="direct_pur_lead",
-                label="Прямой лид ПУР",
+                label="Прямой лид",
                 count=1,
                 payload={"description": "Высокий приоритет для ручной проверки"},
             ),
@@ -148,16 +148,46 @@ class ApiInMemoryAnalyticsRepository:
         solution_area: str | None = None,
         customer_segment: str | None = None,
         lane: str | None = None,
+        score_max: int | None = None,
         q: str | None,
+        message_id: str | None = None,
+        source_chat: str | None = None,
         source_chat_id: str | None = None,
+        source_input_ref: str | None = None,
+        source_chat_status: str | None = None,
+        telegram_message_id: int | None = None,
+        telegram_chat_id: str | None = None,
+        sender: str | None = None,
+        source_account_id: str | None = None,
         received_from: datetime | None = None,
         received_to: datetime | None = None,
         review_status: str | None = None,
         verdict: AnalyticsReviewVerdict | None = None,
+        source_type: str | None = None,
+        llm_processed: bool | None = None,
+        llm_status: str | None = None,
+        llm_verdict: str | None = None,
+        llm_recommendation: str | None = None,
+        llm_model: str | None = None,
+        llm_route: str | None = None,
+        llm_agrees_with_rules: bool | None = None,
+        llm_has_error: bool | None = None,
+        llm_confidence_min: float | None = None,
+        llm_confidence_max: float | None = None,
+        llm_attempts_min: int | None = None,
+        llm_attempts_max: int | None = None,
+        enrichment_status: str | None = None,
+        sort_by: str | None = None,
+        sort_direction: str | None = None,
+        grid_filters: list[dict[str, str]] | None = None,
     ) -> AnalyticsCandidatePage:
         items = self.candidates
+        if source_type is not None:
+            items = [item for item in items if item.source_type == source_type]
         if score_min is not None:
             items = [item for item in items if item.score >= score_min]
+        if score_max is not None:
+            items = [item for item in items if item.score <= score_max]
         if temperature is not None:
             items = [item for item in items if item.temperature == temperature]
         if reason is not None:
@@ -170,6 +200,38 @@ class ApiInMemoryAnalyticsRepository:
             items = [item for item in items if item.review_lane == lane]
         if source_chat_id is not None:
             items = [item for item in items if item.source_chat_id == source_chat_id]
+        if source_chat is not None:
+            needle = source_chat.lower()
+            items = [
+                item
+                for item in items
+                if needle in (item.source_chat_title or "").lower()
+                or needle in (item.source_chat_id or "").lower()
+                or needle in (item.source_input_ref or "").lower()
+            ]
+        if message_id is not None:
+            items = [item for item in items if message_id in item.message_id]
+        if source_input_ref is not None:
+            items = [item for item in items if source_input_ref.lower() in (item.source_input_ref or "").lower()]
+        if source_chat_status is not None:
+            items = [
+                item
+                for item in items
+                if source_chat_status.lower() in (item.source_chat_status or "").lower()
+            ]
+        if telegram_message_id is not None:
+            items = [item for item in items if item.telegram_message_id == telegram_message_id]
+        if telegram_chat_id is not None:
+            items = [item for item in items if telegram_chat_id in (item.telegram_chat_id or "")]
+        if sender is not None:
+            needle = sender.removeprefix("@").lower()
+            items = [
+                item
+                for item in items
+                if needle in (item.sender_username or "").lower() or needle in (item.sender_id or "").lower()
+            ]
+        if source_account_id is not None:
+            items = [item for item in items if source_account_id in (item.source_account_id or "")]
         if received_from is not None:
             items = [item for item in items if item.received_at and item.received_at >= received_from]
         if received_to is not None:
@@ -180,6 +242,37 @@ class ApiInMemoryAnalyticsRepository:
             items = [item for item in items if item.review is None]
         if verdict is not None:
             items = [item for item in items if item.review is not None and item.review.verdict == verdict]
+        if llm_processed is not None:
+            items = [item for item in items if bool(item.llm and item.llm.processed) is llm_processed]
+        if llm_status is not None:
+            items = [item for item in items if item.llm is not None and item.llm.status == llm_status]
+        if llm_verdict is not None:
+            items = [item for item in items if item.llm is not None and item.llm.verdict == llm_verdict]
+        if llm_recommendation is not None:
+            items = [item for item in items if item.llm is not None and item.llm.recommendation == llm_recommendation]
+        if llm_model is not None:
+            items = [item for item in items if item.llm is not None and item.llm.model == llm_model]
+        if llm_route is not None:
+            items = [item for item in items if item.llm is not None and item.llm.route_id == llm_route]
+        if llm_agrees_with_rules is not None:
+            items = [
+                item
+                for item in items
+                if item.llm is not None and item.llm.agrees_with_rule_engine is llm_agrees_with_rules
+            ]
+        if llm_has_error is not None:
+            items = [item for item in items if bool(item.llm and item.llm.has_error) is llm_has_error]
+        if llm_confidence_min is not None:
+            items = [item for item in items if item.llm and item.llm.confidence is not None and item.llm.confidence >= llm_confidence_min]
+        if llm_confidence_max is not None:
+            items = [item for item in items if item.llm and item.llm.confidence is not None and item.llm.confidence <= llm_confidence_max]
+        if llm_attempts_min is not None:
+            items = [item for item in items if item.llm and item.llm.attempts is not None and item.llm.attempts >= llm_attempts_min]
+        if llm_attempts_max is not None:
+            items = [item for item in items if item.llm and item.llm.attempts is not None and item.llm.attempts <= llm_attempts_max]
+        if enrichment_status is not None:
+            items = [item for item in items if item.enrichment_status == enrichment_status]
+        items = sorted(items, key=lambda item: _candidate_sort_key(item, sort_by), reverse=sort_direction != "asc")
         return AnalyticsCandidatePage(total=len(items), items=items[offset : offset + limit])
 
     async def get_live_candidate_by_message_id(self, message_id: str) -> AnalyticsCandidate | None:
@@ -215,6 +308,25 @@ class ApiInMemoryAnalyticsRepository:
         if limit is None:
             return self.review_eval_rows
         return self.review_eval_rows[:limit]
+
+
+def _candidate_sort_key(candidate: AnalyticsCandidate, sort_by: str | None) -> object:
+    if sort_by == "score":
+        return candidate.score
+    if sort_by == "sourceChat":
+        return candidate.source_chat_title or ""
+    if sort_by == "sender":
+        return candidate.sender_username or candidate.sender_id or ""
+    if sort_by == "llmConfidence":
+        return candidate.llm.confidence if candidate.llm and candidate.llm.confidence is not None else -1.0
+    if sort_by == "enrichmentStatus":
+        return candidate.enrichment_status or ""
+    return (
+        candidate.received_at is not None,
+        candidate.received_at or datetime.min.replace(tzinfo=UTC),
+        candidate.message_id,
+        candidate.score,
+    )
 
 
 def test_lists_analytics_runs() -> None:
@@ -291,6 +403,110 @@ def test_lists_analytics_candidates_with_filters() -> None:
     assert payload["items"][0]["received_at"] == "2026-05-08T12:30:00Z"
     assert payload["items"][0]["source_chat_id"] == "designers"
     assert payload["items"][0]["source_chat_title"] == "Чат дизайнеров"
+    assert payload["items"][0]["source_type"] == "telegram"
+
+
+def test_lists_analytics_candidates_with_message_source_and_llm_summary_filters() -> None:
+    repository = ApiInMemoryAnalyticsRepository()
+    repository.candidates[0] = AnalyticsCandidate(
+        **{
+            **repository.candidates[0].__dict__,
+            "message_date": datetime(2026, 5, 8, 12, 29, tzinfo=UTC),
+            "sender_id": "101",
+            "sender_username": "designer_user",
+            "source_input_ref": "@designers",
+            "source_chat_status": "active",
+            "source_chat_enabled": True,
+            "source_account_id": "account-1",
+            "raw_payload": {"id": 488906, "peer_id": "designers"},
+            "enrichment_status": "completed",
+            "enrichment_finished_at": datetime(2026, 5, 8, 12, 31, tzinfo=UTC),
+            "llm": AnalyticsCandidateLlmSummary(
+                processed=True,
+                latest_run_id="llm-run-1",
+                status="completed",
+                verdict="lead",
+                confidence=0.86,
+                recommendation="keep",
+                agrees_with_rule_engine=True,
+                model="lead-qwen-ru",
+                route_id="manual",
+                attempts=1,
+                has_error=False,
+                error=None,
+                created_at=datetime(2026, 5, 8, 12, 40, tzinfo=UTC),
+                updated_at=datetime(2026, 5, 8, 12, 41, tzinfo=UTC),
+            ),
+        }
+    )
+    repository.candidates.append(
+        AnalyticsCandidate(
+            run_id=repository.run_id,
+            message_id="488912",
+            text="Пока без LLM",
+            score=100,
+            temperature="warm",
+            review_lane="domain_interest",
+            solution_areas=[],
+            customer_segments=[],
+            intent_signals=[],
+            noise_signals=[],
+            reasons=[],
+            domain_signals=[],
+            facts=[],
+        )
+    )
+    app = create_app()
+    app.dependency_overrides[get_analytics_repository] = lambda: repository
+    client = TestClient(app)
+
+    response = client.get(
+        f"/api/v1/analytics/runs/{repository.run_id}/candidates",
+        params={
+            "source_type": "telegram",
+            "llm_processed": "true",
+            "llm_status": "completed",
+            "llm_verdict": "lead",
+            "llm_recommendation": "keep",
+            "llm_model": "lead-qwen-ru",
+            "llm_route": "manual",
+            "llm_agrees_with_rules": "true",
+            "llm_has_error": "false",
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["total"] == 1
+    item = payload["items"][0]
+    assert item["message_id"] == "488906"
+    assert item["source_type"] == "telegram"
+    assert item["message_date"] == "2026-05-08T12:29:00Z"
+    assert item["sender_id"] == "101"
+    assert item["sender_username"] == "designer_user"
+    assert item["source_input_ref"] == "@designers"
+    assert item["source_chat_status"] == "active"
+    assert item["source_chat_enabled"] is True
+    assert item["source_account_id"] == "account-1"
+    assert item["raw_payload"] == {"id": 488906, "peer_id": "designers"}
+    assert item["enrichment_status"] == "completed"
+    assert item["enrichment_finished_at"] == "2026-05-08T12:31:00Z"
+    assert item["llm"] == {
+        "processed": True,
+        "latest_run_id": "llm-run-1",
+        "status": "completed",
+        "verdict": "lead",
+        "confidence": 0.86,
+        "recommendation": "keep",
+        "agrees_with_rule_engine": True,
+        "model": "lead-qwen-ru",
+        "route_id": "manual",
+        "attempts": 1,
+        "has_error": False,
+        "error": None,
+        "created_at": "2026-05-08T12:40:00Z",
+        "updated_at": "2026-05-08T12:41:00Z",
+    }
 
 
 def test_filters_analytics_candidates_by_source_channel_and_received_period() -> None:
@@ -332,6 +548,150 @@ def test_filters_analytics_candidates_by_source_channel_and_received_period() ->
     payload = response.json()
     assert payload["total"] == 1
     assert payload["items"][0]["message_id"] == "488906"
+
+
+def test_lists_analytics_candidates_newest_first_by_received_at() -> None:
+    repository = ApiInMemoryAnalyticsRepository()
+    repository.candidates.append(
+        AnalyticsCandidate(
+            run_id=repository.run_id,
+            message_id="488911",
+            text="Более новое сообщение с меньшим score",
+            score=120,
+            temperature="warm",
+            review_lane="domain_interest",
+            solution_areas=[],
+            customer_segments=[],
+            intent_signals=[],
+            noise_signals=[],
+            reasons=[],
+            domain_signals=[],
+            facts=[],
+            received_at=datetime(2026, 5, 8, 12, 45, tzinfo=UTC),
+            source_chat_id="designers",
+            source_chat_title="Чат дизайнеров",
+        )
+    )
+    app = create_app()
+    app.dependency_overrides[get_analytics_repository] = lambda: repository
+    client = TestClient(app)
+
+    response = client.get(
+        f"/api/v1/analytics/runs/{repository.run_id}/candidates",
+        params={"limit": 20},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["total"] == 2
+    assert [item["message_id"] for item in payload["items"]] == ["488911", "488906"]
+
+
+def test_lists_analytics_candidates_with_table_column_filters_and_sorting() -> None:
+    repository = ApiInMemoryAnalyticsRepository()
+    repository.candidates.extend(
+        [
+            AnalyticsCandidate(
+                run_id=repository.run_id,
+                message_id="488920",
+                text="Биржа строителей, нужен подрядчик на слаботочку",
+                score=20,
+                temperature="warm",
+                review_lane="domain_interest",
+                solution_areas=[],
+                customer_segments=[],
+                intent_signals=[],
+                noise_signals=[],
+                reasons=[],
+                domain_signals=[],
+                facts=[],
+                received_at=datetime(2026, 5, 8, 12, 45, tzinfo=UTC),
+                sender_id="201",
+                sender_username="boris_pm",
+                source_chat_id="stroy",
+                source_chat_title="Биржа строителей",
+                source_input_ref="@stroy",
+                telegram_chat_id="-1001",
+                telegram_message_id=99,
+                source_account_id="account-1",
+                enrichment_status="failed",
+                llm=AnalyticsCandidateLlmSummary(
+                    processed=True,
+                    status="completed",
+                    confidence=0.4,
+                    attempts=1,
+                    has_error=False,
+                ),
+            ),
+            AnalyticsCandidate(
+                run_id=repository.run_id,
+                message_id="488921",
+                text="Биржа строителей, нужен проектировщик",
+                score=180,
+                temperature="hot",
+                review_lane="direct_pur_lead",
+                solution_areas=[],
+                customer_segments=[],
+                intent_signals=[],
+                noise_signals=[],
+                reasons=[],
+                domain_signals=[],
+                facts=[],
+                received_at=datetime(2026, 5, 8, 12, 50, tzinfo=UTC),
+                sender_id="202",
+                sender_username="boris_pm",
+                source_chat_id="stroy",
+                source_chat_title="Биржа строителей",
+                source_input_ref="@stroy",
+                telegram_chat_id="-1001",
+                telegram_message_id=100,
+                source_account_id="account-1",
+                enrichment_status="failed",
+                llm=AnalyticsCandidateLlmSummary(
+                    processed=True,
+                    status="completed",
+                    confidence=0.9,
+                    attempts=2,
+                    has_error=False,
+                ),
+            ),
+        ]
+    )
+    app = create_app()
+    app.dependency_overrides[get_analytics_repository] = lambda: repository
+    client = TestClient(app)
+
+    response = client.get(
+        f"/api/v1/analytics/runs/{repository.run_id}/candidates",
+        params={
+            "source_chat": "биржа",
+            "sender": "@boris",
+            "source_input_ref": "@stroy",
+            "telegram_chat_id": "-1001",
+            "source_account_id": "account-1",
+            "enrichment_status": "failed",
+            "llm_confidence_min": "0.3",
+            "llm_attempts_min": "1",
+            "sort_by": "score",
+            "sort_direction": "asc",
+            "limit": 20,
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["total"] == 2
+    assert [item["message_id"] for item in payload["items"]] == ["488920", "488921"]
+
+    exact_message = client.get(
+        f"/api/v1/analytics/runs/{repository.run_id}/candidates",
+        params={"telegram_message_id": "99"},
+    )
+
+    assert exact_message.status_code == 200
+    exact_payload = exact_message.json()
+    assert exact_payload["total"] == 1
+    assert exact_payload["items"][0]["message_id"] == "488920"
 
 
 def test_filters_analytics_candidates_by_reason_key() -> None:

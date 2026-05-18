@@ -6,6 +6,7 @@ lead_scoring:
   weights:
     signals:
       lead_active_intent: 25
+      lead_partner_sourcing: 20
       lead_consultation_intent: 10
       lead_research_intent: 12
       project_context: 12
@@ -26,12 +27,14 @@ lead_scoring:
       pur_curtain_control: 20
       pur_network_infrastructure: 20
       noise_supply: -50
+      noise_advertising_self_promo: -50
       noise_diy_equipment_only: -50
       noise_price_only: -40
       noise_ordinary_household: -50
     facts:
       intent_customer_request: 8
       intent_provider_search: 8
+      intent_partner_contractor_search: 15
       intent_install_connect: 6
       intent_consultation: 4
       intent_solution_selection: 5
@@ -47,8 +50,6 @@ lead_scoring:
       domain_video_surveillance: 5
       domain_access_control: 5
       domain_security_alarm: 5
-      domain_gate_automation: 5
-      domain_power_stability: 5
       domain_climate: 5
       domain_lighting: 5
       domain_curtain: 5
@@ -113,6 +114,12 @@ lead_scoring:
         - intent_customer_request
         - intent_provider_search
         - intent_install_connect
+    partner_contractor:
+      label: Партнерство / поиск подрядчиков
+      signal_types:
+        - lead_partner_sourcing
+      fact_types:
+        - intent_partner_contractor_search
     research_project:
       label: Подбор решений / консультация
       signal_types:
@@ -157,15 +164,18 @@ lead_scoring:
         - context_warranty_risk
   intent_signal_types:
     - lead_active_intent
+    - lead_partner_sourcing
     - lead_consultation_intent
     - lead_research_intent
   noise_signal_types:
     - noise_supply
+    - noise_advertising_self_promo
     - noise_diy_equipment_only
     - noise_price_only
     - noise_ordinary_household
   lead_veto_signal_types:
     - noise_supply
+    - noise_advertising_self_promo
     - noise_diy_equipment_only
     - noise_price_only
     - noise_ordinary_household
@@ -175,11 +185,12 @@ lead_scoring:
       max_score: 0
       noise_signal_types:
         - noise_supply
+        - noise_advertising_self_promo
         - noise_diy_equipment_only
         - noise_price_only
         - noise_ordinary_household
     - key: domain_without_intent
-      label: Домен ПУР без явного намерения
+      label: Домен без явного намерения
       max_score: 34
       signal_types:
         - pur_smart_home
@@ -196,16 +207,18 @@ lead_scoring:
         - pur_network_infrastructure
       excluded_signal_types:
         - lead_active_intent
+        - lead_partner_sourcing
         - lead_consultation_intent
         - lead_research_intent
     - key: intent_without_pur_domain
-      label: Намерение без домена ПУР
+      label: Намерение без целевого домена
       max_score: 34
       signal_types:
         - lead_active_intent
         - lead_consultation_intent
         - lead_research_intent
       excluded_signal_types:
+        - lead_partner_sourcing
         - pur_smart_home
         - pur_leak_protection
         - pur_video_surveillance
@@ -221,17 +234,18 @@ lead_scoring:
   review_lanes:
     - key: noise
       label: Шум / нецелевое
-      description: Явные продажи, DIY-запросы, цена без потребности или бытовые вопросы вне ПУР.
+      description: Явные продажи, DIY-запросы, цена без потребности или бытовые вопросы вне целевого домена.
       priority: 1000
       match_groups:
         - noise_signal_types:
             - noise_supply
+            - noise_advertising_self_promo
             - noise_diy_equipment_only
             - noise_price_only
             - noise_ordinary_household
     - key: direct_pur_lead
-      label: Прямой лид ПУР
-      description: Есть домен ПУР и активное намерение найти подрядчика, заказать, установить, подключить или подготовить проектные выводы.
+      label: Прямой лид
+      description: Есть целевой домен и активное намерение найти подрядчика, заказать, установить, подключить или подготовить проектные выводы.
       priority: 900
       match_groups:
         - solution_area_types:
@@ -247,12 +261,43 @@ lead_scoring:
             - intent_install_connect
       excluded_noise_signal_types:
         - noise_supply
+        - noise_advertising_self_promo
+        - noise_diy_equipment_only
+        - noise_price_only
+        - noise_ordinary_household
+    - key: design_studio_partner_sourcing
+      label: Дизайн-студия / поиск команды
+      description: Дизайн-студия ищет дизайнеров, бригады или партнеров для сотрудничества.
+      priority: 860
+      min_score: 35
+      match_groups:
+        - signal_types:
+            - lead_partner_sourcing
+        - fact_types:
+            - context_designer
+      excluded_noise_signal_types:
+        - noise_supply
+        - noise_advertising_self_promo
+        - noise_diy_equipment_only
+        - noise_price_only
+        - noise_ordinary_household
+    - key: partner_contractor_sourcing
+      label: Партнерство / подрядчики
+      description: Ищут партнеров, подрядчиков, строительные бригады или мастеров для проектного сотрудничества.
+      priority: 850
+      min_score: 35
+      match_groups:
+        - signal_types:
+            - lead_partner_sourcing
+      excluded_noise_signal_types:
+        - noise_supply
+        - noise_advertising_self_promo
         - noise_diy_equipment_only
         - noise_price_only
         - noise_ordinary_household
     - key: research_warm
       label: Исследование / подбор решения
-      description: Есть домен ПУР и вопрос по выбору, пользе, реализации или изучению темы.
+      description: Есть целевой домен и вопрос по выбору, пользе, реализации или изучению темы.
       priority: 750
       match_groups:
         - solution_area_types:
@@ -267,12 +312,13 @@ lead_scoring:
             - lead_research_intent
       excluded_noise_signal_types:
         - noise_supply
+        - noise_advertising_self_promo
         - noise_diy_equipment_only
         - noise_price_only
         - noise_ordinary_household
     - key: pur_design_context
-      label: Проектный контекст ПУР
-      description: Домен ПУР связан с дизайном, ремонтом, электрикой, white box, гарантией или проектной документацией.
+      label: Проектный контекст
+      description: Целевой домен связан с дизайном, ремонтом, электрикой, white box, гарантией или проектной документацией.
       priority: 650
       match_groups:
         - solution_area_types:
@@ -286,12 +332,13 @@ lead_scoring:
             - project_context
       excluded_noise_signal_types:
         - noise_supply
+        - noise_advertising_self_promo
         - noise_diy_equipment_only
         - noise_price_only
         - noise_ordinary_household
     - key: domain_interest
-      label: Доменный интерес ПУР
-      description: Есть релевантная область ПУР, но намерение или проектный контекст слабые.
+      label: Доменный интерес
+      description: Есть релевантная область, но намерение или проектный контекст слабые.
       priority: 500
       match_groups:
         - solution_area_types:
@@ -303,12 +350,13 @@ lead_scoring:
             - climate
       excluded_noise_signal_types:
         - noise_supply
+        - noise_advertising_self_promo
         - noise_diy_equipment_only
         - noise_price_only
         - noise_ordinary_household
     - key: off_domain_demand
-      label: Спрос без домена ПУР
-      description: Есть активный запрос или консультация, но релевантная область ПУР не проявилась.
+      label: Спрос без целевого домена
+      description: Есть активный запрос или консультация, но релевантная область не проявилась.
       priority: 300
       match_groups:
         - intent_signal_types:
@@ -324,12 +372,13 @@ lead_scoring:
         - climate
       excluded_noise_signal_types:
         - noise_supply
+        - noise_advertising_self_promo
         - noise_diy_equipment_only
         - noise_price_only
         - noise_ordinary_household
     - key: generic_context
       label: Общий контекст
-      description: Есть проектный или сегментный контекст без уверенного домена ПУР.
+      description: Есть проектный или сегментный контекст без уверенного целевого домена.
       priority: 100
       match_groups:
         - signal_types:
@@ -347,6 +396,7 @@ lead_scoring:
         - climate
       excluded_noise_signal_types:
         - noise_supply
+        - noise_advertising_self_promo
         - noise_diy_equipment_only
         - noise_price_only
         - noise_ordinary_household

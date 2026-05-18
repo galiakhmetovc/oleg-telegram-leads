@@ -37,11 +37,9 @@ signals:
     group: Спрос и намерение
     color: "#2e7d32"
     confidence: 0.72
-    phrases:
-      - ["нужна"]
-    patterns:
-      - tokens:
-          - normalized: "нужный"
+    match:
+      facts:
+        - demand_fact
 """,
         encoding="utf-8",
     )
@@ -54,6 +52,15 @@ facts:
     confidence: 0.55
     phrases:
       - ["завтра"]
+  - type: demand_fact
+    label: Потребность
+    group: Спрос и намерение
+    confidence: 0.72
+    phrases:
+      - ["нужна"]
+    patterns:
+      - tokens:
+          - normalized: "нужный"
 """,
         encoding="utf-8",
     )
@@ -87,7 +94,7 @@ lead_scoring:
   noise_signal_types: []
   review_lanes:
     - key: direct_pur_lead
-      label: Прямой лид ПУР
+      label: Прямой лид
       description: Высокий приоритет ручной проверки
       priority: 200
       match_groups:
@@ -258,7 +265,8 @@ def test_get_settings_returns_editable_nlp_and_readonly_system_settings(tmp_path
     assert payload["nlp"]["source"]["revision"] == 1
     assert payload["nlp"]["signals"][0]["type"] == "demand"
     assert payload["nlp"]["signals"][0]["group"] == "Спрос и намерение"
-    assert payload["nlp"]["signals"][0]["patterns"][0]["tokens"][0] == {
+    assert payload["nlp"]["signals"][0]["match"]["facts"][0]["types"] == ["demand_fact"]
+    assert payload["nlp"]["facts"][1]["patterns"][0]["tokens"][0] == {
         "predicate": "normalized",
         "value": "нужный",
     }
@@ -365,7 +373,7 @@ def test_update_nlp_settings_validates_and_writes_database_revision_not_yaml(tmp
     repository = InMemoryNlpConfigRepository()
     client = _app_with_settings_repo(config_dir, repository)
     updated = client.get("/api/v1/settings").json()["nlp"]
-    updated["signals"][0]["patterns"].append(
+    updated["facts"][1]["patterns"].append(
         {
             "source_text": "Нужна консультация",
             "tokens": [
@@ -387,10 +395,10 @@ def test_update_nlp_settings_validates_and_writes_database_revision_not_yaml(tmp
     payload = response.json()
     assert payload["source"]["type"] == "postgres"
     assert payload["source"]["revision"] == 2
-    assert payload["signals"][0]["patterns"][1]["source_text"] == "Нужна консультация"
+    assert payload["facts"][1]["patterns"][1]["source_text"] == "Нужна консультация"
     assert payload["signals"][0]["group"] == "Активный спрос"
     assert repository.active is not None
-    assert repository.active["signals"]["signals"][0]["patterns"][1]["source_text"] == "Нужна консультация"
+    assert repository.active["facts"]["facts"][1]["patterns"][1]["source_text"] == "Нужна консультация"
     assert repository.active["signals"]["signals"][0]["group"] == "Активный спрос"
     assert repository.active["lead_scoring"]["lead_scoring"]["weights"]["signals"]["demand"] == 25
     assert repository.active["lead_scoring"]["lead_scoring"]["review_lanes"][0]["priority"] == 250
@@ -431,7 +439,13 @@ def test_constructor_noise_adds_selected_text_to_postgres_nlp_revision(tmp_path:
         for signal in repository.active["signals"]["signals"]
         if signal["type"] == "operator_noise"
     )
-    assert operator_noise["phrases"] == [["dss", "express"]]
+    assert operator_noise["match"] == {"facts": [{"types": ["operator_noise_fact"]}]}
+    operator_noise_fact = next(
+        fact
+        for fact in repository.active["facts"]["facts"]
+        if fact["type"] == "operator_noise_fact"
+    )
+    assert operator_noise_fact["phrases"] == [["dss", "express"]]
     scoring = repository.active["lead_scoring"]["lead_scoring"]
     assert scoring["weights"]["signals"]["operator_noise"] == -50
     assert "operator_noise" in scoring["noise_signal_types"]
@@ -541,7 +555,7 @@ def test_constructor_fact_adds_exact_phrase_to_existing_fact_rule(tmp_path: Path
     assert "до завтра" not in (config_dir / "facts.yaml").read_text(encoding="utf-8")
 
 
-def test_constructor_signal_creates_semantic_rule_with_zero_weight(tmp_path: Path) -> None:
+def test_constructor_signal_rejects_text_rule(tmp_path: Path) -> None:
     config_dir = tmp_path / "nlp"
     _write_config(config_dir)
     repository = InMemoryNlpConfigRepository()
@@ -560,27 +574,8 @@ def test_constructor_signal_creates_semantic_rule_with_zero_weight(tmp_path: Pat
         },
     )
 
-    assert response.status_code == 200
-    payload = response.json()
-    assert payload["rule_type"] == "operator_dss_context"
-    assert payload["rule_label"] == "DSS контекст"
-    assert payload["phrase_kind"] == "semantic"
-    assert payload["created_target"] is True
-    assert payload["created_entry"] is True
-    assert payload["semantic_pattern"]["source_text"] == "камера DSS"
-    assert payload["settings_ref"] == {
-        "section": "signals",
-        "key": "operator_dss_context",
-        "label": "DSS контекст",
-    }
-    assert repository.active is not None
-    signal = repository.active["signals"]["signals"][-1]
-    assert signal["type"] == "operator_dss_context"
-    assert signal["label"] == "DSS контекст"
-    assert signal["group"] == "Операторские сигналы"
-    assert signal["patterns"][0]["source_text"] == "камера DSS"
-    assert repository.active["lead_scoring"]["lead_scoring"]["weights"]["signals"]["operator_dss_context"] == 0
-    assert "DSS контекст" not in (config_dir / "signals.yaml").read_text(encoding="utf-8")
+    assert response.status_code == 422
+    assert "signals do not own text phrases" in response.json()["detail"]
 
 
 def test_preview_nlp_settings_uses_draft_without_saving(tmp_path: Path) -> None:
@@ -589,7 +584,7 @@ def test_preview_nlp_settings_uses_draft_without_saving(tmp_path: Path) -> None:
     repository = InMemoryNlpConfigRepository()
     client = _app_with_settings_repo(config_dir, repository)
     draft = client.get("/api/v1/settings").json()["nlp"]
-    draft["signals"][0]["phrases"].append(["ищем", "поставщика"])
+    draft["facts"][1]["phrases"].append(["ищем", "поставщика"])
     draft["signals"].append(
         {
             "type": "smart_home_platform",
@@ -617,7 +612,7 @@ def test_preview_nlp_settings_uses_draft_without_saving(tmp_path: Path) -> None:
     assert payload["lead_assessment"]["is_lead"] is True
     assert "ищем" not in (config_dir / "signals.yaml").read_text(encoding="utf-8")
     assert repository.active is not None
-    assert ["ищем", "поставщика"] not in repository.active["signals"]["signals"][0]["phrases"]
+    assert ["ищем", "поставщика"] not in repository.active["facts"]["facts"][1]["phrases"]
     assert "Аккара" not in repository.active["vendors"]["vendors"][0]["aliases"]
 
 

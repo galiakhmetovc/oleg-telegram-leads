@@ -64,6 +64,9 @@ import type {
   LeadCategorySetting,
   LeadScoringSettings,
   LeadScoreCapSetting,
+  LlmRouteConditionsSettings,
+  LlmRouteSettings,
+  LlmSettings,
   NlpSettings,
   NotificationRouteConditions,
   NotificationRouteSettings,
@@ -85,7 +88,7 @@ import type {
 } from "./types";
 
 const defaultRouteMessageTemplate = [
-  "Лид ПУР",
+  "Лид",
   "",
   "Оценка: {score} ({temperature})",
   "Очередь: {review_lane_label}",
@@ -164,6 +167,31 @@ export function SettingsCenter({
   }, [loadSettingsSnapshot]);
 
   useEffect(() => {
+    if (section !== "telegram_ingestion" && section !== "notifications") {
+      return;
+    }
+    let active = true;
+    async function refreshRuntimeSettings() {
+      setSettingsError(null);
+      try {
+        const snapshot = await loadSettingsSnapshot({ force: true });
+        if (active) {
+          setDraft(snapshot.nlp);
+          setDraftDirty(false);
+        }
+      } catch (caught) {
+        if (active) {
+          setSettingsError(caught instanceof Error ? caught.message : "Не удалось загрузить настройки");
+        }
+      }
+    }
+    void refreshRuntimeSettings();
+    return () => {
+      active = false;
+    };
+  }, [loadSettingsSnapshot, section]);
+
+  useEffect(() => {
     if (!activeTargetElementId || !settingsReady || loading) {
       return;
     }
@@ -193,7 +221,7 @@ export function SettingsCenter({
         body: JSON.stringify(draft)
       });
       if (!response.ok) {
-        throw new Error(`Backend вернул ${response.status}`);
+        throw new Error(await readBackendError(response));
       }
       const saved = (await response.json()) as NlpSettings;
       if (settings) {
@@ -287,7 +315,7 @@ export function SettingsCenter({
       group: collection === "signals" ? "Новые сигналы" : "Новые факты",
       color: collection === "signals" ? "#0b57d0" : null,
       confidence: 0.5,
-      phrases: [["пример"]],
+      phrases: collection === "facts" ? [["пример"]] : [],
       patterns: [],
       match: { facts: [] }
     };
@@ -361,6 +389,7 @@ export function SettingsCenter({
     });
   }
 
+  const draftValidationError = draft ? nlpDraftValidationError(draft) : null;
   const dirty = draft !== null && draftDirty;
 
   return (
@@ -406,6 +435,34 @@ export function SettingsCenter({
         </Button>
         <Button
           fullWidth
+          variant={section === "solution_areas" ? "contained" : "text"}
+          onClick={() => onSectionChange("solution_areas")}
+        >
+          Направления решений
+        </Button>
+        <Button
+          fullWidth
+          variant={section === "review_lanes" ? "contained" : "text"}
+          onClick={() => onSectionChange("review_lanes")}
+        >
+          Очереди разбора
+        </Button>
+        <Button
+          fullWidth
+          variant={section === "dependency_graph" ? "contained" : "text"}
+          onClick={() => onSectionChange("dependency_graph")}
+        >
+          Схема
+        </Button>
+        <Button
+          fullWidth
+          variant={section === "llm" ? "contained" : "text"}
+          onClick={() => onSectionChange("llm")}
+        >
+          LLM
+        </Button>
+        <Button
+          fullWidth
           variant={section === "notifications" ? "contained" : "text"}
           onClick={() => onSectionChange("notifications")}
         >
@@ -443,7 +500,7 @@ export function SettingsCenter({
             <Button
               variant="contained"
               startIcon={saving ? <CircularProgress size={18} color="inherit" /> : <SaveIcon />}
-              disabled={!draft || saving || !dirty}
+              disabled={!draft || saving || !dirty || Boolean(draftValidationError)}
               onClick={saveDraft}
             >
               Сохранить
@@ -460,11 +517,12 @@ export function SettingsCenter({
           </Paper>
         )}
         {(loadError || settingsError) && <Alert severity="error">{settingsError ?? loadError}</Alert>}
+        {draftValidationError && <Alert severity="warning">{draftValidationError}</Alert>}
         {settingsMessage && (
           <Alert
             severity="success"
             action={
-              <Button color="inherit" size="small" href="#/golden">
+              <Button color="inherit" size="small" href="/golden">
                 Проверить Golden
               </Button>
             }
@@ -474,7 +532,10 @@ export function SettingsCenter({
         )}
 
         {draft && !loading && (
-          <Box className="settings-content-grid">
+          <Box
+            className="settings-content-grid"
+            sx={section === "llm" ? { gridTemplateColumns: "minmax(0, 1fr)" } : undefined}
+          >
             <Paper variant="outlined" className="settings-panel">
               {section === "pipeline" && (
                 <PipelineSettingsEditor
@@ -523,6 +584,27 @@ export function SettingsCenter({
                   onUpdate={updateLeadScoring}
                 />
               )}
+              {section === "solution_areas" && (
+                <SolutionAreasSettingsEditor
+                  settings={draft.lead_scoring}
+                  activeTarget={activeTarget}
+                  onUpdate={updateLeadScoring}
+                />
+              )}
+              {section === "review_lanes" && (
+                <ReviewLanesSettingsSection
+                  settings={draft.lead_scoring}
+                  activeTarget={activeTarget}
+                  onUpdate={updateLeadScoring}
+                />
+              )}
+              {section === "dependency_graph" && <DependencyGraphSettings settings={draft} />}
+              {section === "llm" && (
+                <LlmSettingsEditor
+                  telegramSourceChats={settings?.telegram_ingestion.chats ?? []}
+                  nlpSettings={draft}
+                />
+              )}
               {section === "notifications" && (
                 <NotificationSettingsEditor
                   settings={settings?.notifications ?? defaultNotificationSettings()}
@@ -539,6 +621,7 @@ export function SettingsCenter({
               {section === "system" && <SystemSettingsTable settings={settings?.system ?? []} />}
             </Paper>
 
+            {section !== "llm" && (
             <Paper variant="outlined" className="settings-panel">
               <Stack spacing={2}>
                 <Box>
@@ -580,10 +663,301 @@ export function SettingsCenter({
                 )}
               </Stack>
             </Paper>
+            )}
           </Box>
         )}
       </Stack>
     </Box>
+  );
+}
+
+const llmModelOptions = ["lead-qwen-ru"];
+
+function LlmSettingsEditor({
+  telegramSourceChats,
+  nlpSettings
+}: {
+  telegramSourceChats: TelegramSourceChatSettings[];
+  nlpSettings: NlpSettings;
+}) {
+  const [draft, setDraft] = useState<LlmSettings | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [message, setMessage] = useState<string | null>(null);
+  const routeOptions = useMemo(
+    () => llmRouteOptions(nlpSettings, telegramSourceChats),
+    [nlpSettings, telegramSourceChats]
+  );
+
+  useEffect(() => {
+    let active = true;
+    async function loadLlmSettings() {
+      setLoading(true);
+      setError(null);
+      try {
+        const response = await fetch(`${apiBaseUrl}/api/v1/settings/llm`);
+        if (!response.ok) {
+          throw new Error(await readBackendError(response));
+        }
+        const payload = (await response.json()) as LlmSettings;
+        if (active) {
+          setDraft(llmSettingsDraftFromSnapshot(payload));
+        }
+      } catch (caught) {
+        if (active) {
+          setError(caught instanceof Error ? caught.message : "Не удалось загрузить настройки LLM");
+        }
+      } finally {
+        if (active) {
+          setLoading(false);
+        }
+      }
+    }
+    void loadLlmSettings();
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  async function saveLlmSettings() {
+    if (!draft) {
+      return;
+    }
+    setSaving(true);
+    setError(null);
+    setMessage(null);
+    try {
+      const response = await fetch(`${apiBaseUrl}/api/v1/settings/llm`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(llmSettingsPayload(draft))
+      });
+      if (!response.ok) {
+        throw new Error(await readBackendError(response));
+      }
+      const saved = (await response.json()) as LlmSettings;
+      setDraft(llmSettingsDraftFromSnapshot(saved));
+      setMessage("Настройки LLM сохранены");
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Не удалось сохранить настройки LLM");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  function updateRoute(index: number, patch: Partial<LlmRouteSettings>) {
+    if (!draft) {
+      return;
+    }
+    setDraft({
+      ...draft,
+      routes: draft.routes.map((route, itemIndex) => (itemIndex === index ? { ...route, ...patch } : route))
+    });
+  }
+
+  function updateRouteConditions(index: number, patch: Partial<LlmRouteConditionsSettings>) {
+    if (!draft) {
+      return;
+    }
+    const route = draft.routes[index];
+    updateRoute(index, { conditions: { ...route.conditions, ...patch } });
+  }
+
+  function addDesignerRouteExample() {
+    if (!draft) {
+      return;
+    }
+    setDraft({ ...draft, routes: [...draft.routes, newDesignerLlmRoute(telegramSourceChats)] });
+  }
+
+  if (loading) {
+    return (
+      <Stack spacing={1.5}>
+        <LinearProgress />
+        <Typography variant="body2" color="text.secondary">
+          Загружаю настройки LLM...
+        </Typography>
+      </Stack>
+    );
+  }
+
+  if (!draft) {
+    return (
+      <Stack spacing={1.5}>
+        {error && <Alert severity="error">{error}</Alert>}
+      </Stack>
+    );
+  }
+
+  return (
+    <Stack spacing={2}>
+      <Box>
+        <Typography variant="h6" component="h2">
+          Настройки LLM
+        </Typography>
+        <Typography variant="body2" color="text.secondary">
+          Отдельная очередь LLM получает только сообщения, подходящие под эти маршруты.
+          Фильтры читают уже готовый trace: чат, score, температуру, очередь ревью, факты, сигналы и причины.
+        </Typography>
+      </Box>
+      {error && <Alert severity="error">{error}</Alert>}
+      {message && <Alert severity="success">{message}</Alert>}
+
+      <Alert severity="info">
+        Промпт = System prompt + User JSON context_pack. System prompt хранится здесь, а context_pack backend
+        собирает для конкретного сообщения из текста, компактного deterministic trace и русских labels текущих
+        фактов/словарей/сигналов. Golden-примеры и служебные id в модель не отправляются. confidence в ответе
+        LLM должен быть 0.0-1.0, а не score. В LLM run видно оба слоя: какой system prompt ушел и какой JSON был передан модели.
+      </Alert>
+      <Paper variant="outlined" className="settings-nested-panel">
+        <Stack spacing={1}>
+          <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>
+            Состав context_pack
+          </Typography>
+          <Typography variant="body2" color="text.secondary">
+            В модель уходит только `message.text`, компактный `rule_engine_result`, русские labels текущих сигналов,
+            фактов и словарей. `rule_engine_result передается компактно`: массивы facts, signals и reasons сжимаются
+            до labels и коротких matched_texts, без UUID, source_message_id, telegram_message_id и golden_examples.
+          </Typography>
+          <Box component="pre" className="llm-json-pre">
+{[
+  "{",
+  '  "message": { "text": "текст сообщения" },',
+  '  "available_taxonomy": {',
+  '    "signal_labels": "русские названия сигналов через ;",',
+  '    "fact_rule_labels": "русские названия фактов через ;",',
+  '    "dictionary_labels": "русские названия словарных записей"',
+  "  },",
+  '  "rule_engine_result": {',
+  '    "verdict": "lead | not_lead",',
+  '    "score": 35,',
+  '    "facts": ["Объект: квартира"],',
+  '    "signals": ["Видеонаблюдение"],',
+  '    "reasons": ["Сигнал: активное намерение"]',
+  "  }",
+  "}"
+].join("\n")}
+          </Box>
+        </Stack>
+      </Paper>
+
+      <FormControlLabel
+        control={<Switch checked={draft.enabled} onChange={(event) => setDraft({ ...draft, enabled: event.target.checked })} />}
+        label="LLM включен"
+      />
+      <Box className="settings-two-column">
+        <TextField value={draft.model} onChange={(event) => setDraft({ ...draft, model: event.target.value })} label="Модель" fullWidth />
+        <TextField value={draft.endpoint} onChange={(event) => setDraft({ ...draft, endpoint: event.target.value })} label="Endpoint" fullWidth />
+        <TextField
+          value={draft.timeout_seconds}
+          onChange={(event) => setDraft({ ...draft, timeout_seconds: Number(event.target.value) })}
+          label="Timeout"
+          type="number"
+          fullWidth
+        />
+      </Box>
+      <Stack direction="row" spacing={1} useFlexGap sx={{ flexWrap: "wrap" }}>
+        {llmModelOptions.map((model) => (
+          <Button
+            key={model}
+            size="small"
+            variant={draft.model === model ? "contained" : "outlined"}
+            onClick={() => setDraft({ ...draft, model })}
+          >
+            {model}
+          </Button>
+        ))}
+      </Stack>
+      <TextField
+        value={draft.system_prompt}
+        onChange={(event) => setDraft({ ...draft, system_prompt: event.target.value })}
+        label="System prompt"
+        multiline
+        minRows={6}
+        fullWidth
+      />
+
+      <Stack direction="row" spacing={1} useFlexGap sx={{ flexWrap: "wrap" }}>
+        <Button
+          variant="outlined"
+          startIcon={<AddIcon />}
+          onClick={() => setDraft({ ...draft, routes: [...draft.routes, newLlmRoute()] })}
+        >
+          Добавить LLM-маршрут
+        </Button>
+        <Button
+          variant="outlined"
+          startIcon={<AddIcon />}
+          onClick={addDesignerRouteExample}
+        >
+          Добавить пример маршрута для дизайнерских чатов
+        </Button>
+      </Stack>
+
+      {draft.routes.map((route, index) => (
+        <Accordion key={`${route.id}-${index}`} defaultExpanded={index === 0} disableGutters>
+          <AccordionSummary expandIcon={<ExpandMoreIcon />}>
+            <Stack direction="row" spacing={1} useFlexGap sx={{ alignItems: "center", flexWrap: "wrap" }}>
+              <Typography variant="subtitle2">{route.name || route.id || "Новый LLM-маршрут"}</Typography>
+              <Chip size="small" label={route.enabled ? "enabled" : "disabled"} variant="outlined" />
+              <Chip size="small" label={route.match_mode === "all" ? "all" : "any"} variant="outlined" />
+            </Stack>
+          </AccordionSummary>
+          <AccordionDetails>
+            <Stack spacing={1.5}>
+              <Stack direction="row" spacing={1} sx={{ alignItems: "center", justifyContent: "space-between" }}>
+                <FormControlLabel
+                  control={<Switch checked={route.enabled} onChange={(event) => updateRoute(index, { enabled: event.target.checked })} />}
+                  label="Маршрут включен"
+                />
+                <IconButton
+                  aria-label={`Удалить LLM-маршрут ${route.name || route.id}`}
+                  onClick={() => setDraft({ ...draft, routes: draft.routes.filter((_, itemIndex) => itemIndex !== index) })}
+                >
+                  <DeleteIcon fontSize="small" />
+                </IconButton>
+              </Stack>
+              <Box className="settings-two-column">
+                <TextField value={route.id} onChange={(event) => updateRoute(index, { id: event.target.value })} label="ID маршрута" fullWidth />
+                <TextField value={route.name} onChange={(event) => updateRoute(index, { name: event.target.value })} label="Название" fullWidth />
+                <TextField value={route.priority} onChange={(event) => updateRoute(index, { priority: Number(event.target.value) })} label="Приоритет" type="number" fullWidth />
+                <TextField select value={route.match_mode} onChange={(event) => updateRoute(index, { match_mode: event.target.value as "all" | "any" })} label="Режим условий" fullWidth>
+                  <MenuItem value="all">Все условия</MenuItem>
+                  <MenuItem value="any">Любое условие</MenuItem>
+                </TextField>
+                <TextField value={route.conditions.score_min ?? ""} onChange={(event) => updateRouteConditions(index, { score_min: optionalNumber(event.target.value) })} label="Score min" type="number" fullWidth />
+                <TextField value={route.conditions.score_max ?? ""} onChange={(event) => updateRouteConditions(index, { score_max: optionalNumber(event.target.value) })} label="Score max" type="number" fullWidth />
+                <NotificationMultiSelect label="Чаты-источники" options={routeOptions.source_chats} value={route.conditions.source_chat_ids} onChange={(value) => updateRouteConditions(index, { source_chat_ids: value })} />
+                <NotificationMultiSelect label="Температура" options={routeOptions.temperatures} value={route.conditions.temperatures} onChange={(value) => updateRouteConditions(index, { temperatures: value })} />
+                <NotificationMultiSelect label="Очереди разбора" options={routeOptions.review_lanes} value={route.conditions.review_lanes} onChange={(value) => updateRouteConditions(index, { review_lanes: value })} />
+                <NotificationMultiSelect label="Включить сигналы" options={routeOptions.signals} value={route.conditions.include_signal_types} onChange={(value) => updateRouteConditions(index, { include_signal_types: value })} />
+                <NotificationMultiSelect label="Исключить сигналы" options={routeOptions.signals} value={route.conditions.exclude_signal_types} onChange={(value) => updateRouteConditions(index, { exclude_signal_types: value })} />
+                <NotificationMultiSelect label="Включить факты" options={routeOptions.facts} value={route.conditions.include_fact_types} onChange={(value) => updateRouteConditions(index, { include_fact_types: value })} />
+                <NotificationMultiSelect label="Исключить факты" options={routeOptions.facts} value={route.conditions.exclude_fact_types} onChange={(value) => updateRouteConditions(index, { exclude_fact_types: value })} />
+                <NotificationMultiSelect label="Включить причины score" options={routeOptions.reasons} value={route.conditions.include_reason_keys} onChange={(value) => updateRouteConditions(index, { include_reason_keys: value })} />
+                <NotificationMultiSelect label="Исключить причины score" options={routeOptions.reasons} value={route.conditions.exclude_reason_keys} onChange={(value) => updateRouteConditions(index, { exclude_reason_keys: value })} />
+                <NotificationMultiSelect label="Включить направления решений" options={routeOptions.solution_areas} value={route.conditions.include_solution_area_types} onChange={(value) => updateRouteConditions(index, { include_solution_area_types: value })} />
+                <NotificationMultiSelect label="Исключить направления решений" options={routeOptions.solution_areas} value={route.conditions.exclude_solution_area_types} onChange={(value) => updateRouteConditions(index, { exclude_solution_area_types: value })} />
+                <NotificationMultiSelect label="Включить сегменты клиентов" options={routeOptions.customer_segments} value={route.conditions.include_customer_segment_types} onChange={(value) => updateRouteConditions(index, { include_customer_segment_types: value })} />
+                <NotificationMultiSelect label="Исключить сегменты клиентов" options={routeOptions.customer_segments} value={route.conditions.exclude_customer_segment_types} onChange={(value) => updateRouteConditions(index, { exclude_customer_segment_types: value })} />
+              </Box>
+            </Stack>
+          </AccordionDetails>
+        </Accordion>
+      ))}
+
+      <Stack direction="row" spacing={1} useFlexGap sx={{ flexWrap: "wrap" }}>
+        <Button
+          variant="contained"
+          startIcon={saving ? <CircularProgress size={18} color="inherit" /> : <SaveIcon />}
+          disabled={saving}
+          onClick={saveLlmSettings}
+        >
+          Сохранить LLM
+        </Button>
+      </Stack>
+    </Stack>
   );
 }
 
@@ -1342,6 +1716,105 @@ function newClientUuid() {
   );
 }
 
+function llmSettingsDraftFromSnapshot(settings: LlmSettings): LlmSettings {
+  return {
+    enabled: settings.enabled,
+    model: settings.model,
+    endpoint: settings.endpoint,
+    timeout_seconds: Number(settings.timeout_seconds),
+    system_prompt: settings.system_prompt,
+    routes: (settings.routes ?? []).map(normalizeLlmRoute),
+    updated_at: settings.updated_at ?? null
+  };
+}
+
+function llmSettingsPayload(settings: LlmSettings): LlmSettings {
+  return {
+    ...settings,
+    timeout_seconds: Number(settings.timeout_seconds),
+    routes: settings.routes.map(normalizeLlmRoute)
+  };
+}
+
+function normalizeLlmRoute(route: LlmRouteSettings): LlmRouteSettings {
+  return {
+    id: route.id,
+    name: route.name,
+    enabled: route.enabled,
+    priority: Number(route.priority),
+    match_mode: route.match_mode === "any" ? "any" : "all",
+    conditions: {
+      ...emptyLlmRouteConditions(),
+      ...route.conditions,
+      source_chat_ids: route.conditions.source_chat_ids ?? [],
+      temperatures: route.conditions.temperatures ?? [],
+      review_lanes: route.conditions.review_lanes ?? [],
+      include_signal_types: route.conditions.include_signal_types ?? [],
+      exclude_signal_types: route.conditions.exclude_signal_types ?? [],
+      include_fact_types: route.conditions.include_fact_types ?? [],
+      exclude_fact_types: route.conditions.exclude_fact_types ?? [],
+      include_reason_keys: route.conditions.include_reason_keys ?? [],
+      exclude_reason_keys: route.conditions.exclude_reason_keys ?? [],
+      include_solution_area_types: route.conditions.include_solution_area_types ?? [],
+      exclude_solution_area_types: route.conditions.exclude_solution_area_types ?? [],
+      include_customer_segment_types: route.conditions.include_customer_segment_types ?? [],
+      exclude_customer_segment_types: route.conditions.exclude_customer_segment_types ?? []
+    }
+  };
+}
+
+function emptyLlmRouteConditions(): LlmRouteConditionsSettings {
+  return {
+    source_chat_ids: [],
+    score_min: null,
+    score_max: null,
+    temperatures: [],
+    review_lanes: [],
+    include_signal_types: [],
+    exclude_signal_types: [],
+    include_fact_types: [],
+    exclude_fact_types: [],
+    include_reason_keys: [],
+    exclude_reason_keys: [],
+    include_solution_area_types: [],
+    exclude_solution_area_types: [],
+    include_customer_segment_types: [],
+    exclude_customer_segment_types: []
+  };
+}
+
+function newLlmRoute(): LlmRouteSettings {
+  return {
+    id: `llm_route_${Date.now()}`,
+    name: "Новый LLM-маршрут",
+    enabled: true,
+    priority: 0,
+    match_mode: "all",
+    conditions: emptyLlmRouteConditions()
+  };
+}
+
+function newDesignerLlmRoute(sourceChats: TelegramSourceChatSettings[]): LlmRouteSettings {
+  const designerChatIds = sourceChats
+    .filter((chat) => /дизайн|design|interior|интерьер/i.test(`${chat.title} ${chat.input_ref}`))
+    .map((chat) => chat.id);
+  return {
+    id: "designers_non_noise",
+    name: "Дизайнерские чаты без операторского шума",
+    enabled: true,
+    priority: 100,
+    match_mode: "all",
+    conditions: {
+      ...emptyLlmRouteConditions(),
+      source_chat_ids: designerChatIds,
+      score_min: 20,
+      temperatures: ["warm", "hot"],
+      review_lanes: ["direct_pur_lead"],
+      exclude_signal_types: ["operator_noise"]
+    }
+  };
+}
+
 function defaultNotificationSettings(): NotificationSettings {
   return {
     bots: [],
@@ -1451,18 +1924,75 @@ function NotificationMultiSelect({
   value: string[];
   onChange: (value: string[]) => void;
 }) {
-  const selected = options.filter((option) => value.includes(option.key));
+  const selected = optionsWithFallback(options, value);
+  const mergedOptions = mergeOptionLists(options, selected);
   return (
     <Autocomplete
       multiple
-      options={options}
+      options={mergedOptions}
       value={selected}
       getOptionLabel={(option) => option.label}
       isOptionEqualToValue={(option, selectedOption) => option.key === selectedOption.key}
-      onChange={(_, nextValue) => onChange(nextValue.map((option) => option.key))}
+      onChange={(_, nextValue) => onChange(uniqueStrings(nextValue.map((option) => option.key)))}
       renderInput={(params) => <TextField {...params} label={label} />}
     />
   );
+}
+
+function optionsWithFallback(options: NotificationOption[], selectedKeys: string[]): NotificationOption[] {
+  const optionByKey = new Map(options.map((option) => [option.key, option]));
+  return uniqueStrings(selectedKeys).map((key) => optionByKey.get(key) ?? { key, label: `${key} (нет в текущих настройках)` });
+}
+
+function mergeOptionLists(primary: NotificationOption[], secondary: NotificationOption[]): NotificationOption[] {
+  const seen = new Set<string>();
+  return [...primary, ...secondary].filter((option) => {
+    if (seen.has(option.key)) {
+      return false;
+    }
+    seen.add(option.key);
+    return true;
+  });
+}
+
+function llmRouteOptions(settings: NlpSettings, sourceChats: TelegramSourceChatSettings[]) {
+  const signalOptions = settings.signals.map((signal) => ({ key: signal.type, label: signal.label }));
+  const factOptions = settings.facts.map((fact) => ({ key: fact.type, label: fact.label }));
+  return {
+    source_chats: sourceChats.map((chat) => ({
+      key: chat.id,
+      label: sourceChatOptionLabel(chat)
+    })),
+    temperatures: [
+      { key: "cold", label: "Холодный" },
+      { key: "warm", label: "Теплый" },
+      { key: "hot", label: "Горячий" }
+    ],
+    review_lanes: settings.lead_scoring.review_lanes.map((lane) => ({
+      key: lane.key,
+      label: lane.label
+    })),
+    solution_areas: Object.entries(settings.lead_scoring.solution_areas).map(([key, value]) => ({
+      key,
+      label: value.label
+    })),
+    customer_segments: Object.entries(settings.lead_scoring.customer_segments).map(([key, value]) => ({
+      key,
+      label: value.label
+    })),
+    signals: signalOptions,
+    facts: factOptions,
+    reasons: [
+      ...settings.signals.map((signal) => ({ key: signal.type, label: `Сигнал: ${signal.label}` })),
+      ...settings.facts.map((fact) => ({ key: fact.type, label: `Факт: ${fact.label}` }))
+    ]
+  };
+}
+
+function sourceChatOptionLabel(chat: TelegramSourceChatSettings): string {
+  const title = chat.title.trim() || chat.input_ref.trim() || chat.id;
+  const ref = chat.input_ref.trim();
+  return ref && ref !== title ? `${title} (${ref})` : title;
 }
 
 function notificationRouteOptions(settings: NlpSettings) {
@@ -1598,6 +2128,105 @@ type InlineSettingsLink = {
   label: ReactNode;
   target: SettingsTarget | null;
 };
+
+type DependencyGraphRow = {
+  id: string;
+  sources: InlineSettingsLink[];
+  facts: InlineSettingsLink[];
+  signals: InlineSettingsLink[];
+  routing: InlineSettingsLink[];
+};
+
+function dependencyGraphRows(settings: NlpSettings): DependencyGraphRow[] {
+  return settings.signals.flatMap((signal) => {
+    const match = normalizeRuleMatch(signal.match);
+    if (match.facts.length === 0) {
+      return [
+        {
+          id: `signal-${signal.type}-empty`,
+          sources: [{ label: "Нет зависимостей", target: { kind: "signal", key: signal.type } }],
+          facts: [],
+          signals: [{ label: signal.label || signal.type, target: { kind: "signal", key: signal.type } }],
+          routing: routingLinksForSignal(settings, signal.type, [])
+        }
+      ];
+    }
+    return match.facts.map((dependency, index) => ({
+      id: `signal-${signal.type}-${index}`,
+      sources: dependency.types.map((factType) => sourceLinkForFactType(settings, factType)),
+      facts: dependency.types.map((factType) => ({
+        label: settingsTypeLabel(settings, factType),
+        target: settingsTargetForType(settings, factType)
+      })),
+      signals: [{ label: signal.label || signal.type, target: { kind: "signal", key: signal.type } }],
+      routing: routingLinksForSignal(settings, signal.type, dependency.types)
+    }));
+  });
+}
+
+function sourceLinkForFactType(settings: NlpSettings, factType: string): InlineSettingsLink {
+  const aliasIdentity = parseAliasIdentityFactType(factType);
+  if (aliasIdentity) {
+    return {
+      label: `Словарь: ${aliasLabel(settings, aliasIdentity.catalog, aliasIdentity.key)}`,
+      target: { kind: "alias", catalog: aliasIdentity.catalog, key: aliasIdentity.key }
+    };
+  }
+  const fact = settings.facts.find((item) => item.type === factType);
+  if (fact) {
+    return {
+      label: `Правило факта: ${fact.label || fact.type}`,
+      target: { kind: "fact", key: fact.type }
+    };
+  }
+  const aliases = aliasCatalogDefinitions.flatMap((definition) =>
+    settings[definition.name]
+      .filter((alias) => alias.fact_types.includes(factType))
+      .map((alias) => ({
+        label: `Факт из словаря: ${alias.canonical}`,
+        target: { kind: "alias", catalog: definition.name, key: alias.key } as SettingsTarget
+      }))
+  );
+  return aliases[0] ?? { label: `Внешний fact_type: ${factType}`, target: null };
+}
+
+function routingLinksForSignal(settings: NlpSettings, signalType: string, factTypes: string[]): InlineSettingsLink[] {
+  const links: InlineSettingsLink[] = [];
+  if (Object.hasOwn(settings.lead_scoring.signal_weights, signalType)) {
+    links.push({
+      label: `Вес сигнала ${formatWeight(settings.lead_scoring.signal_weights[signalType])}`,
+      target: { kind: "lead_signal_weight", key: signalType }
+    });
+  }
+  factTypes.forEach((factType) => {
+    if (Object.hasOwn(settings.lead_scoring.fact_weights, factType)) {
+      links.push({
+        label: `Вес факта ${settingsTypeLabel(settings, factType)} ${formatWeight(settings.lead_scoring.fact_weights[factType])}`,
+        target: { kind: "lead_fact_weight", key: factType }
+      });
+    }
+  });
+  Object.entries(settings.lead_scoring.solution_areas).forEach(([key, area]) => {
+    if (area.signal_types.includes(signalType) || factTypes.some((factType) => area.fact_types.includes(factType))) {
+      links.push({ label: `Направление: ${area.label || key}`, target: { kind: "solution_area", key } });
+    }
+  });
+  settings.lead_scoring.review_lanes.forEach((lane) => {
+    if (reviewLaneMatchesSignalOrFacts(lane, signalType, factTypes)) {
+      links.push({ label: `Очередь: ${lane.label || lane.key}`, target: { kind: "review_lane", key: lane.key } });
+    }
+  });
+  return links.length > 0 ? links : [{ label: "Не влияет на score", target: null }];
+}
+
+function reviewLaneMatchesSignalOrFacts(lane: ReviewLaneSetting, signalType: string, factTypes: string[]): boolean {
+  return lane.match_groups.some((group) =>
+    (group.signal_types ?? []).includes(signalType) ||
+    (group.intent_signal_types ?? []).includes(signalType) ||
+    (group.noise_signal_types ?? []).includes(signalType) ||
+    factTypes.some((factType) => (group.fact_types ?? []).includes(factType) || (group.reason_keys ?? []).includes(factType))
+  );
+}
 
 function InlineSettingsLinks({ links }: { links: InlineSettingsLink[] }) {
   const visibleLinks = links.filter((link) => link.label !== "");
@@ -2000,9 +2629,45 @@ function AliasCatalogEditor({
   onRemove: (index: number) => void;
   onUpdate: (index: number, alias: AliasSetting) => void;
 }) {
+  const [expanded, setExpanded] = useState(Boolean(activeKey));
+
+  useEffect(() => {
+    if (activeKey) {
+      setExpanded(true);
+    }
+  }, [activeKey]);
+
   return (
     <Stack spacing={1}>
-      <Box className="rule-list-header">
+    <Box className="rule-list-header">
+      <Box sx={{ minWidth: 0 }}>
+        <Typography variant="subtitle1" sx={{ fontWeight: 700 }}>
+          {definition.label}
+        </Typography>
+        <Typography variant="body2" color="text.secondary">
+          {aliases.length} записей
+        </Typography>
+      </Box>
+      <Button
+        aria-label={`Добавить запись в ${definition.label}`}
+        startIcon={<AddIcon />}
+        variant="outlined"
+        size="small"
+        onClick={() => {
+          onAdd();
+          setExpanded(true);
+        }}
+      >
+        Добавить
+      </Button>
+    </Box>
+    <Accordion
+      variant="outlined"
+      disableGutters
+      expanded={expanded}
+      onChange={(_, nextExpanded) => setExpanded(nextExpanded)}
+    >
+      <AccordionSummary expandIcon={<ExpandMoreIcon />}>
         <Box sx={{ minWidth: 0 }}>
           <Typography variant="subtitle1" sx={{ fontWeight: 700 }}>
             {definition.label}
@@ -2011,25 +2676,38 @@ function AliasCatalogEditor({
             {aliases.length} записей
           </Typography>
         </Box>
-        <Button
-          aria-label={`Добавить alias в ${definition.label}`}
-          startIcon={<AddIcon />}
-          variant="outlined"
-          onClick={onAdd}
-        >
-          Добавить
-        </Button>
-      </Box>
-      {aliases.map((alias, index) => (
-        <AliasEditor
-          key={`${definition.name}-${alias.key}-${index}`}
-          alias={alias}
-          catalog={definition.name}
-          isTarget={alias.key === activeKey}
-          onRemove={() => onRemove(index)}
-          onUpdate={(nextAlias) => onUpdate(index, nextAlias)}
-        />
-      ))}
+      </AccordionSummary>
+      <AccordionDetails>
+        <Stack spacing={1}>
+          <Box className="rule-list-header">
+            <Box sx={{ minWidth: 0 }}>
+              <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>
+                {definition.label}
+              </Typography>
+              <Typography variant="body2" color="text.secondary">
+                {aliases.length} записей
+              </Typography>
+            </Box>
+          </Box>
+          {aliases.length === 0 ? (
+            <Typography variant="body2" color="text.secondary">
+              Словарь пока пустой.
+            </Typography>
+          ) : (
+            aliases.map((alias, index) => (
+              <AliasEditor
+                key={`${definition.name}-${alias.key}-${index}`}
+                alias={alias}
+                catalog={definition.name}
+                isTarget={alias.key === activeKey}
+                onRemove={() => onRemove(index)}
+                onUpdate={(nextAlias) => onUpdate(index, nextAlias)}
+              />
+            ))
+          )}
+        </Stack>
+      </AccordionDetails>
+    </Accordion>
     </Stack>
   );
 }
@@ -2146,46 +2824,6 @@ function LeadScoringSettingsEditor({
   activeTarget: SettingsTarget | null;
   onUpdate: (settings: LeadScoringSettings) => void;
 }) {
-  function updateLane(index: number, lane: ReviewLaneSetting) {
-    onUpdate({
-      ...settings,
-      review_lanes: settings.review_lanes.map((item, itemIndex) => (itemIndex === index ? lane : item))
-    });
-  }
-
-  function addLane() {
-    onUpdate({
-      ...settings,
-      review_lanes: [
-        ...settings.review_lanes,
-        {
-          key: "new_review_lane",
-          label: "Новая lane",
-          description: "",
-          priority: 0,
-          min_score: null,
-          max_score: null,
-          temperatures: [],
-          match_groups: [],
-          excluded_signal_types: [],
-          excluded_fact_types: [],
-          excluded_reason_keys: [],
-          excluded_solution_area_types: [],
-          excluded_customer_segment_types: [],
-          excluded_intent_signal_types: [],
-          excluded_noise_signal_types: []
-        }
-      ]
-    });
-  }
-
-  function removeLane(index: number) {
-    onUpdate({
-      ...settings,
-      review_lanes: settings.review_lanes.filter((_, itemIndex) => itemIndex !== index)
-    });
-  }
-
   function updateScoreCap(index: number, cap: LeadScoreCapSetting) {
     onUpdate({
       ...settings,
@@ -2224,75 +2862,54 @@ function LeadScoringSettingsEditor({
 
   return (
     <Stack spacing={2}>
-      <Typography variant="h6">Оценка лида</Typography>
-      <Box className="rule-grid">
-        <TextField
-          label="lead threshold"
-          type="number"
-          value={settings.lead_threshold}
-          onChange={(event) => onUpdate({ ...settings, lead_threshold: numberInput(event.target.value) })}
-        />
-        <TextField
-          label="warm threshold"
-          type="number"
-          value={settings.warm_threshold}
-          onChange={(event) => onUpdate({ ...settings, warm_threshold: numberInput(event.target.value) })}
-        />
-        <TextField
-          label="hot threshold"
-          type="number"
-          value={settings.hot_threshold}
-          onChange={(event) => onUpdate({ ...settings, hot_threshold: numberInput(event.target.value) })}
-        />
+      <Box>
+        <Typography variant="h6">Оценка лида</Typography>
+        <Typography variant="body2" color="text.secondary">
+          Здесь только score: пороги, веса и ограничители. Направления решений и очереди разбора редактируются отдельно.
+        </Typography>
       </Box>
-      <Typography variant="subtitle1" sx={{ fontWeight: 700 }}>
-        Пороги оценки
-      </Typography>
-      <Box className="settings-two-column">
-        <Box
-          id={
-            activeTarget?.kind === "lead_signal_weight"
-              ? settingsTargetElementId(activeTarget)
-              : undefined
-          }
-          className={activeTarget?.kind === "lead_signal_weight" ? "settings-target-highlight" : undefined}
-          tabIndex={activeTarget?.kind === "lead_signal_weight" ? -1 : undefined}
-        >
-          <TextField
-            label="signal weights"
-            helperText="Одна строка: type: weight"
-            value={numberRecordToText(settings.signal_weights)}
-            onChange={(event) => onUpdate({ ...settings, signal_weights: textToNumberRecord(event.target.value) })}
-            multiline
-            minRows={8}
-            fullWidth
-          />
-        </Box>
-        <Box
-          id={
-            activeTarget?.kind === "lead_fact_weight"
-              ? settingsTargetElementId(activeTarget)
-              : undefined
-          }
-          className={activeTarget?.kind === "lead_fact_weight" ? "settings-target-highlight" : undefined}
-          tabIndex={activeTarget?.kind === "lead_fact_weight" ? -1 : undefined}
-        >
-          <TextField
-            label="fact weights"
-            helperText="Одна строка: type: weight"
-            value={numberRecordToText(settings.fact_weights)}
-            onChange={(event) => onUpdate({ ...settings, fact_weights: textToNumberRecord(event.target.value) })}
-            multiline
-            minRows={8}
-            fullWidth
-          />
-        </Box>
-      </Box>
-      <CategoryMappingEditor
-        title="Направления решений"
-        mappings={settings.solution_areas}
-        activeTarget={activeTarget?.kind === "solution_area" ? activeTarget : null}
-        onUpdate={(solutionAreas) => onUpdate({ ...settings, solution_areas: solutionAreas })}
+      <Paper variant="outlined" className="settings-nested-panel">
+        <Stack spacing={1.5}>
+          <Typography variant="subtitle1" sx={{ fontWeight: 700 }}>
+            Пороги оценки
+          </Typography>
+          <Box className="rule-grid">
+            <TextField
+              label="lead threshold"
+              type="number"
+              value={settings.lead_threshold}
+              onChange={(event) => onUpdate({ ...settings, lead_threshold: numberInput(event.target.value) })}
+            />
+            <TextField
+              label="warm threshold"
+              type="number"
+              value={settings.warm_threshold}
+              onChange={(event) => onUpdate({ ...settings, warm_threshold: numberInput(event.target.value) })}
+            />
+            <TextField
+              label="hot threshold"
+              type="number"
+              value={settings.hot_threshold}
+              onChange={(event) => onUpdate({ ...settings, hot_threshold: numberInput(event.target.value) })}
+            />
+          </Box>
+        </Stack>
+      </Paper>
+      <NumberRecordEditor
+        title="Веса сигналов"
+        addLabel="Добавить вес сигнала"
+        record={settings.signal_weights}
+        activeKey={activeTarget?.kind === "lead_signal_weight" ? activeTarget.key : null}
+        targetKind="lead_signal_weight"
+        onUpdate={(signalWeights) => onUpdate({ ...settings, signal_weights: signalWeights })}
+      />
+      <NumberRecordEditor
+        title="Веса фактов"
+        addLabel="Добавить вес факта"
+        record={settings.fact_weights}
+        activeKey={activeTarget?.kind === "lead_fact_weight" ? activeTarget.key : null}
+        targetKind="lead_fact_weight"
+        onUpdate={(factWeights) => onUpdate({ ...settings, fact_weights: factWeights })}
       />
       <CategoryMappingEditor
         title="Сегменты клиентов"
@@ -2333,6 +2950,250 @@ function LeadScoringSettingsEditor({
         onRemove={removeScoreCap}
         onUpdate={updateScoreCap}
       />
+    </Stack>
+  );
+}
+
+function NumberRecordEditor({
+  title,
+  addLabel,
+  record,
+  activeKey,
+  targetKind,
+  onUpdate
+}: {
+  title: string;
+  addLabel: string;
+  record: Record<string, number>;
+  activeKey: string | null;
+  targetKind: "lead_signal_weight" | "lead_fact_weight";
+  onUpdate: (record: Record<string, number>) => void;
+}) {
+  const entries = Object.entries(record);
+
+  function updateEntry(index: number, nextKey: string, nextValue: number) {
+    const nextEntries = entries.map(([key, value], itemIndex) =>
+      itemIndex === index ? [nextKey, nextValue] : [key, value]
+    );
+    onUpdate(Object.fromEntries(nextEntries.filter(([key]) => String(key).trim())));
+  }
+
+  function removeEntry(index: number) {
+    onUpdate(Object.fromEntries(entries.filter((_, itemIndex) => itemIndex !== index)));
+  }
+
+  function addEntry() {
+    const baseKey = targetKind === "lead_signal_weight" ? "new_signal" : "new_fact";
+    const key = uniqueRecordKey(record, baseKey);
+    onUpdate({ ...record, [key]: 0 });
+  }
+
+  return (
+    <Stack spacing={1}>
+      <Box className="rule-list-header">
+        <Box>
+          <Typography variant="subtitle1" sx={{ fontWeight: 700 }}>
+            {title}
+          </Typography>
+          <Typography variant="body2" color="text.secondary">
+            Один тип - один числовой вклад в score. Положительные веса поднимают кандидата, отрицательные охлаждают.
+          </Typography>
+        </Box>
+        <Button size="small" variant="outlined" startIcon={<AddIcon />} onClick={addEntry}>
+          {addLabel}
+        </Button>
+      </Box>
+      {entries.length === 0 ? (
+        <Typography variant="body2" color="text.secondary">
+          Весов пока нет.
+        </Typography>
+      ) : (
+        <Stack spacing={1}>
+          {entries.map(([key, value], index) => {
+            const target =
+              targetKind === "lead_signal_weight"
+                ? ({ kind: "lead_signal_weight", key } as SettingsTarget)
+                : ({ kind: "lead_fact_weight", key } as SettingsTarget);
+            const isTarget = activeKey === key;
+            return (
+              <Box
+                key={`${key}-${index}`}
+                id={settingsTargetElementId(target)}
+                className={`rule-list-row${isTarget ? " settings-target-highlight" : ""}`}
+                tabIndex={isTarget ? -1 : undefined}
+                sx={{ alignItems: "center" }}
+              >
+                <TextField
+                  label="type"
+                  size="small"
+                  value={key}
+                  onChange={(event) => updateEntry(index, event.target.value, value)}
+                  sx={{ flex: 1, minWidth: 180 }}
+                />
+                <TextField
+                  label="weight"
+                  size="small"
+                  type="number"
+                  value={value}
+                  onChange={(event) => updateEntry(index, key, numberInput(event.target.value))}
+                  sx={{ width: 140 }}
+                />
+                <Tooltip title="Удалить вес">
+                  <IconButton aria-label={`Удалить вес: ${key}`} color="error" onClick={() => removeEntry(index)}>
+                    <DeleteIcon fontSize="small" />
+                  </IconButton>
+                </Tooltip>
+              </Box>
+            );
+          })}
+        </Stack>
+      )}
+    </Stack>
+  );
+}
+
+function SolutionAreasSettingsEditor({
+  settings,
+  activeTarget,
+  onUpdate
+}: {
+  settings: LeadScoringSettings;
+  activeTarget: SettingsTarget | null;
+  onUpdate: (settings: LeadScoringSettings) => void;
+}) {
+  return (
+    <Stack spacing={2}>
+      <Box>
+        <Typography variant="h6" component="h2">
+          Направления решений
+        </Typography>
+        <Typography variant="body2" color="text.secondary">
+          Направление группирует найденные сигналы и факты в бизнес-область: умный дом, видеонаблюдение,
+          домофоны, вентиляция и так далее.
+        </Typography>
+      </Box>
+      <CategoryMappingEditor
+        title="Настроенные направления"
+        mappings={settings.solution_areas}
+        activeTarget={activeTarget?.kind === "solution_area" ? activeTarget : null}
+        onUpdate={(solutionAreas) => onUpdate({ ...settings, solution_areas: solutionAreas })}
+      />
+    </Stack>
+  );
+}
+
+function DependencyGraphSettings({ settings }: { settings: NlpSettings }) {
+  const rows = dependencyGraphRows(settings);
+  return (
+    <Stack spacing={2}>
+      <Box>
+        <Typography variant="h6" component="h2">
+          Схема связей
+        </Typography>
+        <Typography variant="body2" color="text.secondary">
+          Карта показывает, как словари и правила фактов превращаются в факты, затем в сигналы, score,
+          направления решений и очереди разбора.
+        </Typography>
+      </Box>
+      <TableContainer>
+        <Table size="small" aria-label="Схема связей настроек">
+          <TableHead>
+            <TableRow>
+              <TableCell>Словари / правила</TableCell>
+              <TableCell>Факты</TableCell>
+              <TableCell>Сигналы</TableCell>
+              <TableCell>Score / маршрутизация</TableCell>
+            </TableRow>
+          </TableHead>
+          <TableBody>
+            {rows.map((row) => (
+              <TableRow key={row.id}>
+                <TableCell>
+                  <InlineSettingsLinks links={row.sources} />
+                </TableCell>
+                <TableCell>
+                  <InlineSettingsLinks links={row.facts} />
+                </TableCell>
+                <TableCell>
+                  <InlineSettingsLinks links={row.signals} />
+                </TableCell>
+                <TableCell>
+                  <InlineSettingsLinks links={row.routing} />
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </TableContainer>
+      {rows.length === 0 && (
+        <Typography variant="body2" color="text.secondary">
+          Связей пока нет: добавь факты, сигналы и веса score.
+        </Typography>
+      )}
+    </Stack>
+  );
+}
+
+function ReviewLanesSettingsSection({
+  settings,
+  activeTarget,
+  onUpdate
+}: {
+  settings: LeadScoringSettings;
+  activeTarget: SettingsTarget | null;
+  onUpdate: (settings: LeadScoringSettings) => void;
+}) {
+  function updateLane(index: number, lane: ReviewLaneSetting) {
+    onUpdate({
+      ...settings,
+      review_lanes: settings.review_lanes.map((item, itemIndex) => (itemIndex === index ? lane : item))
+    });
+  }
+
+  function addLane() {
+    onUpdate({
+      ...settings,
+      review_lanes: [
+        ...settings.review_lanes,
+        {
+          key: "new_review_lane",
+          label: "Новая очередь",
+          description: "",
+          priority: 0,
+          min_score: null,
+          max_score: null,
+          temperatures: [],
+          match_groups: [],
+          excluded_signal_types: [],
+          excluded_fact_types: [],
+          excluded_reason_keys: [],
+          excluded_solution_area_types: [],
+          excluded_customer_segment_types: [],
+          excluded_intent_signal_types: [],
+          excluded_noise_signal_types: []
+        }
+      ]
+    });
+  }
+
+  function removeLane(index: number) {
+    onUpdate({
+      ...settings,
+      review_lanes: settings.review_lanes.filter((_, itemIndex) => itemIndex !== index)
+    });
+  }
+
+  return (
+    <Stack spacing={2}>
+      <Box>
+        <Typography variant="h6" component="h2">
+          Очереди разбора
+        </Typography>
+        <Typography variant="body2" color="text.secondary">
+          Очередь решает, куда попадет сообщение после score: по температуре, направлению, сегментам,
+          сигналам, фактам и исключениям.
+        </Typography>
+      </Box>
       <ReviewLaneSettingsEditor
         lanes={settings.review_lanes}
         activeTarget={activeTarget?.kind === "review_lane" ? activeTarget : null}
@@ -2503,7 +3364,7 @@ function ReviewLaneSettingsEditor({
       <Box className="rule-list-header">
         <Box sx={{ minWidth: 0 }}>
           <Typography variant="subtitle1" sx={{ fontWeight: 700 }}>
-            Очереди разбора
+            Настроенные очереди
           </Typography>
           <Typography variant="body2" color="text.secondary">
             Очереди ручной проверки строятся из причин, сигналов, сегментов и направлений решений.
@@ -2955,20 +3816,28 @@ function RuleEditor({
               onChange={(event) => onUpdate({ ...rule, color: event.target.value })}
             />
           </Box>
-          <ExactPhraseEditor
-            phrases={rule.phrases}
-            onUpdate={(phrases) => onUpdate({ ...rule, phrases })}
-          />
-          <SemanticPatternEditor
-            patterns={rule.patterns}
-            onUpdate={(patterns) => onUpdate({ ...rule, patterns })}
-          />
-          {collection === "signals" && (
-            <SignalMatchEditor
-              match={normalizeRuleMatch(rule.match)}
-              settings={settings}
-              onUpdate={(match) => onUpdate({ ...rule, match })}
-            />
+          {collection === "facts" ? (
+            <>
+              <ExactPhraseEditor
+                phrases={rule.phrases}
+                onUpdate={(phrases) => onUpdate({ ...rule, phrases })}
+              />
+              <SemanticPatternEditor
+                patterns={rule.patterns}
+                onUpdate={(patterns) => onUpdate({ ...rule, patterns })}
+              />
+            </>
+          ) : (
+            <>
+              <Alert severity="info">
+                Сигналы не хранят текстовые фразы. Добавляй текст в факты или словари, затем подключай эти факты здесь.
+              </Alert>
+              <SignalMatchEditor
+                match={normalizeRuleMatch(rule.match)}
+                settings={settings}
+                onUpdate={(match) => onUpdate({ ...rule, match })}
+              />
+            </>
           )}
           <Box>
             <IconButton aria-label="Удалить правило" color="error" onClick={onRemove}>
@@ -3001,6 +3870,22 @@ function groupRulesByFolder(rules: RuleSetting[]): GroupedRule[] {
 
 function ruleFolderLabel(rule: RuleSetting) {
   return rule.group?.trim() || "Без папки";
+}
+
+function nlpDraftValidationError(draft: NlpSettings): string | null {
+  for (const signal of draft.signals) {
+    if (signal.phrases.length > 0 || signal.patterns.length > 0) {
+      return `Сигнал «${signal.label}» содержит текстовые фразы. Перенеси текст в факт или словарь.`;
+    }
+    const match = normalizeRuleMatch(signal.match);
+    if (match.facts.length === 0) {
+      return `У сигнала «${signal.label}» нет зависимостей от фактов.`;
+    }
+    if (match.facts.some((dependency) => dependency.types.length === 0)) {
+      return `У сигнала есть пустая зависимость от фактов: «${signal.label}». Выбери fact_type или удали строку.`;
+    }
+  }
+  return null;
 }
 
 type RuleDialogState = {
@@ -3498,6 +4383,12 @@ export function settingsSectionForTarget(target: SettingsTarget): SettingsSectio
   if (target.kind === "alias") {
     return "aliases";
   }
+  if (target.kind === "solution_area") {
+    return "solution_areas";
+  }
+  if (target.kind === "review_lane") {
+    return "review_lanes";
+  }
   return "lead_scoring";
 }
 
@@ -3627,6 +4518,23 @@ function patternLemmaText(pattern: RulePatternSetting) {
 function numberInput(value: string): number {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function formatWeight(value: number): string {
+  return value >= 0 ? `+${value}` : String(value);
+}
+
+function uniqueRecordKey(record: Record<string, unknown>, baseKey: string): string {
+  if (!Object.hasOwn(record, baseKey)) {
+    return baseKey;
+  }
+  for (let index = 2; index < 1000; index += 1) {
+    const candidate = `${baseKey}_${index}`;
+    if (!Object.hasOwn(record, candidate)) {
+      return candidate;
+    }
+  }
+  return `${baseKey}_${Date.now()}`;
 }
 
 function numberRecordToText(record: Record<string, number>) {

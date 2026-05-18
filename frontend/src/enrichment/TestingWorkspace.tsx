@@ -185,6 +185,8 @@ function StatusPanel({
               <CheckCircleIcon color="success" />
             ) : job?.status === "failed" ? (
               <ErrorIcon color="error" />
+            ) : !job && !isSubmitting ? (
+              <PlayArrowIcon color="disabled" />
             ) : (
               <CircularProgress size={20} />
             )}
@@ -525,7 +527,7 @@ export function LeadAssessmentSummary({
       />
       <Chip label={`${assessment.score} баллов`} variant="outlined" size={compact ? "small" : "medium"} />
       <Typography variant={compact ? "caption" : "body2"} color="text.secondary">
-        {assessment.is_lead ? "Потенциальный клиент ПУР" : "Недостаточно признаков лида"}
+        {assessment.is_lead ? "Потенциальный клиент" : "Недостаточно признаков лида"}
       </Typography>
     </Box>
   );
@@ -789,7 +791,9 @@ function reasonTypeTarget(reason: LeadReason, result: TextEnrichmentResult): Set
     return { kind: "signal", key: reason.key };
   }
   if (reason.source === "fact") {
-    const hasFactRuleMatch = result.facts.some((fact) => fact.type === reason.key && fact.source === "yargy");
+    const hasFactRuleMatch = result.facts.some(
+      (fact) => fact.type === reason.key && isFactRuleSource(fact.source)
+    );
     return hasFactRuleMatch ? { kind: "fact", key: reason.key } : { kind: "lead_fact_weight", key: reason.key };
   }
   return null;
@@ -814,7 +818,7 @@ function matchedTypeTarget(type: string, result: TextEnrichmentResult): Settings
   if (result.domain_signals.some((signal) => signal.type === type)) {
     return { kind: "signal", key: type };
   }
-  if (result.facts.some((fact) => fact.type === type && fact.source === "yargy")) {
+  if (result.facts.some((fact) => fact.type === type && isFactRuleSource(fact.source))) {
     return { kind: "fact", key: type };
   }
   if (result.lead_assessment?.reasons.some((reason) => reason.source === "fact" && reason.key === type)) {
@@ -897,6 +901,12 @@ function sourceLabel(source: string): string {
   if (source === "score_cap") {
     return "Ограничитель score";
   }
+  if (source === "exact_phrase") {
+    return "Точная фраза";
+  }
+  if (source === "semantic_pattern") {
+    return "Лемматическая фраза";
+  }
   if (source === "yargy") {
     return "Правило Yargy";
   }
@@ -913,10 +923,20 @@ function fallbackExplanation(item: SpanItem): string {
   if (item.source === "fact_dependency") {
     return "Сигнал построен из уже найденного факта по match.facts.";
   }
+  if (item.source === "exact_phrase") {
+    return "Сработало правило факта по точной фразе активной NLP-конфигурации.";
+  }
+  if (item.source === "semantic_pattern") {
+    return "Сработало правило факта по лемматической фразе активной NLP-конфигурации.";
+  }
   if (item.source === "yargy") {
     return "Сработало точное или лемматическое правило активной NLP-конфигурации.";
   }
   return "Источник вернул этот span без дополнительного объяснения.";
+}
+
+function isFactRuleSource(source: string): boolean {
+  return source === "yargy" || source === "exact_phrase" || source === "semantic_pattern";
 }
 
 function formatSignedWeight(value: number): string {

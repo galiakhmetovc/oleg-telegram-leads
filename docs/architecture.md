@@ -26,6 +26,8 @@ Everything currently runs in development mode.
 - Telegram userbot listener receives configured source chat messages.
 - Notification dispatcher sends Telegram bot notifications from a durable
   outbox.
+- Summary bot sends day/night operational summaries to a dedicated Telegram
+  chat configured in notification settings.
 - React + Vite + TypeScript owns the operator UI.
 - Docker Compose owns the local dev stack and service wiring.
 - Host Caddy exposes the dev UI over HTTPS for operator review.
@@ -45,8 +47,11 @@ Frontend shell boundaries:
   domain/layer exploration, a visual dictionary -> fact -> signal -> score
   graph, compact selected-node editing, settings deeplinks, and draft preview
   through the settings preview endpoint.
-- `frontend/src/settings/SettingsHelpPage.tsx` owns the operator-facing help for
-  editable settings.
+- `frontend/src/operator-guide/OperatorGuidePage.tsx` owns the dedicated
+  operator playbook tab backed by the canonical markdown guide
+  `docs/how-to-work-in-system.md`.
+- `frontend/src/settings/SettingsHelpPage.tsx` owns the concise technical
+  reference for editable settings.
 - `frontend/src/enrichment/TestingWorkspace.tsx` owns the Testing page UI:
   text input, enrichment status, result tabs, overview, visual evidence chain,
   and raw span/token/trace tables.
@@ -161,12 +166,17 @@ existing enrichment worker:
    one outbox row per route through `(source_message_id, route_id)` uniqueness.
 7. `notification-dispatcher` atomically claims pending outbox rows with
    `FOR UPDATE SKIP LOCKED`, then sends Telegram bot messages from the outbox.
+8. `summary-bot` computes the latest completed `Europe/Moscow` day/night window
+   from notification summary settings, collects Telegram source, processing,
+   lead-temperature, outbox, LLM, and Redis queue metrics, sends one Bot API
+   message to the configured summary chat, and records the period in
+   `notification_summary_runs`.
 
 Redis/Celery is the execution queue for NLP work. PostgreSQL is the source of
 truth for Telegram source messages, enrichment state, enrichment task
-publication state, and outgoing notification outbox items. This makes
-deduplication, retry, replay, audit, and operator analytics possible even if a
-process restarts.
+publication state, outgoing notification outbox items, and sent summary
+periods. This makes deduplication, retry, replay, audit, and operator analytics
+possible even if a process restarts.
 
 The userbot service is deliberately not connected to batch-runner output.
 Batch-runner remains a local/offline test and calibration tool.
@@ -362,14 +372,12 @@ settings endpoints:
   catalog item or creates a new item.
 - `POST /api/v1/settings/nlp/constructor/fact` adds selected text to an existing
   or new fact rule as an exact or lemmatized phrase.
-- `POST /api/v1/settings/nlp/constructor/signal` adds selected text to an
-  existing or new domain signal rule as an exact or lemmatized phrase.
+- `POST /api/v1/settings/nlp/constructor/signal` rejects selected text because
+  domain signals do not own phrases; operators connect signals by editing
+  `match.facts`.
 - `POST /api/v1/settings/nlp/constructor/noise` stores selected text in the
-  operator-managed `operator_noise` signal and connects it to noise/veto lead
-  scoring.
-
-Newly created domain signals receive score weight `0`, so rule discovery does
-not change lead scoring until scoring is explicitly tuned.
+  operator-managed `operator_noise_fact` fact and connects the `operator_noise`
+  signal to that fact for noise/veto lead scoring.
 
 Container stdout/stderr logs are also bounded in Docker Compose through the
 `json-file` driver with `max-size=10m` and `max-file=5` on every service.
@@ -396,9 +404,19 @@ when the database is empty.
   mappings, customer segment mappings, intent signals, and noise signals.
 
 The reserved signal type `operator_noise` is the fast noise-constructor target.
-It is still stored as normal editable config data in `nlp_config_revisions`;
-the code only defines the creation template used when an operator sends the
-first selected fragment to noise and the active config has no such signal yet.
+It is still stored as normal editable config data in `nlp_config_revisions`,
+but selected noise text is owned by `operator_noise_fact`; the signal depends on
+that fact through `match.facts`.
+
+Facts have exactly two valid sources in the operator model:
+
+1. a direct fact rule that matches text by exact or lemmatized phrase;
+2. an alias dictionary entry that emits `alias:catalog:key` and additional
+   `fact_types`.
+
+This is a source distinction, not a dependency hierarchy. Facts do not
+"depend on dictionaries"; they can simply be emitted by dictionaries. Signals
+still depend only on facts.
 
 Signal and fact rules may include a `group` display folder. The group is stored
 in the PostgreSQL config revision together with the rule and is used by the
@@ -409,10 +427,14 @@ Yargy rules are externalized as configuration data, but the operator-facing
 model is intentionally simpler than Yargy internals:
 
 - Exact phrases: stable token sequences for abbreviations, technical notation,
-  and wording where the exact written form matters. Concrete market names belong
-  in alias catalogs instead of signal/fact phrase rules.
+  and wording where the exact written form matters inside fact rules. Concrete
+  market names belong in exactly one alias catalog item instead of signal/fact
+  phrase rules.
 - Lemmatized phrases: Russian domain phrases entered as normal text and stored
   with both the operator's source text and backend-built lemmas.
+
+Exact and lemmatized phrases belong to fact rules only. Alias dictionaries do
+not perform lemmatized matching, and signals do not own text phrases at all.
 
 Use lemmatized phrases for Russian domain language that appears in different
 cases or forms. For example, operator input `умный дом` is stored as lemmas
@@ -454,6 +476,8 @@ also emit a nested `Wi-Fi` protocol fact. Alias spellings are curated so the sam
 literal spelling is not duplicated across catalogs; choose the most specific
 catalog (`vendors`, `software`, `devices`, or `protocols`) and make domain
 signals depend on that catalog explicitly.
+Alias `canonical` is a display label, not an implicit matcher; match ownership
+is defined by `aliases`.
 
 NLP config v3 separates the model into explicit layers:
 
@@ -462,13 +486,19 @@ NLP config v3 separates the model into explicit layers:
    generic fact types such as `vendor`, `model`, `protocol`, or
    `automation_component`.
 2. Fact rules extract meaning from text into `intent_*`, `context_*`,
-   `object_*`, `domain_*`, and `noise_*` fact types.
+   `object_*`, `domain_*`, and `noise_*` fact types. A concrete text fragment
+   has one phrase owner: either an alias catalog entry or one fact rule. The
+   config loader compares ownership with runtime-equivalent normalization for
+   separators and Latin/Cyrillic confusables, so `Wi-Fi`, `WiFi`, and `wi fi`
+   cannot be split across owners.
 3. Domain signals contain no direct phrases or Yargy patterns. They depend only
    on facts through `match.facts`, for example `pur_leak_protection` depends on
    `domain_leak_protection`, `alias:vendors:neptun`,
    `alias:devices:leak_sensor`, and `alias:devices:leak_valve`.
 4. Lead scoring maps signal/fact types to score reasons, solution areas,
    customer segments, intent/noise categories, score caps, and review lanes.
+   Signal dependencies and lead-scoring fact references are validated against
+   fact types emitted by facts and alias catalogs.
 
 The current semantic signal taxonomy is v3 and intentionally does not preserve
 old v2 names as compatibility targets. Examples are `lead_active_intent`,
@@ -629,7 +659,8 @@ The settings UI exposes the active NLP configuration through FastAPI:
   verdict/comment into `message_reviews`.
 - `GET /api/v1/runtime/logs` returns recent durable runtime events.
 - `GET /api/v1/runtime/status` returns backend/database/Redis/userbot/worker/
-  enrichment-dispatcher/notification-dispatcher status summaries.
+  llm-worker/enrichment-dispatcher/notification-dispatcher status summaries,
+  including the Redis `llm` queue depth and LLM run counters by status.
 
 PostgreSQL table `nlp_config_revisions` is the active source of truth for
 editable NLP settings. `backend/config/nlp/*.yaml` is only a bootstrap default:
@@ -751,6 +782,10 @@ optional provenance (`source_message_id`, `source_chat_title`,
 when present, so repeated promotion from the same Analytics/Review message is a
 no-op. `last_enrichment_job_id` points at the most recent check run and is
 updated by `POST /api/v1/golden-examples/{id}/run`.
+Operator-facing rules now have a canonical home in
+`docs/how-to-work-in-system.md`, exposed in the separate `Как работать` tab.
+`docs/operator-golden-rules.md` remains a narrower Golden/Review/Settings
+discipline reference.
 
 ## Legacy Reference
 

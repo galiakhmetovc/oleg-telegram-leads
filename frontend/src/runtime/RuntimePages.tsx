@@ -65,6 +65,13 @@ type ProjectDocumentContent = ProjectDocumentSummary & {
   content: string;
 };
 
+export type MarkdownHeading = {
+  id: string;
+  level: 1 | 2 | 3;
+  text: string;
+  lineIndex: number;
+};
+
 export function RuntimeLogsPage({ apiBaseUrl }: RuntimePageProps) {
   const [items, setItems] = useState<RuntimeLogEntry[]>([]);
   const [total, setTotal] = useState(0);
@@ -630,60 +637,141 @@ function groupProjectDocuments(items: ProjectDocumentSummary[]): { label: string
     .filter((group) => group.items.length > 0);
 }
 
-function encodeDocumentPath(path: string): string {
+export function encodeDocumentPath(path: string): string {
   return path.split("/").map(encodeURIComponent).join("/");
 }
 
-function MarkdownPreview({ content }: { content: string }) {
+export function extractMarkdownHeadings(content: string, prefix = "section"): MarkdownHeading[] {
+  const headings: MarkdownHeading[] = [];
+  for (const [lineIndex, line] of content.split("\n").entries()) {
+    const trimmed = line.trim();
+    if (trimmed.startsWith("### ")) {
+      headings.push({
+        id: `${prefix}-${headings.length + 1}`,
+        level: 3,
+        text: trimmed.replace(/^###\s+/, ""),
+        lineIndex
+      });
+      continue;
+    }
+    if (trimmed.startsWith("## ")) {
+      headings.push({
+        id: `${prefix}-${headings.length + 1}`,
+        level: 2,
+        text: trimmed.replace(/^##\s+/, ""),
+        lineIndex
+      });
+      continue;
+    }
+    if (trimmed.startsWith("# ")) {
+      headings.push({
+        id: `${prefix}-${headings.length + 1}`,
+        level: 1,
+        text: trimmed.replace(/^#\s+/, ""),
+        lineIndex
+      });
+    }
+  }
+  return headings;
+}
+
+export function MarkdownPreview({
+  content,
+  headings = []
+}: {
+  content: string;
+  headings?: MarkdownHeading[];
+}) {
+  const headingsByLine = new Map(headings.map((heading) => [heading.lineIndex, heading]));
+  const lines = content.split("\n");
+  const blocks: React.JSX.Element[] = [];
+
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index];
+    const key = `${index}-${line.slice(0, 12)}`;
+    const trimmed = line.trim();
+    const heading = headingsByLine.get(index);
+    if (trimmed === "") {
+      blocks.push(<Box key={key} sx={{ height: 8 }} />);
+      continue;
+    }
+    if (trimmed.startsWith("```")) {
+      const codeLines: string[] = [];
+      index += 1;
+      while (index < lines.length && !lines[index].trim().startsWith("```")) {
+        codeLines.push(lines[index]);
+        index += 1;
+      }
+      blocks.push(
+        <Box key={key} component="pre" className="project-docs-code-block">
+          {codeLines.join("\n")}
+        </Box>
+      );
+      continue;
+    }
+    if (trimmed.startsWith("|")) {
+      const tableLines = [line];
+      while (index + 1 < lines.length && lines[index + 1].trim().startsWith("|")) {
+        tableLines.push(lines[index + 1]);
+        index += 1;
+      }
+      blocks.push(
+        <Box key={key} component="pre" className="project-docs-code-block">
+          {tableLines.join("\n")}
+        </Box>
+      );
+      continue;
+    }
+    if (trimmed.startsWith("### ")) {
+      blocks.push(
+        <Typography key={key} id={heading?.id} variant="h6" component="h4" sx={{ scrollMarginTop: 96 }}>
+          {trimmed.replace(/^###\s+/, "")}
+        </Typography>
+      );
+      continue;
+    }
+    if (trimmed.startsWith("## ")) {
+      blocks.push(
+        <Typography key={key} id={heading?.id} variant="h6" component="h3" sx={{ fontWeight: 700, scrollMarginTop: 96 }}>
+          {trimmed.replace(/^##\s+/, "")}
+        </Typography>
+      );
+      continue;
+    }
+    if (trimmed.startsWith("# ")) {
+      blocks.push(
+        <Typography key={key} id={heading?.id} variant="h5" component="h2" sx={{ fontWeight: 700, scrollMarginTop: 96 }}>
+          {trimmed.replace(/^#\s+/, "")}
+        </Typography>
+      );
+      continue;
+    }
+    if (trimmed.startsWith("- ")) {
+      blocks.push(
+        <Typography key={key} component="li" variant="body2">
+          {trimmed.replace(/^-\s+/, "")}
+        </Typography>
+      );
+      continue;
+    }
+    if (/^\d+\.\s+/.test(trimmed)) {
+      blocks.push(
+        <Typography key={key} component="li" variant="body2">
+          {trimmed.replace(/^\d+\.\s+/, "")}
+        </Typography>
+      );
+      continue;
+    }
+    blocks.push(
+      <Typography key={key} variant="body2">
+        {line}
+      </Typography>
+    );
+  }
+
   return (
     <Box className="project-docs-markdown">
-      {content.split("\n").map((line, index) => {
-        const key = `${index}-${line.slice(0, 12)}`;
-        const trimmed = line.trim();
-        if (trimmed === "") {
-          return <Box key={key} sx={{ height: 8 }} />;
-        }
-        if (trimmed.startsWith("### ")) {
-          return (
-            <Typography key={key} variant="h6" component="h4">
-              {trimmed.replace(/^###\s+/, "")}
-            </Typography>
-          );
-        }
-        if (trimmed.startsWith("## ")) {
-          return (
-            <Typography key={key} variant="h6" component="h3" sx={{ fontWeight: 700 }}>
-              {trimmed.replace(/^##\s+/, "")}
-            </Typography>
-          );
-        }
-        if (trimmed.startsWith("# ")) {
-          return (
-            <Typography key={key} variant="h5" component="h2" sx={{ fontWeight: 700 }}>
-              {trimmed.replace(/^#\s+/, "")}
-            </Typography>
-          );
-        }
-        if (trimmed.startsWith("- ")) {
-          return (
-            <Typography key={key} component="li" variant="body2">
-              {trimmed.replace(/^-\s+/, "")}
-            </Typography>
-          );
-        }
-        if (/^\d+\.\s+/.test(trimmed)) {
-          return (
-            <Typography key={key} component="li" variant="body2">
-              {trimmed.replace(/^\d+\.\s+/, "")}
-            </Typography>
-          );
-        }
-        return (
-          <Typography key={key} variant="body2">
-            {line}
-          </Typography>
-        );
-      })}
+      {blocks}
     </Box>
   );
 }
@@ -712,21 +800,30 @@ const systemStatusDetailLabels: Record<string, string> = {
   environment: "Окружение",
   errored_sources: "Проблемные источники",
   failed_latest_error: "Последняя ошибка",
+  endpoint: "Endpoint",
+  execution_mode: "Режим запуска",
   jobs_by_status: "Задачи по статусам",
   jobs_total: "Задач всего",
   latest_event_at: "Последнее событие worker",
   latest_job_created_at: "Последняя задача",
   latest_message_at: "Последнее сообщение",
   latest_notification_at: "Последнее уведомление",
+  latest_completed_at: "Последний completed run",
+  llm_enabled: "LLM включен",
   latest_task_published_at: "Последняя задача отправлена в worker",
+  llm_runs_by_status: "LLM runs по статусам",
+  llm_runs_total: "LLM runs всего",
   messages_total: "Сообщений принято",
+  model: "Модель",
   next_cooldown_until: "Ближайший cooldown до",
   oldest_pending_at: "Самое старое ожидающее",
+  oldest_queued_at: "Самый старый queued run",
   oldest_task_pending_at: "Старая задача ждет отправки",
   outbox_by_status: "Уведомления по статусам",
   outbox_total: "Уведомлений всего",
   public_base_url: "Публичный URL",
   redis_ok: "Redis ping",
+  redis_llm_queue_depth: "Глубина очереди llm",
   source_chats_by_status: "Чаты по статусам",
   source_chats_enabled: "Чатов включено",
   source_chats_total: "Чатов-источников",

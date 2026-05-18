@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import UUID, uuid4
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from app.application.notifications.batching import TELEGRAM_SEND_MESSAGE_CHAR_LIMIT
 from app.application.notifications.batching import pack_notification_batches
@@ -16,10 +17,26 @@ from app.application.notifications.routing import match_notification_routes
 from app.application.notifications.routing import NotificationMessageContext
 from app.application.notifications.routing import render_notification_message
 from app.domain.enrichment import TextEnrichmentResult
+from app.domain.llm_verification import LlmVerificationRun, SourceMessageForLlmVerification
 from app.domain.notifications import NotificationOutboxItem
-from app.domain.notifications import NotificationSettings, TelegramBot, TelegramChat
+from app.domain.notifications import NotificationSettings, NotificationSummarySettings
+from app.domain.notifications import TelegramBot, TelegramChat
 from app.domain.notifications import TelegramSendResult
 
+LLM_LEAD_SOURCE_ROUTE_TEMPERATURES = {
+    "cold_leads": "cold",
+    "warm_leads": "warm",
+}
+LLM_LEAD_NOTIFICATION_ROUTE_IDS = {
+    "cold_leads": "llm_cold_leads",
+    "warm_leads": "llm_warm_leads",
+}
+LLM_LEAD_TEMPERATURE_LABELS = {
+    "cold": "холодный",
+    "warm": "теплый",
+}
+LLM_LEAD_CONFIDENCE_MIN = 0.5
+LLM_LEAD_RECOMMENDATIONS = {"keep", "promote", "manual_review"}
 DEFAULT_TELEGRAM_TEST_MESSAGE = "Проверка уведомлений PUR Leads v2"
 OLD_DEFAULT_ROUTE_MESSAGE_TEMPLATE = (
     "Найден лид ПУР\n"
@@ -79,6 +96,9 @@ class UpdateNotificationSettings:
             ],
             routes=settings.routes,
             updated_at=None,
+            summary=_normalize_summary(settings.summary)
+            if settings.summary is not None
+            else current.summary,
         )
         _validate_unique([bot.id for bot in normalized.bots], "Bot ids must be unique")
         _validate_unique([chat.id for chat in normalized.chats], "Chat ids must be unique")
@@ -96,6 +116,13 @@ class UpdateNotificationSettings:
                 raise ValueError(f"Route {route.id} references unknown bot {route.bot_id}")
             if route.chat_id not in chat_ids:
                 raise ValueError(f"Route {route.id} references unknown chat {route.chat_id}")
+        if normalized.summary is not None:
+            if normalized.summary.bot_id not in bot_ids:
+                raise ValueError(f"Summary references unknown bot {normalized.summary.bot_id}")
+            if normalized.summary.chat_id not in chat_ids:
+                raise ValueError(f"Summary references unknown chat {normalized.summary.chat_id}")
+            if normalized.summary.day_start_hour == normalized.summary.night_start_hour:
+                raise ValueError("Summary day_start_hour and night_start_hour must differ")
         return await self._repository.save_settings(normalized)
 
 
@@ -181,6 +208,57 @@ class QueueNotificationsForEnrichment:
         if not items:
             return []
         return await self._outbox_repository.enqueue(items)
+
+
+class QueueLlmLeadNotification:
+    def __init__(
+        self,
+        *,
+        settings_repository: NotificationSettingsRepository,
+        outbox_repository: NotificationOutboxRepository,
+        now: Callable[[], datetime] | None = None,
+    ) -> None:
+        self._settings_repository = settings_repository
+        self._outbox_repository = outbox_repository
+        self._now = now or (lambda: datetime.now(UTC))
+
+    async def execute(
+        self,
+        *,
+        run: LlmVerificationRun,
+        source: SourceMessageForLlmVerification,
+        context: NotificationMessageContext | None,
+    ) -> list[NotificationOutboxItem]:
+        if not _should_notify_llm_lead(run, source):
+            return []
+        settings = await self._settings_repository.get_settings()
+        target = _llm_notification_target(settings)
+        if target is None:
+            return []
+        if run.route_id is None:
+            return []
+        notification_route_id = _llm_notification_route_id(run.route_id)
+        if notification_route_id is None:
+            return []
+        bot_id, chat_id = target
+        return await self._outbox_repository.enqueue(
+            [
+                NotificationOutboxItem(
+                    id=uuid4(),
+                    route_id=notification_route_id,
+                    bot_id=bot_id,
+                    chat_id=chat_id,
+                    source_message_id=source.source_message_id,
+                    enrichment_job_id=source.enrichment_job_id,
+                    text=_render_llm_lead_notification(run, source, context),
+                    status="pending",
+                    attempts=0,
+                    last_error=None,
+                    created_at=self._now(),
+                    sent_at=None,
+                )
+            ]
+        )
 
 
 class FlushNotificationOutbox:
@@ -351,6 +429,30 @@ def _group_pending_items(
     return list(groups.values())
 
 
+def _normalize_summary(
+    summary: NotificationSummarySettings | None,
+) -> NotificationSummarySettings | None:
+    if summary is None:
+        return None
+    if not 0 <= summary.day_start_hour <= 23:
+        raise ValueError("Summary day_start_hour must be between 0 and 23")
+    if not 0 <= summary.night_start_hour <= 23:
+        raise ValueError("Summary night_start_hour must be between 0 and 23")
+    timezone = _required_str(summary.timezone, "Summary timezone is required")
+    try:
+        ZoneInfo(timezone)
+    except ZoneInfoNotFoundError as exc:
+        raise ValueError("Summary timezone is invalid") from exc
+    return NotificationSummarySettings(
+        enabled=summary.enabled,
+        bot_id=_required_str(summary.bot_id, "Summary bot id is required"),
+        chat_id=_required_str(summary.chat_id, "Summary chat id is required"),
+        timezone=timezone,
+        day_start_hour=summary.day_start_hour,
+        night_start_hour=summary.night_start_hour,
+    )
+
+
 def _lead_action_keyboard(source_message_id: UUID) -> dict[str, Any]:
     return {
         "inline_keyboard": [
@@ -360,6 +462,116 @@ def _lead_action_keyboard(source_message_id: UUID) -> dict[str, Any]:
             ]
         ]
     }
+
+
+def _should_notify_llm_lead(
+    run: LlmVerificationRun,
+    source: SourceMessageForLlmVerification,
+) -> bool:
+    if run.route_id is None:
+        return False
+    expected_temperature = LLM_LEAD_SOURCE_ROUTE_TEMPERATURES.get(run.route_id)
+    if run.status != "completed" or expected_temperature is None:
+        return False
+    if not isinstance(run.response, dict):
+        return False
+    assessment = source.enrichment_result.lead_assessment
+    if assessment is None or not assessment.is_lead or assessment.temperature != expected_temperature:
+        return False
+    verdict = str(run.response.get("verdict") or "")
+    recommendation = str(run.response.get("recommendation") or "")
+    confidence = _confidence_value(run.response.get("confidence"))
+    return (
+        verdict == "lead"
+        and recommendation in LLM_LEAD_RECOMMENDATIONS
+        and confidence is not None
+        and confidence >= LLM_LEAD_CONFIDENCE_MIN
+    )
+
+
+def _llm_notification_route_id(source_route_id: str) -> str | None:
+    return LLM_LEAD_NOTIFICATION_ROUTE_IDS.get(source_route_id)
+
+
+def _llm_notification_target(settings: NotificationSettings) -> tuple[str, str] | None:
+    bot_ids = {bot.id for bot in settings.bots if bot.enabled and bot.token}
+    chat_ids = {chat.id for chat in settings.chats if chat.enabled and chat.telegram_chat_id.strip()}
+    for route in sorted(settings.routes, key=lambda item: item.priority, reverse=True):
+        if route.enabled and route.bot_id in bot_ids and route.chat_id in chat_ids:
+            return route.bot_id, route.chat_id
+    if bot_ids and chat_ids:
+        return sorted(bot_ids)[0], sorted(chat_ids)[0]
+    return None
+
+
+def _render_llm_lead_notification(
+    run: LlmVerificationRun,
+    source: SourceMessageForLlmVerification,
+    context: NotificationMessageContext | None,
+) -> str:
+    assessment = source.enrichment_result.lead_assessment
+    response = run.response or {}
+    review_lane = assessment.review_lane if assessment else None
+    temperature = assessment.temperature if assessment else "none"
+    temperature_label = LLM_LEAD_TEMPERATURE_LABELS.get(temperature, "лид")
+    lead_phrase = f"{temperature_label} лид" if temperature_label != "лид" else "лид"
+    lines = [
+        f"LLM подтвердил {lead_phrase}",
+        "",
+        f"LLM: {response.get('verdict')} / {response.get('recommendation')} / confidence {_format_confidence(response.get('confidence'))}",
+        f"Оценка: {assessment.score if assessment else 0} ({temperature})",
+        f"Очередь: {review_lane.label if review_lane else 'не указано'}",
+    ]
+    evidence = _llm_response_list(response.get("evidence"))
+    if evidence:
+        lines.extend(["", "Evidence:", *[f"- {_truncate_plain_text(item, max_length=220)}" for item in evidence[:5]]])
+    anti_evidence = _llm_response_list(response.get("anti_evidence"))
+    if anti_evidence:
+        lines.extend(["", "Anti-evidence:", *[f"- {_truncate_plain_text(item, max_length=220)}" for item in anti_evidence[:5]]])
+    lines.extend(["", "Текст:", _truncate_plain_text(source.text, max_length=1200)])
+    links = _context_link_lines(context)
+    if links:
+        lines.extend(["", "Ссылки:", *links])
+    return "\n".join(lines)
+
+
+def _format_confidence(value: object) -> str:
+    confidence = _confidence_value(value)
+    if confidence is not None:
+        return f"{confidence:.2f}".rstrip("0").rstrip(".")
+    return str(value or "не указано")
+
+
+def _confidence_value(value: object) -> float | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int | float):
+        return float(value)
+    return None
+
+
+def _llm_response_list(value: object) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return [str(item).strip() for item in value if str(item).strip()]
+
+
+def _truncate_plain_text(text: str, *, max_length: int) -> str:
+    normalized = " ".join(text.split())
+    if len(normalized) <= max_length:
+        return normalized
+    return normalized[: max_length - 1].rstrip() + "..."
+
+
+def _context_link_lines(context: NotificationMessageContext | None) -> list[str]:
+    if context is None:
+        return []
+    lines: list[str] = []
+    if context.telegram_message_url:
+        lines.append(f"Telegram: {context.telegram_message_url}")
+    if context.app_message_url:
+        lines.append(f"Аналитика: {context.app_message_url}")
+    return lines
 
 
 def _find_enabled_bot(settings: NotificationSettings, bot_id: str) -> TelegramBot:

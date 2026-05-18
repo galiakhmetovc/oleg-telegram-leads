@@ -74,6 +74,11 @@ services:
       PUR_RUNTIME_LOG_MAX_LIMIT: ${PUR_RUNTIME_LOG_MAX_LIMIT:-200}
       PUR_RUNTIME_ENRICHMENT_EVENT_RETENTION_ROWS: ${PUR_RUNTIME_ENRICHMENT_EVENT_RETENTION_ROWS:-20000}
       PUR_RUNTIME_NOTIFICATION_OUTBOX_RETENTION_ROWS: ${PUR_RUNTIME_NOTIFICATION_OUTBOX_RETENTION_ROWS:-10000}
+      PUR_LLM_VERIFICATION_MODEL: ${PUR_LLM_VERIFICATION_MODEL:-lead-qwen-ru}
+      PUR_LLM_VERIFICATION_ENDPOINT: ${PUR_LLM_VERIFICATION_ENDPOINT:-http://host.docker.internal:11434/api/chat}
+      PUR_LLM_VERIFICATION_TIMEOUT_SECONDS: ${PUR_LLM_VERIFICATION_TIMEOUT_SECONDS:-600}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     ports:
       - "127.0.0.1:${BACKEND_PORT:-8000}:8000"
     volumes:
@@ -107,6 +112,32 @@ services:
       redis:
         condition: service_healthy
 
+  llm-worker:
+    build:
+      context: ./backend
+    logging: *default-logging
+    command: watchfiles --filter python --target-type command "celery -A app.worker.celery_app worker --loglevel=info --pool=solo --queues=llm --concurrency=1" /app/app
+    environment:
+      PUR_DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-pur_leads}:${POSTGRES_PASSWORD:-pur_leads_dev_password}@postgres:5432/${POSTGRES_DB:-pur_leads_v2}
+      PUR_ENVIRONMENT: development
+      PUR_CODE_VERSION: ${PUR_CODE_VERSION:-dev}
+      PUR_PROCESS_ROLE: llm-worker
+      PUR_REDIS_URL: redis://redis:6379/0
+      PUR_NLP_CONFIG_DIR: /app/config/nlp
+      PUR_PUBLIC_BASE_URL: ${PUR_PUBLIC_BASE_URL:-https://secclaw.qlbc.ru:19443}
+      PUR_LLM_VERIFICATION_MODEL: ${PUR_LLM_VERIFICATION_MODEL:-lead-qwen-ru}
+      PUR_LLM_VERIFICATION_ENDPOINT: ${PUR_LLM_VERIFICATION_ENDPOINT:-http://host.docker.internal:11434/api/chat}
+      PUR_LLM_VERIFICATION_TIMEOUT_SECONDS: ${PUR_LLM_VERIFICATION_TIMEOUT_SECONDS:-600}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ./backend:/app
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+
   enrichment-dispatcher:
     build:
       context: ./backend
@@ -129,7 +160,7 @@ services:
     build:
       context: ./backend
     logging: *default-logging
-    command: python -m app.cli.telegram_userbot_worker --mode listen --batch-limit 100 --cooldown-recovery-limit 10 --cooldown-recovery-delay 15 --idle-retry 60
+    command: python -m app.cli.telegram_userbot_worker --mode listen --batch-limit 100 --cooldown-recovery-limit 10 --cooldown-recovery-delay 15 --settings-reload-interval ${TELEGRAM_SETTINGS_RELOAD_INTERVAL:-600} --idle-retry 60
     environment:
       PUR_DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-pur_leads}:${POSTGRES_PASSWORD:-pur_leads_dev_password}@postgres:5432/${POSTGRES_DB:-pur_leads_v2}
       PUR_ENVIRONMENT: development
@@ -173,6 +204,25 @@ services:
     depends_on:
       migrate:
         condition: service_completed_successfully
+
+  summary-bot:
+    build:
+      context: ./backend
+    logging: *default-logging
+    command: python -m app.cli.notification_summary_worker --interval ${NOTIFICATION_SUMMARY_INTERVAL:-60}
+    environment:
+      PUR_DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-pur_leads}:${POSTGRES_PASSWORD:-pur_leads_dev_password}@postgres:5432/${POSTGRES_DB:-pur_leads_v2}
+      PUR_ENVIRONMENT: development
+      PUR_PROCESS_ROLE: summary-bot
+      PUR_REDIS_URL: redis://redis:6379/0
+      PUR_NLP_CONFIG_DIR: /app/config/nlp
+    volumes:
+      - ./backend:/app
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
 
   frontend:
     build:

@@ -200,6 +200,43 @@ export type NotificationSettings = {
   updated_at?: string | null;
 };
 
+export type LlmRouteConditionsSettings = {
+  source_chat_ids: string[];
+  score_min?: number | null;
+  score_max?: number | null;
+  temperatures: string[];
+  review_lanes: string[];
+  include_signal_types: string[];
+  exclude_signal_types: string[];
+  include_fact_types: string[];
+  exclude_fact_types: string[];
+  include_reason_keys: string[];
+  exclude_reason_keys: string[];
+  include_solution_area_types: string[];
+  exclude_solution_area_types: string[];
+  include_customer_segment_types: string[];
+  exclude_customer_segment_types: string[];
+};
+
+export type LlmRouteSettings = {
+  id: string;
+  name: string;
+  enabled: boolean;
+  priority: number;
+  match_mode: "all" | "any";
+  conditions: LlmRouteConditionsSettings;
+};
+
+export type LlmSettings = {
+  enabled: boolean;
+  model: string;
+  endpoint: string;
+  timeout_seconds: number;
+  system_prompt: string;
+  routes: LlmRouteSettings[];
+  updated_at?: string | null;
+};
+
 export type TelegramUserbotAccountSettings = {
   id: string;
   name: string;

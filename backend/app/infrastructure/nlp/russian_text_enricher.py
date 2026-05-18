@@ -67,6 +67,36 @@ class AliasTextMatch:
     text: str
 
 
+@dataclass(frozen=True)
+class SentenceSpec:
+    id: str
+    text: str
+    start: int
+    stop: int
+
+
+@dataclass(frozen=True)
+class PhraseTextMatch:
+    start: int
+    stop: int
+    text: str
+    source: str
+
+
+@dataclass
+class SpanRegistry:
+    ids: dict[tuple[str, int, int, str], str]
+
+    def __init__(self) -> None:
+        self.ids = {}
+
+    def resolve(self, *, source: str, start: int, stop: int, text: str) -> str:
+        key = (source, start, stop, text.casefold())
+        if key not in self.ids:
+            self.ids[key] = f"span-{len(self.ids) + 1}"
+        return self.ids[key]
+
+
 class RussianTextEnricher:
     def __init__(self, config: NlpPipelineConfig) -> None:
         self._config = config
@@ -109,6 +139,17 @@ class RussianTextEnricher:
         doc.segment(self._segmenter)
         mark("segmentation", 15, "Текст разбит на предложения и токены")
 
+        sentence_specs = tuple(
+            SentenceSpec(
+                id=f"sentence-{index}",
+                text=sentence.text,
+                start=sentence.start,
+                stop=sentence.stop,
+            )
+            for index, sentence in enumerate(doc.sents, start=1)
+        )
+        span_registry = SpanRegistry()
+
         if self._config.is_enabled("morph"):
             doc.tag_morph(self._morph_tagger_instance())
             for token in doc.tokens:
@@ -127,12 +168,16 @@ class RussianTextEnricher:
 
         alias_matches = self._find_alias_matches(text)
 
-        facts = self._extract_facts(text, alias_matches) if self._config.is_enabled("facts") else []
+        facts = (
+            self._extract_facts(text, alias_matches, sentence_specs, span_registry)
+            if self._config.is_enabled("facts")
+            else []
+        )
         if self._config.is_enabled("facts"):
             mark("facts", 80, "Извлечены факты по Yargy-правилам")
 
         signals = (
-            self._extract_domain_signals(text, facts)
+            self._extract_domain_signals(text, facts, sentence_specs, span_registry)
             if self._config.is_enabled("domain_signals")
             else []
         )
@@ -149,11 +194,11 @@ class RussianTextEnricher:
 
         sentences = [
             EnrichedSentence(
-                id=f"sentence-{index}",
+                id=sentence.id,
                 text=sentence.text,
                 range=TextRange(start=sentence.start, stop=sentence.stop),
             )
-            for index, sentence in enumerate(doc.sents, start=1)
+            for sentence in sentence_specs
         ]
         tokens = [
             EnrichedToken(
@@ -235,6 +280,8 @@ class RussianTextEnricher:
         self,
         text: str,
         facts: list[ExtractedFact],
+        sentence_specs: tuple[SentenceSpec, ...],
+        span_registry: SpanRegistry,
     ) -> list[DomainSignal]:
         signals: list[DomainSignal] = []
         for compiled_rule in self._compiled_signal_rules:
@@ -242,11 +289,22 @@ class RussianTextEnricher:
             signals.extend(
                 DomainSignal(
                     id=f"signal-{len(signals) + 1}",
-                    text=match_text,
+                    text=match.text,
                     type=rule_config.type,
                     label=rule_config.label,
-                    range=TextRange(start=start, stop=stop),
-                    source="yargy",
+                    range=TextRange(start=match.start, stop=match.stop),
+                    source=match.source,
+                    span_id=span_registry.resolve(
+                        source=match.source,
+                        start=match.start,
+                        stop=match.stop,
+                        text=match.text,
+                    ),
+                    sentence_id=_sentence_id_for_range(
+                        start=match.start,
+                        stop=match.stop,
+                        sentence_specs=sentence_specs,
+                    ),
                     confidence=rule_config.confidence,
                     color=rule_config.color,
                     explanation=(
@@ -255,7 +313,7 @@ class RussianTextEnricher:
                     ),
                     settings_refs=[_rule_settings_ref("signals", rule_config.type, rule_config.label)],
                 )
-                for start, stop, match_text in self._find_phrase_matches(
+                for match in self._find_phrase_matches(
                     text,
                     compiled_rule.exact_phrases,
                     compiled_rule.parser,
@@ -272,6 +330,9 @@ class RussianTextEnricher:
                         label=rule_config.label,
                         range=fact.range,
                         source="fact_dependency",
+                        span_id=fact.span_id,
+                        sentence_id=fact.sentence_id,
+                        source_fact_ids=[fact.id],
                         confidence=rule_config.confidence,
                         color=rule_config.color,
                         explanation=(
@@ -293,6 +354,8 @@ class RussianTextEnricher:
         self,
         text: str,
         alias_matches: list[AliasTextMatch],
+        sentence_specs: tuple[SentenceSpec, ...],
+        span_registry: SpanRegistry,
     ) -> list[ExtractedFact]:
         facts: list[ExtractedFact] = []
         for compiled_rule in self._compiled_fact_rules:
@@ -300,19 +363,27 @@ class RussianTextEnricher:
             facts.extend(
                 ExtractedFact(
                     id=f"fact-{len(facts) + 1}",
-                    text=match_text,
+                    text=match.text,
                     type=rule_config.type,
                     label=rule_config.label,
-                    range=TextRange(start=start, stop=stop),
-                    source="yargy",
-                    confidence=rule_config.confidence,
-                    explanation=(
-                        f"Сработало правило факта «{rule_config.label}» "
-                        f"({rule_config.type}) через точную или лемматическую фразу."
+                    range=TextRange(start=match.start, stop=match.stop),
+                    source=match.source,
+                    span_id=span_registry.resolve(
+                        source=match.source,
+                        start=match.start,
+                        stop=match.stop,
+                        text=match.text,
                     ),
+                    sentence_id=_sentence_id_for_range(
+                        start=match.start,
+                        stop=match.stop,
+                        sentence_specs=sentence_specs,
+                    ),
+                    confidence=rule_config.confidence,
+                    explanation=_fact_explanation(rule_config, match.source),
                     settings_refs=[_rule_settings_ref("facts", rule_config.type, rule_config.label)],
                 )
-                for start, stop, match_text in self._find_phrase_matches(
+                for match in self._find_phrase_matches(
                     text,
                     compiled_rule.exact_phrases,
                     compiled_rule.parser,
@@ -320,14 +391,28 @@ class RussianTextEnricher:
             )
         for alias_match in alias_matches:
             alias_config = alias_match.config
+            span_id = span_registry.resolve(
+                source="alias_catalog",
+                start=alias_match.start,
+                stop=alias_match.stop,
+                text=alias_match.text,
+            )
+            sentence_id = _sentence_id_for_range(
+                start=alias_match.start,
+                stop=alias_match.stop,
+                sentence_specs=sentence_specs,
+            )
+            identity_fact_id = f"fact-{len(facts) + 1}"
             facts.append(
                 ExtractedFact(
-                    id=f"fact-{len(facts) + 1}",
+                    id=identity_fact_id,
                     text=alias_match.text,
                     type=_alias_identity_fact_type(alias_config),
                     label=_alias_ref_label(alias_config),
                     range=TextRange(start=alias_match.start, stop=alias_match.stop),
                     source="alias_catalog",
+                    span_id=span_id,
+                    sentence_id=sentence_id,
                     confidence=alias_config.confidence,
                     explanation=(
                         f"Найдена словарная сущность «{alias_config.canonical}» "
@@ -344,6 +429,9 @@ class RussianTextEnricher:
                     label=_alias_fact_label(alias_config, fact_type),
                     range=TextRange(start=alias_match.start, stop=alias_match.stop),
                     source="alias_catalog",
+                    span_id=span_id,
+                    sentence_id=sentence_id,
+                    derived_from_fact_id=identity_fact_id,
                     confidence=alias_config.confidence,
                     explanation=(
                         f"Найден alias «{alias_config.canonical}» в каталоге "
@@ -405,21 +493,21 @@ class RussianTextEnricher:
         seen: set[tuple[str, int, int]] = set()
         compact_text = _alias_compact_document(text, self._config.alias_matching)
         for compiled_alias in self._compiled_alias_rules:
-            for start, stop, match_text in self._find_phrase_matches(
+            for match in self._find_phrase_matches(
                 text,
                 compiled_alias.exact_phrases,
                 None,
             ):
-                key = (compiled_alias.config.key, start, stop)
+                key = (compiled_alias.config.key, match.start, match.stop)
                 if key in seen:
                     continue
                 seen.add(key)
                 matches.append(
                     AliasTextMatch(
                         config=compiled_alias.config,
-                        start=start,
-                        stop=stop,
-                        text=match_text,
+                        start=match.start,
+                        stop=match.stop,
+                        text=match.text,
                     )
                 )
             for start, stop in _find_normalized_alias_matches(
@@ -447,7 +535,7 @@ class RussianTextEnricher:
         text: str,
         exact_phrases: tuple[CompiledExactPhrase, ...],
         parser: Any | None,
-    ) -> list[tuple[int, int, str]]:
+    ) -> list[PhraseTextMatch]:
         matches = _find_exact_matches(text, exact_phrases)
         if parser is not None:
             search_text = text.lower()
@@ -456,9 +544,22 @@ class RussianTextEnricher:
                 warnings.filterwarnings("ignore", message="pkg_resources is deprecated.*")
                 for match in parser.findall(search_text):
                     matches.append(
-                        (match.span.start, match.span.stop, text[match.span.start:match.span.stop])
+                        PhraseTextMatch(
+                            start=match.span.start,
+                            stop=match.span.stop,
+                            text=text[match.span.start:match.span.stop],
+                            source="semantic_pattern",
+                        )
                     )
-        return sorted(matches, key=lambda item: (item[0], item[1], item[2].lower()))
+        return sorted(
+            matches,
+            key=lambda item: (
+                item.start,
+                item.stop,
+                item.text.lower(),
+                0 if item.source == "exact_phrase" else 1,
+            ),
+        )
 
     def _token_predicate(self, token: RuleTokenConfig) -> Any:
         if token.predicate == "normalized":
@@ -510,10 +611,15 @@ def _clean_phrase_tokens(phrase: tuple[str, ...]) -> tuple[str, ...]:
 def _find_exact_matches(
     text: str,
     exact_phrases: tuple[CompiledExactPhrase, ...],
-) -> list[tuple[int, int, str]]:
+) -> list[PhraseTextMatch]:
     search_text = text.lower()
     return [
-        (match.start(), match.end(), text[match.start():match.end()])
+        PhraseTextMatch(
+            start=match.start(),
+            stop=match.end(),
+            text=text[match.start():match.end()],
+            source="exact_phrase",
+        )
         for exact_phrase in exact_phrases
         for match in exact_phrase.pattern.finditer(search_text)
     ]
@@ -795,6 +901,17 @@ def _alias_identity_fact_type(alias_config: AliasRuleConfig) -> str:
     return f"alias:{alias_config.catalog}:{alias_config.key}"
 
 
+def _fact_explanation(rule_config: PhraseRuleConfig, match_source: str) -> str:
+    match_label = {
+        "exact_phrase": "точную фразу",
+        "semantic_pattern": "лемматическую фразу",
+    }.get(match_source, "текстовое правило")
+    return (
+        f"Сработало правило факта «{rule_config.label}» "
+        f"({rule_config.type}) через {match_label}."
+    )
+
+
 def _rule_settings_ref(section: str, key: str, label: str) -> SettingsReference:
     return SettingsReference(
         section=section,
@@ -843,23 +960,60 @@ def _rule_matches_fact(rule_config: PhraseRuleConfig, fact: ExtractedFact) -> bo
 
 def _dedupe_signals(signals: list[DomainSignal]) -> list[DomainSignal]:
     deduped: list[DomainSignal] = []
-    seen: set[tuple[str, int, int, str]] = set()
+    seen_indexes: dict[tuple[str, int, int, str], int] = {}
     for signal in signals:
         key = (signal.type, signal.range.start, signal.range.stop, signal.text.lower())
-        if key in seen:
+        if key in seen_indexes:
+            existing = deduped[seen_indexes[key]]
+            merged_fact_ids = list(dict.fromkeys([*existing.source_fact_ids, *signal.source_fact_ids]))
+            merged_refs = list(dict.fromkeys([*existing.settings_refs, *signal.settings_refs]))
+            deduped[seen_indexes[key]] = replace(
+                existing,
+                source_fact_ids=merged_fact_ids,
+                settings_refs=merged_refs,
+            )
             continue
-        seen.add(key)
+        seen_indexes[key] = len(deduped)
         deduped.append(replace(signal, id=f"signal-{len(deduped) + 1}"))
     return deduped
 
 
 def _dedupe_facts(facts: list[ExtractedFact]) -> list[ExtractedFact]:
     deduped: list[ExtractedFact] = []
-    seen: set[tuple[str, int, int, str]] = set()
+    seen: dict[tuple[str, int, int, str], str] = {}
+    id_mapping: dict[str, str] = {}
     for fact in facts:
         key = (fact.type, fact.range.start, fact.range.stop, fact.text.lower())
         if key in seen:
+            id_mapping[fact.id] = seen[key]
             continue
-        seen.add(key)
-        deduped.append(replace(fact, id=f"fact-{len(deduped) + 1}"))
-    return deduped
+        new_id = f"fact-{len(deduped) + 1}"
+        id_mapping[fact.id] = new_id
+        seen[key] = new_id
+        deduped.append(replace(fact, id=new_id))
+    return [
+        replace(
+            fact,
+            derived_from_fact_id=(
+                id_mapping.get(fact.derived_from_fact_id, fact.derived_from_fact_id)
+                if fact.derived_from_fact_id is not None
+                else None
+            ),
+        )
+        for fact in deduped
+    ]
+
+
+def _sentence_id_for_range(
+    *,
+    start: int,
+    stop: int,
+    sentence_specs: tuple[SentenceSpec, ...],
+) -> str | None:
+    for sentence in sentence_specs:
+        if start >= sentence.start and stop <= sentence.stop:
+            return sentence.id
+    for sentence in sentence_specs:
+        if _ranges_overlap(start, stop, sentence.start, sentence.stop):
+            return sentence.id
+    return None

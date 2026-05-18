@@ -41,6 +41,16 @@ class UnusedPoller:
         return FakeSummary()
 
 
+class RecordingWatcher:
+    kwargs: dict[str, object] | None = None
+
+    def __init__(self, **kwargs: object) -> None:
+        type(self).kwargs = kwargs
+
+    async def execute(self) -> FakeSummary:
+        return FakeSummary()
+
+
 @pytest.mark.asyncio
 async def test_userbot_worker_reconnects_after_flood_wait_without_reading_missing_summary(
     monkeypatch: pytest.MonkeyPatch,
@@ -55,6 +65,7 @@ async def test_userbot_worker_reconnects_after_flood_wait_without_reading_missin
     monkeypatch.setattr(telegram_userbot_worker, "WatchTelegramSources", FloodThenCrashWatcher)
     monkeypatch.setattr(telegram_userbot_worker, "PollTelegramSources", UnusedPoller)
     monkeypatch.setattr("app.cli.telegram_userbot_worker.asyncio.sleep", fake_sleep)
+    FloodThenCrashWatcher.calls = 0
 
     with pytest.raises(StopWorkerLoop):
         await telegram_userbot_worker._run(
@@ -64,8 +75,31 @@ async def test_userbot_worker_reconnects_after_flood_wait_without_reading_missin
             batch_limit=100,
             cooldown_recovery_limit=10,
             cooldown_recovery_delay=15,
+            settings_reload_interval=600,
             idle_retry=60,
         )
 
     assert sleeps == [20, 60]
     assert FloodThenCrashWatcher.calls == 2
+
+
+@pytest.mark.asyncio
+async def test_userbot_worker_passes_settings_reload_interval_to_watcher(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(telegram_userbot_worker, "WatchTelegramSources", RecordingWatcher)
+    monkeypatch.setattr(telegram_userbot_worker, "PollTelegramSources", UnusedPoller)
+
+    await telegram_userbot_worker._run(
+        mode="listen",
+        once=True,
+        interval=20,
+        batch_limit=100,
+        cooldown_recovery_limit=10,
+        cooldown_recovery_delay=15,
+        settings_reload_interval=600,
+        idle_retry=60,
+    )
+
+    assert RecordingWatcher.kwargs is not None
+    assert RecordingWatcher.kwargs["settings_reload_interval_seconds"] == 600

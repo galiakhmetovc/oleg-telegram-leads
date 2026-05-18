@@ -100,6 +100,8 @@ class TelegramHistoryClient(Protocol):
 
     async def __aexit__(self, exc_type: object, exc: object, tb: object) -> None: ...
 
+    async def resolve_source(self, input_ref: str) -> str | None: ...
+
     async def get_latest_message_id(self, input_ref: str) -> tuple[str | None, int | None]: ...
 
     async def fetch_messages_after(
@@ -114,6 +116,8 @@ class TelegramHistoryClient(Protocol):
         self,
         sources: Sequence[TelegramSourceSubscription],
         handler: Callable[[UUID, TelegramFetchedMessage], Awaitable[None]],
+        *,
+        reload_after_seconds: float | None = None,
     ) -> None: ...
 
 

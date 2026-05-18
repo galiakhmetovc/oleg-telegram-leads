@@ -39,9 +39,9 @@ const reviewVerdictOptions: Array<{
   { value: "noise", label: "Шум", color: "secondary" }
 ];
 const reviewLaneFallbackLabels: Record<string, string> = {
-  direct_pur_lead: "Прямой лид ПУР",
+  direct_pur_lead: "Прямой лид",
   domain_interest: "Доменный интерес",
-  pur_design_context: "Проектный контекст ПУР",
+  pur_design_context: "Проектный контекст",
   research_warm: "Исследование / теплый интерес",
   noise: "Шум",
   none: "Без очереди"
@@ -561,7 +561,9 @@ function reasonTypeTarget(reason: AnalyticsReason, candidate: AnalyticsCandidate
     return { kind: "signal", key: reason.key };
   }
   if (reason.source === "fact") {
-    const hasFactRuleMatch = candidate.facts.some((fact) => fact.type === reason.key && fact.source === "yargy");
+    const hasFactRuleMatch = candidate.facts.some(
+      (fact) => fact.type === reason.key && isFactRuleSource(fact.source)
+    );
     return hasFactRuleMatch ? { kind: "fact", key: reason.key } : { kind: "lead_fact_weight", key: reason.key };
   }
   return null;
@@ -599,7 +601,7 @@ function matchedTypeTarget(type: string, candidate: AnalyticsCandidate): Analyti
   if (candidate.domain_signals.some((signal) => signal.type === type)) {
     return { kind: "signal", key: type };
   }
-  if (candidate.facts.some((fact) => fact.type === type && fact.source === "yargy")) {
+  if (candidate.facts.some((fact) => fact.type === type && isFactRuleSource(fact.source))) {
     return { kind: "fact", key: type };
   }
   if (candidate.reasons.some((reason) => reason.source === "fact" && reason.key === type)) {
@@ -622,6 +624,10 @@ function candidateEvidenceFlowReasonTypeTarget(
   return reasonTypeTarget(reason as AnalyticsReason, candidate);
 }
 
+function isFactRuleSource(source: string | undefined): boolean {
+  return source === "yargy" || source === "exact_phrase" || source === "semantic_pattern";
+}
+
 function typeLabelFromCandidate(type: string, candidate: AnalyticsCandidate): string {
   const signal = candidate.domain_signals.find((item) => item.type === type);
   if (signal) {
@@ -640,27 +646,27 @@ function analyticsSettingsTargetHash(target: AnalyticsSettingsTarget | null): st
     return "";
   }
   if (target.kind === "signal") {
-    return `#/settings/signals/${encodeURIComponent(target.key)}`;
+    return `/settings/signals/${encodeURIComponent(target.key)}`;
   }
   if (target.kind === "fact") {
-    return `#/settings/facts/${encodeURIComponent(target.key)}`;
+    return `/settings/facts/${encodeURIComponent(target.key)}`;
   }
   if (target.kind === "alias") {
-    return `#/settings/aliases/${target.catalog}/${encodeURIComponent(target.key)}`;
+    return `/settings/aliases/${target.catalog}/${encodeURIComponent(target.key)}`;
   }
   if (target.kind === "lead_signal_weight") {
-    return `#/settings/lead-scoring/signal-weight/${encodeURIComponent(target.key)}`;
+    return `/settings/lead-scoring/signal-weight/${encodeURIComponent(target.key)}`;
   }
   if (target.kind === "lead_fact_weight") {
-    return `#/settings/lead-scoring/fact-weight/${encodeURIComponent(target.key)}`;
+    return `/settings/lead-scoring/fact-weight/${encodeURIComponent(target.key)}`;
   }
   if (target.kind === "solution_area") {
-    return `#/settings/lead-scoring/solution-area/${encodeURIComponent(target.key)}`;
+    return `/settings/solution-areas/${encodeURIComponent(target.key)}`;
   }
   if (target.kind === "customer_segment") {
-    return `#/settings/lead-scoring/customer-segment/${encodeURIComponent(target.key)}`;
+    return `/settings/lead-scoring/customer-segment/${encodeURIComponent(target.key)}`;
   }
-  return `#/settings/lead-scoring/review-lane/${encodeURIComponent(target.key)}`;
+  return `/settings/review-lanes/${encodeURIComponent(target.key)}`;
 }
 
 function isAliasCatalogName(value: string | null | undefined): value is AliasCatalogName {

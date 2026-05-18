@@ -111,10 +111,9 @@ stages:
 signals:
   - type: smart_home
     label: Умный дом
-    patterns:
-      - tokens:
-          - normalized: "умный"
-          - normalized: "дом"
+    match:
+      facts:
+        - solution_area
 """,
         encoding="utf-8",
     )
@@ -148,7 +147,7 @@ facts:
     enricher.enrich("Заказчик хочет умный дом.")
     enricher.enrich("Нужен умный дом.")
 
-    assert parser_calls == 2
+    assert parser_calls == 1
 
 
 def test_reuses_one_yargy_tokenizer_between_compiled_rules(tmp_path: Path) -> None:
@@ -171,16 +170,14 @@ stages:
 signals:
   - type: smart_home
     label: Умный дом
-    patterns:
-      - tokens:
-          - normalized: "умный"
-          - normalized: "дом"
+    match:
+      facts:
+        - solution_area
   - type: leak
     label: Протечки
-    patterns:
-      - tokens:
-          - normalized: "датчик"
-          - normalized: "протечка"
+    match:
+      facts:
+        - leak_device
 """,
         encoding="utf-8",
     )
@@ -193,6 +190,12 @@ facts:
       - tokens:
           - normalized: "умный"
           - normalized: "дом"
+  - type: leak_device
+    label: Протечки
+    patterns:
+      - tokens:
+          - normalized: "датчик"
+          - normalized: "протечка"
 """,
         encoding="utf-8",
     )
@@ -518,6 +521,164 @@ protocols:
     assert not any(text == "WI-Fi" for text, _type in alias_facts)
 
 
+def test_facts_expose_match_source_kind_and_sentence_span_coordinates(tmp_path: Path) -> None:
+    config_dir = tmp_path / "nlp"
+    config_dir.mkdir()
+    (config_dir / "pipeline.yaml").write_text(
+        """
+stages:
+  - name: segmentation
+    enabled: true
+  - name: facts
+    enabled: true
+""",
+        encoding="utf-8",
+    )
+    (config_dir / "signals.yaml").write_text("signals: []\n", encoding="utf-8")
+    (config_dir / "facts.yaml").write_text(
+        """
+facts:
+  - type: wifi_term
+    label: Wi-Fi термин
+    phrases:
+      - ["wi-fi"]
+  - type: domain_smart_home
+    label: Умный дом
+    patterns:
+      - tokens:
+          - normalized: "умный"
+          - normalized: "дом"
+""",
+        encoding="utf-8",
+    )
+    (config_dir / "lead_scoring.yaml").write_text("lead_scoring: {}\n", encoding="utf-8")
+
+    result = RussianTextEnricher(load_nlp_config(config_dir)).enrich(
+        "Нужен wi-fi. Хочу умный дом."
+    )
+
+    wifi_fact = next(fact for fact in result.facts if fact.type == "wifi_term")
+    smart_home_fact = next(fact for fact in result.facts if fact.type == "domain_smart_home")
+
+    assert wifi_fact.source == "exact_phrase"
+    assert wifi_fact.sentence_id == "sentence-1"
+    assert wifi_fact.span_id is not None
+
+    assert smart_home_fact.source == "semantic_pattern"
+    assert smart_home_fact.sentence_id == "sentence-2"
+    assert smart_home_fact.span_id is not None
+    assert smart_home_fact.span_id != wifi_fact.span_id
+
+
+def test_alias_identity_fact_owns_span_and_other_alias_facts_are_derived(tmp_path: Path) -> None:
+    config_dir = tmp_path / "nlp"
+    config_dir.mkdir()
+    (config_dir / "pipeline.yaml").write_text(
+        """
+stages:
+  - name: segmentation
+    enabled: true
+  - name: facts
+    enabled: true
+""",
+        encoding="utf-8",
+    )
+    (config_dir / "signals.yaml").write_text("signals: []\n", encoding="utf-8")
+    (config_dir / "facts.yaml").write_text("facts: []\n", encoding="utf-8")
+    (config_dir / "lead_scoring.yaml").write_text("lead_scoring: {}\n", encoding="utf-8")
+    (config_dir / "devices.yaml").write_text(
+        """
+devices:
+  - key: yandex_hub
+    canonical: Яндекс Хаб
+    type: device
+    aliases:
+      - Яндекс Хаб
+    fact_types:
+      - device
+      - smart_home_hub
+      - vendor_yandex
+""",
+        encoding="utf-8",
+    )
+
+    result = RussianTextEnricher(load_nlp_config(config_dir)).enrich("Хочу поставить Яндекс Хаб.")
+
+    hub_facts = [fact for fact in result.facts if fact.text == "Яндекс Хаб"]
+    fact_types = {fact.type for fact in hub_facts}
+
+    assert {
+        "alias:devices:yandex_hub",
+        "device",
+        "smart_home_hub",
+        "vendor_yandex",
+    } <= fact_types
+
+    identity_fact = next(fact for fact in hub_facts if fact.type == "alias:devices:yandex_hub")
+    derived_facts = [fact for fact in hub_facts if fact.type != "alias:devices:yandex_hub"]
+
+    assert identity_fact.span_id is not None
+    assert identity_fact.sentence_id == "sentence-1"
+    assert identity_fact.derived_from_fact_id is None
+    assert all(fact.span_id == identity_fact.span_id for fact in derived_facts)
+    assert all(fact.sentence_id == identity_fact.sentence_id for fact in derived_facts)
+    assert all(fact.derived_from_fact_id == identity_fact.id for fact in derived_facts)
+
+
+def test_fact_dependency_signals_reference_source_facts_and_coordinates(tmp_path: Path) -> None:
+    config_dir = tmp_path / "nlp"
+    config_dir.mkdir()
+    (config_dir / "pipeline.yaml").write_text(
+        """
+stages:
+  - name: segmentation
+    enabled: true
+  - name: facts
+    enabled: true
+  - name: domain_signals
+    enabled: true
+""",
+        encoding="utf-8",
+    )
+    (config_dir / "signals.yaml").write_text(
+        """
+signals:
+  - type: smart_home_platform
+    label: Платформа умного дома
+    match:
+      facts:
+        - types:
+            - alias:vendors:aqara
+""",
+        encoding="utf-8",
+    )
+    (config_dir / "facts.yaml").write_text("facts: []\n", encoding="utf-8")
+    (config_dir / "lead_scoring.yaml").write_text("lead_scoring: {}\n", encoding="utf-8")
+    (config_dir / "vendors.yaml").write_text(
+        """
+vendors:
+  - key: aqara
+    canonical: Aqara
+    type: vendor
+    aliases:
+      - Aqara
+    fact_types:
+      - vendor
+""",
+        encoding="utf-8",
+    )
+
+    result = RussianTextEnricher(load_nlp_config(config_dir)).enrich("Клиент хочет Aqara.")
+
+    aqara_fact = next(fact for fact in result.facts if fact.type == "alias:vendors:aqara")
+    platform_signal = next(signal for signal in result.domain_signals if signal.type == "smart_home_platform")
+
+    assert platform_signal.source == "fact_dependency"
+    assert platform_signal.source_fact_ids == [aqara_fact.id]
+    assert platform_signal.span_id == aqara_fact.span_id
+    assert platform_signal.sentence_id == aqara_fact.sentence_id
+
+
 def test_alias_separator_normalization_can_be_disabled(tmp_path: Path) -> None:
     config_dir = tmp_path / "nlp"
     config_dir.mkdir()
@@ -562,6 +723,8 @@ def test_exact_phrases_match_technical_punctuation_and_digits(tmp_path: Path) ->
 stages:
   - name: segmentation
     enabled: true
+  - name: facts
+    enabled: true
   - name: domain_signals
     enabled: true
 """,
@@ -571,6 +734,17 @@ stages:
         """
 signals:
   - type: technical_exact
+    label: Точные технические варианты
+    match:
+      facts:
+        - technical_exact_fact
+""",
+        encoding="utf-8",
+    )
+    (config_dir / "facts.yaml").write_text(
+        """
+facts:
+  - type: technical_exact_fact
     label: Точные технические варианты
     phrases:
       - ["wi-fi"]
@@ -585,8 +759,9 @@ signals:
         "Нужны Wi-Fi модуль, вывод 220v, Z-Wave реле и O’CLIMATE."
     )
 
-    matched_texts = {signal.text for signal in result.domain_signals}
+    matched_texts = {fact.text for fact in result.facts}
     assert {"Wi-Fi", "220v", "Z-Wave", "O’CLIMATE"} <= matched_texts
+    assert any(signal.type == "technical_exact" for signal in result.domain_signals)
 
 
 
@@ -722,6 +897,32 @@ def test_default_config_marks_smart_home_design_question_as_lead(
     assert result.lead_assessment.temperature in {"warm", "hot"}
     assert "smart_home" in {item.type for item in result.lead_assessment.solution_areas}
     assert "designer_partner" in {item.type for item in result.lead_assessment.customer_segments}
+
+
+def test_default_config_marks_contractor_cooperation_search_as_possible_lead(
+    default_lead_enricher: RussianTextEnricher,
+) -> None:
+    text = (
+        "Ищу строительные бригады и мастеров для объектов.\n\n"
+        "Я инженер-строитель. Нужны исполнители по строительству домов, "
+        "ремонту квартир и домов, черновой и чистовой отделке, инженерным "
+        "системам, электрике, сантехнике, отоплению, фасадам, кровле, "
+        "монолиту, кладке, плитке, ГКЛ, малярке и полам.\n\n"
+        "Работаю с заказчиками, поэтому ищу ответственных людей, с которыми "
+        "можно выстраивать нормальное сотрудничество."
+    )
+
+    result = default_lead_enricher.enrich(text)
+
+    signal_types = {signal.type for signal in result.domain_signals}
+    fact_types = {fact.type for fact in result.facts}
+
+    assert "intent_partner_contractor_search" in fact_types
+    assert "lead_partner_sourcing" in signal_types
+    assert result.lead_assessment is not None
+    assert result.lead_assessment.is_lead is True
+    assert result.lead_assessment.review_lane is not None
+    assert result.lead_assessment.review_lane.key == "partner_contractor_sourcing"
 
 
 def test_default_config_marks_hot_zigbee_installation_lead_text(
@@ -1139,7 +1340,7 @@ def test_default_config_marks_latest_motion_relay_and_hvac_leads(
     assert motion_result.lead_assessment.is_lead is True
     assert motion_result.lead_assessment.temperature in {"warm", "hot"}
     assert {"pur_lighting_automation", "lead_consultation_intent", "lead_research_intent"} <= motion_signals
-    assert {"domain_lighting", "context_design_project"} <= motion_facts
+    assert {"context_design_project", "alias:devices:motion_sensor"} <= motion_facts
     assert "smart_home" in {item.type for item in motion_result.lead_assessment.solution_areas}
 
     relay_result = default_lead_enricher.enrich(
@@ -1269,6 +1470,63 @@ def test_default_config_does_not_mark_equipment_or_household_noise_as_lead(
     assert result.lead_assessment.is_lead is False
     assert result.lead_assessment.temperature == "none"
     assert expected_noise & {item.type for item in result.lead_assessment.noise_signals}
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        (
+            "Мы полностью обновили наш сайт и представили на нем готовые коробочные "
+            "решения умного дома для квартир. В основе этих решений наш реальный опыт. "
+            "Мы собрали комплекты под типовые планировки. Посмотреть можно на сайте."
+        ),
+        (
+            "Показываем один из наших объектов. В доме установлен щит с системой "
+            "защиты от протечек, освещение работает по датчикам движения, сценарии "
+            "умного дома запускаются голосом через Алису. Наш канал в Telegram."
+        ),
+        (
+            "Бригада электромонтажников ищет объекты любой степени сложности. "
+            "Спектр услуг: электромонтаж, слаботочные сети, СКУД, АПС, СОУЭ. "
+            "Работаем по всей РФ. Телефон для связи."
+        ),
+        (
+            "Во Владивостоке на базе салона Умный дом открылся экспертный центр iRidi. "
+            "Для обучения мы собрали отдельный стенд, на нем можно смотреть работу "
+            "оборудования и проходить практику на реальной инженерной базе."
+        ),
+    ],
+)
+def test_default_config_vetoes_self_promotion_advertising_posts(
+    default_lead_enricher: RussianTextEnricher,
+    text: str,
+) -> None:
+    result = default_lead_enricher.enrich(text)
+
+    assert result.lead_assessment is not None
+    assert result.lead_assessment.is_lead is False
+    assert result.lead_assessment.temperature == "none"
+    assert result.lead_assessment.score == 0
+    assert "noise_advertising_self_promo" in {
+        item.type for item in result.lead_assessment.noise_signals
+    }
+
+
+def test_default_config_keeps_contractor_tender_as_lead_not_advertising_noise(
+    default_lead_enricher: RussianTextEnricher,
+) -> None:
+    result = default_lead_enricher.enrich(
+        "На выполнение строительно-монтажных работ по устройству системы пожарной "
+        "сигнализации, СОУЭ, охранной сигнализации, СКУД объекта требуется подрядчик. "
+        "Заказчик: ГК IRBIS. Цена задается подрядчиком. Окончание подачи заявок: "
+        "19.05.2026. Если нет доступов скачать ТЗ, документы - пишите мне."
+    )
+
+    assert result.lead_assessment is not None
+    assert result.lead_assessment.is_lead is True
+    assert "noise_advertising_self_promo" not in {
+        item.type for item in result.lead_assessment.noise_signals
+    }
 
 
 def test_default_config_routes_research_smart_home_question_outside_direct_lead(

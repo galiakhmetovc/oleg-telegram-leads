@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Awaitable, Callable, Sequence
 from datetime import datetime
 from typing import Any
@@ -28,6 +29,13 @@ class TelethonUserbotHistoryClient:
 
     async def __aexit__(self, exc_type: object, exc: object, tb: object) -> None:
         await self._client.disconnect()
+
+    async def resolve_source(self, input_ref: str) -> str | None:
+        try:
+            entity = await self._client.get_entity(input_ref)
+        except errors.FloodWaitError as exc:
+            raise TelegramUserbotFloodWait(int(getattr(exc, "seconds", 0) or 0)) from exc
+        return _entity_id(entity)
 
     async def get_latest_message_id(self, input_ref: str) -> tuple[str | None, int | None]:
         try:
@@ -66,6 +74,8 @@ class TelethonUserbotHistoryClient:
         self,
         sources: Sequence[TelegramSourceSubscription],
         handler: Callable[[UUID, TelegramFetchedMessage], Awaitable[None]],
+        *,
+        reload_after_seconds: float | None = None,
     ) -> None:
         try:
             for source in sources:
@@ -82,7 +92,16 @@ class TelethonUserbotHistoryClient:
                     await handler(source.source_chat_id, message)
 
                 self._client.add_event_handler(_handle, events.NewMessage(chats=entity))
-            await self._client.run_until_disconnected()
+            if reload_after_seconds is not None and reload_after_seconds > 0:
+                try:
+                    await asyncio.wait_for(
+                        self._client.run_until_disconnected(),
+                        timeout=reload_after_seconds,
+                    )
+                except TimeoutError:
+                    await self._client.disconnect()
+            else:
+                await self._client.run_until_disconnected()
         except errors.FloodWaitError as exc:
             raise TelegramUserbotFloodWait(int(getattr(exc, "seconds", 0) or 0)) from exc
 

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -158,6 +159,10 @@ def load_nlp_config_from_documents(documents: dict[str, dict[str, Any]]) -> NlpP
     signals = documents["signals"]
     facts = documents.get("facts", {"facts": []})
     lead_scoring = documents.get("lead_scoring", {"lead_scoring": {}})
+    alias_matching = _parse_alias_matching(pipeline.get("alias_matching", {}))
+    _validate_no_signal_text_rules(signals)
+    _validate_rule_text_ownership(documents, alias_matching)
+    _validate_references(documents)
     return NlpPipelineConfig(
         stages=tuple(_parse_stage(item) for item in pipeline.get("stages", [])),
         signals=tuple(_parse_phrase_rule(item, "signals") for item in signals.get("signals", [])),
@@ -171,7 +176,7 @@ def load_nlp_config_from_documents(documents: dict[str, dict[str, Any]]) -> NlpP
             )
         ),
         lead_scoring=_parse_lead_scoring(lead_scoring.get("lead_scoring", {})),
-        alias_matching=_parse_alias_matching(pipeline.get("alias_matching", {})),
+        alias_matching=alias_matching,
     )
 
 
@@ -241,6 +246,11 @@ def _parse_phrase_rule(raw: Any, collection_name: str) -> PhraseRuleConfig:
     phrases = raw.get("phrases", [])
     patterns = raw.get("patterns", [])
     match = _parse_rule_match(raw.get("match"), collection_name)
+    if collection_name == "signals":
+        if phrases or patterns or match.is_empty:
+            raise ValueError(
+                "signals must use match.facts; put text phrases in facts or alias catalogs"
+            )
     if not phrases and not patterns and match.is_empty:
         raise ValueError(f"{collection_name} item must define phrases, patterns, or match")
 
@@ -260,6 +270,338 @@ def _parse_phrase_rule(raw: Any, collection_name: str) -> PhraseRuleConfig:
         patterns=_parse_patterns(patterns, collection_name),
         match=match,
     )
+
+
+def _validate_rule_text_ownership(
+    documents: dict[str, dict[str, Any]],
+    alias_matching: AliasMatchingConfig,
+) -> None:
+    text_owners: dict[str, tuple[str, str]] = {}
+    for catalog_name in _alias_catalog_names():
+        raw_items = documents.get(catalog_name, {catalog_name: []}).get(catalog_name, [])
+        if not raw_items:
+            continue
+        if not isinstance(raw_items, list):
+            raise ValueError(f"{catalog_name} must be a list")
+        for raw_item in raw_items:
+            if not isinstance(raw_item, dict):
+                raise ValueError(f"{catalog_name} item must be a mapping")
+            key = str(raw_item.get("key", ""))
+            owner = ("alias", f"{catalog_name}:{key}")
+            for alias_text in _raw_string_list(raw_item.get("aliases", [])):
+                _register_text_owner(text_owners, alias_text, owner, alias_matching)
+
+    for collection_name in ("facts", "signals"):
+        raw_rules = documents.get(collection_name, {collection_name: []}).get(collection_name, [])
+        if not raw_rules:
+            continue
+        if not isinstance(raw_rules, list):
+            raise ValueError(f"{collection_name} must be a list")
+        for raw_rule in raw_rules:
+            if not isinstance(raw_rule, dict):
+                raise ValueError(f"{collection_name} item must be a mapping")
+            rule_type = str(raw_rule.get("type", ""))
+            for source_text in _rule_source_texts(raw_rule):
+                _register_text_owner(
+                    text_owners,
+                    source_text,
+                    (collection_name, rule_type),
+                    alias_matching,
+                )
+
+
+def _register_text_owner(
+    text_owners: dict[str, tuple[str, str]],
+    raw_text: str,
+    owner: tuple[str, str],
+    alias_matching: AliasMatchingConfig,
+) -> None:
+    text_key = _text_ownership_key(raw_text, alias_matching)
+    if not text_key:
+        return
+    existing = text_owners.get(text_key)
+    if existing is None:
+        text_owners[text_key] = owner
+        return
+    if existing == owner:
+        return
+
+    owner_kind, owner_name = owner
+    existing_kind, existing_name = existing
+    if owner_kind in {"facts", "signals"} and existing_kind == "alias":
+        raise ValueError(
+            f"{owner_kind} rule {owner_name} duplicates alias text {raw_text!r}; "
+            f"alias text is already owned by {existing_name}"
+        )
+    if owner_kind == "alias" and existing_kind == "alias":
+        raise ValueError(
+            f"alias text {raw_text!r} is already owned by {existing_name}; "
+            f"duplicate owner {owner_name}"
+        )
+    raise ValueError(
+        f"{owner_kind} rule {owner_name} duplicates text {raw_text!r}; "
+        f"text is already owned by {existing_kind}:{existing_name}"
+    )
+
+
+def _validate_no_signal_text_rules(signals_document: dict[str, Any]) -> None:
+    raw_signals = signals_document.get("signals", [])
+    if not isinstance(raw_signals, list):
+        return
+    for raw_signal in raw_signals:
+        if not isinstance(raw_signal, dict):
+            continue
+        if raw_signal.get("phrases") or raw_signal.get("patterns"):
+            raise ValueError(
+                "signals must use match.facts; put text phrases in facts or alias catalogs"
+            )
+
+
+def _rule_source_texts(raw_rule: dict[str, Any]) -> tuple[str, ...]:
+    source_texts: list[str] = []
+    for raw_phrase in raw_rule.get("phrases", []) or []:
+        if isinstance(raw_phrase, list):
+            source_texts.append(" ".join(str(token) for token in raw_phrase))
+    for raw_pattern in raw_rule.get("patterns", []) or []:
+        if isinstance(raw_pattern, dict) and raw_pattern.get("source_text") is not None:
+            source_texts.append(str(raw_pattern["source_text"]))
+    return tuple(source_texts)
+
+
+def _raw_string_list(raw: Any) -> tuple[str, ...]:
+    if not raw:
+        return ()
+    if not isinstance(raw, list):
+        raise ValueError("aliases must be a list")
+    return tuple(str(item) for item in raw)
+
+
+def _validate_references(documents: dict[str, dict[str, Any]]) -> None:
+    emitted_fact_types = _emitted_fact_types(documents)
+    defined_signal_types = _defined_signal_types(documents)
+    for raw_signal in documents.get("signals", {"signals": []}).get("signals", []) or []:
+        if not isinstance(raw_signal, dict):
+            continue
+        signal_type = str(raw_signal.get("type", ""))
+        for fact_type in _rule_match_fact_types(raw_signal):
+            if fact_type not in emitted_fact_types:
+                raise ValueError(
+                    f"signals rule {signal_type} references unknown fact type {fact_type}"
+                )
+
+    lead_scoring = documents.get("lead_scoring", {}).get("lead_scoring", {})
+    if not isinstance(lead_scoring, dict):
+        return
+    for path, fact_type in _lead_scoring_fact_references(lead_scoring):
+        if fact_type not in emitted_fact_types:
+            raise ValueError(f"lead_scoring {path} references unknown fact type {fact_type}")
+    for path, signal_type in _lead_scoring_signal_references(lead_scoring):
+        if signal_type not in defined_signal_types:
+            raise ValueError(f"lead_scoring {path} references unknown signal type {signal_type}")
+
+
+def _emitted_fact_types(documents: dict[str, dict[str, Any]]) -> set[str]:
+    fact_types: set[str] = set()
+    for raw_rule in documents.get("facts", {"facts": []}).get("facts", []) or []:
+        if isinstance(raw_rule, dict) and raw_rule.get("type") is not None:
+            fact_types.add(str(raw_rule["type"]))
+    for catalog_name in _alias_catalog_names():
+        for raw_item in documents.get(catalog_name, {catalog_name: []}).get(catalog_name, []) or []:
+            if not isinstance(raw_item, dict):
+                continue
+            key = raw_item.get("key")
+            if key is not None:
+                fact_types.add(f"alias:{catalog_name}:{key}")
+            fact_types.update(_raw_string_list(raw_item.get("fact_types", [])))
+    return fact_types
+
+
+def _defined_signal_types(documents: dict[str, dict[str, Any]]) -> set[str]:
+    return {
+        str(raw_rule["type"])
+        for raw_rule in documents.get("signals", {"signals": []}).get("signals", []) or []
+        if isinstance(raw_rule, dict) and raw_rule.get("type") is not None
+    }
+
+
+def _rule_match_fact_types(raw_rule: dict[str, Any]) -> tuple[str, ...]:
+    raw_match = raw_rule.get("match")
+    if not isinstance(raw_match, dict):
+        return ()
+    raw_facts = raw_match.get("facts", [])
+    if not isinstance(raw_facts, list):
+        return ()
+    fact_types: list[str] = []
+    for dependency in raw_facts:
+        if isinstance(dependency, str):
+            fact_types.append(dependency)
+        elif isinstance(dependency, dict):
+            fact_types.extend(_raw_string_list(dependency.get("types", [])))
+    return tuple(fact_types)
+
+
+def _lead_scoring_signal_references(raw: dict[str, Any]) -> tuple[tuple[str, str], ...]:
+    references: list[tuple[str, str]] = []
+    weights = raw.get("weights", {})
+    if isinstance(weights, dict) and isinstance(weights.get("signals"), dict):
+        references.extend(("weights.signals", str(signal_type)) for signal_type in weights["signals"])
+    for signal_type in _raw_string_list(raw.get("intent_signal_types", [])):
+        references.append(("intent_signal_types", signal_type))
+    for signal_type in _raw_string_list(raw.get("noise_signal_types", [])):
+        references.append(("noise_signal_types", signal_type))
+    for signal_type in _raw_string_list(raw.get("lead_veto_signal_types", [])):
+        references.append(("lead_veto_signal_types", signal_type))
+    for group_name in ("solution_areas", "customer_segments"):
+        groups = raw.get(group_name, {})
+        if not isinstance(groups, dict):
+            continue
+        for key, value in groups.items():
+            if not isinstance(value, dict):
+                continue
+            references.extend(
+                (f"{group_name}.{key}.signal_types", signal_type)
+                for signal_type in _raw_string_list(value.get("signal_types", []))
+            )
+    for index, cap in enumerate(raw.get("score_caps", []) or []):
+        if not isinstance(cap, dict):
+            continue
+        for list_name in (
+            "signal_types",
+            "noise_signal_types",
+            "excluded_signal_types",
+            "excluded_noise_signal_types",
+        ):
+            references.extend(
+                (f"score_caps[{index}].{list_name}", signal_type)
+                for signal_type in _raw_string_list(cap.get(list_name, []))
+            )
+    for index, lane in enumerate(raw.get("review_lanes", []) or []):
+        if not isinstance(lane, dict):
+            continue
+        references.extend(
+            (f"review_lanes[{index}].excluded_noise_signal_types", signal_type)
+            for signal_type in _raw_string_list(lane.get("excluded_noise_signal_types", []))
+        )
+        for group_index, group in enumerate(lane.get("match_groups", []) or []):
+            if not isinstance(group, dict):
+                continue
+            for list_name in ("signal_types", "intent_signal_types", "noise_signal_types"):
+                references.extend(
+                    (f"review_lanes[{index}].match_groups[{group_index}].{list_name}", signal_type)
+                    for signal_type in _raw_string_list(group.get(list_name, []))
+                )
+    return tuple(references)
+
+
+def _lead_scoring_fact_references(raw: dict[str, Any]) -> tuple[tuple[str, str], ...]:
+    references: list[tuple[str, str]] = []
+    weights = raw.get("weights", {})
+    if isinstance(weights, dict) and isinstance(weights.get("facts"), dict):
+        references.extend(("weights.facts", str(fact_type)) for fact_type in weights["facts"])
+    for group_name in ("solution_areas", "customer_segments"):
+        groups = raw.get(group_name, {})
+        if not isinstance(groups, dict):
+            continue
+        for key, value in groups.items():
+            if not isinstance(value, dict):
+                continue
+            references.extend(
+                (f"{group_name}.{key}.fact_types", fact_type)
+                for fact_type in _raw_string_list(value.get("fact_types", []))
+            )
+    for index, cap in enumerate(raw.get("score_caps", []) or []):
+        if not isinstance(cap, dict):
+            continue
+        references.extend(
+            (f"score_caps[{index}].fact_types", fact_type)
+            for fact_type in _raw_string_list(cap.get("fact_types", []))
+        )
+        references.extend(
+            (f"score_caps[{index}].excluded_fact_types", fact_type)
+            for fact_type in _raw_string_list(cap.get("excluded_fact_types", []))
+        )
+    for index, lane in enumerate(raw.get("review_lanes", []) or []):
+        if not isinstance(lane, dict):
+            continue
+        references.extend(
+            (f"review_lanes[{index}].excluded_fact_types", fact_type)
+            for fact_type in _raw_string_list(lane.get("excluded_fact_types", []))
+        )
+        for group_index, group in enumerate(lane.get("match_groups", []) or []):
+            if not isinstance(group, dict):
+                continue
+            references.extend(
+                (f"review_lanes[{index}].match_groups[{group_index}].fact_types", fact_type)
+                for fact_type in _raw_string_list(group.get("fact_types", []))
+            )
+    return tuple(references)
+
+
+def _text_ownership_key(value: str, alias_matching: AliasMatchingConfig) -> str:
+    chars: list[str] = []
+    for token in re.findall(r"\w+", value, flags=re.UNICODE):
+        target_script = _dominant_script(token) if alias_matching.normalize_latin_confusables else None
+        for char in token:
+            normalized = _normalize_ownership_char(char, alias_matching, target_script)
+            chars.extend(item for item in normalized if item.isalnum())
+    return "".join(chars)
+
+
+def _normalize_ownership_char(
+    char: str,
+    alias_matching: AliasMatchingConfig,
+    target_script: str | None,
+) -> str:
+    value = char.casefold()
+    if alias_matching.normalize_yo:
+        value = value.replace("ё", "е")
+    if target_script == "cyrillic":
+        return "".join(_LATIN_TO_CYRILLIC_CONFUSABLES.get(item, item) for item in value)
+    if target_script == "latin":
+        return "".join(_CYRILLIC_TO_LATIN_CONFUSABLES.get(item, item) for item in value)
+    return value
+
+
+def _dominant_script(token: str) -> str | None:
+    value = token.casefold()
+    latin_count = sum(1 for char in value if "a" <= char <= "z")
+    cyrillic_count = sum(1 for char in value if "а" <= char <= "я" or char == "ё")
+    if cyrillic_count > 0 and cyrillic_count >= latin_count:
+        return "cyrillic"
+    if latin_count > 0:
+        return "latin"
+    return None
+
+
+_LATIN_TO_CYRILLIC_CONFUSABLES = {
+    "a": "а",
+    "b": "в",
+    "c": "с",
+    "e": "е",
+    "h": "н",
+    "k": "к",
+    "m": "м",
+    "o": "о",
+    "p": "р",
+    "t": "т",
+    "x": "х",
+    "y": "у",
+}
+
+_CYRILLIC_TO_LATIN_CONFUSABLES = {
+    "а": "a",
+    "в": "b",
+    "с": "c",
+    "е": "e",
+    "н": "h",
+    "к": "k",
+    "м": "m",
+    "о": "o",
+    "р": "p",
+    "т": "t",
+    "х": "x",
+    "у": "y",
+}
 
 
 def _parse_patterns(raw_patterns: Any, collection_name: str) -> tuple[RulePatternConfig, ...]:

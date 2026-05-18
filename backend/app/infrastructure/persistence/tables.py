@@ -93,6 +93,14 @@ notification_settings = sa.Table(
     sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
 )
 
+llm_settings = sa.Table(
+    "llm_settings",
+    metadata,
+    sa.Column("id", sa.Text(), primary_key=True),
+    sa.Column("config", JSONB(), nullable=False),
+    sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
+)
+
 telegram_userbot_accounts = sa.Table(
     "telegram_userbot_accounts",
     metadata,
@@ -190,6 +198,37 @@ golden_examples = sa.Table(
     sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
 )
 
+llm_verifications = sa.Table(
+    "llm_verifications",
+    metadata,
+    sa.Column("id", UUID(as_uuid=True), primary_key=True),
+    sa.Column(
+        "source_message_id",
+        UUID(as_uuid=True),
+        sa.ForeignKey("telegram_source_messages.id", ondelete="CASCADE"),
+        nullable=False,
+    ),
+    sa.Column(
+        "enrichment_job_id",
+        UUID(as_uuid=True),
+        sa.ForeignKey("enrichment_jobs.id", ondelete="SET NULL"),
+        nullable=True,
+    ),
+    sa.Column("model", sa.Text(), nullable=False),
+    sa.Column("route_id", sa.Text(), nullable=True),
+    sa.Column("prompt", sa.Text(), nullable=True),
+    sa.Column("schema_version", sa.Text(), nullable=False),
+    sa.Column("status", sa.Text(), nullable=False),
+    sa.Column("attempts", sa.Integer(), nullable=False),
+    sa.Column("claimed_at", sa.DateTime(timezone=True), nullable=True),
+    sa.Column("context_pack", JSONB(), nullable=False),
+    sa.Column("response", JSONB(), nullable=True),
+    sa.Column("raw_response", sa.Text(), nullable=True),
+    sa.Column("error", sa.Text(), nullable=True),
+    sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
+    sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
+)
+
 notification_outbox = sa.Table(
     "notification_outbox",
     metadata,
@@ -206,6 +245,39 @@ notification_outbox = sa.Table(
     sa.Column("claimed_at", sa.DateTime(timezone=True), nullable=True),
     sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
     sa.Column("sent_at", sa.DateTime(timezone=True), nullable=True),
+)
+
+notification_summary_runs = sa.Table(
+    "notification_summary_runs",
+    metadata,
+    sa.Column("period_kind", sa.Text(), nullable=False),
+    sa.Column("period_start", sa.DateTime(timezone=True), nullable=False),
+    sa.Column("period_end", sa.DateTime(timezone=True), nullable=False),
+    sa.Column("bot_id", sa.Text(), nullable=False),
+    sa.Column("chat_id", sa.Text(), nullable=False),
+    sa.Column("status", sa.Text(), nullable=False),
+    sa.Column("attempts", sa.Integer(), nullable=False),
+    sa.Column("telegram_message_id", sa.BigInteger(), nullable=True),
+    sa.Column("last_error", sa.Text(), nullable=True),
+    sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
+    sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
+    sa.Column("sent_at", sa.DateTime(timezone=True), nullable=True),
+    sa.PrimaryKeyConstraint(
+        "period_kind",
+        "period_start",
+        "period_end",
+        "bot_id",
+        "chat_id",
+        name="pk_notification_summary_runs",
+    ),
+    sa.CheckConstraint(
+        "period_kind IN ('day', 'night')",
+        name="ck_notification_summary_runs_period_kind",
+    ),
+    sa.CheckConstraint(
+        "status IN ('sending', 'sent', 'failed')",
+        name="ck_notification_summary_runs_status",
+    ),
 )
 
 lead_handlings = sa.Table(
