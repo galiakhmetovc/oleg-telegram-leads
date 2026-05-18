@@ -66,7 +66,7 @@ const apiBaseUrl = import.meta.env.VITE_API_BASE_URL ?? "";
 const themeStorageKey = "pur-leads-theme-mode";
 
 type AppThemeMode = "light" | "dark";
-type WorkbenchSection = "queue" | "testing" | "constructor";
+type WorkbenchSection = "queue" | "review" | "testing" | "constructor";
 
 function createAppTheme(mode: AppThemeMode) {
   return createTheme({
@@ -438,8 +438,22 @@ export function App() {
   }
 
   function handleWorkbenchSectionChange(section: WorkbenchSection) {
+    const currentReviewMessageId = analyticsReviewMessageId;
+    const currentReviewReturnHash = analyticsReviewReturnHash;
     setSettingsTarget(null);
     setAnalyticsMessageId(null);
+    if (section === "review") {
+      setActivePage(12);
+      if (currentReviewMessageId) {
+        const returnQuery = currentReviewReturnHash ? `?return=${encodeURIComponent(currentReviewReturnHash)}` : "";
+        navigateRoute(`/analytics/review/${encodeURIComponent(currentReviewMessageId)}${returnQuery}`);
+      } else {
+        setAnalyticsReviewMessageId(null);
+        setAnalyticsReviewReturnHash(null);
+        navigateRoute("/review");
+      }
+      return;
+    }
     setAnalyticsReviewMessageId(null);
     setAnalyticsReviewReturnHash(null);
     if (section === "testing") {
@@ -562,7 +576,6 @@ export function App() {
               aria-label="Основная навигация"
             >
               <Tab value={1} icon={<RateReviewIcon fontSize="small" />} iconPosition="start" label="Рабочее место" />
-              <Tab value={12} icon={<ScienceIcon fontSize="small" />} iconPosition="start" label="Разбор" />
               <Tab value={11} icon={<InsightsIcon fontSize="small" />} iconPosition="start" label="Аналитика" />
               <Tab value={10} icon={<SmartToyIcon fontSize="small" />} iconPosition="start" label="LLM" />
               <Tab value={2} icon={<StarIcon fontSize="small" />} iconPosition="start" label="Golden" />
@@ -608,7 +621,26 @@ export function App() {
               activeSection={workbenchSectionForPage(currentPage)}
               onSectionChange={handleWorkbenchSectionChange}
             >
-              {currentPage === 0 ? (
+              {currentPage === 12 ? (
+                analyticsReviewMessageId ? (
+                  <AnalyticsReviewPage
+                    apiBaseUrl={apiBaseUrl}
+                    messageId={analyticsReviewMessageId}
+                    returnHash={analyticsReviewReturnHash}
+                    nlpSettings={visibleSettingsSnapshot?.nlp ?? null}
+                    onBack={() => {
+                      navigateRoute(
+                        analyticsReviewReturnHash ?? `/analytics/message/${encodeURIComponent(analyticsReviewMessageId)}`
+                      );
+                      setAnalyticsReviewMessageId(null);
+                      setActivePage(1);
+                    }}
+                    onNlpSettingsChange={updateNlpSettingsSnapshot}
+                  />
+                ) : (
+                  <ReviewEmptyState />
+                )
+              ) : currentPage === 0 ? (
                 <TestingWorkspace
                   inputText={inputText}
                   onInputTextChange={setInputText}
@@ -650,25 +682,6 @@ export function App() {
                 />
               )}
             </WorkbenchShell>
-          ) : currentPage === 12 ? (
-            analyticsReviewMessageId ? (
-              <AnalyticsReviewPage
-                apiBaseUrl={apiBaseUrl}
-                messageId={analyticsReviewMessageId}
-                returnHash={analyticsReviewReturnHash}
-                nlpSettings={visibleSettingsSnapshot?.nlp ?? null}
-                onBack={() => {
-                  navigateRoute(
-                    analyticsReviewReturnHash ?? `/analytics/message/${encodeURIComponent(analyticsReviewMessageId)}`
-                  );
-                  setAnalyticsReviewMessageId(null);
-                  setActivePage(1);
-                }}
-                onNlpSettingsChange={updateNlpSettingsSnapshot}
-              />
-            ) : (
-              <ReviewEmptyState />
-            )
           ) : currentPage === 2 ? (
             <GoldenExamplesPage
               apiBaseUrl={apiBaseUrl}
@@ -833,6 +846,7 @@ function WorkbenchShell({
           aria-label="Разделы рабочего места"
         >
           <Tab value="queue" icon={<InsightsIcon fontSize="small" />} iconPosition="start" label="Очередь" />
+          <Tab value="review" icon={<RateReviewIcon fontSize="small" />} iconPosition="start" label="Ревью" />
           <Tab value="testing" icon={<ScienceIcon fontSize="small" />} iconPosition="start" label="Проверка" />
           <Tab value="constructor" icon={<ConstructionIcon fontSize="small" />} iconPosition="start" label="Конструктор" />
         </Tabs>
@@ -1012,7 +1026,7 @@ function pageRoute(page: number, settingsSection?: SettingsSection): string {
 }
 
 function isWorkbenchPage(page: number): boolean {
-  return page === 0 || page === 1 || page === 3;
+  return page === 0 || page === 1 || page === 3 || page === 12;
 }
 
 function workbenchSectionForPage(page: number): WorkbenchSection {
@@ -1021,6 +1035,9 @@ function workbenchSectionForPage(page: number): WorkbenchSection {
   }
   if (page === 3) {
     return "constructor";
+  }
+  if (page === 12) {
+    return "review";
   }
   return "queue";
 }

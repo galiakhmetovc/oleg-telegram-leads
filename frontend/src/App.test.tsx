@@ -96,19 +96,50 @@ test("opens the operator workspace by default and keeps testing inside it", asyn
   expect(screen.getByRole("button", { name: /запустить обогащение/i })).toBeInTheDocument();
 });
 
-test("shows review as a separate top-level screen after the workspace", async () => {
+test("keeps review as a workspace section instead of a top-level tab", async () => {
+  window.history.replaceState(null, "", "/#/analytics/review/focus-1");
+  const candidate = {
+    message_id: "focus-1",
+    text: "Нужно проверить сообщение в рабочем месте.",
+    score: 54,
+    temperature: "warm",
+    review_lane: "domain_interest",
+    solution_areas: [],
+    customer_segments: [],
+    intent_signals: [],
+    noise_signals: [],
+    reasons: [],
+    domain_signals: [],
+    facts: [],
+    review: null
+  };
+  const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+    const url = String(input);
+    if (url === "/api/v1/auth/me") {
+      return jsonResponse({ authenticated: true, username: "admin" });
+    }
+    if (url === "/api/v1/settings") {
+      return jsonResponse(sampleSettingsSnapshot());
+    }
+    if (url === "/api/v1/analytics/runs") {
+      return jsonResponse({ runs: [] });
+    }
+    if (url === "/api/v1/analytics/messages/focus-1") {
+      return jsonResponse(candidate);
+    }
+    throw new Error(`Unhandled fetch: ${url}`);
+  });
+  vi.stubGlobal("fetch", fetchMock);
+
   render(<App />);
 
-  expect(await screen.findByRole("heading", { name: "Очередь сообщений" })).toBeInTheDocument();
   const mainNav = screen.getByRole("tablist", { name: "Основная навигация" });
-  const tabNames = within(mainNav).getAllByRole("tab").map((tab) => tab.textContent ?? "");
-  expect(tabNames.indexOf("Разбор")).toBe(tabNames.indexOf("Рабочее место") + 1);
-
-  fireEvent.click(within(mainNav).getByRole("tab", { name: "Разбор" }));
-
-  expect(window.location.pathname).toBe("/review");
+  expect(within(mainNav).queryByRole("tab", { name: "Разбор" })).not.toBeInTheDocument();
+  expect(within(mainNav).getByRole("tab", { name: "Рабочее место" })).toHaveAttribute("aria-selected", "true");
+  const workspaceNav = screen.getByRole("tablist", { name: "Разделы рабочего места" });
+  expect(within(workspaceNav).getByRole("tab", { name: "Ревью" })).toHaveAttribute("aria-selected", "true");
   expect(await screen.findByRole("heading", { name: "Разбор сообщения" })).toBeInTheDocument();
-  expect(screen.getByText(/Выберите запись в очереди/i)).toBeInTheDocument();
+  expect(screen.getAllByText("Нужно проверить сообщение в рабочем месте.").length).toBeGreaterThan(0);
 });
 
 test("uses scrollable top navigation for narrow screens", () => {
