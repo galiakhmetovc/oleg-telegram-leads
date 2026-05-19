@@ -9,7 +9,6 @@ import LogoutIcon from "@mui/icons-material/Logout";
 import MonitorHeartIcon from "@mui/icons-material/MonitorHeart";
 import RateReviewIcon from "@mui/icons-material/RateReview";
 import ReceiptLongIcon from "@mui/icons-material/ReceiptLong";
-import ScienceIcon from "@mui/icons-material/Science";
 import SettingsIcon from "@mui/icons-material/Settings";
 import SmartToyIcon from "@mui/icons-material/SmartToy";
 import StarIcon from "@mui/icons-material/Star";
@@ -66,7 +65,7 @@ const apiBaseUrl = import.meta.env.VITE_API_BASE_URL ?? "";
 const themeStorageKey = "pur-leads-theme-mode";
 
 type AppThemeMode = "light" | "dark";
-type WorkbenchSection = "queue" | "review" | "testing" | "constructor";
+type WorkbenchSection = "queue" | "tuning";
 
 function createAppTheme(mode: AppThemeMode) {
   return createTheme({
@@ -438,30 +437,11 @@ export function App() {
   }
 
   function handleWorkbenchSectionChange(section: WorkbenchSection) {
-    const currentReviewMessageId = analyticsReviewMessageId;
-    const currentReviewReturnHash = analyticsReviewReturnHash;
     setSettingsTarget(null);
     setAnalyticsMessageId(null);
-    if (section === "review") {
-      setActivePage(12);
-      if (currentReviewMessageId) {
-        const returnQuery = currentReviewReturnHash ? `?return=${encodeURIComponent(currentReviewReturnHash)}` : "";
-        navigateRoute(`/analytics/review/${encodeURIComponent(currentReviewMessageId)}${returnQuery}`);
-      } else {
-        setAnalyticsReviewMessageId(null);
-        setAnalyticsReviewReturnHash(null);
-        navigateRoute("/review");
-      }
-      return;
-    }
     setAnalyticsReviewMessageId(null);
     setAnalyticsReviewReturnHash(null);
-    if (section === "testing") {
-      setActivePage(0);
-      navigateRoute("/testing");
-      return;
-    }
-    if (section === "constructor") {
+    if (section === "tuning") {
       setActivePage(3);
       navigateRoute("/constructor");
       return;
@@ -846,9 +826,7 @@ function WorkbenchShell({
           aria-label="Разделы рабочего места"
         >
           <Tab value="queue" icon={<InsightsIcon fontSize="small" />} iconPosition="start" label="Очередь" />
-          <Tab value="review" icon={<RateReviewIcon fontSize="small" />} iconPosition="start" label="Ревью" />
-          <Tab value="testing" icon={<ScienceIcon fontSize="small" />} iconPosition="start" label="Проверка" />
-          <Tab value="constructor" icon={<ConstructionIcon fontSize="small" />} iconPosition="start" label="Конструктор" />
+          <Tab value="tuning" icon={<ConstructionIcon fontSize="small" />} iconPosition="start" label="Настройка разбора" />
         </Tabs>
       </Paper>
       {children}
@@ -1030,14 +1008,8 @@ function isWorkbenchPage(page: number): boolean {
 }
 
 function workbenchSectionForPage(page: number): WorkbenchSection {
-  if (page === 0) {
-    return "testing";
-  }
-  if (page === 3) {
-    return "constructor";
-  }
-  if (page === 12) {
-    return "review";
+  if (page === 0 || page === 3) {
+    return "tuning";
   }
   return "queue";
 }

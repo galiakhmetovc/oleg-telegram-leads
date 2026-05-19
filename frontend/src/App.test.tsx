@@ -69,7 +69,7 @@ afterEach(() => {
   window.history.replaceState(null, "", "/");
 });
 
-function openWorkspaceSection(sectionName: "Очередь" | "Проверка" | "Конструктор") {
+function openWorkspaceSection(sectionName: "Очередь" | "Настройка разбора") {
   const mainNav = screen.getByRole("tablist", { name: "Основная навигация" });
   const workspaceTab = within(mainNav).getByRole("tab", { name: "Рабочее место" });
   if (workspaceTab.getAttribute("aria-selected") !== "true") {
@@ -79,7 +79,14 @@ function openWorkspaceSection(sectionName: "Очередь" | "Проверка"
   fireEvent.click(within(workspaceNav).getByRole("tab", { name: sectionName }));
 }
 
-test("opens the operator workspace by default and keeps testing inside it", async () => {
+async function openTestingWorkspace() {
+  await screen.findByRole("tablist", { name: "Основная навигация" });
+  window.history.pushState(null, "", "/testing");
+  window.dispatchEvent(new Event("popstate"));
+  await screen.findByLabelText("Произвольный текст");
+}
+
+test("opens the operator workspace with queue and tuning sections", async () => {
   render(<App />);
 
   expect(await screen.findByRole("heading", { name: "Очередь сообщений" })).toBeInTheDocument();
@@ -90,13 +97,19 @@ test("opens the operator workspace by default and keeps testing inside it", asyn
   expect(within(mainNav).queryByRole("tab", { name: "Конструктор" })).not.toBeInTheDocument();
 
   const workspaceNav = screen.getByRole("tablist", { name: "Разделы рабочего места" });
-  fireEvent.click(within(workspaceNav).getByRole("tab", { name: "Проверка" }));
+  const workspaceTabs = within(workspaceNav).getAllByRole("tab").map((tab) => tab.textContent);
+  expect(workspaceTabs).toEqual(["Очередь", "Настройка разбора"]);
+  expect(within(workspaceNav).queryByRole("tab", { name: "Ревью" })).not.toBeInTheDocument();
+  expect(within(workspaceNav).queryByRole("tab", { name: "Проверка" })).not.toBeInTheDocument();
+  expect(within(workspaceNav).queryByRole("tab", { name: "Конструктор" })).not.toBeInTheDocument();
 
-  expect(screen.getByLabelText("Произвольный текст")).toBeInTheDocument();
-  expect(screen.getByRole("button", { name: /запустить обогащение/i })).toBeInTheDocument();
+  fireEvent.click(within(workspaceNav).getByRole("tab", { name: "Настройка разбора" }));
+
+  expect(await screen.findByRole("heading", { name: "Конструктор" })).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Разобрать" })).toBeInTheDocument();
 });
 
-test("keeps review as a workspace section instead of a top-level tab", async () => {
+test("keeps review inside queue instead of a separate workspace section", async () => {
   window.history.replaceState(null, "", "/#/analytics/review/focus-1");
   const candidate = {
     message_id: "focus-1",
@@ -137,7 +150,8 @@ test("keeps review as a workspace section instead of a top-level tab", async () 
   expect(within(mainNav).queryByRole("tab", { name: "Разбор" })).not.toBeInTheDocument();
   expect(within(mainNav).getByRole("tab", { name: "Рабочее место" })).toHaveAttribute("aria-selected", "true");
   const workspaceNav = screen.getByRole("tablist", { name: "Разделы рабочего места" });
-  expect(within(workspaceNav).getByRole("tab", { name: "Ревью" })).toHaveAttribute("aria-selected", "true");
+  expect(within(workspaceNav).getByRole("tab", { name: "Очередь" })).toHaveAttribute("aria-selected", "true");
+  expect(within(workspaceNav).queryByRole("tab", { name: "Ревью" })).not.toBeInTheDocument();
   expect(await screen.findByRole("heading", { name: "Разбор сообщения" })).toBeInTheDocument();
   expect(screen.getAllByText("Нужно проверить сообщение в рабочем месте.").length).toBeGreaterThan(0);
 });
@@ -165,11 +179,26 @@ test("shows constructor inside workspace and keeps direct route working", async 
   expect(within(mainNav).getByRole("tab", { name: "Рабочее место" })).toHaveAttribute("aria-selected", "true");
   expect(within(mainNav).queryByRole("tab", { name: "Конструктор" })).not.toBeInTheDocument();
   const workspaceNav = screen.getByRole("tablist", { name: "Разделы рабочего места" });
-  expect(within(workspaceNav).getByRole("tab", { name: "Конструктор" })).toHaveAttribute("aria-selected", "true");
+  expect(within(workspaceNav).getByRole("tab", { name: "Настройка разбора" })).toHaveAttribute("aria-selected", "true");
+  expect(within(workspaceNav).queryByRole("tab", { name: "Конструктор" })).not.toBeInTheDocument();
   expect(await screen.findByRole("heading", { name: "Конструктор" })).toBeInTheDocument();
   expect(screen.getByText("Работа через draft-ревизию")).toBeInTheDocument();
   expect(screen.getByText("NLP-ревизия #1")).toBeInTheDocument();
   expect(screen.getByRole("button", { name: "Разобрать" })).toBeInTheDocument();
+});
+
+test("keeps direct testing route under the tuning workspace section", async () => {
+  window.history.replaceState(null, "", "/#/testing");
+
+  render(<App />);
+
+  const mainNav = screen.getByRole("tablist", { name: "Основная навигация" });
+  expect(within(mainNav).getByRole("tab", { name: "Рабочее место" })).toHaveAttribute("aria-selected", "true");
+  const workspaceNav = screen.getByRole("tablist", { name: "Разделы рабочего места" });
+  expect(within(workspaceNav).getByRole("tab", { name: "Настройка разбора" })).toHaveAttribute("aria-selected", "true");
+  expect(within(workspaceNav).queryByRole("tab", { name: "Проверка" })).not.toBeInTheDocument();
+  expect(screen.getByLabelText("Произвольный текст")).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: /запустить обогащение/i })).toBeInTheDocument();
 });
 
 test("opens analytics reports separately from the operator queue", async () => {
@@ -755,7 +784,7 @@ test("starts enrichment job and subscribes to SSE progress", async () => {
   vi.stubGlobal("fetch", fetchMock);
   render(<App />);
 
-  openWorkspaceSection("Проверка");
+  await openTestingWorkspace();
   fireEvent.click(screen.getAllByRole("button", { name: /запустить обогащение/i })[0]);
 
   await waitFor(() =>
@@ -807,7 +836,7 @@ test("renders lead assessment from completed enrichment event", async () => {
   vi.stubGlobal("fetch", fetchMock);
   render(<App />);
 
-  openWorkspaceSection("Проверка");
+  await openTestingWorkspace();
   fireEvent.click(screen.getAllByRole("button", { name: /запустить обогащение/i })[0]);
   await waitFor(() => expect(FakeEventSource.instances.length).toBe(1));
   FakeEventSource.instances[0].listeners.get("job_completed")?.(
@@ -881,7 +910,7 @@ test("renders annotation ranges correctly after emoji", async () => {
   vi.stubGlobal("fetch", fetchMock);
   render(<App />);
 
-  openWorkspaceSection("Проверка");
+  await openTestingWorkspace();
   fireEvent.click(screen.getAllByRole("button", { name: /запустить обогащение/i })[0]);
   await waitFor(() => expect(FakeEventSource.instances.length).toBe(1));
   FakeEventSource.instances[0].listeners.get("job_completed")?.(
@@ -942,7 +971,7 @@ test("opens settings sections from enrichment overview shortcuts", async () => {
   vi.stubGlobal("fetch", fetchMock);
   render(<App />);
 
-  openWorkspaceSection("Проверка");
+  await openTestingWorkspace();
   fireEvent.click(screen.getAllByRole("button", { name: /запустить обогащение/i })[0]);
   await waitFor(() => expect(FakeEventSource.instances.length).toBe(1));
   FakeEventSource.instances[0].listeners.get("job_completed")?.(
@@ -1009,7 +1038,7 @@ test("opens setting links as modal on left click and keeps cached settings for f
 
   await waitFor(() => expect(settingsCalls).toBe(1));
 
-  openWorkspaceSection("Проверка");
+  await openTestingWorkspace();
   fireEvent.change(screen.getByLabelText("Произвольный текст"), {
     target: { value: "Контекст входного текста должен сохраниться" }
   });
@@ -1053,7 +1082,7 @@ test("opens setting links as modal on left click and keeps cached settings for f
   expect(document.getElementById("settings-target-aliases-devices-smart_home_hub")).toHaveClass("settings-target-highlight");
   expect(settingsCalls).toBe(1);
 
-  openWorkspaceSection("Проверка");
+  await openTestingWorkspace();
 
   expect(screen.getByLabelText("Произвольный текст")).toHaveValue("Контекст входного текста должен сохраниться");
 });
